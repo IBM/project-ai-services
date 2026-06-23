@@ -35,11 +35,6 @@ func configureSpyre() error {
 	// Run validation and repair
 	allPassed := runValidationAndRepair()
 
-	// Add current user to sentient group
-	if err := configureUsergroup(); err != nil {
-		return err
-	}
-
 	if !allPassed {
 		return fmt.Errorf("some Spyre configuration checks still failed after repair")
 	}
@@ -118,6 +113,11 @@ func logRepairResults(results []spyre.RepairResult) {
 }
 
 func configureUsergroup() error {
+	// Ensure sentient group exists first
+	if err := ensureSentientGroupExists(); err != nil {
+		return err
+	}
+
 	username := os.Getenv("SUDO_USER")
 	if username == "" {
 		// Fallback to current user if not running via sudo
@@ -134,10 +134,312 @@ func configureUsergroup() error {
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
+		return fmt.Errorf("failed to add current user to the sentient group. Error: %w, output: %s", err, string(out))
 	}
 
 	return nil
+}
+
+// ensureSentientGroupExists creates the sentient group if it doesn't exist.
+func ensureSentientGroupExists() error {
+	// Check if sentient group already exists
+	cmd := exec.Command("getent", "group", "sentient")
+	if err := cmd.Run(); err == nil {
+		// Group already exists
+		logger.Debugln("sentient group already exists")
+
+		return nil
+	}
+
+	// Create the sentient group
+	logger.Debugln("Creating sentient group")
+	cmd = exec.Command("groupadd", "sentient")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create sentient group: %w, output: %s", err, string(out))
+	}
+
+	logger.Debugln("sentient group created successfully")
+
+	return nil
+}
+
+// configureUlimits configures both memlock and nofile ulimits for the sentient group.
+func configureUlimits() error {
+	if err := configureMemlockLimit(); err != nil {
+		return err
+	}
+
+	if err := configureNofileLimit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// configureSystemdUserSliceLimits configures systemd user slice limits for rootless podman.
+// This ensures that containers started by non-root users have proper ulimits.
+func configureSystemdUserSliceLimits() error {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		// Not running via sudo, skip this configuration
+		logger.Debugln("Not running via sudo, skipping systemd user slice limits configuration")
+
+		return nil
+	}
+
+	userID, err := getUserID(sudoUser)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID for %s: %w", sudoUser, err)
+	}
+
+	// Skip if user is root (UID 0)
+	// Systemd user slice limits only apply to non-root users running rootless podman
+	if userID == "0" {
+		logger.Debugln("User is root, skipping systemd user slice limits configuration")
+
+		return nil
+	}
+
+	sliceDir := fmt.Sprintf("/etc/systemd/system/user-%s.slice.d", userID)
+	limitsFile := fmt.Sprintf("%s/limits.conf", sliceDir)
+
+	// Check if already configured
+	if isSystemdSliceLimitsConfigured(limitsFile) {
+		logger.Debugln("Systemd user slice limits already configured")
+
+		return nil
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(sliceDir, constants.DirPerm); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", sliceDir, err)
+	}
+
+	// Write limits configuration
+	limitsContent := fmt.Sprintf(`[Slice]
+LimitNOFILE=%d
+LimitMEMLOCK=infinity
+`, constants.MinNofileLimit)
+	if err := os.WriteFile(limitsFile, []byte(limitsContent), constants.FilePerm); err != nil {
+		return fmt.Errorf("failed to write systemd slice limits file: %w", err)
+	}
+
+	// Reload systemd daemon
+	cmd := exec.Command("systemctl", "daemon-reload")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to reload systemd daemon: %w, output: %s", err, string(out))
+	}
+
+	logger.Infof("Systemd user slice limits configured for user %s (UID: %s)", sudoUser, userID)
+
+	return nil
+}
+
+// getUserID gets the user ID for the specified user.
+func getUserID(username string) (string, error) {
+	cmd := exec.Command("id", "-u", username)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user ID: %w", err)
+	}
+
+	return strings.TrimSpace(string(out)), nil
+}
+
+// isSystemdSliceLimitsConfigured checks if systemd slice limits are already configured.
+func isSystemdSliceLimitsConfigured(limitsFile string) bool {
+	if !utils.FileExists(limitsFile) {
+		return false
+	}
+
+	lines, err := utils.ReadFileLines(limitsFile)
+	if err != nil {
+		return false
+	}
+
+	hasNofile := false
+	hasMemlock := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "LimitNOFILE="); ok {
+			if value, err := strconv.Atoi(after); err == nil && value >= constants.MinNofileLimit {
+				hasNofile = true
+			}
+		}
+		if after, ok := strings.CutPrefix(line, "LimitMEMLOCK="); ok {
+			if after == "infinity" {
+				hasMemlock = true
+			}
+		}
+	}
+
+	return hasNofile && hasMemlock
+}
+
+// configureMemlockLimit configures memlock ulimit for the sentient group.
+func configureMemlockLimit() error {
+	// Check if configuration already exists and is valid
+	if isMemlockConfigValid(constants.MemlockConfFile) {
+		logger.Debugln("memlock configuration already exists")
+
+		return nil
+	}
+
+	// Read and filter existing content
+	existingContent, err := getFilteredMemlockContent(constants.MemlockConfFile)
+	if err != nil {
+		return err
+	}
+
+	// Write configuration
+	content := existingContent + constants.MemlockConfContent
+	if err := os.WriteFile(constants.MemlockConfFile, []byte(content), constants.FilePerm); err != nil {
+		return fmt.Errorf("failed to write memlock configuration: %w", err)
+	}
+
+	logger.Debugln("memlock configuration created successfully")
+
+	return nil
+}
+
+// isMemlockConfigValid checks if memlock configuration already exists.
+func isMemlockConfigValid(confFile string) bool {
+	if !utils.FileExists(confFile) {
+		return false
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == constants.ExpectedMemlockConfig {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getFilteredMemlockContent reads and filters existing memlock configuration.
+func getFilteredMemlockContent(confFile string) (string, error) {
+	if !utils.FileExists(confFile) {
+		return "", nil
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read existing memlock.conf: %w", err)
+	}
+
+	var filteredLines []string
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "@"+constants.SentientGroupName) {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	if len(filteredLines) > 0 {
+		return strings.Join(filteredLines, "\n") + "\n", nil
+	}
+
+	return "", nil
+}
+
+// configureNofileLimit configures nofile ulimit for the sentient group.
+func configureNofileLimit() error {
+	// Check if configuration already exists and is valid
+	if isNofileConfigValid(constants.NofileConfFile, constants.MinNofileLimit) {
+		logger.Debugln("nofile configuration already exists with sufficient limit")
+
+		return nil
+	}
+
+	// Read and filter existing content
+	existingContent, err := getFilteredNofileContent(constants.NofileConfFile)
+	if err != nil {
+		return err
+	}
+
+	// Write configuration
+	nofileConf := fmt.Sprintf(constants.NofileConfTemplate, constants.MinNofileLimit)
+	content := existingContent + nofileConf
+	if err := os.WriteFile(constants.NofileConfFile, []byte(content), constants.FilePerm); err != nil {
+		return fmt.Errorf("failed to write nofile configuration: %w", err)
+	}
+
+	logger.Debugln("nofile configuration created successfully")
+
+	return nil
+}
+
+// isNofileConfigValid checks if nofile configuration already exists with sufficient limit.
+func isNofileConfigValid(confFile string, minLimit int) bool {
+	if !utils.FileExists(confFile) {
+		return false
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		if isValidNofileLine(strings.TrimSpace(line), minLimit) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isValidNofileLine checks if a line contains valid nofile configuration.
+func isValidNofileLine(line string, minLimit int) bool {
+	sentientPrefix := "@" + constants.SentientGroupName
+
+	if !strings.HasPrefix(line, sentientPrefix) || !strings.Contains(line, "nofile") {
+		return false
+	}
+
+	parts := strings.Fields(line)
+	if len(parts) < constants.NofileFieldCount {
+		return false
+	}
+
+	value, err := strconv.Atoi(parts[3])
+
+	return err == nil && value >= minLimit
+}
+
+// getFilteredNofileContent reads and filters existing nofile configuration.
+func getFilteredNofileContent(confFile string) (string, error) {
+	if !utils.FileExists(confFile) {
+		return "", nil
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read existing limits.conf: %w", err)
+	}
+
+	sentientPrefix := "@" + constants.SentientGroupName
+	var filteredLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, sentientPrefix) && strings.Contains(trimmed, "nofile") {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+
+	if len(filteredLines) > 0 {
+		return strings.Join(filteredLines, "\n") + "\n", nil
+	}
+
+	return "", nil
 }
 
 func installPodman() error {
@@ -360,6 +662,54 @@ func ensureSpyreConfigured(ctx context.Context) error {
 		return err
 	}
 	s.Stop("Spyre cards configuration validated successfully.")
+
+	return nil
+}
+
+// ensureUsergroupConfigured ensures sentient group exists and adds current user to it.
+// This is required for both Spyre and non-Spyre setups to handle ulimit configurations.
+func ensureUsergroupConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring user groups")
+	s.Start(ctx)
+
+	if err := configureUsergroup(); err != nil {
+		s.Fail("failed to configure user groups")
+
+		return err
+	}
+	s.Stop("User groups configured successfully")
+
+	return nil
+}
+
+// ensureUlimitsConfigured configures ulimits (memlock and nofile) for the sentient group.
+// This is required for both Spyre and non-Spyre setups to allow pods to run properly.
+func ensureUlimitsConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring ulimits")
+	s.Start(ctx)
+
+	if err := configureUlimits(); err != nil {
+		s.Fail("failed to configure ulimits")
+
+		return err
+	}
+	s.Stop("Ulimits configured successfully")
+
+	return nil
+}
+
+// ensureSystemdSliceLimitsConfigured configures systemd user slice limits for rootless podman.
+// This is required for both Spyre and non-Spyre setups to ensure proper ulimits for non-root users.
+func ensureSystemdSliceLimitsConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring systemd user slice limits")
+	s.Start(ctx)
+
+	if err := configureSystemdUserSliceLimits(); err != nil {
+		s.Fail("failed to configure systemd user slice limits")
+
+		return err
+	}
+	s.Stop("Systemd user slice limits configured successfully")
 
 	return nil
 }

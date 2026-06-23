@@ -6,7 +6,7 @@
 
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS gosu-builder
 
-ARG GO_VERSION=1.25.10
+ARG GO_VERSION=1.26.4
 
 ENV GOSU_VERSION=1.19 \
 	CGO_ENABLED=0

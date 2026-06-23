@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/jaypipes/ghw"
@@ -27,7 +26,6 @@ const (
 var (
 	vfioOptionsPattern = regexp.MustCompile(`^options\s+(\S+)\s+(.+)$`)
 	vfioConfigPattern  = regexp.MustCompile(`(\w+)=([^=\s]+)`)
-	memLimitPattern    = regexp.MustCompile(`^(@sentient.+)\s+(unlimited|\d+)$`)
 )
 
 // GetNumberOfSpyreCards returns the number of Spyre cards in the system.
@@ -70,14 +68,10 @@ func RunChecks() []check.CheckResult {
 	return []check.CheckResult{
 		checkDriverConfig(),
 		checkUdevRule(),
-		checkMemlockConf(),
-		checkNofileConf(),
 		checkVfioPciConf(),
-		checkUserGroup(),
 		checkVfioModule(),
 		checkVfioAccessPermission(),
 		checkSELinuxVFIOPolicy(),
-		checkSystemdUserSliceLimits(),
 		checkPodmanServiceSupplementaryGroups(),
 	}
 }
@@ -232,155 +226,6 @@ func checkUdevRule() *check.ConfigurationFileCheck {
 	return confCheck
 }
 
-// parseMemLimitLine extracts the group pattern and value from a memlock config line.
-func parseMemLimitLine(line string, pattern *regexp.Regexp) (groupPattern, value string, ok bool) {
-	matches := pattern.FindStringSubmatch(line)
-	if matches == nil {
-		return "", "", false
-	}
-
-	return matches[1], matches[2], true
-}
-
-// isMemLimitValid checks if a line's memlock value satisfies the expected limit.
-func isMemLimitValid(lineValue, expectedValue string) bool {
-	// If line has unlimited, it satisfies any requirement
-	if lineValue == "unlimited" {
-		return true
-	}
-
-	// If expected is unlimited but line isn't, it doesn't satisfy.
-	if expectedValue == "unlimited" {
-		return false
-	}
-
-	// Both are numeric - compare values.
-	lineInt, err1 := strconv.Atoi(lineValue)
-	expectedInt, err2 := strconv.Atoi(expectedValue)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-
-	return lineInt >= expectedInt
-}
-
-// isMemLimitConfigValid checks if memlock configuration is valid.
-func isMemLimitConfigValid(configFile, expectedConf string) bool {
-	lines, err := utils.ReadFileLines(configFile)
-	if err != nil {
-		log.Printf("Error reading %s: %v", configFile, err)
-
-		return false
-	}
-
-	// Parse expected configuration once.
-	expectedGroup, expectedValue, ok := parseMemLimitLine(expectedConf, memLimitPattern)
-	if !ok {
-		return false
-	}
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Skip empty lines.
-		if line == "" {
-			continue
-		}
-
-		// Check for exact match first.
-		if line == expectedConf {
-			return true
-		}
-
-		// Parse current line.
-		lineGroup, lineValue, ok := parseMemLimitLine(line, memLimitPattern)
-		if !ok {
-			continue
-		}
-
-		// Check if this line matches the expected group pattern.
-		if lineGroup == expectedGroup {
-			return isMemLimitValid(lineValue, expectedValue)
-		}
-	}
-
-	return false
-}
-
-// checkMemlockConf validates user memlock configuration.
-func checkMemlockConf() *check.ConfigurationFileCheck {
-	expectedConf := "@sentient - memlock unlimited"
-	configFile := "/etc/security/limits.d/memlock.conf"
-
-	confCheck := check.NewConfigurationFileCheck("User memlock configuration", configFile)
-
-	status := isMemLimitConfigValid(configFile, expectedConf)
-	confCheck.AddAttribute(expectedConf, status, "", "")
-	confCheck.SetStatus(status)
-
-	return confCheck
-}
-
-// checkNofileConf validates user nofile limit configuration.
-func checkNofileConf() *check.ConfigurationFileCheck {
-	expectedConf := "@sentient hard nofile 134217728"
-	configFile := "/etc/security/limits.conf"
-
-	confCheck := check.NewConfigurationFileCheck("User nofile limit configuration", configFile)
-
-	status := isNofileLimitConfigValid(configFile, expectedConf)
-	confCheck.AddAttribute(expectedConf, status, "", "")
-	confCheck.SetStatus(status)
-
-	return confCheck
-}
-
-// isNofileLimitConfigValid checks if nofile limit configuration is valid.
-func isNofileLimitConfigValid(configFile, expectedConf string) bool {
-	lines, err := utils.ReadFileLines(configFile)
-	if err != nil {
-		log.Printf("Error reading %s: %v", configFile, err)
-
-		return false
-	}
-
-	// Pattern to match: @sentient hard nofile <value>
-	nofilePattern := regexp.MustCompile(`^@sentient\s+hard\s+nofile\s+(\d+)$`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Check for exact match first
-		if line == expectedConf {
-			return true
-		}
-
-		// Parse current line
-		matches := nofilePattern.FindStringSubmatch(line)
-		if matches != nil {
-			// Found a nofile config for @sentient group
-			lineValue := matches[1]
-			lineInt, err := strconv.Atoi(lineValue)
-			if err != nil {
-				continue
-			}
-
-			// Check if the value meets or exceeds the expected value (134217728)
-			expectedInt, _ := strconv.Atoi("134217728")
-			if lineInt >= expectedInt {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 // checkVfioPciConf validates VFIO module dep configuration.
 func checkVfioPciConf() *check.ConfigurationFileCheck {
 	configFile := "/etc/modules-load.d/vfio-pci.conf"
@@ -414,17 +259,6 @@ func checkVfioPciConf() *check.ConfigurationFileCheck {
 	confCheck.SetStatus(status)
 
 	return confCheck
-}
-
-// checkUserGroup validates user group configuration.
-func checkUserGroup() *check.ConfigCheck {
-	userGroupCheck := check.NewConfigCheck("User group configuration")
-
-	status := utils.GroupExists(sentientGroup)
-	userGroupCheck.AddConfig(sentientGroup, status)
-	userGroupCheck.SetStatus(status)
-
-	return userGroupCheck
 }
 
 // checkVfioModule validates VFIO kernel module is loaded.
@@ -654,100 +488,6 @@ func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue
 		confCheck.AddAttribute("SupplementaryGroups=sentient", false, "not found", sentientGroup)
 		confCheck.SetStatus(false)
 	}
-}
-
-// getUserIDForSliceCheck retrieves the user ID for the SUDO_USER.
-// Returns userID and ok status. If ok is false, the check should be skipped or failed.
-func getUserIDForSliceCheck() (userID string, shouldSkip bool, shouldFail bool) {
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		// Not running via sudo, skip this check
-		return "", true, false
-	}
-
-	exitCode, stdout, stderr, err := utils.ExecuteCommand("id", "-u", sudoUser)
-	if err != nil || exitCode != 0 {
-		log.Printf("Failed to get user ID for %s: %v, stderr: %s", sudoUser, err, stderr)
-
-		return "", false, true
-	}
-
-	userID = strings.TrimSpace(stdout)
-
-	// Skip this check if the user is root (UID 0).
-	// Systemd user slice limits (LimitMEMLOCK and LimitNOFILE) only apply to non-root users
-	// running rootless podman. root users don't need to re-login to shell after configuration changes,
-	// as these values can be picked up from podman yaml annotations at runtime.
-	if userID == "0" {
-		return "", true, false
-	}
-
-	return userID, false, false
-}
-
-// validateSystemdLimitsFile reads and validates the systemd limits file for required values.
-func validateSystemdLimitsFile(limitsFile string) (hasNofile, hasMemlock bool, err error) {
-	lines, err := utils.ReadFileLines(limitsFile)
-	if err != nil {
-		return false, false, err
-	}
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "LimitNOFILE="); ok {
-			hasNofile = after == "134217728"
-		}
-		if after, ok := strings.CutPrefix(line, "LimitMEMLOCK="); ok {
-			hasMemlock = after == "infinity"
-		}
-	}
-
-	return hasNofile, hasMemlock, nil
-}
-
-// checkSystemdUserSliceLimits validates that systemd user slice limits are configured for rootless podman.
-func checkSystemdUserSliceLimits() *check.ConfigurationFileCheck {
-	checkName := "Systemd user slice limits configuration"
-	confCheck := check.NewConfigurationFileCheck(checkName, "")
-
-	userID, shouldSkip, shouldFail := getUserIDForSliceCheck()
-	if shouldSkip {
-		confCheck.SetStatus(true)
-
-		return confCheck
-	}
-	if shouldFail {
-		confCheck.SetStatus(false)
-
-		return confCheck
-	}
-
-	limitsFile := fmt.Sprintf("/etc/systemd/system/user-%s.slice.d/limits.conf", userID)
-	confCheck.FilePath = limitsFile
-
-	// Check if limits file exists
-	if !utils.FileExists(limitsFile) {
-		confCheck.AddAttribute("LimitNOFILE=134217728", false, "not found", "134217728")
-		confCheck.AddAttribute("LimitMEMLOCK=infinity", false, "not found", "infinity")
-		confCheck.SetStatus(false)
-
-		return confCheck
-	}
-
-	// Read and validate limits file
-	hasNofile, hasMemlock, err := validateSystemdLimitsFile(limitsFile)
-	if err != nil {
-		log.Printf("Failed to read %s: %v", limitsFile, err)
-		confCheck.SetStatus(false)
-
-		return confCheck
-	}
-
-	confCheck.AddAttribute("LimitNOFILE=134217728", hasNofile, "", "134217728")
-	confCheck.AddAttribute("LimitMEMLOCK=infinity", hasMemlock, "", "infinity")
-	confCheck.SetStatus(hasNofile && hasMemlock)
-
-	return confCheck
 }
 
 // Made with Bob
