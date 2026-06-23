@@ -45,12 +45,15 @@ func NewConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Configure the catalog service",
-		Long: `Configures the catalog service for the specified runtime type.
+		Long: `Configures the catalog service it includes reset flags to update admin credentials, podman authentication, and SSL certificates.
 
-The catalog service manages AI services through two main components:
-	- Catalog UI: Web-based interface for managing AI services
-	- Catalog API: REST API for programmatic management of AI services
+The configure process will:
+		- Create a new admin user if one does not exist.
+		- Create a new podman authentication secret if one does not exist.
+		- Create a new SSL certificate if one does not exist.
+		- Deploys the catalog services.
 
+Command also support additional parameters to configure base directories, SSL/TLS certificates, and HTTPS port. 
 
 Examples:
 	 # Configure catalog service for podman
