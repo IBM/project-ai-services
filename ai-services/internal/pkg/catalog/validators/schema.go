@@ -119,6 +119,7 @@ func sanitizeErrorMessage(msg string) string {
 	// We want to keep '/fieldName' but redact 'actual-value'
 	// This pattern finds the first quoted value after ": " which is typically the actual value being validated
 	re := regexp.MustCompile(`(at '[^']+': )'[^']+'`)
+
 	return re.ReplaceAllString(msg, "${1}'[REDACTED]'")
 }
 
