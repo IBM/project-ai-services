@@ -10,6 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
@@ -20,17 +21,8 @@ const (
 	defaultPasswordIterations = 100000
 )
 
-// PodmanConfigureOptions contains the configuration for configuring the catalog service on Podman runtime.
-type PodmanConfigureOptions struct {
-	BaseDir     string
-	DomainName  string // Custom domain name for self-signed certificates
-	SSLCertPath string // Path to user-provided SSL certificate
-	SSLKeyPath  string // Path to user-provided SSL private key
-	HttpsPort   int
-}
-
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
+func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
@@ -57,7 +49,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	return handlePostDeployment(caddyCtx, deployCtx)
 }
 
-func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
+func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
 	logger.Debugln("started configuring catalog service...")
 
 	s := spinner.New("Configuring catalog service...")
@@ -223,7 +215,7 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 // 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
 // 3. Creates Caddy context with pod name and domain suffix
 // 4. Generates and writes Caddyfile.
-func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
+func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
 	if err != nil {
