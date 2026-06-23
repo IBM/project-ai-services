@@ -16,6 +16,7 @@ import {
   type JSONSchema,
 } from "@/utils/schemaParser";
 import type { ProviderSchema } from "@/services/deployment.api";
+import { parseMarkdownLinks } from "@/utils/string";
 import styles from "../ServicesDeployFlow.module.scss";
 
 interface DynamicSchemaFieldsProps {
@@ -68,19 +69,29 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     const isInvalid =
       hasValidationError && field.validation?.required && !value;
 
-    // Label with optional info tooltip
+    // Label with optional info tooltip and required indicator
     const labelWithInfo = field.description ? (
       <div className={styles.labelWithInfo}>
-        <span>{field.label}</span>
+        <span>
+          {field.label}
+          {field.validation?.required && (
+            <span className={styles.requiredIndicator}> *</span>
+          )}
+        </span>
         <Toggletip align="top">
           <ToggletipButton label="Additional information">
             <Information />
           </ToggletipButton>
           <ToggletipContent>
-            <p>{field.description}</p>
+            <p>{parseMarkdownLinks(field.description)}</p>
           </ToggletipContent>
         </Toggletip>
       </div>
+    ) : field.validation?.required ? (
+      <>
+        {field.label}
+        <span className={styles.requiredIndicator}> *</span>
+      </>
     ) : (
       field.label
     );
@@ -94,6 +105,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             type="password"
             value={String(value || "")}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={`${field.label} is required`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
@@ -121,6 +133,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             id={fieldId}
             label={labelWithInfo}
             value={Number(value || field.defaultValue || 0)}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={`${field.label} is required`}
             min={field.validation?.min}
@@ -179,6 +192,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             id={fieldId}
             labelText={labelWithInfo}
             value={String(value || "")}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={`${field.label} is required`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}

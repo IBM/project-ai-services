@@ -1,11 +1,13 @@
 import { Toggletip, ToggletipButton, ToggletipContent } from "@carbon/react";
 import { Information } from "@carbon/icons-react";
+import { parseMarkdownLinks } from "@/utils/string";
 import styles from "../ServicesDeployFlow.module.scss";
 
 interface ServiceFieldLabelProps {
   label: string;
   description?: string;
   className?: string;
+  required?: boolean;
 }
 
 /**
@@ -17,22 +19,31 @@ export const ServiceFieldLabel: React.FC<ServiceFieldLabelProps> = ({
   label,
   description,
   className,
+  required = false,
 }) => {
-  // If no description, return plain label
+  // If no description, return plain label with optional required indicator
   if (!description) {
-    return <span className={className}>{label}</span>;
+    return (
+      <span className={className}>
+        {label}
+        {required && <span className={styles.requiredIndicator}> *</span>}
+      </span>
+    );
   }
 
-  // Return label with info tooltip
+  // Return label with info tooltip and optional required indicator
   return (
     <div className={`${styles.serviceLabelWithInfo} ${className || ""}`}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {required && <span className={styles.requiredIndicator}> *</span>}
+      </span>
       <Toggletip align="top">
         <ToggletipButton label="Additional information">
           <Information />
         </ToggletipButton>
         <ToggletipContent>
-          <p>{description}</p>
+          <p>{parseMarkdownLinks(description)}</p>
         </ToggletipContent>
       </Toggletip>
     </div>
