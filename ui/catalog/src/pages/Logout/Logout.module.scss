@@ -23,3 +23,10 @@
   color: var(--cds-link-primary);
   text-decoration: none;
 }
+
+.toastNotification {
+  position: fixed;
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-05;
+  z-index: 9999;
+}
