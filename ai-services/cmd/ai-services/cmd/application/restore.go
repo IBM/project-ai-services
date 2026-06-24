@@ -30,11 +30,6 @@ var restoreCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 
-Flags:
-  --target   : Target to restore (opensearch, digitize) (required)
-  --filename : Path to the backup tar.gz file (required)
-  -y, --yes  : Automatically accept confirmation prompt (default=false)
-
 Supported targets:
   - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
   - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)

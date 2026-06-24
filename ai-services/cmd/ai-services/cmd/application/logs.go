@@ -21,7 +21,7 @@ var (
 )
 
 var logsCmd = &cobra.Command{
-	Use: "logs [name]",
+	Use:   "logs [name]",
 	Short: "Application pod logs",
 	Long: `Displays logs from an application pod
 

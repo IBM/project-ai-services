@@ -165,15 +165,7 @@ func createExample() string {
 
   For Openshift:
   # Deploy with default mode (5 Spyre cards)
-  ai-services application create rag --template rag --runtime openshift
-
-  # Deploy with default mode (4 Spyre cards - reranker on CPU)
-  ai-services application create rag --template rag --runtime openshift --params reranker.vllm-cpu=true
-
-  # Deploy with default mode (CPU mode)
-  ai-services application create rag --template rag --runtime openshift --params reranker.vllm-cpu=true,llm.vllm-cpu=true
-  
-  `
+  ai-services application create rag --template rag --runtime openshift`
 }
 
 func doBootstrapValidate() error {

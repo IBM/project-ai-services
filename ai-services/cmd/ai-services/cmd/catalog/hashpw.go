@@ -29,7 +29,7 @@ func NewHashpwCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hashpw",
 		Short: "Generate a password hash",
-		Long: `Reads a password securely and prints a PBKDF2 hash to stdout.`,
+		Long:  `Reads a password securely and prints a PBKDF2 hash to stdout.`,
 		Example: `  # Interactive (hidden input, with confirmation)
   ai-services catalog hashpw --iterations 150000 --runtime podman
 

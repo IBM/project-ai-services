@@ -53,13 +53,7 @@ This command performs the following operations:
   - Initializes directory structure for applications and models
 
 Additional configuration options include base directory customization, domain name setup,
-SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
-The configure and deploy process will:
-  - Deploys the catalog services.
-  - Create a new admin user if one does not exist.
-  - Sets up base directory structure for applications and models
-
-The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.`,
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
 		Example: `  # Configure catalog service for podman
   ai-services catalog configure --runtime podman
 

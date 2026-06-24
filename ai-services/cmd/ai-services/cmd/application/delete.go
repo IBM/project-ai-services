@@ -33,7 +33,7 @@ var deleteCmd = &cobra.Command{
 
 Arguments:
   [name] : Application name (required)`,
-  Example: `  # Delete an application from podman runtime
+	Example: `  # Delete an application from podman runtime
   ai-services application delete rag --runtime podman
   
   # Delete an application from openshift runtime

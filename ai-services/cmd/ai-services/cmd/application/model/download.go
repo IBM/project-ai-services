@@ -17,7 +17,7 @@ var modelDirectory string
 var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download models for a given application template",
-	Long:  `Download all required models for a specific application template to the local system.
+	Long: `Download all required models for a specific application template to the local system.
 
 Note:
   - Supports only podman runtime
@@ -28,7 +28,7 @@ Note:
 
   # Download models to a custom directory
   ai-services application model download --template chatbot --dir /path/to/models --runtime podman`,
-	Args:  cobra.MaximumNArgs(0),
+	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
