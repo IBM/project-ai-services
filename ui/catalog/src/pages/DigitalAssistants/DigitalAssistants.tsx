@@ -119,23 +119,6 @@ const DigitalAssistantsPage = () => {
     selectedArchitecture?.description ||
     "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";
 
-  const fetchApplicationsData = async () => {
-    if (!catalogId) {
-      return null;
-    }
-
-    const response = await fetchApplications({
-      page: state.page,
-      page_size: state.pageSize,
-      catalog_id: catalogId,
-    });
-
-    return {
-      rows: response.data.map(transformApplicationToRow),
-      pagination: response.pagination,
-    };
-  };
-
   // Fetch applications from API
   const loadApplications = async () => {
     // Don't fetch if we don't have a catalog_id yet
@@ -146,15 +129,20 @@ const DigitalAssistantsPage = () => {
     dispatch({ type: ACTION_TYPES.FETCH_APPLICATIONS_START });
 
     try {
-      const result = await fetchApplicationsData();
+      const response = await fetchApplications({
+        page: state.page,
+        page_size: state.pageSize,
+        catalog_id: catalogId,
+      });
 
-      if (!result) {
-        return;
-      }
+      const rows = response.data.map(transformApplicationToRow);
 
       dispatch({
         type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
-        payload: result,
+        payload: {
+          rows,
+          pagination: response.pagination,
+        },
       });
     } catch (error) {
       const errorMessage =
