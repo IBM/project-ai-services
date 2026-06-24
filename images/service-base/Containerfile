@@ -9,7 +9,9 @@ RUN microdnf install -y python3.12-devel python3.12-pip \
     microdnf clean all && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
-    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
+    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3 && \
+    python3.12 -m pip install --upgrade pip && \
+    rm -rf /usr/lib/python3.12/site-packages/pip-23.2.1.dist-info
 
 ENV DOCLING_MODELS_PATH=/var/docling-models
 

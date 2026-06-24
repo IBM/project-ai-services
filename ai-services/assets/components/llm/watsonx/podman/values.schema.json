@@ -12,7 +12,7 @@
         {
           "const": "ibm/granite-4-h-small",
           "title": "granite-4-h-small",
-          "description": "An 8-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.\n\n**Model strengths**: reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more."
+          "description": "A 32B parameter long-context instruct model finetuned from Granite-4.0-H-Small-Base using a combination of open source instruction datasets with permissive license and internally collected synthetic datasets. Developed by IBM's Granite Team using diverse techniques including supervised finetuning, model alignment using reinforcement learning, and model merging with a structured chat format. In this project, it powers tasks such as summarization, text classification, text extraction, question-answering, RAG, code-related tasks, function-calling, multilingual dialog, and Fill-In-the-Middle (FIM) code completions.\n\n**Model strengths**: Improved instruction following, tool-calling capabilities, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, and Chinese. Users may finetune for additional languages."
         }
       ],
       "default": "ibm/granite-4-h-small"
@@ -21,17 +21,22 @@
       "type": "string",
       "title": "API Key",
       "format": "password",
-      "description": "API key for accessing watsonx"
+      "description": "API key for accessing watsonx",
+      "pattern": "^[A-Za-z0-9_-]{44}$",
+      "minLength": 44,
+      "maxLength": 44
     },
     "watsonxProjectId": {
       "type": "string",
       "title": "Project ID",
-      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)"
+      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "watsonxUrl": {
       "type": "string",
       "title": "API Endpoint",
-      "description": "API Endpoint for accessing watsonx"
+      "description": "API Endpoint for accessing watsonx",
+      "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
     }
   }
 }

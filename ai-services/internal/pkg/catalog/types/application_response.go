@@ -40,6 +40,8 @@ type ServiceComponentResp struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
 	Provider ProviderInfo   `json:"provider"`
+	Status   string         `json:"status,omitempty"`
+	Message  string         `json:"message,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 

@@ -169,7 +169,7 @@ export const MessageCell = ({ value }: CellRendererProps) => {
   return (
     <div className={styles.messageWithIcon}>
       <MessageIcon size={16} className={iconClass} />
-      <span>{message}</span>
+      <span className={styles.messageText}>{message}</span>
     </div>
   );
 };

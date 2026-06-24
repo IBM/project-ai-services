@@ -73,7 +73,7 @@ Use `-h` for more configuration options.
 **Step 1: Login to Catalog Backend**
 
 ```bash
-./bin/ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
+./bin/ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman --insecure
 ```
 
 Use `-h` for more information.

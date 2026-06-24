@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -15,7 +16,7 @@ func Run(runtime types.RuntimeType, baseDir, domainName, sslCertPath, sslKeyPath
 	// Deploy catalog service based on runtime
 	switch runtime {
 	case types.RuntimeTypePodman:
-		opts := catalogPodman.PodmanConfigureOptions{
+		opts := catalogUtils.PodmanConfigureOptions{
 			BaseDir:     baseDir,
 			DomainName:  domainName,
 			SSLCertPath: sslCertPath,

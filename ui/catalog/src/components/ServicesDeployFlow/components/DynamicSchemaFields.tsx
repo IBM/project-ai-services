@@ -26,6 +26,7 @@ interface DynamicSchemaFieldsProps {
   providerParamsMap: Record<string, ProviderSchema>;
   hasValidationError?: boolean;
   className?: string;
+  fieldErrors?: Record<string, string>;
 }
 
 export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
@@ -36,6 +37,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   providerParamsMap,
   hasValidationError = false,
   className: _className,
+  fieldErrors = {},
 }) => {
   // Parse schema to get field definitions
   const fields = useMemo(() => {
@@ -65,8 +67,11 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   const renderField = (field: ParsedField) => {
     const fieldId = `${componentType}-${providerId}-${field.key}`;
     const value = values[field.key];
-    const isInvalid =
-      hasValidationError && field.validation?.required && !value;
+
+    // Get validation error for this field from parent
+    const fieldError = fieldErrors[field.key];
+    const isInvalid = hasValidationError && !!fieldError;
+    const invalidText = fieldError || `${field.label} is required`;
 
     // Label with optional info tooltip
     const labelWithInfo = field.description ? (
@@ -95,7 +100,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             type="password"
             value={String(value || "")}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );
@@ -108,7 +113,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             value={String(value || "")}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
             rows={4}
           />
@@ -122,7 +127,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             label={labelWithInfo}
             value={Number(value || field.defaultValue || 0)}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={invalidText}
             min={field.validation?.min}
             max={field.validation?.max}
             onChange={(_e, { value: numValue }) => {
@@ -161,7 +166,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             itemToString={(item) => (item ? item.text : "")}
             selectedItem={selectedItem}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={invalidText}
             onChange={({ selectedItem: item }) => {
               if (item) {
                 handleFieldChange(field.key, item.id);
@@ -180,7 +185,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             value={String(value || "")}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );

@@ -617,6 +617,8 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 					ID:   component.Provider,
 					Name: providerName,
 				},
+				Status:   string(component.Status),
+				Message:  component.Message,
 				Metadata: component.Metadata,
 			}
 			components = append(components, temp)

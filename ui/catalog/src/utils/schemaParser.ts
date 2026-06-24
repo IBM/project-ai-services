@@ -198,12 +198,22 @@ export function validateField(
     field.validation;
 
   // Required check
-  if (required && (value === undefined || value === null || value === "")) {
+  if (
+    required &&
+    (value === undefined ||
+      value === null ||
+      (typeof value === "string" && value.trim() === ""))
+  ) {
     return `${field.label} is required`;
   }
 
   // Skip other validations if value is empty and not required
-  if (!required && (value === undefined || value === null || value === "")) {
+  if (
+    !required &&
+    (value === undefined ||
+      value === null ||
+      (typeof value === "string" && value.trim() === ""))
+  ) {
     return null;
   }
 

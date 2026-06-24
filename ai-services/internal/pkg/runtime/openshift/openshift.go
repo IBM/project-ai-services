@@ -448,6 +448,12 @@ func (kc *OpenshiftClient) DeleteVolume(name string) error {
 	return nil
 }
 
+func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
+	logger.Warningln("Not implemented")
+
+	return false, nil
+}
+
 // GetSystemInfo returns empty system information for OpenShift runtime.
 // Resource information is managed by Kubernetes/OpenShift and not directly accessible.
 func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
