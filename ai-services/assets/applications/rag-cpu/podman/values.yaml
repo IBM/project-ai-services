@@ -36,7 +36,7 @@ ingest:
 
 opensearch:
   # @hidden
-  image: icr.io/ppc64le-oss/opensearch-ppc64le:3.3.0
+  image: icr.io/ppc64le-oss/opensearch-ppc64le:3.5.0
   # @description Sets the memory limit for the Opensearch service(Default: 8Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   memoryLimit: 8Gi
   auth:
