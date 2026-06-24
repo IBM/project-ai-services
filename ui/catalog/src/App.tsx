@@ -8,7 +8,7 @@ import Logout from "./pages/Logout";
 import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
 import UseCaseReferences from "./pages/UseCaseReferences";
-import { ProtectedRoute } from "@/components";
+import { AuthRoute } from "@/components";
 
 function App() {
   return (
@@ -19,8 +19,8 @@ function App() {
           element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
         />
 
-        {/* Protected routes */}
-        <Route element={<ProtectedRoute />}>
+        {/* Protected routes - require authentication */}
+        <Route element={<AuthRoute requireAuth={true} />}>
           <Route element={<MainLayout />}>
             <Route
               path={ROUTES.DIGITAL_ASSISTANTS}
@@ -34,9 +34,11 @@ function App() {
           </Route>
         </Route>
 
-        {/* Public routes */}
-        <Route element={<AuthLayout />}>
-          <Route path={ROUTES.LOGIN} element={<Login />} />
+        {/* Public routes - redirect if authenticated */}
+        <Route element={<AuthRoute requireAuth={false} />}>
+          <Route element={<AuthLayout />}>
+            <Route path={ROUTES.LOGIN} element={<Login />} />
+          </Route>
         </Route>
 
         <Route path={ROUTES.LOGOUT} element={<Logout />} />
