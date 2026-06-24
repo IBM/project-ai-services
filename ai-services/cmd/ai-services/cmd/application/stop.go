@@ -25,9 +25,23 @@ var stopCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 
-Note: 
+Note:
   - Supported for podman runtime only.
 `,
+	Example: `  # Stop an application
+  ai-services application stop rag --runtime podman
+
+  # Stop specific pods in an application
+  ai-services application stop rag --pod pod1 --pod pod2 --runtime podman
+
+  # Stop specific pods using comma-separated list
+  ai-services application stop rag --pod pod1,pod2 --runtime podman
+
+  # Stop with auto-accept confirmation prompts
+  ai-services application stop rag --yes --runtime podman
+
+  # Stop using legacy implementation
+  ai-services application stop rag --legacy --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error

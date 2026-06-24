@@ -33,8 +33,12 @@ var deleteCmd = &cobra.Command{
 
 Arguments:
   [name] : Application name (required)`,
-  Example: `  # Delete an application
-  ai-services application delete rag --runtime podman`,
+  Example: `  # Delete an application from podman runtime
+  ai-services application delete rag --runtime podman
+  
+  # Delete an application from openshift runtime
+  ai-services application delete rag --runtime openshift
+  `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator

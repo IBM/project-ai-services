@@ -41,17 +41,19 @@ Supported targets:
 
 Note:
   - WARNING: Restore will overwrite existing data`,
-	Example: `  # Restore OpenSearch data with Podman
+	Example: `  For Podman:
+  # Restore OpenSearch data with Podman
   ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
-	 
+
+  # Restore with automatic confirmation
+  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
+
+  For OpenShift:
   # Restore OpenSearch data with OpenShift
   ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
 
   # Restore digitize data with OpenShift
-  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift
-	 
-  # Restore with automatic confirmation
-  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes`,
+  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := restoreTarget

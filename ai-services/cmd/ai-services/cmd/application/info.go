@@ -31,8 +31,12 @@ var infoCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 	`,
-	Example: `  # Display application information
-  ai-services application info rag --runtime podman`,
+	Example: `  # Display application information from podman runtime
+  ai-services application info rag --runtime podman
+  
+  # Display application information from openshift runtime
+  ai-services application info rag --runtime openshift
+  `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// fetch application name

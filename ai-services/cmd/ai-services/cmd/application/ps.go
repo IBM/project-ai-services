@@ -35,6 +35,31 @@ Lists information about a specific application if the name is provided
 Arguments:
   [name] : Application name (required)
 `,
+	Example: `  For Podman:
+  # List all running applications
+  ai-services application ps --runtime podman
+
+  # List a specific application
+  ai-services application ps myapp --runtime podman
+
+  # List applications with wide output format
+  ai-services application ps --output wide --runtime podman
+
+  # List a specific application with wide output
+  ai-services application ps myapp -o wide --runtime podman
+
+  # Use legacy implementation (Podman only)
+  ai-services application ps --legacy --runtime podman
+
+  For OpenShift:
+  # List all running applications
+  ai-services application ps --runtime openshift
+
+  # List a specific application
+  ai-services application ps myapp --runtime openshift
+
+  # List applications with wide output format
+  ai-services application ps --output wide --runtime openshift`,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator

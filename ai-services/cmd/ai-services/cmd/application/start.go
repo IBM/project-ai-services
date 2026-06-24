@@ -27,10 +27,30 @@ var startCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 
-Note: 
+Note:
   - Logs are streamed only when a single pod is specified, and only after the pod has started.
   - Supported for podman runtime only.
 `,
+	Example: `  # Start an application
+  ai-services application start rag --runtime podman
+
+  # Start an application and skip logs
+  ai-services application start rag --skip-logs --runtime podman
+
+  # Start specific pods in an application
+  ai-services application start rag --pod pod1 --pod pod2 --runtime podman
+
+  # Start specific pods using comma-separated list
+  ai-services application start rag --pod pod1,pod2 --runtime podman
+
+  # Start a single pod and view logs
+  ai-services application start rag --pod mypod --runtime podman
+
+  # Start with auto-accept confirmation prompts
+  ai-services application start rag --yes --runtime podman
+
+  # Start using legacy implementation
+  ai-services application start rag --legacy --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error

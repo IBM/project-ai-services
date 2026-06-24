@@ -105,13 +105,13 @@ func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
 }
 
 func bootstrapExample() string {
-	return `  # Validate the environment
+	return `  # Validate the environment for podman runtime
   ai-services bootstrap validate --runtime podman
 
   # Validate the environment for openshift runtime
   ai-services bootstrap validate --runtime openshift
 
-  # Configure the infrastructure
+  # Configure the infrastructure for podman runtime
   ai-services bootstrap configure  --runtime podman
 
   # Configure the infrastructure for openshift runtime

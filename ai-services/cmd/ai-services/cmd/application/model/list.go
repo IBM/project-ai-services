@@ -14,7 +14,12 @@ var templateName string
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List models for a given application template",
-	Long:  ``,
+	Long:  `List all available models for a specific application template.
+Note:
+  - Supports only podman runtime.
+  - Use 'ai-services application templates' to see available template names`,
+	Example: `  # List models for a specific template for podman runtime
+  ai-services application model list --template chatbot --runtime podman`,
 	Args:  cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
