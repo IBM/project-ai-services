@@ -204,7 +204,7 @@ export function validateField(
       value === null ||
       (typeof value === "string" && value.trim() === ""))
   ) {
-    return `${field.label} is required`;
+    return `Provide a valid ${field.label}`;
   }
 
   // Skip other validations if value is empty and not required

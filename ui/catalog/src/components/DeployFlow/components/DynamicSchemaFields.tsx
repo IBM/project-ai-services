@@ -146,24 +146,25 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
       ? validateField(value, field)
       : null;
     const isInvalid = !!validationError;
-    const invalidText = validationError || `${field.label} is required`;
+    const invalidText = validationError || `Provide a valid ${field.label}`;
 
     // Label with optional info tooltip
-    const labelWithInfo = field.description ? (
-      <div className={styles.labelWithInfo}>
-        <span>{field.label}</span>
-        <Toggletip align="top">
-          <ToggletipButton label="Additional information">
-            <Information />
-          </ToggletipButton>
-          <ToggletipContent>
-            <p>{parseMarkdownLinks(field.description)}</p>
-          </ToggletipContent>
-        </Toggletip>
-      </div>
-    ) : (
-      field.label
-    );
+    const labelWithInfo =
+      field.description && field.key === "watsonxProjectId" ? (
+        <div className={styles.labelWithInfo}>
+          <span>{field.label}</span>
+          <Toggletip align="top">
+            <ToggletipButton label="Additional information">
+              <Information />
+            </ToggletipButton>
+            <ToggletipContent>
+              <p>{parseMarkdownLinks(field.description)}</p>
+            </ToggletipContent>
+          </Toggletip>
+        </div>
+      ) : (
+        field.label
+      );
 
     // Handle UI-only checkboxes (that control other fields)
     if (field.uiOnly && field.type === "boolean") {

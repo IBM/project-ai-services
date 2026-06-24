@@ -72,24 +72,25 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     // Get validation error for this field from parent
     const fieldError = fieldErrors[field.key];
     const isInvalid = hasValidationError && !!fieldError;
-    const invalidText = fieldError || `${field.label} is required`;
+    const invalidText = fieldError || `Provide a valid ${field.label}`;
 
     // Label with optional info tooltip
-    const labelWithInfo = field.description ? (
-      <div className={styles.labelWithInfo}>
-        <span>{field.label}</span>
-        <Toggletip align="top">
-          <ToggletipButton label="Additional information">
-            <Information />
-          </ToggletipButton>
-          <ToggletipContent>
-            <p>{parseMarkdownLinks(field.description)}</p>
-          </ToggletipContent>
-        </Toggletip>
-      </div>
-    ) : (
-      field.label
-    );
+    const labelWithInfo =
+      field.description && field.key === "watsonxProjectId" ? (
+        <div className={styles.labelWithInfo}>
+          <span>{field.label}</span>
+          <Toggletip align="top">
+            <ToggletipButton label="Additional information">
+              <Information />
+            </ToggletipButton>
+            <ToggletipContent>
+              <p>{parseMarkdownLinks(field.description)}</p>
+            </ToggletipContent>
+          </Toggletip>
+        </div>
+      ) : (
+        field.label
+      );
 
     switch (field.type) {
       case "password":
