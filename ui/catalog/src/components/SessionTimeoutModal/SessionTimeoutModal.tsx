@@ -5,23 +5,19 @@ interface SessionTimeoutModalProps {
   open: boolean;
   timeRemaining: string;
   onExtendSession: () => void;
-  onLogout: () => void;
 }
 
 const SessionTimeoutModal = ({
   open,
   timeRemaining,
   onExtendSession,
-  onLogout,
 }: SessionTimeoutModalProps) => {
   return (
     <Modal
       open={open}
       modalHeading="Session Timeout Warning"
       primaryButtonText="Stay Logged In"
-      secondaryButtonText="Logout"
       onRequestSubmit={onExtendSession}
-      onSecondarySubmit={onLogout}
       onRequestClose={onExtendSession}
       preventCloseOnClickOutside
       size="sm"

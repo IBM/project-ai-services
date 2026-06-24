@@ -7,8 +7,7 @@ interface SessionManagerProps {
 }
 
 const SessionManager = ({ children }: SessionManagerProps) => {
-  const { showWarning, timeRemaining, extendSession, handleLogout } =
-    useSessionTimeout();
+  const { showWarning, timeRemaining, extendSession } = useSessionTimeout();
 
   return (
     <>
@@ -17,7 +16,6 @@ const SessionManager = ({ children }: SessionManagerProps) => {
         open={showWarning}
         timeRemaining={timeRemaining}
         onExtendSession={extendSession}
-        onLogout={handleLogout}
       />
     </>
   );

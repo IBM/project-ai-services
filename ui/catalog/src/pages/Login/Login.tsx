@@ -18,6 +18,7 @@ import {
   SESSION_STORAGE_KEYS,
   type LoginLocationState,
 } from "@/types/navigation.types";
+import axios from "axios";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -124,7 +125,7 @@ const LoginPage = () => {
                 />
               )}
 
-              {error && (
+              {credentialError && (
                 <InlineNotification
                   kind="error"
                   role="alert"

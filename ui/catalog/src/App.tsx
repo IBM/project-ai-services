@@ -21,26 +21,27 @@ function App() {
             element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
           />
 
-        {/* Protected routes - require authentication */}
-        <Route element={<AuthRoute requireAuth={true} />}>
-          <Route element={<MainLayout />}>
-            <Route
-              path={ROUTES.DIGITAL_ASSISTANTS}
-              element={<DigitalAssistantsPage />}
-            />
-            <Route path={ROUTES.SERVICES} element={<Services />} />
-            <Route
-              path={ROUTES.USE_CASE_REFERENCES}
-              element={<UseCaseReferences />}
-            />
+          {/* Protected routes - require authentication */}
+          <Route element={<AuthRoute requireAuth={true} />}>
+            <Route element={<MainLayout />}>
+              <Route
+                path={ROUTES.DIGITAL_ASSISTANTS}
+                element={<DigitalAssistantsPage />}
+              />
+              <Route path={ROUTES.SERVICES} element={<Services />} />
+              <Route
+                path={ROUTES.USE_CASE_REFERENCES}
+                element={<UseCaseReferences />}
+              />
+            </Route>
           </Route>
 
-        {/* Public routes - redirect if authenticated */}
-        <Route element={<AuthRoute requireAuth={false} />}>
-          <Route element={<AuthLayout />}>
-            <Route path={ROUTES.LOGIN} element={<Login />} />
+          {/* Public routes - redirect if authenticated */}
+          <Route element={<AuthRoute requireAuth={false} />}>
+            <Route element={<AuthLayout />}>
+              <Route path={ROUTES.LOGIN} element={<Login />} />
+            </Route>
           </Route>
-        </Route>
 
           <Route path={ROUTES.LOGOUT} element={<Logout />} />
         </Routes>
