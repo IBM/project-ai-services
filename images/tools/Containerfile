@@ -10,6 +10,8 @@ COPY requirements.txt .
 RUN dnf update ${DNF_FLAGS} -y \
   && dnf install ${DNF_FLAGS} -y gcc \
   python3.12-pip python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
+  && python3.12 -m pip install --upgrade pip \
+  && rm -rf /usr/lib/python3.12/site-packages/pip-23.2.1.dist-info \
   && python3.12 -m venv ${VIRTUAL_ENV} \
   && ARCH=$(uname -m) \
   && if [ "$ARCH" = "ppc64le" ]; then \
