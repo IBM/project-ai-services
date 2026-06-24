@@ -93,6 +93,8 @@ const renderCell = ({
   );
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
@@ -117,6 +119,23 @@ const DigitalAssistantsPage = () => {
     selectedArchitecture?.description ||
     "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";
 
+  const fetchApplicationsData = async () => {
+    if (!catalogId) {
+      return null;
+    }
+
+    const response = await fetchApplications({
+      page: state.page,
+      page_size: state.pageSize,
+      catalog_id: catalogId,
+    });
+
+    return {
+      rows: response.data.map(transformApplicationToRow),
+      pagination: response.pagination,
+    };
+  };
+
   // Fetch applications from API
   const loadApplications = async () => {
     // Don't fetch if we don't have a catalog_id yet
@@ -127,20 +146,15 @@ const DigitalAssistantsPage = () => {
     dispatch({ type: ACTION_TYPES.FETCH_APPLICATIONS_START });
 
     try {
-      const response = await fetchApplications({
-        page: state.page,
-        page_size: state.pageSize,
-        catalog_id: catalogId,
-      });
+      const result = await fetchApplicationsData();
 
-      const rows = response.data.map(transformApplicationToRow);
+      if (!result) {
+        return;
+      }
 
       dispatch({
         type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
-        payload: {
-          rows,
-          pagination: response.pagination,
-        },
+        payload: result,
       });
     } catch (error) {
       const errorMessage =
@@ -198,7 +212,11 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
-      await loadApplications();
+
+      void (async () => {
+        await sleep(5000);
+        await loadApplications();
+      })();
     } catch (err) {
       const msg =
         err instanceof Error
