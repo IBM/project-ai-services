@@ -575,17 +575,17 @@ export function calculateUptime(createdAt: string): string {
 
   // Format based on duration
   if (totalDays > 0) {
-    // Show days + hours (e.g., "3d 4hr")
-    return hours > 0 ? `${totalDays}d ${hours}hr` : `${totalDays}d`;
+    // Show days + hours (e.g., "3 d 4 hr")
+    return hours > 0 ? `${totalDays} d ${hours} hr` : `${totalDays} d`;
   } else if (totalHours > 0) {
-    // Show hours + minutes (e.g., "2hr 10min")
-    return minutes > 0 ? `${totalHours}hr ${minutes}min` : `${totalHours}hr`;
+    // Show hours + minutes (e.g., "2 hr 10 min")
+    return minutes > 0 ? `${totalHours} hr ${minutes} min` : `${totalHours} hr`;
   } else if (totalMinutes > 0) {
-    // Show minutes only (e.g., "5min")
-    return `${totalMinutes}min`;
+    // Show minutes only (e.g., "5 min")
+    return `${totalMinutes} min`;
   } else {
-    // Show seconds for very recent deployments (e.g., "45sec")
-    return totalSeconds > 0 ? `${totalSeconds}sec` : "Just now";
+    // Show seconds for very recent deployments (e.g., "45 sec")
+    return totalSeconds > 0 ? `${totalSeconds} sec` : "Just now";
   }
 }
 

@@ -172,13 +172,13 @@ export function calculateUptime(createdAt: string): string {
   const hours = totalHours % 24;
 
   if (totalDays > 0) {
-    return hours > 0 ? `${totalDays}d ${hours}hr` : `${totalDays}d`;
+    return hours > 0 ? `${totalDays} d ${hours} hr` : `${totalDays} d`;
   } else if (totalHours > 0) {
-    return minutes > 0 ? `${totalHours}hr ${minutes}min` : `${totalHours}hr`;
+    return minutes > 0 ? `${totalHours} hr ${minutes} min` : `${totalHours} hr`;
   } else if (totalMinutes > 0) {
-    return `${totalMinutes}min`;
+    return `${totalMinutes} min`;
   } else {
-    return totalSeconds > 0 ? `${totalSeconds}sec` : "Just now";
+    return totalSeconds > 0 ? `${totalSeconds} sec` : "Just now";
   }
 }
 
