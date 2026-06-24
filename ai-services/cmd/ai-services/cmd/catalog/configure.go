@@ -44,8 +44,15 @@ const (
 func NewConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
-		Short: "Configure the catalog service with initial configuration",
-		Long: `Deploys the catalog service with the provided configuration.
+		Short: "Configure the catalog service",
+		Long: `Configure and deploy the AI Services catalog service with the specified runtime and configuration.
+
+The configure and deploy process will:
+	- Deploys the catalog services.
+	- Create a new admin user if one does not exist.
+	- Sets up base directory structure for applications and models
+
+The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.
 
 Examples:
 	 # Configure catalog service for podman
@@ -53,6 +60,7 @@ Examples:
 
 	 # Configure with custom HTTPS port
 	 ai-services catalog configure --runtime podman --https-port 8443`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -242,8 +250,6 @@ func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 }
 
 func runResetCertificate() error {
-	logger.Infof("Resetting certificates and reloading catalog pod...")
-
 	// Sanitize SSL certificate paths to prevent path traversal attacks
 	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
 
@@ -333,36 +339,10 @@ func configureResetFlags(cmd *cobra.Command) {
 }
 
 func runResetPassword() error {
-	logger.Warningf("Resetting password will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
-	// Confirm deletion
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with password reset?")
-	if err != nil {
-		return fmt.Errorf("failed to get confirmation: %w", err)
-	}
-
-	if !confirmed {
-		logger.Infoln("Catalog password reset cancelled")
-
-		return nil
-	}
-
 	return catalogPodman.ResetCatalogPassword()
 }
 
 func runResetPodmanAuth() error {
-	logger.Warningf("Resetting Podman auth will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
-	// Confirm deletion
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with podman auth reset?")
-	if err != nil {
-		return fmt.Errorf("failed to get confirmation: %w", err)
-	}
-
-	if !confirmed {
-		logger.Infoln("Catalog podman auth reset cancelled")
-
-		return nil
-	}
-
 	return catalogPodman.ResetPodmanAuth()
 }
 

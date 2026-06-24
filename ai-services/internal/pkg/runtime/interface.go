@@ -30,6 +30,7 @@ type Runtime interface {
 
 	// Volume operations
 	DeleteVolume(name string) error
+	VolumeExists(nameOrID string) (bool, error)
 
 	// Container operations
 	// ListContainers(filters map[string][]string) ([]types.Container, error)

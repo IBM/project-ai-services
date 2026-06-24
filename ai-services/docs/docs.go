@@ -1707,12 +1707,18 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "message": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
                 },
                 "provider": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
+                },
+                "status": {
+                    "type": "string"
                 },
                 "type": {
                     "type": "string"

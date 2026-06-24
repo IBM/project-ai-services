@@ -52,6 +52,7 @@ type scannedServiceFields struct {
 	appID     uuid.UUID
 	catalogID string
 	status    string
+	message   sql.NullString
 	endpoint  []byte
 	version   string
 	created   sql.NullTime
@@ -125,7 +126,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		)
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM paged_applications a
 		INNER JOIN services s ON a.id = s.app_id
 		ORDER BY a.created_at DESC, s.created_at ASC
@@ -149,7 +150,7 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 		err := rows.Scan(
 			&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 			&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-			&svc.id, &svc.appID, &svc.catalogID, &svc.status,
+			&svc.id, &svc.appID, &svc.catalogID, &svc.status, &svc.message,
 			&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 		)
 		if err != nil {
@@ -236,6 +237,10 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 		UpdatedAt: s.updated.Time,
 	}
 
+	if s.message.Valid {
+		service.Message = s.message.String
+	}
+
 	if len(s.endpoint) > 0 {
 		var endpoints []map[string]any
 		if err := json.Unmarshal(s.endpoint, &endpoints); err != nil {
@@ -257,7 +262,7 @@ func scanApplicationWithService(rows pgx.Rows, app *models.Application) (*models
 	err := rows.Scan(
 		&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 		&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-		&svc.id, &svc.appID, &svc.catalogID, &svc.status,
+		&svc.id, &svc.appID, &svc.catalogID, &svc.status, &svc.message,
 		&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 	)
 	if err != nil {
@@ -304,7 +309,7 @@ func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Ap
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		INNER JOIN services s ON a.id = s.app_id
 		WHERE a.id = $1
@@ -325,7 +330,7 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		LEFT JOIN services s ON a.id = s.app_id
 		WHERE a.name = $1

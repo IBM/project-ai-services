@@ -400,11 +400,15 @@ definitions:
     properties:
       id:
         type: string
+      message:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
       provider:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo'
+      status:
+        type: string
       type:
         type: string
     type: object
