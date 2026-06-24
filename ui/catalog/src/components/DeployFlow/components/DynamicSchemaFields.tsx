@@ -309,14 +309,8 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   };
 
   return (
-    <>
-      {/* Only show header for watsonx IBM provider */}
-      {providerId.toLowerCase().includes("watsonx") && (
-        <h4 className={styles.cloudCredentialsTitle}>Cloud credentials</h4>
-      )}
-      <div className={styles.dynamicSchemaFields}>
-        {fields.map((field) => renderField(field))}
-      </div>
-    </>
+    <div className={styles.dynamicSchemaFields}>
+      {fields.map((field) => renderField(field))}
+    </div>
   );
 };

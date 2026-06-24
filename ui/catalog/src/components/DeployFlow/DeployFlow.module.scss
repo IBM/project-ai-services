@@ -62,7 +62,6 @@
   display: flex;
   align-items: center;
   gap: $spacing-03;
-  margin-bottom: $spacing-03;
 
   > span {
     @include type-style("label-01");
@@ -219,7 +218,7 @@
 .serviceConfigFieldRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: $spacing-07;
+  gap: $spacing-06;
   width: 100%;
 
   // White background for dropdowns and text inputs in edit mode
@@ -258,18 +257,17 @@
 }
 
 .cloudCredentialsSection {
-  margin-top: $spacing-06;
-  padding-top: $spacing-06;
-  border-top: 1px solid $border-subtle;
+  margin-top: $spacing-03;
 }
 
 .cloudCredentialsTitle {
-  @include type-style("body-01");
+  @include type-style("heading-compact-01");
+  margin-top: -$spacing-05;
   margin-bottom: $spacing-05;
 }
 
 .systemPromptSection {
-  grid-column: 1 / -1; // Span full width of grid
+  grid-column: 1 / -1;
 }
 
 .apiKeyValue {
@@ -289,7 +287,7 @@
 }
 
 .systemPromptTextArea {
-  margin-top: $spacing-05;
+  margin-top: 0;
 
   :global(.cds--text-area) {
     background-color: $field-02 !important;
@@ -368,14 +366,15 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: $spacing-06;
-  margin-top: $spacing-06;
+  align-items: start;
 
   > * {
-    min-width: 0; // Prevent grid blowout
+    min-width: 0;
   }
 
   // Full width for textareas and controlled textareas
-  :global(.cds--text-area__wrapper) {
+  :global(.cds--text-area__wrapper),
+  :global(.cds--text-area) {
     grid-column: 1 / -1;
   }
 
@@ -383,7 +382,7 @@
   :global(.cds--checkbox-wrapper) {
     grid-column: 1 / -1;
     margin-top: $spacing-07;
-    margin-bottom: $spacing-07;
+    margin-bottom: $spacing-03;
   }
 
   // When containing controlled fields, use single column layout
@@ -416,8 +415,8 @@
 
 // Model Description Accordion Styles
 .modelDescriptionSection {
-  margin-top: $spacing-07;
-  margin-bottom: $spacing-07;
+  margin-top: $spacing-03;
+  margin-bottom: $spacing-05;
 }
 
 .modelDescriptionContent {

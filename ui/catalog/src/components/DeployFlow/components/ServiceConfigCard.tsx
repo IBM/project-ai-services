@@ -685,57 +685,82 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                         }}
                       />
                     </div>
-                    <div />
-                    <div style={{ gridColumn: "1 / -1" }}>
-                      <DynamicSchemaFields
-                        componentType={componentType}
-                        providerId={fieldValue || ""}
-                        values={currentConfig?.params || {}}
-                        onChange={(params) => {
-                          // Clear validation error when user makes changes
-                          if (hasValidationError) {
-                            setHasValidationError(false);
-                          }
-                          // Get provider schema keys to know which params belong to provider
-                          const providerSchema =
-                            providerParamsByType[componentType]?.paramsMap?.[
-                              fieldValue || ""
-                            ];
-                          const providerKeys = new Set(
-                            providerSchema?.properties
-                              ? Object.keys(providerSchema.properties)
-                              : [],
-                          );
+                    {(() => {
+                      const providerSchema =
+                        providerParamsByType[componentType]?.paramsMap?.[
+                          fieldValue || ""
+                        ];
+                      const hasCredentialFields =
+                        providerSchema?.properties &&
+                        Object.keys(providerSchema.properties).filter(
+                          (key) => key !== "model",
+                        ).length > 0;
 
-                          // Preserve service-level params, update only provider params
-                          const mergedParams: Record<string, unknown> = {};
-                          Object.entries(currentConfig?.params || {}).forEach(
-                            ([key, value]) => {
-                              // Keep service-level params (not in provider schema)
-                              if (!providerKeys.has(key)) {
-                                mergedParams[key] = value;
+                      return hasCredentialFields ? (
+                        <>
+                          <div />
+                          <div style={{ gridColumn: "1 / -1" }}>
+                            <h4 className={styles.cloudCredentialsTitle}>
+                              {(fieldValue || "")
+                                .toLowerCase()
+                                .includes("watsonx")
+                                ? "Cloud credentials"
+                                : "Inference credentials"}
+                            </h4>
+                            <DynamicSchemaFields
+                              componentType={componentType}
+                              providerId={fieldValue || ""}
+                              values={currentConfig?.params || {}}
+                              onChange={(params) => {
+                                // Clear validation error when user makes changes
+                                if (hasValidationError) {
+                                  setHasValidationError(false);
+                                }
+                                // Get provider schema keys to know which params belong to provider
+                                const providerSchema =
+                                  providerParamsByType[componentType]
+                                    ?.paramsMap?.[fieldValue || ""];
+                                const providerKeys = new Set(
+                                  providerSchema?.properties
+                                    ? Object.keys(providerSchema.properties)
+                                    : [],
+                                );
+
+                                // Preserve service-level params, update only provider params
+                                const mergedParams: Record<string, unknown> =
+                                  {};
+                                Object.entries(
+                                  currentConfig?.params || {},
+                                ).forEach(([key, value]) => {
+                                  // Keep service-level params (not in provider schema)
+                                  if (!providerKeys.has(key)) {
+                                    mergedParams[key] = value;
+                                  }
+                                });
+                                // Add/update provider params from DynamicSchemaFields
+                                Object.entries(params).forEach(
+                                  ([key, value]) => {
+                                    mergedParams[key] = value;
+                                  },
+                                );
+
+                                onUpdateConfig({
+                                  params: mergedParams,
+                                });
+                              }}
+                              providerParamsMap={
+                                (providerParamsByType[componentType]
+                                  ?.paramsMap || {}) as Record<
+                                  string,
+                                  import("@/utils/schemaParser").JSONSchema
+                                >
                               }
-                            },
-                          );
-                          // Add/update provider params from DynamicSchemaFields
-                          Object.entries(params).forEach(([key, value]) => {
-                            mergedParams[key] = value;
-                          });
-
-                          onUpdateConfig({
-                            params: mergedParams,
-                          });
-                        }}
-                        providerParamsMap={
-                          (providerParamsByType[componentType]?.paramsMap ||
-                            {}) as Record<
-                            string,
-                            import("@/utils/schemaParser").JSONSchema
-                          >
-                        }
-                        hasValidationError={hasValidationError}
-                      />
-                    </div>
+                              hasValidationError={hasValidationError}
+                            />
+                          </div>
+                        </>
+                      ) : null;
+                    })()}
                   </Fragment>
                 );
               })()}
