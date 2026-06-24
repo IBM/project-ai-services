@@ -265,10 +265,14 @@ const UseCaseReferences = () => {
       if (matchesFilters(sol, { checkAsset: false })) {
         sol.assets.forEach((asset) => {
           const key = normalizeString(asset);
-          // If assets are selected and this isn't one of them, count is 0
-          if (selectedAssets.length > 0 && !selectedAssets.includes(key)) {
-            counts[key] = 0;
-          } else {
+          // Count if no selection, already selected, or has all selected assets
+          if (
+            selectedAssets.length === 0 ||
+            selectedAssets.includes(key) ||
+            selectedAssets.every((selected) =>
+              sol.assets.some((a) => normalizeString(a) === selected),
+            )
+          ) {
             counts[key] = (counts[key] || 0) + 1;
           }
         });
@@ -285,13 +289,14 @@ const UseCaseReferences = () => {
       if (matchesFilters(sol, { checkArchitecture: false })) {
         sol.architectures.forEach((arch) => {
           const key = normalizeString(arch);
-          // If architectures are selected and this isn't one of them, count is 0
+          // Count if no selection, already selected, or has all selected architectures
           if (
-            selectedArchitectures.length > 0 &&
-            !selectedArchitectures.includes(key)
+            selectedArchitectures.length === 0 ||
+            selectedArchitectures.includes(key) ||
+            selectedArchitectures.every((selected) =>
+              sol.architectures.some((a) => normalizeString(a) === selected),
+            )
           ) {
-            counts[key] = 0;
-          } else {
             counts[key] = (counts[key] || 0) + 1;
           }
         });

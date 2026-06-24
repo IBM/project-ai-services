@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { parseSchema, validateField } from "@/utils/schemaParser";
 import {
   Button,
   Dropdown,
@@ -32,6 +33,7 @@ export const StepTwo: React.FC<StepProps> = ({
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -136,14 +138,18 @@ export const StepTwo: React.FC<StepProps> = ({
       setTempConfig({ ...selectedServiceConfig });
       setEditingService(selectedServiceId);
       setShowValidationError(false);
+      setFieldErrors({});
       onEditingChange?.(true);
     }
   };
 
   const handleApply = () => {
-    // Check if required fields are filled
-    if (!areRequiredFieldsFilled()) {
+    // Validate all fields including pattern, minLength, maxLength
+    const { isValid, errors } = validateAllFields();
+
+    if (!isValid) {
       setShowValidationError(true);
+      setFieldErrors(errors);
       return; // Stay in edit mode
     }
 
@@ -158,6 +164,7 @@ export const StepTwo: React.FC<StepProps> = ({
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
+    setFieldErrors({});
     onEditingChange?.(false);
   };
 
@@ -165,6 +172,7 @@ export const StepTwo: React.FC<StepProps> = ({
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
+    setFieldErrors({});
     onEditingChange?.(false);
   };
 
@@ -174,22 +182,37 @@ export const StepTwo: React.FC<StepProps> = ({
     }
   };
 
-  // Helper function to check if all required credential fields are filled
-  const areRequiredFieldsFilled = () => {
+  // Helper function to validate all fields including pattern, minLength, maxLength
+  const validateAllFields = (): {
+    isValid: boolean;
+    errors: Record<string, string>;
+  } => {
     if (!providerSchema || !tempConfig?.components?.llm) {
-      return true; // If no schema or no LLM component, allow proceeding
+      return { isValid: true, errors: {} }; // If no schema or no LLM component, allow proceeding
     }
 
-    const requiredFields = providerSchema.required || [];
     const llmParams = tempConfig.components.llm.params || {};
+    const errors: Record<string, string> = {};
 
-    // Check if all required fields have non-empty values
-    return requiredFields.every((fieldKey) => {
-      const value = llmParams[fieldKey];
-      return (
-        value !== undefined && value !== null && String(value).trim() !== ""
-      );
+    // Parse schema to get all fields with their validation rules
+    const fields = parseSchema(
+      providerSchema as import("@/utils/schemaParser").JSONSchema,
+    );
+
+    // Validate each field
+    fields.forEach((field) => {
+      const value = llmParams[field.key];
+      const error = validateField(value, field);
+
+      if (error) {
+        errors[field.key] = error;
+      }
     });
+
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors,
+    };
   };
 
   // Helper function to get display name from ID
@@ -651,6 +674,7 @@ export const StepTwo: React.FC<StepProps> = ({
                   }}
                   providerParamsMap={{ [currentLlmProviderId]: providerSchema }}
                   hasValidationError={showValidationError}
+                  fieldErrors={fieldErrors}
                 />
               </div>
             )}

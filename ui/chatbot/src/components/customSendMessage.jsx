@@ -246,6 +246,8 @@ async function customSendMessage(
     const noDocsMessages = [
       'No documents found in the knowledge base for this query.',
       'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.',
+      'Nessun documento trovato nella base di conoscenza per questa richiesta.',
+      'Aucun document trouvé dans la base de connaissances pour cette requête.',
     ];
     const hasNoDocsMessage = noDocsMessages.some((msg) =>
       fullText.includes(msg),

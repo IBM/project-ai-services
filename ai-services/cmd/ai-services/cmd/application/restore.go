@@ -28,33 +28,27 @@ var restoreCmd = &cobra.Command{
 	Long: `Restore application data from a tar.gz backup file.
 
 Arguments:
-	 [name] : Application name (required)
-
-Flags:
-	 --target   : Target to restore (opensearch, digitize) (required)
-	 --filename : Path to the backup tar.gz file (required)
-	 -y, --yes  : Automatically accept confirmation prompt (default=false)
+  [name] : Application name (required)
 
 Supported targets:
   - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
   - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)
 
 Note:
-	 - WARNING: Restore will overwrite existing data
+  - WARNING: Restore will overwrite existing data`,
+	Example: `  For Podman:
+  # Restore OpenSearch data with Podman
+  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
 
-Examples:
-	 # Restore OpenSearch data with Podman
-	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
-	 
-	 # Restore OpenSearch data with OpenShift
-	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
+  # Restore with automatic confirmation
+  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
 
-	 # Restore digitize data with OpenShift
-	 ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift
-	 
-	 # Restore with automatic confirmation
-	 ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
-`,
+  For OpenShift:
+  # Restore OpenSearch data with OpenShift
+  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
+
+  # Restore digitize data with OpenShift
+  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := restoreTarget

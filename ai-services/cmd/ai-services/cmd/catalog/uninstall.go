@@ -23,13 +23,13 @@ func NewUninstallCmd() *cobra.Command {
 		Long: `Removes the catalog service and all associated resources including pods, secrets, and database data.
 
 The uninstall process will:
-	 - Remove all catalog pods
-	 - Delete catalog secrets
-	 - Delete database data directory
+  - Remove all catalog pods
+  - Delete catalog secrets
+  - Delete database data directory
 
 Examples:
-	 # Uninstall catalog service for podman
-	 ai-services catalog uninstall --runtime podman`,
+  # Uninstall catalog service for podman
+  ai-services catalog uninstall --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 

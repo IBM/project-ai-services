@@ -12,7 +12,7 @@
         {
           "const": "ibm/granite-4-h-small",
           "title": "granite-4-h-small",
-          "description": "An 8-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.\n\n**Model strengths**: reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more."
+          "description": "A 32B parameter long-context instruct model finetuned from Granite-4.0-H-Small-Base using a combination of open source instruction datasets with permissive license and internally collected synthetic datasets. Developed by IBM's Granite Team using diverse techniques including supervised finetuning, model alignment using reinforcement learning, and model merging with a structured chat format. In this project, it powers tasks such as summarization, text classification, text extraction, question-answering, RAG, code-related tasks, function-calling, multilingual dialog, and Fill-In-the-Middle (FIM) code completions.\n\n**Model strengths**: Improved instruction following, tool-calling capabilities, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, and Chinese. Users may finetune for additional languages."
         }
       ],
       "default": "ibm/granite-4-h-small"

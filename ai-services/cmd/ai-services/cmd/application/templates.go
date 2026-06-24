@@ -26,6 +26,19 @@ var templatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "Lists the offered application templates and their supported parameters",
 	Long:  `Retrieves information about the offered application templates and their supported parameters`,
+	Example: `  For Podman:
+  # List all available application templates (Podman)
+  ai-services application templates --runtime podman
+
+  # List parameters for a specific template (see subcommand)
+  ai-services application templates parameters --template digitize --runtime podman
+  
+  For OpenShift:
+  # List all available application templates (OpenShift)
+  ai-services application templates --runtime openshift
+
+  # List parameters for a specific template (see subcommand)
+  ai-services application templates parameters --template digitize --runtime openshift `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true

@@ -45,21 +45,21 @@ func NewConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Configure the catalog service",
-		Long: `Configure and deploy the AI Services catalog service with the specified runtime and configuration.
+		Long: `Configure and deploy the AI Services catalog service with the specified runtime.
 
-The configure and deploy process will:
-	- Deploys the catalog services.
-	- Create a new admin user if one does not exist.
-	- Sets up base directory structure for applications and models
+This command performs the following operations:
+  - Deploys the catalog services
+  - Creates an admin user (if not already present)
+  - Initializes directory structure for applications and models
 
-The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.
+Additional configuration options include base directory customization, domain name setup,
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
+		Example: `  # Configure catalog service for podman
+  ai-services catalog configure --runtime podman
 
-Examples:
-	 # Configure catalog service for podman
-	 ai-services catalog configure --runtime podman
-
-	 # Configure with custom HTTPS port
-	 ai-services catalog configure --runtime podman --https-port 8443`,
+  # Configure with custom HTTPS port
+  ai-services catalog configure --runtime podman --https-port 8443`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 

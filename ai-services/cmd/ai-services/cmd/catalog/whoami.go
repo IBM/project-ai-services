@@ -19,10 +19,12 @@ func NewWhoamiCmd() *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the currently authenticated user",
 		Long: `Retrieve and display information about the user that is currently
-logged in to the catalog API server.
+logged in to the catalog API server.`,
+		Example: `  # Show currently authenticated user for podman runtime
+  ai-services catalog whoami --runtime podman
 
-Example:
-		ai-services catalog whoami --runtime podman`,
+Note:
+  - Requires prior authentication via 'ai-services catalog login'`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},

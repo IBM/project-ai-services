@@ -12,6 +12,7 @@ import {
 import { Information } from "@carbon/icons-react";
 import {
   parseSchema,
+  validateField,
   type ParsedField,
   type JSONSchema,
 } from "@/utils/schemaParser";
@@ -139,8 +140,13 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
 
     const fieldId = `${componentType}-${providerId}-${field.key}`;
     const value = values[field.key];
-    const isInvalid =
-      hasValidationError && field.validation?.required && !value;
+
+    // Use validateField to check pattern, minLength, maxLength, and required
+    const validationError = hasValidationError
+      ? validateField(value, field)
+      : null;
+    const isInvalid = !!validationError;
+    const invalidText = validationError || `${field.label} is required`;
 
     // Label with optional info tooltip
     const labelWithInfo = field.description ? (
@@ -185,7 +191,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={String(value || "")}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`Provide a valid ${field.label}`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );
@@ -204,7 +210,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
                 labelText={labelWithInfo}
                 value={String(value || "")}
                 invalid={isInvalid}
-                invalidText={`Provide a valid ${field.label}`}
+                invalidText={invalidText}
                 onChange={(e) => handleFieldChange(field.key, e.target.value)}
                 rows={4}
                 maxCount={field.validation?.maxLength}
@@ -221,7 +227,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             value={String(value || "")}
             invalid={isInvalid}
-            invalidText={`Provide a valid ${field.label}`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
             rows={4}
             maxCount={field.validation?.maxLength}
@@ -238,7 +244,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={Number(value || field.defaultValue || 0)}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`Provide a valid ${field.label}`}
+            invalidText={invalidText}
             min={field.validation?.min}
             max={field.validation?.max}
             onChange={(_e, { value: numValue }) => {
@@ -277,7 +283,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             itemToString={(item) => (item ? item.text : "")}
             selectedItem={selectedItem}
             invalid={isInvalid}
-            invalidText={`Provide a valid ${field.label}`}
+            invalidText={invalidText}
             onChange={({ selectedItem }) =>
               handleFieldChange(field.key, selectedItem?.id || "")
             }
@@ -294,7 +300,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={String(value || "")}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`Provide a valid ${field.label}`}
+            invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );

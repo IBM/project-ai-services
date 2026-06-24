@@ -38,16 +38,16 @@ jobs:
            image: chatbot-ui
          - path: ui/digitize
            image: digitize-ui
-         - path: services/chatbot
+         - path: services
            image: chatbot-service
            service: chatbot
-         - path: services/digitize
+         - path: services
            image: digitize-service
            service: digitize
-         - path: services/similarity
+         - path: services
            image: similarity-service
            service: similarity
-         - path: services/summarize
+         - path: services
            image: summarize-service
            service: summarize
          - path: ai-services

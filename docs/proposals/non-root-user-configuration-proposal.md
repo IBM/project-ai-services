@@ -10,23 +10,28 @@ This document outlines the configuration changes and system requirements impleme
 
 ## Prerequisites Summary
 
-1. Run these commands before running the bootstrap command:
+1. Run below command
    ```bash
    sudo usermod -aG wheel <username>
+   ```
+   & then log in to the user using su - <username>
+
+2. Run these commands before running the bootstrap command:
+   ```bash
    sudo loginctl enable-linger <username>
    ```
-2. Run bootstrap command with sudo:
+3. Run bootstrap command with sudo:
    ```bash
    sudo ai-services bootstrap
    ```
 
-3. Create application data directory (if using default location):
+4. Create application data directory (if using default location):
    ```bash
    sudo mkdir -p /var/lib/ai-services/{models,cache,data}
    sudo chown -R <username>:sentient /var/lib/ai-services
    ```
 
-4. Apply configuration changes for users:
+5. Apply configuration changes for users:
    ```bash
    # Terminate user session to apply group membership and resource limits
    sudo loginctl terminate-user <username>
@@ -38,7 +43,7 @@ This document outlines the configuration changes and system requirements impleme
    # Enable lingering to keep user services running
    sudo loginctl enable-linger <username>
    ```
-5. While running `ai-services catalog configure` cmd, make sure to add `--https-port 8443`, as 443 is a privileged port. For PowerVS environments, use `--https-port 6443` along with a custom domain configuration, as 6443 is one of the available port option for non-root users on PowerVS.
+6. While running `ai-services catalog configure` cmd, make sure to add `--https-port 8443`, as 443 is a privileged port. For PowerVS environments, use `--https-port 6443` along with a custom domain configuration, as 6443 is one of the available port option for non-root users on PowerVS.
 
 **Why This Is Required:**
 - Group membership changes require a new login session

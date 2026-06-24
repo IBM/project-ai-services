@@ -21,10 +21,30 @@ var (
 )
 
 var logsCmd = &cobra.Command{
-	Use: "logs [name]",
+	Use:   "logs [name]",
+	Short: "Application pod logs",
 	Long: `Displays logs from an application pod
-Arguments
-[name]: Application name (required)`,
+
+Arguments:
+  [name] : Application name (required)`,
+	Example: `  For Podman:
+  # Display logs from an application pod
+  ai-services application logs rag --pod mypod --runtime podman
+
+  # Display logs from a specific container in a pod
+  ai-services application logs rag --pod mypod --container mycontainer --runtime podman
+
+  # Display logs using legacy implementation
+  ai-services application logs rag --pod mypod --legacy --runtime podman
+
+  For Openshift:
+  # Display logs from an application pod
+  ai-services application logs rag --pod mypod --runtime openshift
+
+  # Display logs from a specific container in a pod
+  ai-services application logs rag --pod mypod --container mycontainer --runtime openshift
+
+  `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator

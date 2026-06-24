@@ -20,9 +20,8 @@ func NewLogoutCmd() *cobra.Command {
 		Use:   "logout",
 		Short: "Log out from the catalog API server",
 		Long: `Invalidate the current session on the catalog API server and remove
-the locally stored credentials.
-
-Example:
+the locally stored credentials.`,
+		Example: `  # Logout from the api server
   ai-services catalog logout --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)

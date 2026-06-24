@@ -12,7 +12,7 @@ import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout, getUserInfo } from "@/services/auth";
+import { getUserInfo } from "@/services/auth";
 import { useAuthStore } from "@/store/auth.store";
 
 type AppHeaderProps =
@@ -67,15 +67,9 @@ const AppHeader = (props: AppHeaderProps) => {
   const navigate = useNavigate();
   const userInfo = useAuthStore((state) => state.userInfo);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch (err) {
-      console.error("Logout API failed:", err);
-    } finally {
-      dispatch({ type: "CLOSE_LOGOUT_MODAL" });
-      navigate("/logout", { replace: true });
-    }
+  const handleLogout = () => {
+    dispatch({ type: "CLOSE_LOGOUT_MODAL" });
+    navigate("/logout", { replace: true });
   };
 
   useEffect(() => {
