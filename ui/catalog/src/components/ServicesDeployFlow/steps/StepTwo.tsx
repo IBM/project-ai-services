@@ -605,8 +605,14 @@ export const StepTwo: React.FC<StepProps> = ({
                                 ...currentConfig?.components,
                                 llm: {
                                   providerId: selectedItem?.id || "",
-                                  params:
-                                    currentConfig?.components.llm?.params || {},
+                                  params: currentConfig?.components.llm?.params
+                                    ?.model
+                                    ? {
+                                        model:
+                                          currentConfig.components.llm.params
+                                            .model,
+                                      }
+                                    : {},
                                 },
                               },
                             });
@@ -633,7 +639,6 @@ export const StepTwo: React.FC<StepProps> = ({
                                 llm: {
                                   providerId: newProviderId,
                                   params: {
-                                    ...llmComponent?.params,
                                     model: newModelId,
                                   },
                                 },
