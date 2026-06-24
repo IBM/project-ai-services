@@ -239,8 +239,15 @@ const DigitalAssistantsPage = () => {
     // Close modal immediately
     dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG });
 
+    // Filter headers to only include visible columns (excluding actions)
+    const visibleHeaders = HEADERS.filter(
+      (h) =>
+        h.key !== "actions" &&
+        state.visibleColumns[h.key as keyof typeof state.visibleColumns],
+    );
+
     // Use utility function to handle export
-    const result = downloadCSVWithChildren(filteredRows, HEADERS, name);
+    const result = downloadCSVWithChildren(filteredRows, visibleHeaders, name);
 
     // Show toast based on result
     dispatch({

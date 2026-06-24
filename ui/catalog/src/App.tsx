@@ -8,7 +8,7 @@ import Logout from "./pages/Logout";
 import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
 import UseCaseReferences from "./pages/UseCaseReferences";
-import { ProtectedRoute } from "@/components";
+import { AuthRoute } from "@/components";
 import SessionManager from "@/components/SessionManager";
 
 function App() {
@@ -21,25 +21,26 @@ function App() {
             element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
           />
 
-          {/* Protected routes */}
-          <Route element={<ProtectedRoute />}>
-            <Route element={<MainLayout />}>
-              <Route
-                path={ROUTES.DIGITAL_ASSISTANTS}
-                element={<DigitalAssistantsPage />}
-              />
-              <Route path={ROUTES.SERVICES} element={<Services />} />
-              <Route
-                path={ROUTES.USE_CASE_REFERENCES}
-                element={<UseCaseReferences />}
-              />
-            </Route>
+        {/* Protected routes - require authentication */}
+        <Route element={<AuthRoute requireAuth={true} />}>
+          <Route element={<MainLayout />}>
+            <Route
+              path={ROUTES.DIGITAL_ASSISTANTS}
+              element={<DigitalAssistantsPage />}
+            />
+            <Route path={ROUTES.SERVICES} element={<Services />} />
+            <Route
+              path={ROUTES.USE_CASE_REFERENCES}
+              element={<UseCaseReferences />}
+            />
           </Route>
 
-          {/* Public routes */}
+        {/* Public routes - redirect if authenticated */}
+        <Route element={<AuthRoute requireAuth={false} />}>
           <Route element={<AuthLayout />}>
             <Route path={ROUTES.LOGIN} element={<Login />} />
           </Route>
+        </Route>
 
           <Route path={ROUTES.LOGOUT} element={<Logout />} />
         </Routes>

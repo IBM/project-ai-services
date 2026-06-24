@@ -1,5 +1,5 @@
 export { default as Navbar } from "./Navbar";
-export { default as ProtectedRoute } from "./ProtectedRoute";
+export { default as AuthRoute } from "./AuthRoute";
 export { default as ServiceCard } from "./ServiceCard";
 export type { ServiceCardProps } from "./ServiceCard";
 export { default as ServiceDetailPanel } from "./ServiceDetailPanel";

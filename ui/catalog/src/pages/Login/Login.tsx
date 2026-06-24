@@ -5,6 +5,7 @@ import {
   Theme,
   Grid,
   Column,
+  ToastNotification,
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
 import { useState, useEffect } from "react";
@@ -25,7 +26,8 @@ const LoginPage = () => {
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
 
-  const [error, setError] = useState<boolean>(false);
+  const [credentialError, setCredentialError] = useState<boolean>(false);
+  const [networkError, setNetworkError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [showInactivityNotification, setShowInactivityNotification] =
     useState<boolean>(false);
@@ -53,7 +55,8 @@ const LoginPage = () => {
   }, [location, navigate]);
 
   const handleLogin = async (): Promise<void> => {
-    setError(false);
+    setCredentialError(false);
+    setNetworkError(false);
     setLoading(true);
 
     try {
@@ -63,8 +66,19 @@ const LoginPage = () => {
       });
 
       navigate(ROUTES.DIGITAL_ASSISTANTS);
-    } catch {
-      setError(true);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        // Treat 400 and 401 as credential/validation errors
+        if (error.response.status === 400 || error.response.status === 401) {
+          setCredentialError(true);
+        } else {
+          // 5xx server errors or other unexpected errors
+          setNetworkError(true);
+        }
+      } else {
+        // Network error (no response from server)
+        setNetworkError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -72,6 +86,16 @@ const LoginPage = () => {
 
   return (
     <Theme theme="white">
+      {networkError && (
+        <ToastNotification
+          kind="error"
+          title="Network error"
+          subtitle="Unable to connect to server. Please try again."
+          timeout={5000}
+          onClose={() => setNetworkError(false)}
+          className={styles.toastNotification}
+        />
+      )}
       <Grid fullWidth className={styles.loginPage}>
         <Column lg={8} md={4} sm={4} className={styles.loginLeft}>
           <div className={styles.loginForm}>
@@ -116,7 +140,7 @@ const LoginPage = () => {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setUsername(e.target.value)
                 }
-                invalid={error}
+                invalid={credentialError}
               />
 
               <TextInput
@@ -127,7 +151,7 @@ const LoginPage = () => {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setPassword(e.target.value)
                 }
-                invalid={error}
+                invalid={credentialError}
               />
 
               <Button
