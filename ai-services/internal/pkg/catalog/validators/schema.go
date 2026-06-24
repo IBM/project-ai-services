@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -96,17 +97,30 @@ func validateAgainstSchema(compiledSchema *jsonschema.Schema, params map[string]
 func ExtractValidationErrors(err *jsonschema.ValidationError) []string {
 	var messages []string
 
-	// Add current error message using Error() method
-	if err.Error() != "" {
-		messages = append(messages, err.Error())
-	}
-
-	// Recursively add causes
-	for _, cause := range err.Causes {
-		messages = append(messages, ExtractValidationErrors(cause)...)
+	// If there are no causes, this is a leaf error - add its message
+	if len(err.Causes) == 0 {
+		if err.Error() != "" {
+			messages = append(messages, sanitizeErrorMessage(err.Error()))
+		}
+	} else {
+		// If there are causes, recursively collect them (don't add parent message to avoid duplication)
+		for _, cause := range err.Causes {
+			messages = append(messages, ExtractValidationErrors(cause)...)
+		}
 	}
 
 	return messages
+}
+
+// sanitizeErrorMessage removes sensitive values from error messages while keeping field names and validation details.
+// It only redacts the actual value being validated (the first quoted string after a colon in the message).
+func sanitizeErrorMessage(msg string) string {
+	// Pattern to match: at '/fieldName': 'actual-value' does not match...
+	// We want to keep '/fieldName' but redact 'actual-value'
+	// This pattern finds the first quoted value after ": " which is typically the actual value being validated
+	re := regexp.MustCompile(`(at '[^']+': )'[^']+'`)
+
+	return re.ReplaceAllString(msg, "${1}'[REDACTED]'")
 }
 
 // Made with Bob
