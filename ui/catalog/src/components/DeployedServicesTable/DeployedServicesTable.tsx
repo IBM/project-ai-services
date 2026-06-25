@@ -1,4 +1,10 @@
-import React, { useReducer, useEffect, useCallback, useRef } from "react";
+import React, {
+  useReducer,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS } from "@/constants";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
@@ -37,13 +43,7 @@ import {
 } from "@carbon/icons-react";
 import styles from "./DeployedServices.module.scss";
 import type { DeployedServicesRow, ApplicationApiResponse } from "./types";
-import {
-  ACTION_TYPES,
-  HEADERS,
-  INITIAL_STATE,
-  appReducer,
-  SERVICE_TYPES,
-} from "./types";
+import { ACTION_TYPES, HEADERS, INITIAL_STATE, appReducer } from "./types";
 import { CELL_RENDERERS } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
@@ -104,14 +104,28 @@ const DeployedServicesTable = ({
 }: DeployedServicesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-  // Zustand store for deployed services caching
+  // Zustand store for deployed services caching and services data
   const {
     deployedServices,
     setDeployedServices,
     setDeployedServicesLoading,
     setDeployedServicesError,
     isDeployedServicesStale,
+    services,
   } = useServiceDeployStore();
+
+  // Generate dynamic service filter options from backend services
+  // Only show services where standalone === true
+  const availableServiceFilters = useMemo(() => {
+    if (!services || services.length === 0) return [];
+
+    return services
+      .filter((service) => service.standalone === true)
+      .map((service) => ({
+        id: service.id,
+        name: service.name,
+      }));
+  }, [services]);
 
   // Transform API response to table row format
   const transformDeployedServices = (data: ApplicationApiResponse[]) => {
@@ -522,59 +536,22 @@ const DeployedServicesTable = ({
                                 Filter by service
                               </h6>
                               <CheckboxGroup legendText="">
-                                <Checkbox
-                                  labelText={SERVICE_TYPES.DIGITIZE_DOCUMENTS}
-                                  id="filter-digitize"
-                                  checked={state.selectedServices.includes(
-                                    SERVICE_TYPES.DIGITIZE_DOCUMENTS,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
-                                      payload: SERVICE_TYPES.DIGITIZE_DOCUMENTS,
-                                    })
-                                  }
-                                />
-                                <Checkbox
-                                  labelText={SERVICE_TYPES.FIND_SIMILAR_ITEMS}
-                                  id="filter-similar"
-                                  checked={state.selectedServices.includes(
-                                    SERVICE_TYPES.FIND_SIMILAR_ITEMS,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
-                                      payload: SERVICE_TYPES.FIND_SIMILAR_ITEMS,
-                                    })
-                                  }
-                                />
-                                <Checkbox
-                                  labelText={SERVICE_TYPES.QUESTION_AND_ANSWER}
-                                  id="filter-qa"
-                                  checked={state.selectedServices.includes(
-                                    SERVICE_TYPES.QUESTION_AND_ANSWER,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
-                                      payload:
-                                        SERVICE_TYPES.QUESTION_AND_ANSWER,
-                                    })
-                                  }
-                                />
-                                <Checkbox
-                                  labelText={SERVICE_TYPES.SUMMARIZE}
-                                  id="filter-summary"
-                                  checked={state.selectedServices.includes(
-                                    SERVICE_TYPES.SUMMARIZE,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
-                                      payload: SERVICE_TYPES.SUMMARIZE,
-                                    })
-                                  }
-                                />
+                                {availableServiceFilters.map((service) => (
+                                  <Checkbox
+                                    key={service.id}
+                                    labelText={service.name}
+                                    id={`filter-${service.id}`}
+                                    checked={state.selectedServices.includes(
+                                      service.name,
+                                    )}
+                                    onChange={() =>
+                                      dispatch({
+                                        type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
+                                        payload: service.name,
+                                      })
+                                    }
+                                  />
+                                ))}
                               </CheckboxGroup>
                               <div className={styles.overflowMenuActions}>
                                 <Button
