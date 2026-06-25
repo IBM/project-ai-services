@@ -200,11 +200,9 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
-
-      void (async () => {
-        await sleep(5000);
-        await loadApplications();
-      })();
+      // Await the delayed reload to ensure error handling
+      await sleep(5000);
+      await loadApplications();
     } catch (err) {
       const msg =
         err instanceof Error
