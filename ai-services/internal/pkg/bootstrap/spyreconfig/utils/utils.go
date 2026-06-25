@@ -237,13 +237,13 @@ func ReloadUdevRules() error {
 	}
 
 	// Trigger for VFIO subsystem devices (/dev/vfio/0, 1, 2, 3, etc.)
-	if err := executeCommandOrFail("udevadm", "trigger", "--action=add", "--subsystem-match=vfio"); err != nil {
-		return fmt.Errorf("failed to trigger udev add for vfio subsystem: %w", err)
+	if err := executeCommandOrFail("udevadm", "trigger", "--subsystem-match=vfio"); err != nil {
+		return fmt.Errorf("failed to trigger udev for vfio subsystem: %w", err)
 	}
 
 	// Trigger for the vfio kernel device (/dev/vfio/vfio)
-	if err := executeCommandOrFail("udevadm", "trigger", "--action=add", "--subsystem-match=misc"); err != nil {
-		return fmt.Errorf("failed to trigger udev add for misc subsystem: %w", err)
+	if err := executeCommandOrFail("udevadm", "trigger", "--subsystem-match=misc", "--name-match=vfio/vfio"); err != nil {
+		return fmt.Errorf("failed to trigger udev for vfio kernel device: %w", err)
 	}
 
 	if err := executeCommandOrFail("udevadm", "settle"); err != nil {
