@@ -290,6 +290,7 @@ const DigitalAssistantsPage = () => {
             payload: newName,
           })
         }
+        onRefresh={loadApplications}
       />
     );
   }

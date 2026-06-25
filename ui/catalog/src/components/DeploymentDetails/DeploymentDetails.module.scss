@@ -497,3 +497,7 @@
   padding: $spacing-02 0;
   color: $text-primary;
 }
+
+:global(.cds--grid) {
+  margin-left: 0;
+}

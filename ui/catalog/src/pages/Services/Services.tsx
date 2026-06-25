@@ -42,8 +42,8 @@ const transformServiceData = (service: Service): ServiceDetailData => {
 };
 
 const Services = () => {
-  // Use unified services cache
-  const { services, isLoading, error, refetch } = useServices();
+  // Use unified services cache - autoFetch on mount
+  const { services, isLoading, error, refetch } = useServices(true);
 
   // Local UI state using useReducer
   const [state, dispatch] = useReducer(servicesReducer, initialState);
@@ -106,6 +106,11 @@ const Services = () => {
     dispatch({ type: "HIDE_DEPLOYMENT_DETAILS" });
   };
 
+  const handleRefreshDeployments = () => {
+    // Increment trigger to force table refresh with fresh API call
+    dispatch({ type: "REFRESH_DEPLOYMENTS_TABLE" });
+  };
+
   // If showing deployment details, render DeploymentDetails component
   if (state.showDeploymentDetails && state.selectedDeployment) {
     return (
@@ -113,6 +118,13 @@ const Services = () => {
         deployment={state.selectedDeployment}
         onBack={handleBackFromDetails}
         deploymentSource="Services"
+        onNameUpdate={(newName) =>
+          dispatch({
+            type: "UPDATE_DEPLOYMENT_NAME",
+            payload: newName,
+          })
+        }
+        onRefresh={handleRefreshDeployments}
       />
     );
   }

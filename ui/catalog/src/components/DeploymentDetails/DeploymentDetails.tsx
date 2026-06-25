@@ -39,6 +39,7 @@ interface DeploymentDetailsProps {
   onBack: () => void;
   deploymentSource: string;
   onNameUpdate?: (newName: string) => void;
+  onRefresh?: () => void;
 }
 
 const DeploymentDetails = ({
@@ -46,6 +47,7 @@ const DeploymentDetails = ({
   onBack,
   deploymentSource,
   onNameUpdate,
+  onRefresh,
 }: DeploymentDetailsProps) => {
   const [activeSection, setActiveSection] = useState("details");
   const [resources, setResources] = useState<
@@ -393,6 +395,10 @@ const DeploymentDetails = ({
                   onClick={(e) => {
                     e.preventDefault();
                     onBack();
+                    // Call refresh after navigation so table is mounted
+                    setTimeout(() => {
+                      onRefresh?.();
+                    }, 0);
                   }}
                 >
                   <ArrowLeft size={16} />

@@ -24,7 +24,9 @@ export type ServicesAction =
   | { type: "DEPLOY_SUBMIT" }
   | { type: "CLEAR_SELECTED_SERVICE_ID" }
   | { type: "SHOW_DEPLOYMENT_DETAILS"; payload: DeploymentDetails }
-  | { type: "HIDE_DEPLOYMENT_DETAILS" };
+  | { type: "HIDE_DEPLOYMENT_DETAILS" }
+  | { type: "UPDATE_DEPLOYMENT_NAME"; payload: string }
+  | { type: "REFRESH_DEPLOYMENTS_TABLE" };
 
 // Initial state
 export const initialState: ServicesState = {
@@ -80,6 +82,18 @@ export const servicesReducer = (
         ...state,
         selectedDeployment: null,
         showDeploymentDetails: false,
+      };
+    case "UPDATE_DEPLOYMENT_NAME":
+      return {
+        ...state,
+        selectedDeployment: state.selectedDeployment
+          ? { ...state.selectedDeployment, name: action.payload }
+          : null,
+      };
+    case "REFRESH_DEPLOYMENTS_TABLE":
+      return {
+        ...state,
+        tableRefreshTrigger: state.tableRefreshTrigger + 1,
       };
     default:
       return state;
