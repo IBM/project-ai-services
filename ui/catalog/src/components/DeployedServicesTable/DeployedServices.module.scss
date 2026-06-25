@@ -36,7 +36,8 @@
     :global(td:nth-child(5)) {
       white-space: normal;
       word-wrap: break-word;
-      word-break: break-word;
+      overflow-wrap: break-word;
+      padding: spacing.$spacing-04;
     }
 
     // Last column (actions) - fixed width for action buttons

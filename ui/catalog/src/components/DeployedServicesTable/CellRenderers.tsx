@@ -145,25 +145,35 @@ export const MessageCell = ({ value, rowData }: CellRendererProps) => {
   const message = String(value || "");
   const status = rowData?.status || "";
 
-  // Don't show message if status is Running
+  // Hide message if status is Running or if message is empty
   if (status === "Running" || !message) {
     return <span></span>;
   }
 
-  const isError =
-    message.toLowerCase().includes("error") ||
-    message.toLowerCase().includes("failed");
-  const isSuccess = message.toLowerCase().includes("completed successfully");
+  let MessageIcon;
+  let iconClassName;
 
-  let MessageIcon = InProgress;
-  let iconClassName = styles.messageIconInfo;
-
-  if (isError) {
+  // First check row status for accurate icon selection
+  if (status === "Error") {
     MessageIcon = ErrorFilled;
     iconClassName = styles.messageIconError;
-  } else if (isSuccess) {
-    MessageIcon = CheckmarkFilled;
-    iconClassName = styles.messageIconSuccess;
+  } else {
+    // Fall back to checking message content for other statuses
+    const messageLower = message.toLowerCase();
+    const isError =
+      messageLower.includes("error") || messageLower.includes("failed");
+    const isSuccess = messageLower.includes("completed successfully");
+
+    if (isError) {
+      MessageIcon = ErrorFilled;
+      iconClassName = styles.messageIconError;
+    } else if (isSuccess) {
+      MessageIcon = CheckmarkFilled;
+      iconClassName = styles.messageIconSuccess;
+    } else {
+      MessageIcon = InProgress;
+      iconClassName = styles.messageIconInfo;
+    }
   }
 
   return (

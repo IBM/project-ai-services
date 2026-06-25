@@ -70,8 +70,8 @@ type ApplicationResourcesResponse struct {
 
 // ApplicationCPUInfo represents CPU allocation and usage for an application.
 type ApplicationCPUInfo struct {
-	TotalCores float64 `json:"total_cores"` // Total allocated CPU cores
-	UsedCores  float64 `json:"used_cores"`  // Actually used CPU cores
+	Total float64 `json:"total_cpu"` // Total allocated CPUs
+	Used  float64 `json:"used_cpu"`  // Actually used CPUs
 }
 
 // ApplicationMemInfo represents memory allocation and usage for an application.
