@@ -93,6 +93,8 @@ const renderCell = ({
   );
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
@@ -198,6 +200,8 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
+      // Await the delayed reload to ensure error handling
+      await sleep(5000);
       await loadApplications();
     } catch (err) {
       const msg =
