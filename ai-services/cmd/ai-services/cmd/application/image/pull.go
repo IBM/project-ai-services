@@ -17,11 +17,14 @@ var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pulls all container images for a given application template",
 	Long:  ``,
-	Example: `  # Pull images for a specific template
-  ai-services application image pull --template chatbot --runtime podman
+	Example: `  # List images for Digital Assistant
+  ai-services application image list --template rag --runtime podman
+
+  # Pull images for a specific service
+  ai-services application image pull --template chat --runtime podman
 
   # Pull images using legacy implementation
-  ai-services application image pull --template chatbot --legacy --runtime podman`,
+  ai-services application image pull --template rag --legacy --runtime podman`,
 	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.

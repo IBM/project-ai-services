@@ -18,11 +18,14 @@ var listCmd = &cobra.Command{
 Note:
   - Supports only podman runtime.
   - Use 'ai-services application templates' to see available template names`,
-	Example: `  # List models for a specific template
-	 ai-services application model list --template chatbot --runtime podman
+	Example: `  # List models for Digital Assistant
+     ai-services application model list --template rag --runtime podman
+
+     # List models for a specific template
+	 ai-services application model list --template chat --runtime podman
 
 	 # List models using legacy implementation
-	 ai-services application model list --template chatbot --legacy --runtime podman`,
+	 ai-services application model list --template rag --legacy --runtime podman`,
 	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.

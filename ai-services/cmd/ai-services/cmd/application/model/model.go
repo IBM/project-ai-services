@@ -18,11 +18,6 @@ var (
 		Short: "Manage application models",
 		Long: `Manage AI models for application templates.
 This command provides subcommands to list and download models required by application templates.`,
-		Example: `  # List available models for a template
-	 ai-services application model list --template chatbot --runtime podman
-
-	 # Download models for a template
-	 ai-services application model download --template chatbot --runtime podman`,
 		Args: cobra.MaximumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()

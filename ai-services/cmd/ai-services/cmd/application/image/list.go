@@ -15,11 +15,14 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List container images for a given application template",
 	Long:  ``,
-	Example: `  # List images for a specific template
-  ai-services application image list --template chatbot --runtime podman
+	Example: `  # List images for Digital Assistant
+  ai-services application image list --template rag --runtime podman
+
+  # List images for a specific service
+  ai-services application image list --template chat --runtime podman
 
   # List images using legacy implementation
-  ai-services application image list --template chatbot --legacy --runtime podman`,
+  ai-services application image list --template rag --legacy --runtime podman`,
 	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
