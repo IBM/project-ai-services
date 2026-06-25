@@ -201,7 +201,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	// Step 3: If any service or component is still initialising, skip updating the
 	// application status this cycle — we don't have a complete picture yet.
 	if componentsPending || servicesPending {
-		logger.InfofCtx(ctx, "Skipping application %s status update: some services/components are still initialising", app.Name)
+		logger.InfofCtx(ctx, "Skipping application %s status update: some services/components are still in Initializing state", app.Name)
 
 		return nil
 	}
