@@ -221,7 +221,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 // syncAllComponents syncs all components for an application.
 // Returns error messages and a pending flag — pending is true if any component was
 // skipped because it has not yet reached a stable (Running/Error) state.
-func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) {
+func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) { //nolint:cyclop
 	processedComponents := make(map[uuid.UUID]bool)
 	errorMessages := []string{}
 	pending := false
