@@ -34,6 +34,8 @@ export const StepTwo: React.FC<StepProps> = ({
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Track the model for filtering inference backends, even when params.model is cleared
+  const [modelForFiltering, setModelForFiltering] = useState<string | null>(null);
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -112,16 +114,19 @@ export const StepTwo: React.FC<StepProps> = ({
     );
   }, [tempConfig, selectedServiceConfig]);
 
-  // Inference method options - filtered based on selected LLM model
+  // Inference method options - filtered based on selected LLM model or modelForFiltering
   const inferenceMethodOptions = useMemo(() => {
+    // Use modelForFiltering if available (for filtering after backend change), otherwise use selectedLlmModel
+    const modelToFilter =  modelForFiltering || selectedLlmModel;
+    
     // If no LLM model is selected, show all providers
-    if (!selectedLlmModel) {
+    if (!modelToFilter) {
       return getComponentProviders("llm");
     }
 
     // Find which providers support the selected model
     const supportingProviders = llmModelsWithProviders
-      .filter((option) => option.id === selectedLlmModel)
+      .filter((option) => option.id === modelToFilter)
       .map((option) => option.providerId);
 
     // Filter providers to only show those that support the selected model
@@ -129,7 +134,7 @@ export const StepTwo: React.FC<StepProps> = ({
     return allProviders.filter((provider) =>
       supportingProviders.includes(provider.id),
     );
-  }, [selectedLlmModel, llmModelsWithProviders, getComponentProviders]);
+  }, [modelForFiltering, selectedLlmModel, llmModelsWithProviders, getComponentProviders]);
 
   // Set default LLM model if not already set and options are available
 
@@ -139,6 +144,7 @@ export const StepTwo: React.FC<StepProps> = ({
       setEditingService(selectedServiceId);
       setShowValidationError(false);
       setFieldErrors({});
+      setModelForFiltering(null); // Reset filtering model when entering edit mode
       onEditingChange?.(true);
     }
   };
@@ -146,7 +152,6 @@ export const StepTwo: React.FC<StepProps> = ({
   const handleApply = () => {
     // Validate all fields including pattern, minLength, maxLength
     const { isValid, errors } = validateAllFields();
-
     if (!isValid) {
       setShowValidationError(true);
       setFieldErrors(errors);
@@ -173,6 +178,7 @@ export const StepTwo: React.FC<StepProps> = ({
     setTempConfig(null);
     setShowValidationError(false);
     setFieldErrors({});
+    setModelForFiltering(null); // Reset filtering model on cancel
     onEditingChange?.(false);
   };
 
@@ -600,25 +606,26 @@ export const StepTwo: React.FC<StepProps> = ({
                         selectedItem={selectedItem}
                         onChange={({ selectedItem }) => {
                           if (field.isInferenceMethod) {
+                            // Store current model for filtering before clearing params
+                            const currentModel = currentConfig?.components.llm?.params?.model as string | undefined;
+                            if (currentModel) {
+                              setModelForFiltering(currentModel);
+                            }
                             updateTempConfig({
                               components: {
                                 ...currentConfig?.components,
                                 llm: {
                                   providerId: selectedItem?.id || "",
-                                  params: currentConfig?.components.llm?.params
-                                    ?.model
-                                    ? {
-                                        model:
-                                          currentConfig.components.llm.params
-                                            .model,
-                                      }
-                                    : {},
+                                  params: {},
                                 },
                               },
                             });
                           } else if (field.key === "llm") {
                             const llmComponent = currentConfig?.components.llm;
                             const newModelId = selectedItem?.id || "";
+
+                            // Clear modelForFiltering when user selects a new model
+                            setModelForFiltering(null);
 
                             const supportingProviders = llmModelsWithProviders
                               .filter((option) => option.id === newModelId)
@@ -776,3 +783,4 @@ export const StepTwo: React.FC<StepProps> = ({
 };
 
 // Made with Bob
+
