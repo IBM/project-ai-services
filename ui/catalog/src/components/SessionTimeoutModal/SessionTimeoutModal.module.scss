@@ -1,0 +1,45 @@
+@use "@carbon/react/scss/spacing" as *;
+@use "@carbon/react/scss/theme" as *;
+@use "@carbon/react/scss/type" as *;
+
+.modalContent {
+  padding: $spacing-05 0;
+}
+
+.message {
+  margin-bottom: $spacing-06;
+  @include type-style("body-01");
+  color: $text-primary;
+}
+
+.countdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-03;
+  padding: $spacing-05;
+  margin-bottom: $spacing-06;
+  background-color: $layer-01;
+  border-radius: 4px;
+  border: 1px solid $border-subtle-01;
+}
+
+.countdownLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+  margin: 0;
+}
+
+.countdownTime {
+  @include type-style("heading-04");
+  color: $text-error;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+.instruction {
+  @include type-style("body-compact-01");
+  color: $text-secondary;
+  margin: 0;
+}

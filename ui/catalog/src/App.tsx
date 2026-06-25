@@ -9,40 +9,43 @@ import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
 import UseCaseReferences from "./pages/UseCaseReferences";
 import { AuthRoute } from "@/components";
+import SessionManager from "@/components/SessionManager";
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route
-          path="/"
-          element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
-        />
+      <SessionManager>
+        <Routes>
+          <Route
+            path="/"
+            element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
+          />
 
-        {/* Protected routes - require authentication */}
-        <Route element={<AuthRoute requireAuth={true} />}>
-          <Route element={<MainLayout />}>
-            <Route
-              path={ROUTES.DIGITAL_ASSISTANTS}
-              element={<DigitalAssistantsPage />}
-            />
-            <Route path={ROUTES.SERVICES} element={<Services />} />
-            <Route
-              path={ROUTES.USE_CASE_REFERENCES}
-              element={<UseCaseReferences />}
-            />
+          {/* Protected routes - require authentication */}
+          <Route element={<AuthRoute requireAuth={true} />}>
+            <Route element={<MainLayout />}>
+              <Route
+                path={ROUTES.DIGITAL_ASSISTANTS}
+                element={<DigitalAssistantsPage />}
+              />
+              <Route path={ROUTES.SERVICES} element={<Services />} />
+              <Route
+                path={ROUTES.USE_CASE_REFERENCES}
+                element={<UseCaseReferences />}
+              />
+            </Route>
           </Route>
-        </Route>
 
-        {/* Public routes - redirect if authenticated */}
-        <Route element={<AuthRoute requireAuth={false} />}>
-          <Route element={<AuthLayout />}>
-            <Route path={ROUTES.LOGIN} element={<Login />} />
+          {/* Public routes - redirect if authenticated */}
+          <Route element={<AuthRoute requireAuth={false} />}>
+            <Route element={<AuthLayout />}>
+              <Route path={ROUTES.LOGIN} element={<Login />} />
+            </Route>
           </Route>
-        </Route>
 
-        <Route path={ROUTES.LOGOUT} element={<Logout />} />
-      </Routes>
+          <Route path={ROUTES.LOGOUT} element={<Logout />} />
+        </Routes>
+      </SessionManager>
     </BrowserRouter>
   );
 }
