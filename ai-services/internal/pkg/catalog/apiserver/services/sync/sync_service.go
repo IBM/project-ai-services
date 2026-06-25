@@ -185,20 +185,28 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	allHealthy := true
 
 	// Step 1: Sync all components first (bottom of dependency tree)
-	componentErrors := s.syncAllComponents(ctx, rt, app)
+	componentErrors, componentsPending := s.syncAllComponents(ctx, rt, app)
 	if len(componentErrors) > 0 {
 		errorMessages = append(errorMessages, componentErrors...)
 		allHealthy = false
 	}
 
 	// Step 2: Sync services (middle of dependency tree)
-	serviceErrors := s.syncAllServices(ctx, rt, app)
+	serviceErrors, servicesPending := s.syncAllServices(ctx, rt, app)
 	if len(serviceErrors) > 0 {
 		errorMessages = append(errorMessages, serviceErrors...)
 		allHealthy = false
 	}
 
-	// Step 3: Update application status based on collected errors
+	// Step 3: If any service or component is still initialising, skip updating the
+	// application status this cycle — we don't have a complete picture yet.
+	if componentsPending || servicesPending {
+		logger.InfofCtx(ctx, "Skipping application %s status update: some services/components are still initialising", app.Name)
+
+		return nil
+	}
+
+	// Step 4: Update application status based on collected errors
 	if err := s.updateApplicationStatus(ctx, app, allHealthy, errorMessages); err != nil {
 		return fmt.Errorf("failed to update application status: %w", err)
 	}
@@ -210,9 +218,13 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 
 // syncAllComponents syncs all components for an application
 // Returns: error messages for application-level reporting.
-func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) []string {
+// syncAllComponents syncs all components for an application.
+// Returns error messages and a pending flag — pending is true if any component was
+// skipped because it has not yet reached a stable (Running/Error) state.
+func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) {
 	processedComponents := make(map[uuid.UUID]bool)
 	errorMessages := []string{}
+	pending := false
 
 	// Collect all unique components from all services
 	for _, service := range app.Services {
@@ -245,6 +257,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 			if component.Status != models.ComponentStatusRunning && component.Status != models.ComponentStatusError {
 				logger.InfofCtx(ctx, "Skipping component %s sync: status is %s", dep.DependencyID, component.Status)
 				processedComponents[dep.DependencyID] = true
+				pending = true
 
 				continue
 			}
@@ -262,19 +275,22 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 		}
 	}
 
-	return errorMessages
+	return errorMessages, pending
 }
 
-// syncAllServices syncs all services for an application
-// Service status is determined ONLY by the service pod health, not component health
-// Returns: error messages for application-level reporting.
-func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, app *models.Application) []string {
+// syncAllServices syncs all services for an application.
+// Service status is determined ONLY by the service pod health, not component health.
+// Returns error messages and a pending flag — pending is true if any service was
+// skipped because it has not yet reached a stable (Running/Error) state.
+func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) {
 	errorMessages := []string{}
+	pending := false
 
 	for _, service := range app.Services {
 		// Only sync services that are in a stable, observable state
 		if service.Status != models.ServiceStatusRunning && service.Status != models.ServiceStatusError {
 			logger.InfofCtx(ctx, "Skipping service %s sync: status is %s", service.ID, service.Status)
+			pending = true
 
 			continue
 		}
@@ -290,7 +306,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 		}
 	}
 
-	return errorMessages
+	return errorMessages, pending
 }
 
 // syncServicePod syncs a single service's pod status
