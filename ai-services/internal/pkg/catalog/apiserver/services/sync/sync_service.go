@@ -233,8 +233,24 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 				continue
 			}
 
-			// Sync component pod status
-			status, componentMsg, err := s.syncComponentPod(ctx, rt, dep.DependencyID)
+			// Only sync components that are in a stable, observable state
+			component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
+			if err != nil || component == nil {
+				logger.ErrorfCtx(ctx, "Failed to get component %s for sync check: %v", dep.DependencyID, err)
+				processedComponents[dep.DependencyID] = true
+
+				continue
+			}
+
+			if component.Status != models.ComponentStatusRunning && component.Status != models.ComponentStatusError {
+				logger.InfofCtx(ctx, "Skipping component %s sync: status is %s", dep.DependencyID, component.Status)
+				processedComponents[dep.DependencyID] = true
+
+				continue
+			}
+
+			// Sync component pod status, passing the already-fetched component to avoid a second DB call
+			status, componentMsg, err := s.syncComponentPod(ctx, rt, component)
 			if err != nil {
 				logger.ErrorfCtx(ctx, "Failed to sync component %s: %v", dep.DependencyID, err)
 			} else if status == models.ComponentStatusError && componentMsg != "" {
@@ -256,6 +272,13 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 	errorMessages := []string{}
 
 	for _, service := range app.Services {
+		// Only sync services that are in a stable, observable state
+		if service.Status != models.ServiceStatusRunning && service.Status != models.ServiceStatusError {
+			logger.InfofCtx(ctx, "Skipping service %s sync: status is %s", service.ID, service.Status)
+
+			continue
+		}
+
 		serviceMsg, err := s.syncServicePod(ctx, rt, service)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to sync service %s: %v", service.ID, err)
@@ -349,17 +372,11 @@ func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service 
 	return nil
 }
 
-// syncComponentPod syncs a single component's pod status
+// syncComponentPod syncs a single component's pod status.
+// The component must already be fetched by the caller to avoid a redundant DB lookup.
 // Returns: status, error message (if any), and error.
-func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, componentID uuid.UUID) (models.ComponentStatus, string, error) {
-	// Get component from DB
-	component, err := s.componentRepo.GetByID(ctx, componentID)
-	if err != nil {
-		return models.ComponentStatusError, "", fmt.Errorf("failed to get component: %w", err)
-	}
-	if component == nil {
-		return models.ComponentStatusError, "", fmt.Errorf("component not found: %s", componentID)
-	}
+func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, component *models.Component) (models.ComponentStatus, string, error) {
+	componentID := component.ID
 
 	// Fetch all pods using component ID as template label
 	pods, err := s.fetchPodsByTemplateID(rt, componentID.String())
