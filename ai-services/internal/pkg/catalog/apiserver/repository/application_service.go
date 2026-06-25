@@ -758,7 +758,7 @@ func (s *ApplicationService) filterSensitiveFields(ctx context.Context, params m
 	return metadata, nil
 }
 
-// GetApplicationResources retrieves resource usage (vCPU, memory) for an application using runtime-specific stats.
+// GetApplicationResources retrieves resource usage (CPU, memory) for an application using runtime-specific stats.
 func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uuid.UUID) (*types.ApplicationResourcesResponse, error) {
 	// Fetch application from database
 	app, err := s.appRepo.GetByID(ctx, id)
