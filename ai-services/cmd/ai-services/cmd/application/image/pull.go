@@ -17,7 +17,12 @@ var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pulls all container images for a given application template",
 	Long:  ``,
-	Args:  cobra.MaximumNArgs(0),
+	Example: `  # Pull images for a specific template
+  ai-services application image pull --template chatbot --runtime podman
+
+  # Pull images using legacy implementation
+  ai-services application image pull --template chatbot --legacy --runtime podman`,
+	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
@@ -27,7 +32,7 @@ var pullCmd = &cobra.Command{
 }
 
 func pull(template string) error {
-	if experimentalImages && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	if !legacyImage && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
 		return pullCatalogImages(templateName)
 	}
 

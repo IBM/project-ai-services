@@ -24,10 +24,13 @@ Note:
   - Models are downloaded to the default models directory unless --dir is specified
   - Use 'ai-services application model list' to see available models for a template`,
 	Example: `  # Download models for a specific template
-  ai-services application model download --template chatbot --runtime podman
+	 ai-services application model download --template chatbot --runtime podman
 
-  # Download models to a custom directory
-  ai-services application model download --template chatbot --dir /path/to/models --runtime podman`,
+	 # Download models to a custom directory
+	 ai-services application model download --template chatbot --dir /path/to/models --runtime podman
+
+	 # Download models using legacy implementation
+	 ai-services application model download --template chatbot --legacy --runtime podman`,
 	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
@@ -47,7 +50,7 @@ func init() {
 }
 
 func download(cmd *cobra.Command) error {
-	if experimentalModels && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	if !legacyModel && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
 		return downloadCatalogModels(templateName)
 	}
 

@@ -29,14 +29,14 @@ This command provides subcommands to list and download models required by applic
 		},
 	}
 
-	hiddenTemplates    bool
-	experimentalModels bool
+	hiddenTemplates bool
+	legacyModel     bool
 )
 
 func init() {
 	ModelCmd.AddCommand(listCmd)
 	ModelCmd.AddCommand(downloadCmd)
-	ModelCmd.PersistentFlags().BoolVar(&experimentalModels, "experimental", false, "Use experimental catalog-based model listing")
+	ModelCmd.PersistentFlags().BoolVar(&legacyModel, "legacy", false, "Use legacy application model implementation")
 }
 
 func models(template string) ([]string, error) {
