@@ -72,7 +72,9 @@ export const refreshAccessToken = async () => {
   });
 
   const newAccessToken = response.data.access_token;
-  useAuthStore.getState().setAccessToken(newAccessToken);
+  const newRefreshToken = response.data.refresh_token;
+
+  useAuthStore.getState().setTokens(newAccessToken, newRefreshToken);
 
   return newAccessToken;
 };
