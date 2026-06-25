@@ -556,8 +556,10 @@ const DigitalAssistantsPage = () => {
                                                     dispatch={dispatch}
                                                   />
                                                 </TableCell>
-                                                <TableCell />
-                                                <TableCell />
+                                                {state.visibleColumns
+                                                  .uptime && <TableCell />}
+                                                {state.visibleColumns
+                                                  .messages && <TableCell />}
                                                 <TableCell />
                                               </TableRow>
                                             ),

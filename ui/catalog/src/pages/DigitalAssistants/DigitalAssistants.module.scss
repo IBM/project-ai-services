@@ -9,35 +9,31 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Make first 3 columns compact (sized to content) - name, status, uptime
+    // Name column - compact
     :global(th:nth-child(2)),
-    :global(td:nth-child(2)),
+    :global(td:nth-child(2)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Status column - compact
     :global(th:nth-child(3)),
-    :global(td:nth-child(3)),
+    :global(td:nth-child(3)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Uptime column - compact
     :global(th:nth-child(4)),
     :global(td:nth-child(4)) {
       width: 1%;
       white-space: nowrap;
     }
 
-    // Messages column header - keep nowrap for header
-    :global(th:nth-child(5)) {
-      white-space: nowrap;
-    }
-
-    // Messages column cells - allow text wrapping to take available space
-    :global(td:nth-child(5)) {
-      white-space: normal;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
-      padding: spacing.$spacing-04;
-    }
-
-    // Last column (actions) - fixed width for action buttons
+    // Last column (actions) - expands to fill remaining space, content aligned right
     :global(th:last-child),
     :global(td:last-child) {
-      width: 1%;
-      white-space: nowrap;
+      width: auto;
       text-align: right;
     }
   }
