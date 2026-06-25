@@ -674,10 +674,9 @@ func (s *SyncService) extractResourceLabelsFromPodSpec(podSpec *modelpkg.PodSpec
 // validateResourceCounts validates that actual resources match expected counts from templates.
 // Returns error message if validation fails, empty string if all resources are present.
 func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, instanceID, itemType string, actualPodCount int, rt runtime.Runtime) string {
-	// Get expected counts from cache.
-	// Cache key is instanceID (not catalogID) because SecretNames/VolumeNames contain
-	// instance-specific slugs derived from instanceID, so each instance needs its own entry.
-	expectedCounts := s.getExpectedResourceCounts(instanceID)
+	// Cache key combines catalogID and instanceID:
+	cacheKey := catalogID + ":" + instanceID
+	expectedCounts := s.getExpectedResourceCounts(cacheKey)
 
 	// If not in cache, count from templates and cache it
 	if expectedCounts == nil {
@@ -688,7 +687,7 @@ func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, ins
 			return ""
 		}
 		expectedCounts = counts
-		s.setExpectedResourceCounts(instanceID, counts)
+		s.setExpectedResourceCounts(cacheKey, counts)
 	}
 
 	var errorMessages []string
