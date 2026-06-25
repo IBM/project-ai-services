@@ -3,7 +3,8 @@ import axios from 'axios';
 import { OpenAI } from 'openai';
 import { DEFAULT_CONFIG } from '../config/chatbotConfig.js';
 
-const DEFAULT_STREAM_ERROR_MESSAGE = '⚠️ Error occurred during active stream.';
+const DEFAULT_STREAM_ERROR_MESSAGE =
+  '⚠️ Error occurred during active stream. Please contact System Administrator.';
 
 // Helper function to escape HTML entities to prevent rendering issues with angle brackets
 function escapeHtml(text) {
@@ -308,7 +309,7 @@ async function customSendMessage(
       (err.error && err.error.code === 'AUTHENTICATION_FAILED')
     ) {
       errorMessage =
-        '⚠️ Authentication failed. Please provide a valid API key.';
+        '⚠️ Authentication failed. Please provide a valid API key or contact your system administrator.';
       // Trigger auth error callback to show API key dialog
       if (onAuthError) {
         setTimeout(() => onAuthError(), 1000);
@@ -318,13 +319,14 @@ async function customSendMessage(
     else if (errorStatus === 429) {
       errorMessage = '⚠️ Server busy. Try again shortly.';
     } else if (errorStatus >= 500 && errorStatus < 600) {
-      errorMessage = '⚠️ Something went wrong on the server.';
+      errorMessage =
+        '⚠️ Something went wrong on the server. Please contact System Administrator.';
     } else if (err.message) {
       // Extract error message from exception
-      errorMessage = `⚠️ ${err.message}`;
+      errorMessage = `⚠️ ${err.message} Please contact System Administrator.`;
     } else if (err.error?.message) {
       // Extract error from OpenAI error format
-      errorMessage = `⚠️ ${err.error.message}`;
+      errorMessage = `⚠️ ${err.error.message} Please contact System Administrator.`;
     }
 
     await instance.messaging.addMessageChunk({
