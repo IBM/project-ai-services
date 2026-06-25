@@ -521,7 +521,7 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, 
 			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
 
 		case <-ticker.C:
-			app, err := appClient.GetApplication(id)
+			app, err := appClient.GetApplicationWithRefresh(id)
 			if err != nil {
 				return fmt.Errorf("failed to get application status: %w", err)
 			}

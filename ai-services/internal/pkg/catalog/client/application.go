@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -150,7 +151,6 @@ func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicati
 }
 
 // GetApplication retrieves full details for a specific application by ID.
-// If the server returns 401 Unauthorized, it refreshes the access token once and retries.
 func (c *ApplicationClient) GetApplication(id string) (*types.Application, error) {
 	var result types.Application
 	resp, err := c.client.HTTPClient().R().
@@ -161,22 +161,30 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 	}
 
 	if resp.IsError() {
-		httpErr := &HTTPError{
+		return nil, &HTTPError{
 			StatusCode: resp.StatusCode(),
 			Message:    utils.ParseErrorResponse(resp),
 		}
-		if httpErr.StatusCode == http.StatusUnauthorized {
-			if refreshErr := c.client.RefreshToken(); refreshErr != nil {
-				return nil, httpErr
-			}
-
-			return c.GetApplication(id)
-		}
-
-		return nil, httpErr
 	}
 
 	return &result, nil
+}
+
+// GetApplicationWithRefresh retrieves full details for a specific application by ID.
+// If the server returns 401 Unauthorized, it refreshes the access token once and retries.
+func (c *ApplicationClient) GetApplicationWithRefresh(id string) (*types.Application, error) {
+	result, err := c.GetApplication(id)
+	if err != nil {
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
+			if refreshErr := c.client.RefreshToken(); refreshErr != nil {
+				return nil, err
+			}
+			return c.GetApplication(id)
+		}
+		return nil, err
+	}
+	return result, nil
 }
 
 // CreateApplication creates a new application deployment via catalog API.
