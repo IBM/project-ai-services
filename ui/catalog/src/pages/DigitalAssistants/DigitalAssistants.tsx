@@ -571,7 +571,7 @@ const DigitalAssistantsPage = () => {
                             {noApplications && (
                               <NoDataEmptyState
                                 title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant, click Deploy."
+                                subtitle="To deploy a new digital assistant, click Deploy."
                                 className={styles.noDataContent}
                               />
                             )}
