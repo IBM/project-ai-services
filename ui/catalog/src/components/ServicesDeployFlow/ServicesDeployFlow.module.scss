@@ -62,13 +62,23 @@
   display: flex;
   align-items: center;
   gap: $spacing-03;
+  margin-bottom: $spacing-03;
+
+  > span {
+    @include type-style("label-01");
+  }
 
   :global(.cds--toggletip-button) {
     padding: 0;
     min-height: auto;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    line-height: 1;
 
     svg {
       fill: $icon-secondary;
+      vertical-align: middle;
     }
   }
 }

@@ -3,6 +3,7 @@ import { API_BASE_URL } from "@/constants/env.constants";
 import { useAuthStore } from "@/store/auth.store";
 import { refreshAccessToken } from "@/services/auth";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
+import { parseTokenExpiry } from "@/utils/sessionTimeout";
 
 const AUTH_ROUTES = [
   AUTH_ENDPOINTS.LOGIN,
@@ -30,7 +31,16 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const tokenExpHeader = response.headers["x-token-exp"];
+    if (tokenExpHeader) {
+      const expiry = parseTokenExpiry(tokenExpHeader);
+      if (expiry) {
+        useAuthStore.getState().setTokenExpiry(expiry);
+      }
+    }
+    return response;
+  },
   async (error) => {
     if (!error.config) {
       return Promise.reject(error);

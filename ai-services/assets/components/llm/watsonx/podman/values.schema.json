@@ -19,7 +19,7 @@
     },
     "watsonxApiKey": {
       "type": "string",
-      "title": "API Key",
+      "title": "API key",
       "format": "password",
       "description": "API key for accessing watsonx",
       "pattern": "^[A-Za-z0-9_-]{44}$",
@@ -34,7 +34,7 @@
     },
     "watsonxUrl": {
       "type": "string",
-      "title": "API Endpoint",
+      "title": "API endpoint",
       "description": "API Endpoint for accessing watsonx",
       "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
     }
