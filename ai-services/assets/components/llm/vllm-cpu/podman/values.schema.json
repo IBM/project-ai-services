@@ -18,7 +18,7 @@
     },
     "apiKey": {
       "type": "string",
-      "title": "API Key",
+      "title": "API key (optional)",
       "format": "password",
       "description": "Optional API key for securing the vLLM service. If provided, **store it securely**—you will need to enter this key when accessing the Question and Answer service. Leave empty to disable authentication."
     }

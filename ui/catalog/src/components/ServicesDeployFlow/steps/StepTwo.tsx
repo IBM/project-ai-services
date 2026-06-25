@@ -508,7 +508,7 @@ export const StepTwo: React.FC<StepProps> = ({
                         titleText={field.label}
                         label={`Select ${field.label.toLowerCase()}`}
                         invalid={!selectedItem}
-                        invalidText={`${field.label} is required`}
+                        invalidText={`Provide a valid ${field.label}`}
                         items={field.options}
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
@@ -594,7 +594,7 @@ export const StepTwo: React.FC<StepProps> = ({
                         titleText={field.label}
                         label={`Select ${field.label.toLowerCase()}`}
                         invalid={!selectedItem}
-                        invalidText={`${field.label} is required`}
+                        invalidText={`Provide a valid ${field.label}`}
                         items={field.options}
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
@@ -650,12 +650,12 @@ export const StepTwo: React.FC<StepProps> = ({
             {/* Cloud credentials section - dynamically rendered based on provider schema */}
             {currentLlmProviderId && providerSchema && (
               <div className={styles.cloudCredentialsSection}>
-                {/* Only show header for watsonx IBM provider */}
-                {currentLlmProviderId.toLowerCase().includes("watsonx") && (
-                  <h4 className={styles.cloudCredentialsTitle}>
-                    Cloud credentials
-                  </h4>
-                )}
+                {/* Show header for all providers */}
+                <h4 className={styles.cloudCredentialsTitle}>
+                  {currentLlmProviderId.toLowerCase().includes("watsonx")
+                    ? "Cloud credentials"
+                    : "Inference credentials"}
+                </h4>
                 <DynamicSchemaFields
                   componentType="llm"
                   providerId={currentLlmProviderId}

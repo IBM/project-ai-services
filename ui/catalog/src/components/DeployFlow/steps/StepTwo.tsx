@@ -253,7 +253,7 @@ export const StepTwo: React.FC<StepProps> = ({
       label: "Processors",
       required: calculateRequiredResources.cpu.toString(),
       available: Math.floor(resources.cpu.available_cores).toString(),
-      unit: "Cores",
+      unit: "vCPUs",
       type: "cpu",
     });
 
@@ -568,177 +568,184 @@ export const StepTwo: React.FC<StepProps> = ({
 
   // Build service configurations dynamically from API
   const serviceConfigurations = useMemo(() => {
-    return deployOptions.services.map((service) => {
-      const serviceConfig = formData.services[service.id];
-      if (!serviceConfig) return null;
+    return deployOptions.services
+      .map((service) => {
+        const serviceConfig = formData.services[service.id];
+        if (!serviceConfig) return null;
 
-      // Build fields dynamically from service components
-      const fields: Array<{
-        key: keyof ServiceConfig;
-        label: string;
-        options: Array<{ id: string; text: string }>;
-        readonly?: boolean;
-        globalValue?: string;
-      }> = [];
+        // Build fields dynamically from service components
+        const fields: Array<{
+          key: keyof ServiceConfig;
+          label: string;
+          options: Array<{ id: string; text: string }>;
+          readonly?: boolean;
+          globalValue?: string;
+        }> = [];
 
-      // Always add service version first
-      fields.push({
-        key: "version" as keyof ServiceConfig,
-        label: "Service version",
-        options: serviceVersionOptions,
-      });
-
-      // Track components that need Inference Backend field (LLM, reranker, etc.)
-      let llmComponent: Component | null = null;
-      let rerankerComponent: Component | null = null;
-
-      // Add component fields dynamically
-      service.components.forEach((component) => {
-        // Track components that may need inference backend (first one wins)
-        if (!llmComponent && component.type === "llm") {
-          llmComponent = component as Component;
-        }
-        if (!rerankerComponent && component.type === "reranker") {
-          rerankerComponent = component as Component;
-        }
-
-        // Build provider options with model names, deduplicate by preferring default provider
-        const componentModelNames = state.modelNamesByComponent[component.type];
-        const providersByDisplayName = new Map<
-          string,
-          (typeof component.providers)[0]
-        >();
-
-        component.providers.forEach((provider) => {
-          const displayName =
-            componentModelNames?.[provider.id] || provider.name;
-
-          const existing = providersByDisplayName.get(displayName);
-          if (!existing) {
-            // First provider with this display name
-            providersByDisplayName.set(displayName, provider);
-          } else if (provider.default && !existing.default) {
-            // Replace with default provider if current one isn't default
-            providersByDisplayName.set(displayName, provider);
-          }
+        // Always add service version first
+        fields.push({
+          key: "version" as keyof ServiceConfig,
+          label: "Service version",
+          options: serviceVersionOptions,
         });
 
-        const providers: Array<{ id: string; text: string }> = [];
-        providersByDisplayName.forEach((provider, displayName) => {
-          providers.push({
-            id: provider.id,
-            text: displayName,
+        // Track components that need Inference Backend field (LLM, reranker, etc.)
+        let llmComponent: Component | null = null;
+        let rerankerComponent: Component | null = null;
+
+        // Add component fields dynamically
+        service.components.forEach((component) => {
+          // Track components that may need inference backend (first one wins)
+          if (!llmComponent && component.type === "llm") {
+            llmComponent = component as Component;
+          }
+          if (!rerankerComponent && component.type === "reranker") {
+            rerankerComponent = component as Component;
+          }
+
+          // Build provider options with model names, deduplicate by preferring default provider
+          const componentModelNames =
+            state.modelNamesByComponent[component.type];
+          const providersByDisplayName = new Map<
+            string,
+            (typeof component.providers)[0]
+          >();
+
+          component.providers.forEach((provider) => {
+            const displayName =
+              componentModelNames?.[provider.id] || provider.name;
+
+            const existing = providersByDisplayName.get(displayName);
+            if (!existing) {
+              // First provider with this display name
+              providersByDisplayName.set(displayName, provider);
+            } else if (provider.default && !existing.default) {
+              // Replace with default provider if current one isn't default
+              providersByDisplayName.set(displayName, provider);
+            }
+          });
+
+          const providers: Array<{ id: string; text: string }> = [];
+          providersByDisplayName.forEach((provider, displayName) => {
+            providers.push({
+              id: provider.id,
+              text: displayName,
+            });
+          });
+
+          // Check if this component is a global component (shared across services)
+          const isGlobalComponent = deployOptions.global_components.some(
+            (gc) => gc.type === component.type,
+          );
+
+          fields.push({
+            key: component.type as keyof ServiceConfig,
+            label: component.name,
+            options: providers,
+            readonly: isGlobalComponent,
+            globalValue: isGlobalComponent
+              ? formData.globalComponents[component.type]?.providerId
+              : undefined,
           });
         });
 
-        // Check if this component is a global component (shared across services)
-        const isGlobalComponent = deployOptions.global_components.some(
-          (gc) => gc.type === component.type,
-        );
+        // Add Inference Backend field if service has LLM component
+        if (llmComponent) {
+          // Get the currently selected LLM model
+          const selectedLlmModel = serviceConfig.components?.llm?.params?.model;
 
-        fields.push({
-          key: component.type as keyof ServiceConfig,
-          label: component.name,
-          options: providers,
-          readonly: isGlobalComponent,
-          globalValue: isGlobalComponent
-            ? formData.globalComponents[component.type]?.providerId
-            : undefined,
-        });
+          // Get LLM provider params to check which providers support the selected model
+          const llmParamsMap = providerParamsByType["llm"]?.paramsMap || {};
+
+          // Filter providers that support the same model as the selected LLM
+          const inferenceBackendOptions = (llmComponent as Component).providers
+            .filter((provider) => {
+              // If no LLM model selected yet, show all providers
+              if (!selectedLlmModel) return true;
+
+              // Get this provider's schema
+              const providerSchema = llmParamsMap[provider.id];
+              if (!providerSchema || !providerSchema.properties) return false;
+
+              const properties = providerSchema.properties as Record<
+                string,
+                { default?: unknown }
+              >;
+              const providerDefaultModel = properties.model?.default;
+
+              // Check if this provider's default model matches the selected model
+              return providerDefaultModel === selectedLlmModel;
+            })
+            .map((provider) => ({
+              id: provider.id,
+              text: provider.name, // Use provider name, not model name
+            }));
+
+          fields.push({
+            key: "inferenceBackend" as keyof ServiceConfig,
+            label: "Inference backend",
+            options: inferenceBackendOptions,
+          });
+        }
+
+        // Add Inference Backend field if service has reranker component
+        if (rerankerComponent) {
+          // Get the currently selected reranker model
+          const selectedRerankerModel =
+            serviceConfig.components?.reranker?.params?.model;
+
+          // Get reranker provider params to check which providers support the selected model
+          const rerankerParamsMap =
+            providerParamsByType["reranker"]?.paramsMap || {};
+
+          // Filter providers that support the same model as the selected reranker
+          const inferenceBackendOptions = (
+            rerankerComponent as Component
+          ).providers
+            .filter((provider) => {
+              // If no reranker model selected yet, show all providers
+              if (!selectedRerankerModel) return true;
+
+              // Get this provider's schema
+              const providerSchema = rerankerParamsMap[provider.id];
+              if (!providerSchema || !providerSchema.properties) return false;
+
+              const properties = providerSchema.properties as Record<
+                string,
+                { default?: unknown }
+              >;
+              const providerDefaultModel = properties.model?.default;
+
+              // Check if this provider's default model matches the selected model
+              return providerDefaultModel === selectedRerankerModel;
+            })
+            .map((provider) => ({
+              id: provider.id,
+              text: provider.name, // Use provider name, not model name
+            }));
+
+          fields.push({
+            key: "inferenceBackend" as keyof ServiceConfig,
+            label: "Inference backend",
+            options: inferenceBackendOptions,
+          });
+        }
+
+        return {
+          serviceId: service.id,
+          serviceName: service.name,
+          description: getServiceDescription(service.id),
+          config: serviceConfig,
+          fields,
+          llmComponent: llmComponent as Component | null,
+          rerankerComponent: rerankerComponent as Component | null,
+        };
+      })
+      .sort((a, b) => {
+        // Sort service cards alphabetically by service name
+        if (!a || !b) return 0;
+        return a.serviceName.localeCompare(b.serviceName);
       });
-
-      // Add Inference Backend field if service has LLM component
-      if (llmComponent) {
-        // Get the currently selected LLM model
-        const selectedLlmModel = serviceConfig.components?.llm?.params?.model;
-
-        // Get LLM provider params to check which providers support the selected model
-        const llmParamsMap = providerParamsByType["llm"]?.paramsMap || {};
-
-        // Filter providers that support the same model as the selected LLM
-        const inferenceBackendOptions = (llmComponent as Component).providers
-          .filter((provider) => {
-            // If no LLM model selected yet, show all providers
-            if (!selectedLlmModel) return true;
-
-            // Get this provider's schema
-            const providerSchema = llmParamsMap[provider.id];
-            if (!providerSchema || !providerSchema.properties) return false;
-
-            const properties = providerSchema.properties as Record<
-              string,
-              { default?: unknown }
-            >;
-            const providerDefaultModel = properties.model?.default;
-
-            // Check if this provider's default model matches the selected model
-            return providerDefaultModel === selectedLlmModel;
-          })
-          .map((provider) => ({
-            id: provider.id,
-            text: provider.name, // Use provider name, not model name
-          }));
-
-        fields.push({
-          key: "inferenceBackend" as keyof ServiceConfig,
-          label: "Inference backend",
-          options: inferenceBackendOptions,
-        });
-      }
-
-      // Add Inference Backend field if service has reranker component
-      if (rerankerComponent) {
-        // Get the currently selected reranker model
-        const selectedRerankerModel =
-          serviceConfig.components?.reranker?.params?.model;
-
-        // Get reranker provider params to check which providers support the selected model
-        const rerankerParamsMap =
-          providerParamsByType["reranker"]?.paramsMap || {};
-
-        // Filter providers that support the same model as the selected reranker
-        const inferenceBackendOptions = (
-          rerankerComponent as Component
-        ).providers
-          .filter((provider) => {
-            // If no reranker model selected yet, show all providers
-            if (!selectedRerankerModel) return true;
-
-            // Get this provider's schema
-            const providerSchema = rerankerParamsMap[provider.id];
-            if (!providerSchema || !providerSchema.properties) return false;
-
-            const properties = providerSchema.properties as Record<
-              string,
-              { default?: unknown }
-            >;
-            const providerDefaultModel = properties.model?.default;
-
-            // Check if this provider's default model matches the selected model
-            return providerDefaultModel === selectedRerankerModel;
-          })
-          .map((provider) => ({
-            id: provider.id,
-            text: provider.name, // Use provider name, not model name
-          }));
-
-        fields.push({
-          key: "inferenceBackend" as keyof ServiceConfig,
-          label: "Inference backend",
-          options: inferenceBackendOptions,
-        });
-      }
-
-      return {
-        serviceId: service.id,
-        serviceName: service.name,
-        description: getServiceDescription(service.id),
-        config: serviceConfig,
-        fields,
-        llmComponent: llmComponent as Component | null,
-        rerankerComponent: rerankerComponent as Component | null,
-      };
-    });
   }, [
     deployOptions.services,
     deployOptions.global_components,

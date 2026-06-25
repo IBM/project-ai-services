@@ -53,14 +53,12 @@ This command performs the following operations:
   - Initializes directory structure for applications and models
 
 Additional configuration options include base directory customization, domain name setup,
-SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
+		Example: `  # Configure catalog service for podman
+  ai-services catalog configure --runtime podman
 
-Examples:
-	 # Configure catalog service for podman
-	 ai-services catalog configure --runtime podman
-
-	 # Configure with custom HTTPS port
-	 ai-services catalog configure --runtime podman --https-port 8443`,
+  # Configure with custom HTTPS port
+  ai-services catalog configure --runtime podman --https-port 8443`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true

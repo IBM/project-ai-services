@@ -1,6 +1,6 @@
 # Service identification
 id: similarity
-name: "Find Similar Items"
+name: "Find similar items"
 description: "Identifies and retrieves items similar to a reference item based on content, attributes, or patterns; enables efficient recommendation, duplicate detection, and content discovery at scale."
 type: service
 

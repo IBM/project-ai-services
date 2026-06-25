@@ -590,7 +590,7 @@ const DigitalAssistantsPage = () => {
                             )}
                           </TableContainer>
 
-                          {state.totalItems > state.pageSize && (
+                          {state.totalItems > 20 && (
                             <Pagination
                               page={state.page}
                               pageSize={state.pageSize}
