@@ -52,12 +52,13 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	}
 
 	// Fix checks in dependency order.
-	// Note: User group, ulimit, and systemd slice limit configurations moved to generic bootstrap flow
+	// Note: User group is created in the bootstrap flow before Spyre runs, so it is always
+	// present by the time Repair is called. Pass StatusSkipped to satisfy the dependency guard.
 	results = append(results, fixVFIODriverConfig(checkMap))
 	results = append(results, fixUdevRule(checkMap))
 	results = append(results, fixVFIOPCIConf(checkMap))
 	results = append(results, fixVFIOModule(checkMap))
-	results = append(results, fixVFIOPermissions(checkMap, RepairResult{}))
+	results = append(results, fixVFIOPermissions(checkMap, RepairResult{Status: StatusSkipped}))
 	results = append(results, fixSELinuxVFIOPolicy())
 	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 
