@@ -1,9 +1,7 @@
 package utils
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -22,21 +20,7 @@ func GetAllApps(appClient *catalogClient.ApplicationClient) ([]types.Application
 func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*types.Application, error) {
 	listResponse, err := appClient.ListApplications(nil)
 	if err != nil {
-		// Check if error is HTTP 401 (invalid token) and retry with token refresh
-		if !isUnauthorizedError(err) {
-			return nil, err
-		}
-
-		// Refresh token and retry once
-		if refreshErr := appClient.Client().RefreshToken(); refreshErr != nil {
-			return nil, fmt.Errorf("failed to refresh token: %w", refreshErr)
-		}
-
-		// Retry the request with refreshed token
-		listResponse, err = appClient.ListApplications(nil)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	for _, app := range listResponse.Data {
@@ -48,11 +32,13 @@ func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*
 	return nil, fmt.Errorf("application with name '%s' not found", appName)
 }
 
-// isUnauthorizedError checks if the error is an HTTP 401 Unauthorized error.
-func isUnauthorizedError(err error) bool {
-	var httpErr *catalogClient.HTTPError
+func GetAppByID(appClient *catalogClient.ApplicationClient, id string) (*types.Application, error) {
+	resp, err := appClient.GetApplication(id)
+	if err != nil {
+		return nil, err
+	}
 
-	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized
+	return resp, fmt.Errorf("application with name '%s' not found", id)
 }
 
 // GetAppDetailsWithComponents retrieves full application details including services and components.

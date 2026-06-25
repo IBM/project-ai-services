@@ -465,7 +465,7 @@ func createApp(appName string) error {
 	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
 	// 5. Poll for application status
-	return pollApplicationStatus(appClient, appName)
+	return pollApplicationStatus(appClient, appName, resp.ID)
 }
 
 // checkApplicationExists checks if an application with the given name already exists.
@@ -507,7 +507,7 @@ func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, e
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
-func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName string) error {
+func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, id string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
 
 	ticker := time.NewTicker(pollInterval)
@@ -521,7 +521,7 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName s
 			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
 
 		case <-ticker.C:
-			app, err := cliutils.GetAppByName(appClient, appName)
+			app, err := cliutils.GetAppByID(appClient, id)
 			if err != nil {
 				return fmt.Errorf("failed to get application status: %w", err)
 			}

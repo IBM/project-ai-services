@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -149,6 +150,7 @@ func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicati
 }
 
 // GetApplication retrieves full details for a specific application by ID.
+// If the server returns 401 Unauthorized, it refreshes the access token once and retries.
 func (c *ApplicationClient) GetApplication(id string) (*types.Application, error) {
 	var result types.Application
 	resp, err := c.client.HTTPClient().R().
@@ -159,10 +161,19 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 	}
 
 	if resp.IsError() {
-		return nil, &HTTPError{
+		httpErr := &HTTPError{
 			StatusCode: resp.StatusCode(),
 			Message:    utils.ParseErrorResponse(resp),
 		}
+		if httpErr.StatusCode == http.StatusUnauthorized {
+			if refreshErr := c.client.RefreshToken(); refreshErr != nil {
+				return nil, httpErr
+			}
+
+			return c.GetApplication(id)
+		}
+
+		return nil, httpErr
 	}
 
 	return &result, nil
@@ -240,12 +251,6 @@ func (c *ApplicationClient) GetComponentProviderParams(componentType, providerID
 	}
 
 	return result, nil
-}
-
-// Client returns the underlying authenticated HTTP client.
-// This allows access to client-level operations like token refresh.
-func (c *ApplicationClient) Client() *Client {
-	return c.client
 }
 
 // Made with Bob
