@@ -52,12 +52,11 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	}
 
 	// Fix checks in dependency order.
-	// Note: User group, ulimit, and systemd slice limit configurations moved to generic bootstrap flow
 	results = append(results, fixVFIODriverConfig(checkMap))
 	results = append(results, fixUdevRule(checkMap))
 	results = append(results, fixVFIOPCIConf(checkMap))
 	results = append(results, fixVFIOModule(checkMap))
-	results = append(results, fixVFIOPermissions(checkMap, RepairResult{}))
+	results = append(results, fixVFIOPermissions(checkMap))
 	results = append(results, fixSELinuxVFIOPolicy())
 	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 
@@ -266,17 +265,17 @@ func fixVFIOModule(checkMap map[string]check.CheckResult) RepairResult {
 }
 
 // fixVFIOPermissions repairs VFIO device permissions.
-func fixVFIOPermissions(checkMap map[string]check.CheckResult, userGroupResult RepairResult) RepairResult {
+func fixVFIOPermissions(checkMap map[string]check.CheckResult) RepairResult {
 	checkName := "VFIO device permission"
 	_, ok := getCheckFromMap(checkMap, checkName)
 	if !ok {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped}
 	}
 
-	// Check if user group was successfully fixed.
-	if userGroupResult.Status != StatusFixed && userGroupResult.Status != StatusSkipped {
+	// The sentient group must exist before we can fix device ownership.
+	if !utils.GroupExists(sentientGroup) {
 		return RepairResult{CheckName: checkName, Status: StatusNotFixable,
-			Message: "User group must be fixed first"}
+			Message: "sentient group does not exist"}
 	}
 
 	// Reload udev rules.
