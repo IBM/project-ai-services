@@ -10,3 +10,4 @@ backend:
     searchMode: "hybrid"
     numChunksPostReranker: 3
     rerank: true
+    systemPrompt: ""

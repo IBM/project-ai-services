@@ -104,7 +104,11 @@ spec:
         - name: CHATBOT_SIMILARITY_SERVICE_URL
           value: "http://similarity-api-{{ .InstanceSlug }}:7000"
         - name: CHATBOT_SYSTEM_PROMPT
+          {{- if .Values.backend.systemPrompt }}
           value: "{{ .Values.backend.systemPrompt }}"
+          {{- else }}
+          value: ""
+          {{ end }}
       ports:
         - containerPort: 5000
           protocol: TCP
