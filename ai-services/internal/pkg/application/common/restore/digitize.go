@@ -157,12 +157,13 @@ func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
 	// Check runtime type
 	runtimeType := vars.RuntimeFactory.GetRuntimeType()
 
-	if runtimeType == runtimeTypes.RuntimeTypeOpenShift {
+	switch runtimeType {
+	case runtimeTypes.RuntimeTypeOpenShift:
 		// For OpenShift, always skip TLS verification
 		client.SetTLSClientConfig(&tls.Config{
 			InsecureSkipVerify: true,
 		})
-	} else if runtimeType == runtimeTypes.RuntimeTypePodman {
+	case runtimeTypes.RuntimeTypePodman:
 		// For Podman, check the insecure flag from catalog credentials
 		creds, err := config.Load()
 		if err == nil && creds.Insecure {
