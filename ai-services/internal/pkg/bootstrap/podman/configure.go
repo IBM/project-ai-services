@@ -32,13 +32,13 @@ func (p *PodmanBootstrap) Configure() error {
 		return err
 	}
 
-	// 2. Spyre cards – validate and repair spyre configurations
-	if err := ensureSpyreConfigured(ctx); err != nil {
+	// 2. Configure user groups (sentient group)
+	if err := ensureUsergroupConfigured(ctx); err != nil {
 		return err
 	}
 
-	// 3. Configure user groups (sentient group)
-	if err := ensureUsergroupConfigured(ctx); err != nil {
+	// 3. Spyre cards – validate and repair spyre configurations
+	if err := ensureSpyreConfigured(ctx); err != nil {
 		return err
 	}
 

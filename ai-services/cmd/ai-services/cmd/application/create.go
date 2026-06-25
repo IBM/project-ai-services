@@ -451,15 +451,21 @@ func createApp(appName string) error {
 
 	// 4. Create application via catalog API
 	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
-	resp, err := appClient.CreateApplication(payload)
+	var resp *apiModels.CreateApplicationResponse
+	err = utils.Retry(context.Background(), vars.RetryCount, vars.RetryInterval, nil, func() error {
+		var createErr error
+		resp, createErr = appClient.CreateApplication(payload)
+
+		return createErr
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create application: %w", err)
+		return fmt.Errorf("failed to create application after %d retries: %w", vars.RetryCount, err)
 	}
 
 	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
 	// 5. Poll for application status
-	return pollApplicationStatus(appClient, appName)
+	return pollApplicationStatus(appClient, appName, resp.ID)
 }
 
 // checkApplicationExists checks if an application with the given name already exists.
@@ -501,7 +507,7 @@ func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, e
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
-func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName string) error {
+func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, id string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
 
 	ticker := time.NewTicker(pollInterval)
@@ -515,7 +521,7 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName s
 			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
 
 		case <-ticker.C:
-			app, err := cliutils.GetAppByName(appClient, appName)
+			app, err := appClient.GetApplicationWithRefresh(id)
 			if err != nil {
 				return fmt.Errorf("failed to get application status: %w", err)
 			}
@@ -533,7 +539,6 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName s
 
 // handleApplicationStatus handles the application status and returns (done, error).
 func handleApplicationStatus(app *catalogTypes.Application, appName string) (bool, error) {
-	// Status values from ai-services/internal/pkg/catalog/db/models/application.go.
 	switch app.Status {
 	case "Running":
 		logger.Infof("Application '%s' is ready!\n", appName)

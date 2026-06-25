@@ -1,6 +1,6 @@
 # Service identification
 id: digitize
-name: "Digitize Documents"
+name: "Digitize documents"
 description: "Converts physical and scanned documents into searchable, editable digital formats; enables efficient document management, data extraction, and workflow automation at scale."
 type: service
 

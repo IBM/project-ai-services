@@ -22,6 +22,32 @@
     background-color: theme.$layer-hover;
   }
 
+  &:focus,
+  &:focus-visible,
+  &:active {
+    outline: none;
+    border: none;
+    box-shadow: none;
+    background-color: theme.$layer;
+  }
+
+  &:focus:hover,
+  &:focus-visible:hover,
+  &:active:hover {
+    background-color: theme.$layer-hover;
+  }
+
+  :global(.c4p--card__clickable) {
+    &:focus,
+    &:focus-visible,
+    &:active {
+      outline: none;
+      border: none;
+      box-shadow: none;
+      background-color: transparent;
+    }
+  }
+
   :global(.c4p--card__header) {
     padding: 0;
   }

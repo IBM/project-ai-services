@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -175,8 +176,13 @@ func deleteApplication(appName string) error {
 		KeepData: skipCleanup,
 	}
 
-	if err := appClient.DeleteApplication(app.ID, &deleteParams); err != nil {
-		return fmt.Errorf("failed to delete application: %w", err)
+	// Retry deletion if it fails
+	logger.Infof("Deleting application %s...\n", appName)
+	err = utils.Retry(context.Background(), vars.RetryCount, vars.RetryInterval, nil, func() error {
+		return appClient.DeleteApplication(app.ID, &deleteParams)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete application after %d retries: %w", vars.RetryCount, err)
 	}
 
 	// Poll to verify deletion is complete

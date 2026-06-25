@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	templateName       string
-	experimentalImages bool
+	templateName string
+	legacyImage  bool
 )
 
 var ImageCmd = &cobra.Command{
@@ -44,5 +44,5 @@ func init() {
 	ImageCmd.AddCommand(pullCmd)
 	ImageCmd.PersistentFlags().StringVarP(&templateName, "template", "t", "", "Application template name (Required)")
 	_ = ImageCmd.MarkPersistentFlagRequired("template")
-	ImageCmd.PersistentFlags().BoolVar(&experimentalImages, "experimental", false, "Use experimental catalog-based image listing")
+	ImageCmd.PersistentFlags().BoolVar(&legacyImage, "legacy", false, "Use legacy application image implementation")
 }

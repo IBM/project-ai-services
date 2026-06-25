@@ -16,6 +16,7 @@ import {
   type ParsedField,
   type JSONSchema,
 } from "@/utils/schemaParser";
+import { parseMarkdownLinks } from "@/utils/string";
 import styles from "../DeployFlow.module.scss";
 
 interface DynamicSchemaFieldsProps {
@@ -145,24 +146,25 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
       ? validateField(value, field)
       : null;
     const isInvalid = !!validationError;
-    const invalidText = validationError || `${field.label} is required`;
+    const invalidText = validationError || `Provide a valid ${field.label}`;
 
     // Label with optional info tooltip
-    const labelWithInfo = field.description ? (
-      <div className={styles.labelWithInfo}>
-        <span>{field.label}</span>
-        <Toggletip align="top">
-          <ToggletipButton label="Additional information">
-            <Information />
-          </ToggletipButton>
-          <ToggletipContent>
-            <p>{field.description}</p>
-          </ToggletipContent>
-        </Toggletip>
-      </div>
-    ) : (
-      field.label
-    );
+    const labelWithInfo =
+      field.description && field.key === "watsonxProjectId" ? (
+        <div className={styles.labelWithInfo}>
+          <span>{field.label}</span>
+          <Toggletip align="top">
+            <ToggletipButton label="Additional information">
+              <Information />
+            </ToggletipButton>
+            <ToggletipContent>
+              <p>{parseMarkdownLinks(field.description)}</p>
+            </ToggletipContent>
+          </Toggletip>
+        </div>
+      ) : (
+        field.label
+      );
 
     // Handle UI-only checkboxes (that control other fields)
     if (field.uiOnly && field.type === "boolean") {
@@ -188,6 +190,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             type="password"
             value={String(value || "")}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
@@ -240,6 +243,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             id={fieldId}
             label={labelWithInfo}
             value={Number(value || field.defaultValue || 0)}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={invalidText}
             min={field.validation?.min}
@@ -295,6 +299,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             id={fieldId}
             labelText={labelWithInfo}
             value={String(value || "")}
+            required={field.validation?.required}
             invalid={isInvalid}
             invalidText={invalidText}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
@@ -304,14 +309,8 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   };
 
   return (
-    <>
-      {/* Only show header for watsonx IBM provider */}
-      {providerId.toLowerCase().includes("watsonx") && (
-        <h4 className={styles.cloudCredentialsTitle}>Cloud credentials</h4>
-      )}
-      <div className={styles.dynamicSchemaFields}>
-        {fields.map((field) => renderField(field))}
-      </div>
-    </>
+    <div className={styles.dynamicSchemaFields}>
+      {fields.map((field) => renderField(field))}
+    </div>
   );
 };

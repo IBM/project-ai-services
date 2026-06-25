@@ -51,7 +51,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           onChange={({ selectedItem }) => onChange(selectedItem?.id || "")}
           disabled={disabled}
           invalid={invalid}
-          invalidText={invalidText || `${label} is required`}
+          invalidText={invalidText || `Provide a valid ${label}`}
         />
       );
     }
@@ -79,7 +79,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           }}
           disabled={disabled}
           invalid={invalid}
-          invalidText={invalidText || `${label} is required`}
+          invalidText={invalidText || `Provide a valid ${label}`}
           min={field.validation?.min}
           max={field.validation?.max}
         />
@@ -95,7 +95,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           invalid={invalid}
-          invalidText={invalidText || `${label} is required`}
+          invalidText={invalidText || `Provide a valid ${label}`}
           rows={4}
           maxCount={field.validation?.maxLength}
           enableCounter={!!field.validation?.maxLength}
@@ -113,7 +113,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           invalid={invalid}
-          invalidText={invalidText || `${label} is required`}
+          invalidText={invalidText || `Provide a valid ${label}`}
           maxLength={field.validation?.maxLength}
         />
       );
@@ -129,7 +129,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           invalid={invalid}
-          invalidText={invalidText || `${label} is required`}
+          invalidText={invalidText || `Provide a valid ${label}`}
           maxLength={field.validation?.maxLength}
         />
       );
