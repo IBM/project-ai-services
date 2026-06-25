@@ -870,7 +870,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including vCPU, memory, and accelerator availability",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
                 "produces": [
                     "application/json"
                 ],
@@ -1249,6 +1249,19 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo": {
+            "type": "object",
+            "properties": {
+                "total_cpu": {
+                    "description": "Total allocated CPUs",
+                    "type": "number"
+                },
+                "used_cpu": {
+                    "description": "Actually used CPUs",
+                    "type": "number"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse": {
             "type": "object",
             "properties": {
@@ -1311,11 +1324,11 @@ const docTemplate = `{
                         }
                     }
                 },
+                "cpu": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo"
+                },
                 "memory": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo"
-                },
-                "vcpu": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationVCPUInfo"
                 }
             }
         },
@@ -1358,19 +1371,6 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationVCPUInfo": {
-            "type": "object",
-            "properties": {
-                "total": {
-                    "description": "Total allocated vCPUs",
-                    "type": "number"
-                },
-                "used": {
-                    "description": "Actually used vCPUs",
-                    "type": "number"
                 }
             }
         },
@@ -1651,16 +1651,16 @@ const docTemplate = `{
                         "type": "integer"
                     }
                 },
+                "cpu": {
+                    "description": "CPU cores",
+                    "type": "integer"
+                },
                 "memory": {
                     "description": "Memory in bytes",
                     "type": "integer"
                 },
                 "storage": {
                     "description": "Storage in bytes",
-                    "type": "integer"
-                },
-                "vcpu": {
-                    "description": "vCPUs",
                     "type": "integer"
                 }
             }
@@ -1801,6 +1801,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
+            "type": "object",
+            "properties": {
+                "available_cpu": {
+                    "type": "number"
+                },
+                "total_cpu": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo": {
             "type": "object",
             "properties": {
@@ -1808,17 +1819,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_bytes": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_models.VCPUInfo": {
-            "type": "object",
-            "properties": {
-                "available": {
-                    "type": "number"
-                },
-                "total": {
                     "type": "integer"
                 }
             }
@@ -1840,11 +1840,11 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo"
                     }
                 },
+                "cpu": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo"
+                },
                 "memory": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo"
-                },
-                "vcpu": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.VCPUInfo"
                 }
             }
         },

@@ -98,6 +98,15 @@ definitions:
       version:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo:
+    properties:
+      total_cpu:
+        description: Total allocated CPUs
+        type: number
+      used_cpu:
+        description: Actually used CPUs
+        type: number
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse:
     properties:
       data:
@@ -139,10 +148,10 @@ definitions:
             type: string
           type: array
         type: object
+      cpu:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo'
       memory:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo'
-      vcpu:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationVCPUInfo'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService:
     properties:
@@ -171,15 +180,6 @@ definitions:
         type: string
       version:
         type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationVCPUInfo:
-    properties:
-      total:
-        description: Total allocated vCPUs
-        type: number
-      used:
-        description: Actually used vCPUs
-        type: number
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
@@ -362,14 +362,14 @@ definitions:
           type: integer
         description: 'Accelerator cards (e.g., "ibm.com/spyre_pf": 1)'
         type: object
+      cpu:
+        description: CPU cores
+        type: integer
       memory:
         description: Memory in bytes
         type: integer
       storage:
         description: Storage in bytes
-        type: integer
-      vcpu:
-        description: vCPUs
         type: integer
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
@@ -467,18 +467,18 @@ definitions:
       total:
         type: integer
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo:
+    properties:
+      available_cpu:
+        type: number
+      total_cpu:
+        type: integer
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo:
     properties:
       available_bytes:
         type: integer
       total_bytes:
-        type: integer
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_models.VCPUInfo:
-    properties:
-      available:
-        type: number
-      total:
         type: integer
     type: object
   internal_pkg_catalog_apiserver_handlers.ErrorResponse:
@@ -492,10 +492,10 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo'
         type: object
+      cpu:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo'
       memory:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo'
-      vcpu:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.VCPUInfo'
     type: object
   internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
     properties:
@@ -1095,7 +1095,7 @@ paths:
       - Catalog
   /resources:
     get:
-      description: Retrieves system resource information including vCPU, memory, and
+      description: Retrieves system resource information including CPU, memory, and
         accelerator availability
       produces:
       - application/json
