@@ -22,7 +22,6 @@ func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*
 	if err != nil {
 		return nil, err
 	}
-
 	for _, app := range listResponse.Data {
 		if app.Name == appName {
 			return &app, nil
