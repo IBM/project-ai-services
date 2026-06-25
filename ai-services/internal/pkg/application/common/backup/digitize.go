@@ -3,6 +3,7 @@ package common
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -67,8 +69,18 @@ type DigitizeBackupClient struct {
 }
 
 // NewDigitizeBackupClient creates a new digitize backup client.
+// It respects the insecure flag from catalog credentials if available.
 func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 	client := resty.New().SetBaseURL(serviceURL)
+
+	// Load catalog credentials to check if insecure mode is enabled
+	creds, err := config.Load()
+	if err == nil && creds.Insecure {
+		logger.Infoln("Using insecure TLS mode for digitize export API (certificate verification disabled)")
+		client.SetTLSClientConfig(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+	}
 
 	return &DigitizeBackupClient{
 		client: client,

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -147,8 +149,18 @@ type DigitizeRestoreClient struct {
 }
 
 // NewDigitizeRestoreClient creates a new digitize restore client.
+// It respects the insecure flag from catalog credentials if available.
 func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
 	client := resty.New().SetBaseURL(serviceURL)
+
+	// Load catalog credentials to check if insecure mode is enabled
+	creds, err := config.Load()
+	if err == nil && creds.Insecure {
+		logger.Infoln("Using insecure TLS mode for digitize import API (certificate verification disabled)")
+		client.SetTLSClientConfig(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+	}
 
 	return &DigitizeRestoreClient{
 		client: client,
