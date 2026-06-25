@@ -180,10 +180,13 @@ func (c *ApplicationClient) GetApplicationWithRefresh(id string) (*types.Applica
 			if refreshErr := c.client.RefreshToken(); refreshErr != nil {
 				return nil, err
 			}
+
 			return c.GetApplication(id)
 		}
+
 		return nil, err
 	}
+
 	return result, nil
 }
 
