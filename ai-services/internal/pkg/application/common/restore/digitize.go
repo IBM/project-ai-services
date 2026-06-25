@@ -12,7 +12,9 @@ import (
 	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ConstructMetadataFromCache reads cache files and constructs the Import API payload.
@@ -149,17 +151,25 @@ type DigitizeRestoreClient struct {
 }
 
 // NewDigitizeRestoreClient creates a new digitize restore client.
-// It respects the insecure flag from catalog credentials if available.
 func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
 	client := resty.New().SetBaseURL(serviceURL)
 
-	// Load catalog credentials to check if insecure mode is enabled
-	creds, err := config.Load()
-	if err == nil && creds.Insecure {
-		logger.Infoln("Using insecure TLS mode for digitize import API (certificate verification disabled)")
+	// Check runtime type
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+
+	if runtimeType == runtimeTypes.RuntimeTypeOpenShift {
+		// For OpenShift, always skip TLS verification
 		client.SetTLSClientConfig(&tls.Config{
 			InsecureSkipVerify: true,
 		})
+	} else if runtimeType == runtimeTypes.RuntimeTypePodman {
+		// For Podman, check the insecure flag from catalog credentials
+		creds, err := config.Load()
+		if err == nil && creds.Insecure {
+			client.SetTLSClientConfig(&tls.Config{
+				InsecureSkipVerify: true,
+			})
+		}
 	}
 
 	return &DigitizeRestoreClient{

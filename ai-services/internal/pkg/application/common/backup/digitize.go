@@ -15,6 +15,8 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 const (
@@ -69,17 +71,25 @@ type DigitizeBackupClient struct {
 }
 
 // NewDigitizeBackupClient creates a new digitize backup client.
-// It respects the insecure flag from catalog credentials if available.
 func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 	client := resty.New().SetBaseURL(serviceURL)
 
-	// Load catalog credentials to check if insecure mode is enabled
-	creds, err := config.Load()
-	if err == nil && creds.Insecure {
-		logger.Infoln("Using insecure TLS mode for digitize export API (certificate verification disabled)")
+	// Check runtime type
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+
+	if runtimeType == runtimeTypes.RuntimeTypeOpenShift {
+		// For OpenShift, always skip TLS verification
 		client.SetTLSClientConfig(&tls.Config{
 			InsecureSkipVerify: true,
 		})
+	} else if runtimeType == runtimeTypes.RuntimeTypePodman {
+		// For Podman, check the insecure flag from catalog credentials
+		creds, err := config.Load()
+		if err == nil && creds.Insecure {
+			client.SetTLSClientConfig(&tls.Config{
+				InsecureSkipVerify: true,
+			})
+		}
 	}
 
 	return &DigitizeBackupClient{
