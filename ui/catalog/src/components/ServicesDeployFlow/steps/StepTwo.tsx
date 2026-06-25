@@ -35,7 +35,9 @@ export const StepTwo: React.FC<StepProps> = ({
   const [showValidationError, setShowValidationError] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Track the model for filtering inference backends, even when params.model is cleared
-  const [modelForFiltering, setModelForFiltering] = useState<string | null>(null);
+  const [modelForFiltering, setModelForFiltering] = useState<string | null>(
+    null,
+  );
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -117,8 +119,8 @@ export const StepTwo: React.FC<StepProps> = ({
   // Inference method options - filtered based on selected LLM model or modelForFiltering
   const inferenceMethodOptions = useMemo(() => {
     // Use modelForFiltering if available (for filtering after backend change), otherwise use selectedLlmModel
-    const modelToFilter =  modelForFiltering || selectedLlmModel;
-    
+    const modelToFilter = modelForFiltering || selectedLlmModel;
+
     // If no LLM model is selected, show all providers
     if (!modelToFilter) {
       return getComponentProviders("llm");
@@ -134,7 +136,12 @@ export const StepTwo: React.FC<StepProps> = ({
     return allProviders.filter((provider) =>
       supportingProviders.includes(provider.id),
     );
-  }, [modelForFiltering, selectedLlmModel, llmModelsWithProviders, getComponentProviders]);
+  }, [
+    modelForFiltering,
+    selectedLlmModel,
+    llmModelsWithProviders,
+    getComponentProviders,
+  ]);
 
   // Set default LLM model if not already set and options are available
 
@@ -607,7 +614,8 @@ export const StepTwo: React.FC<StepProps> = ({
                         onChange={({ selectedItem }) => {
                           if (field.isInferenceMethod) {
                             // Store current model for filtering before clearing params
-                            const currentModel = currentConfig?.components.llm?.params?.model as string | undefined;
+                            const currentModel = currentConfig?.components.llm
+                              ?.params?.model as string | undefined;
                             if (currentModel) {
                               setModelForFiltering(currentModel);
                             }
@@ -783,4 +791,3 @@ export const StepTwo: React.FC<StepProps> = ({
 };
 
 // Made with Bob
-
