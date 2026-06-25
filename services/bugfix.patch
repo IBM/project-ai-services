@@ -1,0 +1,44 @@
+diff --git a/services/summarize/app.py b/services/summarize/app.py
+index 9db9fc28..43f71975 100644
+--- a/services/summarize/app.py
++++ b/services/summarize/app.py
+@@ -23,7 +23,8 @@ from summarize.models import (
+     PaginationInfo,
+     DocumentInfo,
+     JobState,
+-    JobStatus
++    JobStatus,
++    JobMetadata
+ )
+ 
+ set_log_level(settings.common.app.log_level)
+@@ -1070,6 +1071,21 @@ async def list_jobs(
+             # Convert status string to JobStatus enum if needed
+             job_status = job.status if isinstance(job.status, JobStatus) else JobStatus(job.status)
+             
++            # Create JobMetadata from job metadata if available
++            if hasattr(job, 'job_metadata') and job.job_metadata:
++                if isinstance(job.job_metadata, dict):
++                    try:
++                        metadata = JobMetadata(**job.job_metadata)
++                    except (TypeError, ValueError) as e:
++                        logger.warning(f"Failed to create JobMetadata from dict for job {job.job_id}: {e}")
++                        metadata = JobMetadata()
++                elif isinstance(job.job_metadata, JobMetadata):
++                    metadata = job.job_metadata
++                else:
++                    metadata = JobMetadata()
++            else:
++                metadata = JobMetadata()
++            
+             # Create JobState object
+             job_state = JobState(
+                 job_id=job.job_id,
+@@ -1082,6 +1098,7 @@ async def list_jobs(
+                 document_word_count=job.document_word_count if hasattr(job, 'document_word_count') else 0,
+                 level=job.level if hasattr(job, 'level') else None,
+                 job_type=job.job_type if hasattr(job, 'job_type') else None,
++                metadata=metadata,
+                 error=job.error if hasattr(job, 'error') else None
+             )
+             job_list.append(job_state)

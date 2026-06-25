@@ -166,7 +166,8 @@ class DatabaseManager:
             status: Optional[JobStatus] = None,
             completed_at: Optional[datetime] = None,
             error: Optional[str] = None,
-            metadata : Optional[Dict[str, Any]] = None
+            metadata : Optional[Dict[str, Any]] = None,
+            job_type: Optional[SummarizationType] = None
     ) -> bool:
         """
         Update job fields in the database.
@@ -177,6 +178,7 @@ class DatabaseManager:
             completed_at: Completion timestamp
             error: Error message
             metadata: Updated metadata
+            job_type: Job type (direct or chunked)
 
         Returns:
             True if update successful, False otherwise
@@ -192,6 +194,8 @@ class DatabaseManager:
                     updates["error"] = error
                 if metadata is not None:
                     updates["job_metadata"] = metadata
+                if job_type is not None:
+                    updates["job_type"] = job_type.value
 
                 if not updates:
                     logger.debug(f"No updates provided for job {job_id}")
