@@ -191,6 +191,49 @@ func TestSanitizeMapAny_NestedMapAny_TwoLevelsDeep(t *testing.T) {
 	assertValue(t, opensearch, "host", "opensearch-host")
 }
 
+// ── sanitizeMapAny: multiple sibling nested maps (real-world component params) ─
+
+func TestSanitizeMapAny_MultipleNestedComponents(t *testing.T) {
+	s := NewSecretSanitizer()
+
+	// Mirrors the shape of a deployment request Values map:
+	// { llm: { apiKey: "...", model: "..." }, opensearch: { password: "...", host: "..." } }
+	in := map[string]any{
+		"llm": map[string]any{
+			"apiKey": "sk-llm-secret",
+			"model":  "ibm-granite/granite-3.3-8b-instruct",
+		},
+		"opensearch": map[string]any{
+			"password": "os-admin-pw",
+			"host":     "opensearch-d41fed174e",
+			"port":     "9200",
+		},
+		"name": "Test RAG",
+	}
+
+	out := s.sanitizeMapAny(in)
+
+	// Top-level safe key unchanged
+	assertValue(t, out, "name", "Test RAG")
+
+	// llm block: apiKey redacted, model preserved
+	llm, ok := out["llm"].(map[string]any)
+	if !ok {
+		t.Fatal("'llm' not preserved as map[string]any")
+	}
+	assertRedacted(t, llm, "apiKey")
+	assertValue(t, llm, "model", "ibm-granite/granite-3.3-8b-instruct")
+
+	// opensearch block: password redacted, host/port preserved
+	opensearch, ok := out["opensearch"].(map[string]any)
+	if !ok {
+		t.Fatal("'opensearch' not preserved as map[string]any")
+	}
+	assertRedacted(t, opensearch, "password")
+	assertValue(t, opensearch, "host", "opensearch-d41fed174e")
+	assertValue(t, opensearch, "port", "9200")
+}
+
 // ── sanitizeMapAny: nested map[string]string ──────────────────────────────────
 
 func TestSanitizeMapAny_NestedMapString(t *testing.T) {
@@ -365,6 +408,53 @@ func TestSanitizeArgs_NestedMapInsideArg(t *testing.T) {
 	}
 	assertRedacted(t, nested, "password")
 	assertValue(t, nested, "host", "opensearch-host")
+}
+
+func TestSanitizeArgs_MultipleNestedComponents(t *testing.T) {
+	s := NewSecretSanitizer()
+
+	// Same shape as above but exercised through SanitizeArgs — the path the
+	// logger takes when a Values map is passed as a %v format argument.
+	args := []any{
+		"deploying application",
+		map[string]any{
+			"llm": map[string]any{
+				"apiKey": "sk-llm-secret",
+				"model":  "ibm-granite/granite-3.3-8b-instruct",
+			},
+			"opensearch": map[string]any{
+				"password": "os-admin-pw",
+				"host":     "opensearch-d41fed174e",
+				"port":     "9200",
+			},
+		},
+	}
+
+	out := s.SanitizeArgs(args)
+
+	if out[0] != "deploying application" {
+		t.Errorf("string arg was changed: got %v", out[0])
+	}
+
+	top, ok := out[1].(map[string]any)
+	if !ok {
+		t.Fatal("second arg not map[string]any after SanitizeArgs")
+	}
+
+	llm, ok := top["llm"].(map[string]any)
+	if !ok {
+		t.Fatal("'llm' not preserved as map[string]any")
+	}
+	assertRedacted(t, llm, "apiKey")
+	assertValue(t, llm, "model", "ibm-granite/granite-3.3-8b-instruct")
+
+	opensearch, ok := top["opensearch"].(map[string]any)
+	if !ok {
+		t.Fatal("'opensearch' not preserved as map[string]any")
+	}
+	assertRedacted(t, opensearch, "password")
+	assertValue(t, opensearch, "host", "opensearch-d41fed174e")
+	assertValue(t, opensearch, "port", "9200")
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
