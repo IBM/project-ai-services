@@ -82,8 +82,8 @@ const DeploymentDetails = ({
         const transformedResources = [
           {
             name: "Processors",
-            used: response.data.cpu.used_cores,
-            allocated: response.data.cpu.total_cores,
+            used: response.data.cpu.used_cpu,
+            allocated: response.data.cpu.total_cpu,
             unit: "vCPUs",
           },
           {
