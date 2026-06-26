@@ -23,7 +23,8 @@ from summarize.models import (
     PaginationInfo,
     DocumentInfo,
     JobState,
-    JobStatus
+    JobStatus,
+    JobMetadata
 )
 
 set_log_level(settings.common.app.log_level)
@@ -594,6 +595,13 @@ async def process_summarization_job(job_id: str, level):
             logger.info(f"Using CHUNKED strategy (exceeds context window)")
             strategy = "chunked"
             
+            # Update job_type to chunked in database
+            db_repo.update_job(
+                job_id,
+                job_type=SummarizationType.CHUNKED
+            )
+            logger.info(f"Updated job {job_id} type to CHUNKED in database")
+            
             # Split into chunks
             chunks = await asyncio.to_thread(
                 split_text_into_chunks,
@@ -1069,6 +1077,7 @@ async def list_jobs(
         for job in jobs:
             # Convert status string to JobStatus enum if needed
             job_status = job.status if isinstance(job.status, JobStatus) else JobStatus(job.status)
+
             
             # Create JobState object
             job_state = JobState(

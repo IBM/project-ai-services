@@ -167,7 +167,7 @@ func WarningfCtx(ctx context.Context, format string, args ...any) {
 	if activeMinLevel > LevelRankWarn {
 		return
 	}
-	formattedMsg := fmt.Sprintf(format, args...)
+	formattedMsg := sanitizedSprintf(format, args...)
 	if isServiceEnv {
 		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelWarn, 1)...)
 	} else {
@@ -184,7 +184,7 @@ func ErrorlnCtx(ctx context.Context, msg string) {
 }
 
 func ErrorfCtx(ctx context.Context, format string, args ...any) {
-	formattedMsg := fmt.Sprintf(format, args...)
+	formattedMsg := sanitizedSprintf(format, args...)
 	if isServiceEnv {
 		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelError, 1)...)
 	} else {
@@ -209,7 +209,7 @@ func InfofCtx(ctx context.Context, format string, args ...any) {
 		return
 	}
 
-	formattedMsg := fmt.Sprintf(format, args...)
+	formattedMsg := sanitizedSprintf(format, args...)
 	if isServiceEnv {
 		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelInfo, 1)...)
 	} else {
@@ -236,7 +236,7 @@ func DebugfCtx(ctx context.Context, format string, args ...any) {
 		return
 	}
 
-	formattedMsg := fmt.Sprintf(format, args...)
+	formattedMsg := sanitizedSprintf(format, args...)
 	if isServiceEnv {
 		klog.V(klog.Level(verbosityLevelDebug)).InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelDebug, 1)...)
 	} else {
