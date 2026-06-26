@@ -168,8 +168,8 @@ export interface DeployApplicationResponse {
 // Resources API Types - Used for fetching system resource availability
 export interface ResourcesResponse {
   cpu: {
-    total_cores: number;
-    available_cores: number;
+    total_cpu: number;
+    available_cpu: number;
   };
   memory: {
     total_bytes: number;
@@ -228,8 +228,8 @@ export interface DeployIntegrationEndpoints {
 
 export interface ResourcesApiResponse {
   cpu: {
-    used_cores: number;
-    total_cores: number;
+    used_cpu: number;
+    total_cpu: number;
   };
   memory: {
     used_bytes: number;
