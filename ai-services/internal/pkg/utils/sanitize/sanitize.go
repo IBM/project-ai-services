@@ -5,19 +5,9 @@ import "regexp"
 // Redacted is the placeholder written in place of a sensitive value.
 const Redacted = "[REDACTED]"
 
-// SecretSanitizer redacts sensitive values from map arguments before they are
-// serialised (e.g. into log messages or error strings).
-//
-// A map key is considered sensitive when it matches any of the compiled
-// patterns.  Each pattern uses (?i) for case-insensitive matching and .*
-// anchors so partial key names are caught (e.g. "dbPassword", "tls_cert").
-//
-// False-positive mitigation:
-//   - bare "key"     → catches "componentKey", "cacheKey" — replaced by the
-//     more specific api.*key / private.*key / access.*key.
-//   - "token"        → catches "tokenizer" — scoped with \btoken\b.
-//   - "auth"         → catches "author"    — scoped with \bauth\b.
-//   - bare "private" → catches "isPrivate" — scoped to private.*key.
+// SecretSanitizer redacts values of sensitive map keys before they are
+// serialised into log messages or error strings.
+// Use NewSecretSanitizer to create an instance and SanitizeArgs as the entry point.
 type SecretSanitizer struct {
 	sensitiveKeyPatterns []*regexp.Regexp
 }
@@ -53,10 +43,9 @@ func NewSecretSanitizer() *SecretSanitizer {
 	return &SecretSanitizer{sensitiveKeyPatterns: patterns}
 }
 
-// SanitizeArgs is the single public entry point used by the logger package.
-// It returns a new slice with every sensitive map argument sanitised.
-// Returns the original slice unchanged when no map argument is present,
-// avoiding any allocation on the hot path.
+// SanitizeArgs redacts sensitive values from any map arguments in args.
+// Non-map arguments are passed through unchanged.
+// If no map arguments are present the original slice is returned as-is (no allocation).
 func (s *SecretSanitizer) SanitizeArgs(args []any) []any {
 	hasMaps := false
 	for _, a := range args {
@@ -100,6 +89,7 @@ func (s *SecretSanitizer) sanitizeMapAny(m map[string]any) map[string]any {
 	for k, v := range m {
 		if s.isSensitiveKey(k) {
 			out[k] = Redacted
+
 			continue
 		}
 		switch nested := v.(type) {
