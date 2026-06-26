@@ -1,4 +1,4 @@
-import { useReducer, useMemo } from "react";
+import { useReducer, useMemo, useEffect, useRef } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
 import { ServiceCard, ServiceDetailPanel } from "@/components";
@@ -42,8 +42,8 @@ const transformServiceData = (service: Service): ServiceDetailData => {
 };
 
 const Services = () => {
-  // Use unified services cache
-  const { services, isLoading, error, refetch } = useServices();
+  // Use unified services cache - autoFetch on mount
+  const { services, isLoading, error, refetch } = useServices(true);
 
   // Local UI state using useReducer
   const [state, dispatch] = useReducer(servicesReducer, initialState);
@@ -106,13 +106,36 @@ const Services = () => {
     dispatch({ type: "HIDE_DEPLOYMENT_DETAILS" });
   };
 
+  const handleRefreshDeployments = () => {
+    // Increment trigger to force table refresh with fresh API call
+    dispatch({ type: "REFRESH_DEPLOYMENTS_TABLE" });
+  };
+
+  const needsRefreshRef = useRef(false);
+
+  useEffect(() => {
+    if (!state.showDeploymentDetails && needsRefreshRef.current) {
+      needsRefreshRef.current = false;
+      handleRefreshDeployments();
+    }
+  }, [state.showDeploymentDetails]);
+
   // If showing deployment details, render DeploymentDetails component
   if (state.showDeploymentDetails && state.selectedDeployment) {
     return (
       <DeploymentDetails
         deployment={state.selectedDeployment}
-        onBack={handleBackFromDetails}
+        onBack={() => {
+          needsRefreshRef.current = true;
+          handleBackFromDetails();
+        }}
         deploymentSource="Services"
+        onNameUpdate={(newName) =>
+          dispatch({
+            type: "UPDATE_DEPLOYMENT_NAME",
+            payload: newName,
+          })
+        }
       />
     );
   }
