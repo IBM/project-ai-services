@@ -39,7 +39,7 @@ spec:
           {{- if .Values.apiKey }}
           export VLLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
           {{- end }}
-          /opt/app-root/spyre_entrypoint.sh \
+          exec /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \

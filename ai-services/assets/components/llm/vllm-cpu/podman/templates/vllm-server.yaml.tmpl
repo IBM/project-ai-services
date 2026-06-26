@@ -32,8 +32,7 @@ spec:
           {{- if .Values.apiKey }}
           export VLLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
           {{- end }}
-          exec /usr/local/bin/python -m vllm.entrypoints.openai.api_server \
-            --model /models/{{ .Values.model }} \
+          exec vllm serve /models/{{ .Values.model }} \
             --served-model-name {{ .Values.model }} \
             --max-num-batched-tokens={{ .Values.maxNumBatchedTokens }} \
             --max-model-len={{ .Values.maxModelLen }} \
