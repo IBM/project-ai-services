@@ -1,4 +1,5 @@
 REGISTRY?=icr.io/ai-services-private
+RELEASE_REGISTRY?=icr.io/ai-services
 IMAGE=ai-services
 TAG?=v0.0.152
 CONTAINER_BUILDER?=podman
@@ -27,14 +28,25 @@ PLATFORMS := \
 	linux/amd64 \
 	linux/ppc64le
 
+# Tools image baked into the binary as the default at build time.
+# The default points at the cicd registry. Release targets pass RELEASE_REGISTRY
+# so that both the container image and all binaries embed the prod/public ref.
+# Override the full ref directly if needed:
+#   make release TOOLS_IMAGE=icr.io/my-org/tools:0.12
+TOOLS_IMAGE_NAME ?= tools
+TOOLS_IMAGE_TAG  ?= 0.11
+TOOLS_IMAGE      ?= icr.io/ai-services-cicd/$(TOOLS_IMAGE_NAME):$(TOOLS_IMAGE_TAG)
+
+LDFLAGS = \
+	-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
+	-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=$(GITCOMMIT)' \
+	-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
+	-X 'github.com/project-ai-services/ai-services/internal/pkg/vars.ToolImage=$(TOOLS_IMAGE)'
+
 BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath $(BUILDFLAGS) \
      -o $(BIN)/ai-services-$(GOOS)-$(GOARCH) \
      -tags "$(BUILDTAGS)" \
-     -ldflags " \
-    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
-    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=$(GITCOMMIT)' \
-    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
-     " \
+     -ldflags "$(LDFLAGS)" \
      ./cmd/ai-services
 
 REPORT_DIR := tests/e2e/reports
@@ -75,11 +87,7 @@ binaries:
 		CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) $(GO) build $(BUILDFLAGS) \
 			-o $(BIN)/ai-services-$(OS)-$(ARCH) \
 			-tags "$(BUILDTAGS)" \
-			-ldflags " \
-				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
-				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=$(GITCOMMIT)' \
-				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
-			" \
+			-ldflags "$(LDFLAGS)" \
 			./cmd/ai-services || exit 1; \
 	)
 	@echo "All binaries built successfully in $(BIN)/"
@@ -105,6 +113,29 @@ build:
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: push
+
+# Release targets — all artifacts (binaries + container image) embed a
+# TOOLS_IMAGE pointing at RELEASE_REGISTRY, and the container is pushed there.
+# RELEASE_TOOLS_IMAGE is always derived from RELEASE_REGISTRY so the two stay
+# in sync; override the full ref only if you need a different image entirely:
+#   make release RELEASE_REGISTRY=icr.io/my-org
+#   make release RELEASE_REGISTRY=icr.io/my-org TOOLS_IMAGE_TAG=0.12
+RELEASE_TOOLS_IMAGE = $(RELEASE_REGISTRY)/$(TOOLS_IMAGE_NAME):$(TOOLS_IMAGE_TAG)
+
+release: release-binaries release-build release-push
+.PHONY: release
+
+release-binaries:
+	$(MAKE) binaries TOOLS_IMAGE=$(RELEASE_TOOLS_IMAGE)
+.PHONY: release-binaries
+
+release-build:
+	$(MAKE) build REGISTRY=$(RELEASE_REGISTRY) TOOLS_IMAGE=$(RELEASE_TOOLS_IMAGE)
+.PHONY: release-build
+
+release-push:
+	$(MAKE) push REGISTRY=$(RELEASE_REGISTRY)
+.PHONY: release-push
 
 test:
 	$(TEST_CMD)

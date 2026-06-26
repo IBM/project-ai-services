@@ -6,11 +6,15 @@ ARG BUILDDATE
 ARG BUILDTAGS
 ARG GO_VERSION=1.26.4
 
+# TARGETOS / TARGETARCH are set automatically by --platform; default to linux/ppc64le.
+ARG TARGETOS=linux
+ARG TARGETARCH=ppc64le
+
 WORKDIR /go/src/github.com/project-ai-services/ai-services
 
 USER root
 
-RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.gz && \
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.${TARGETOS}-${TARGETARCH}.tar.gz -o go.tar.gz && \
     tar -C /usr/local -xzf go.tar.gz && \
     rm go.tar.gz
 
@@ -33,8 +37,10 @@ RUN CGO_ENABLED=0 go build \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+
 # Install pciutils for lspci command (required for Spyre card detection)
-RUN microdnf install -y pciutils && \
+RUN microdnf install ${DNF_FLAGS} -y pciutils && \
     microdnf clean all
 
 COPY --from=builder /go/src/github.com/project-ai-services/ai-services/bin/ai-services /usr/bin/ai-services
