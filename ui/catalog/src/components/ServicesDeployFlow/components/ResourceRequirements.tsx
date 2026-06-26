@@ -185,8 +185,8 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     resources.push({
       label: "Processors",
       required: calculateRequiredResources.cpu.toString(),
-      available: Math.floor(resourceData.cpu.available_cores).toString(),
-      unit: "Cores",
+      available: Math.floor(resourceData.cpu.available_cpu).toString(),
+      unit: "vCPUs",
       type: "cpu",
     });
 

@@ -185,20 +185,28 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	allHealthy := true
 
 	// Step 1: Sync all components first (bottom of dependency tree)
-	componentErrors := s.syncAllComponents(ctx, rt, app)
+	componentErrors, componentsPending := s.syncAllComponents(ctx, rt, app)
 	if len(componentErrors) > 0 {
 		errorMessages = append(errorMessages, componentErrors...)
 		allHealthy = false
 	}
 
 	// Step 2: Sync services (middle of dependency tree)
-	serviceErrors := s.syncAllServices(ctx, rt, app)
+	serviceErrors, servicesPending := s.syncAllServices(ctx, rt, app)
 	if len(serviceErrors) > 0 {
 		errorMessages = append(errorMessages, serviceErrors...)
 		allHealthy = false
 	}
 
-	// Step 3: Update application status based on collected errors
+	// Step 3: If any service or component is still initialising, skip updating the
+	// application status this cycle — we don't have a complete picture yet.
+	if componentsPending || servicesPending {
+		logger.InfofCtx(ctx, "Skipping application %s status update: some services/components are still in Initializing state", app.Name)
+
+		return nil
+	}
+
+	// Step 4: Update application status based on collected errors
 	if err := s.updateApplicationStatus(ctx, app, allHealthy, errorMessages); err != nil {
 		return fmt.Errorf("failed to update application status: %w", err)
 	}
@@ -210,9 +218,13 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 
 // syncAllComponents syncs all components for an application
 // Returns: error messages for application-level reporting.
-func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) []string {
+// syncAllComponents syncs all components for an application.
+// Returns error messages and a pending flag — pending is true if any component was
+// skipped because it has not yet reached a stable (Running/Error) state.
+func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) { //nolint:cyclop
 	processedComponents := make(map[uuid.UUID]bool)
 	errorMessages := []string{}
+	pending := false
 
 	// Collect all unique components from all services
 	for _, service := range app.Services {
@@ -233,8 +245,25 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 				continue
 			}
 
-			// Sync component pod status
-			status, componentMsg, err := s.syncComponentPod(ctx, rt, dep.DependencyID)
+			// Only sync components that are in a stable, observable state
+			component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
+			if err != nil || component == nil {
+				logger.ErrorfCtx(ctx, "Failed to get component %s for sync check: %v", dep.DependencyID, err)
+				processedComponents[dep.DependencyID] = true
+
+				continue
+			}
+
+			if component.Status != models.ComponentStatusRunning && component.Status != models.ComponentStatusError {
+				logger.InfofCtx(ctx, "Skipping component %s sync: status is %s", dep.DependencyID, component.Status)
+				processedComponents[dep.DependencyID] = true
+				pending = true
+
+				continue
+			}
+
+			// Sync component pod status, passing the already-fetched component to avoid a second DB call
+			status, componentMsg, err := s.syncComponentPod(ctx, rt, component)
 			if err != nil {
 				logger.ErrorfCtx(ctx, "Failed to sync component %s: %v", dep.DependencyID, err)
 			} else if status == models.ComponentStatusError && componentMsg != "" {
@@ -246,16 +275,26 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 		}
 	}
 
-	return errorMessages
+	return errorMessages, pending
 }
 
-// syncAllServices syncs all services for an application
-// Service status is determined ONLY by the service pod health, not component health
-// Returns: error messages for application-level reporting.
-func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, app *models.Application) []string {
+// syncAllServices syncs all services for an application.
+// Service status is determined ONLY by the service pod health, not component health.
+// Returns error messages and a pending flag — pending is true if any service was
+// skipped because it has not yet reached a stable (Running/Error) state.
+func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) {
 	errorMessages := []string{}
+	pending := false
 
 	for _, service := range app.Services {
+		// Only sync services that are in a stable, observable state
+		if service.Status != models.ServiceStatusRunning && service.Status != models.ServiceStatusError {
+			logger.InfofCtx(ctx, "Skipping service %s sync: status is %s", service.ID, service.Status)
+			pending = true
+
+			continue
+		}
+
 		serviceMsg, err := s.syncServicePod(ctx, rt, service)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to sync service %s: %v", service.ID, err)
@@ -267,7 +306,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 		}
 	}
 
-	return errorMessages
+	return errorMessages, pending
 }
 
 // syncServicePod syncs a single service's pod status
@@ -349,17 +388,11 @@ func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service 
 	return nil
 }
 
-// syncComponentPod syncs a single component's pod status
+// syncComponentPod syncs a single component's pod status.
+// The component must already be fetched by the caller to avoid a redundant DB lookup.
 // Returns: status, error message (if any), and error.
-func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, componentID uuid.UUID) (models.ComponentStatus, string, error) {
-	// Get component from DB
-	component, err := s.componentRepo.GetByID(ctx, componentID)
-	if err != nil {
-		return models.ComponentStatusError, "", fmt.Errorf("failed to get component: %w", err)
-	}
-	if component == nil {
-		return models.ComponentStatusError, "", fmt.Errorf("component not found: %s", componentID)
-	}
+func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, component *models.Component) (models.ComponentStatus, string, error) {
+	componentID := component.ID
 
 	// Fetch all pods using component ID as template label
 	pods, err := s.fetchPodsByTemplateID(rt, componentID.String())
@@ -530,18 +563,18 @@ func (s *SyncService) updateApplicationStatus(ctx context.Context, app *models.A
 }
 
 // getExpectedResourceCounts retrieves expected resource counts from cache.
-func (s *SyncService) getExpectedResourceCounts(catalogID string) *ResourceCounts {
+func (s *SyncService) getExpectedResourceCounts(instanceID string) *ResourceCounts {
 	s.cacheMutex.RLock()
 	defer s.cacheMutex.RUnlock()
 
-	return s.resourceCache[catalogID]
+	return s.resourceCache[instanceID]
 }
 
 // setExpectedResourceCounts stores expected resource counts in cache.
-func (s *SyncService) setExpectedResourceCounts(catalogID string, counts *ResourceCounts) {
+func (s *SyncService) setExpectedResourceCounts(instanceID string, counts *ResourceCounts) {
 	s.cacheMutex.Lock()
 	defer s.cacheMutex.Unlock()
-	s.resourceCache[catalogID] = counts
+	s.resourceCache[instanceID] = counts
 }
 
 // countResourcesFromTemplates counts expected Pods and Secrets from service/component templates.
@@ -674,8 +707,9 @@ func (s *SyncService) extractResourceLabelsFromPodSpec(podSpec *modelpkg.PodSpec
 // validateResourceCounts validates that actual resources match expected counts from templates.
 // Returns error message if validation fails, empty string if all resources are present.
 func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, instanceID, itemType string, actualPodCount int, rt runtime.Runtime) string {
-	// Get expected counts from cache
-	expectedCounts := s.getExpectedResourceCounts(catalogID)
+	// Cache key combines catalogID and instanceID:
+	cacheKey := catalogID + ":" + instanceID
+	expectedCounts := s.getExpectedResourceCounts(cacheKey)
 
 	// If not in cache, count from templates and cache it
 	if expectedCounts == nil {
@@ -686,7 +720,7 @@ func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, ins
 			return ""
 		}
 		expectedCounts = counts
-		s.setExpectedResourceCounts(catalogID, counts)
+		s.setExpectedResourceCounts(cacheKey, counts)
 	}
 
 	var errorMessages []string

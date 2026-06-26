@@ -179,7 +179,6 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
               )}
               {imageSection && imageSection.image && (
                 <div className={styles.architectureDiagram}>
-                  {/* TODO: Update image here */}
                   <img
                     src={imageSection.image.source}
                     alt="Architecture Diagram"

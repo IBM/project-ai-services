@@ -6,9 +6,9 @@ import "github.com/spf13/cobra"
 func CatalogCmd() *cobra.Command {
 	catalogCMD := &cobra.Command{
 		Use:   "catalog",
-		Short: "Manage AI Services catalog service",
-		Long: `catalog service provides APIs to manage AI Services catalog, including listing available services,
-deploying services, and managing service metadata`,
+		Short: "Manage the AI Services catalog",
+		Long: `The catalog service offers APIs for managing the AI Services catalog, enabling you to list available services,
+deploy them, and handle service metadata`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

@@ -51,7 +51,7 @@ func loadDBConfig() (db.Config, error) {
 func getOrGenerateSecretKey() (string, error) {
 	secretKey := os.Getenv("AUTH_JWT_SECRET")
 	if len(secretKey) == 0 {
-		fmt.Println("** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
+		logger.DebuglnCtx(context.Background(), "** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
 		byteSecretKey, err := auth.GenerateRandomSecretKey(defaultRandomSecretKeyLength)
 		if err != nil {
 			return "", err
@@ -141,7 +141,25 @@ func NewAPIServerCmd() *cobra.Command {
 	apiserverCmd := &cobra.Command{
 		Use:   "apiserver",
 		Short: "Manage AI Services API server",
-		Long:  `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
+		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
+		Example: `  # Start the API server with default settings
+	 ai-services catalog apiserver --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start the API server on a custom port
+	 ai-services catalog apiserver --port 9090 --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with custom admin username
+	 ai-services catalog apiserver --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with custom token TTL settings
+	 ai-services catalog apiserver --access-token-ttl 30m --refresh-token-ttl 48h --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with all custom settings
+	 ai-services catalog apiserver --port 9090 --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --access-token-ttl 30m --refresh-token-ttl 48h --runtime podman
+
+Note:
+  - Requires database connection via environment variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)
+  - AUTH_JWT_SECRET environment variable is recommended for production use`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},

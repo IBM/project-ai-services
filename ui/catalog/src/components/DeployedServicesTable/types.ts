@@ -177,14 +177,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "", key: "actions" },
 ];
 
-// Service filter constants
-export const SERVICE_TYPES = {
-  DIGITIZE_DOCUMENTS: "Digitize Documents",
-  FIND_SIMILAR_ITEMS: "Find Similar Items",
-  QUESTION_AND_ANSWER: "Question and Answer",
-  SUMMARIZE: "Summarize",
-} as const;
-
 // Status Column sort order
 export const STATUS_SORT_ORDER: Record<string, number> = {
   "Deploying...": 1,

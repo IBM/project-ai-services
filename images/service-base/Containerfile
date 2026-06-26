@@ -1,17 +1,15 @@
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
-RUN microdnf install -y python3.12-devel python3.12-pip \
+RUN microdnf install -y python3.12-devel \
         lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
     curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
     microdnf install -y spatialindex-devel && \
     microdnf clean all && \
+    curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 - && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
-    ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
-    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3 && \
-    python3.12 -m pip install --upgrade pip && \
-    rm -rf /usr/lib/python3.12/site-packages/pip-23.2.1.dist-info
+    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
 ENV DOCLING_MODELS_PATH=/var/docling-models
 
@@ -19,7 +17,6 @@ COPY requirements.txt .
 COPY download_docling_models.py .
 
 RUN python -m venv /var/venv && source /var/venv/bin/activate && \
-    pip install --upgrade pip && \
     pip install -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \

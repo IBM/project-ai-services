@@ -93,6 +93,8 @@ const renderCell = ({
   );
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
@@ -198,6 +200,8 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
+      // Await the delayed reload to ensure error handling
+      await sleep(5000);
       await loadApplications();
     } catch (err) {
       const msg =
@@ -549,15 +553,20 @@ const DigitalAssistantsPage = () => {
                                                 <TableCell>
                                                   {child.name}
                                                 </TableCell>
-                                                <TableCell>
-                                                  <StatusCell
-                                                    value={child.status}
-                                                    rowId={child.id}
-                                                    dispatch={dispatch}
-                                                  />
-                                                </TableCell>
-                                                <TableCell />
-                                                <TableCell />
+                                                {state.visibleColumns
+                                                  .status && (
+                                                  <TableCell>
+                                                    <StatusCell
+                                                      value={child.status}
+                                                      rowId={child.id}
+                                                      dispatch={dispatch}
+                                                    />
+                                                  </TableCell>
+                                                )}
+                                                {state.visibleColumns
+                                                  .uptime && <TableCell />}
+                                                {state.visibleColumns
+                                                  .messages && <TableCell />}
                                                 <TableCell />
                                               </TableRow>
                                             ),
@@ -571,7 +580,7 @@ const DigitalAssistantsPage = () => {
                             {noApplications && (
                               <NoDataEmptyState
                                 title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant, click Deploy."
+                                subtitle="To deploy a new digital assistant, click Deploy."
                                 className={styles.noDataContent}
                               />
                             )}
@@ -584,7 +593,7 @@ const DigitalAssistantsPage = () => {
                             )}
                           </TableContainer>
 
-                          {state.totalItems > state.pageSize && (
+                          {state.totalItems > 20 && (
                             <Pagination
                               page={state.page}
                               pageSize={state.pageSize}

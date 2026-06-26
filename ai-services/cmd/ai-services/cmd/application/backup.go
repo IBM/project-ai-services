@@ -28,24 +28,17 @@ var backupCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 
-Flags:
-  --target   : Target to backup (opensearch, digitize) (required)
-  --filename : Path to save the backup tar.gz file (optional)
-               If not specified, a filename will be auto-generated with timestamp
-
 Supported targets:
   - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
-  - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)
-Examples:
-  # Backup OpenSearch data with Podman (auto-generated filename)
+  - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)`,
+	Example: `  # Backup OpenSearch data with Podman (auto-generated filename)
   ai-services application backup myapp --target opensearch --runtime podman
 
   # Backup digitize data with OpenShift
   ai-services application backup myapp --target digitize --runtime openshift
 
   # Backup digitize data with custom filename
-  ai-services application backup myapp --target digitize --filename mybackup.tar.gz --runtime podman
-`,
+  ai-services application backup myapp --target digitize --filename mybackup.tar.gz --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := backupTarget

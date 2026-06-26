@@ -16,14 +16,12 @@ func NewInfoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "info",
 		Short: "Display catalog service information",
-		Long: `Displays information about the running catalog service, including:
-- Catalog service version
-- Catalog UI endpoint
-- Catalog Backend API endpoint
-
-Examples:
-	# Display catalog service info for podman
-	ai-services catalog info --runtime podman`,
+		Long: `Retrieve and display catalog service information:
+- Service version
+- UI endpoint URL
+- Backend API endpoint URL`,
+		Example: `  # Display catalog service info for podman
+  ai-services catalog info --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 

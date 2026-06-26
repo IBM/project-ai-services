@@ -1252,12 +1252,12 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo": {
             "type": "object",
             "properties": {
-                "total_cores": {
-                    "description": "Total allocated CPU cores",
+                "total_cpu": {
+                    "description": "Total allocated CPUs",
                     "type": "number"
                 },
-                "used_cores": {
-                    "description": "Actually used CPU cores",
+                "used_cpu": {
+                    "description": "Actually used CPUs",
                     "type": "number"
                 }
             }
@@ -1804,10 +1804,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
             "type": "object",
             "properties": {
-                "available_cores": {
+                "available_cpu": {
                     "type": "number"
                 },
-                "total_cores": {
+                "total_cpu": {
                     "type": "integer"
                 }
             }

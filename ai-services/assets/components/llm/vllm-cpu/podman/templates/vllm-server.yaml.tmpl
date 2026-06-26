@@ -24,8 +24,8 @@ spec:
       - /models/{{ .Values.model }}
       - --served-model-name
       - {{ .Values.model }}
-      - --max-num-batched-tokens=26208
-      - --max-model-len=26208
+      - --max-num-batched-tokens={{ .Values.maxNumBatchedTokens }}
+      - --max-model-len={{ .Values.maxModelLen }}
       - --port=8000
       livenessProbe:
         httpGet:
@@ -49,9 +49,9 @@ spec:
       {{- end }}
       resources:
         requests:
-          memory: "100Gi"
+          memory: "150Gi"
         limits:
-          memory: "100Gi"
+          memory: "150Gi"
       ports:
         - containerPort: 8000
       volumeMounts:

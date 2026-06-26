@@ -94,25 +94,35 @@ export const NameCell = ({
   rowId,
   rowData,
   onRowClick,
-}: CellRendererProps) => (
-  <Link
-    onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (onRowClick) {
-        onRowClick({
-          id: rowId,
-          name: String(value),
-          status: rowData?.status || "Unknown",
-          type: rowData?.type || "Service",
-          resources: [],
-        });
-      }
-    }}
-  >
-    {String(value)}
-  </Link>
-);
+}: CellRendererProps) => {
+  const status = rowData?.status?.toLowerCase() || "";
+  const isRunning = status === "running";
+
+  if (!isRunning) {
+    return <span className={styles.nameText}>{String(value)}</span>;
+  }
+
+  return (
+    <Link
+      href="#"
+      onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onRowClick) {
+          onRowClick({
+            id: rowId,
+            name: String(value),
+            status: rowData?.status || "Unknown",
+            type: rowData?.type || "Service",
+            resources: [],
+          });
+        }
+      }}
+    >
+      {String(value)}
+    </Link>
+  );
+};
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);
   const config =
@@ -135,25 +145,35 @@ export const MessageCell = ({ value, rowData }: CellRendererProps) => {
   const message = String(value || "");
   const status = rowData?.status || "";
 
-  // Don't show message if status is Running
+  // Hide message if status is Running or if message is empty
   if (status === "Running" || !message) {
     return <span></span>;
   }
 
-  const isError =
-    message.toLowerCase().includes("error") ||
-    message.toLowerCase().includes("failed");
-  const isSuccess = message.toLowerCase().includes("completed successfully");
+  let MessageIcon;
+  let iconClassName;
 
-  let MessageIcon = InProgress;
-  let iconClassName = styles.messageIconInfo;
-
-  if (isError) {
+  // First check row status for accurate icon selection
+  if (status === "Error") {
     MessageIcon = ErrorFilled;
     iconClassName = styles.messageIconError;
-  } else if (isSuccess) {
-    MessageIcon = CheckmarkFilled;
-    iconClassName = styles.messageIconSuccess;
+  } else {
+    // Fall back to checking message content for other statuses
+    const messageLower = message.toLowerCase();
+    const isError =
+      messageLower.includes("error") || messageLower.includes("failed");
+    const isSuccess = messageLower.includes("completed successfully");
+
+    if (isError) {
+      MessageIcon = ErrorFilled;
+      iconClassName = styles.messageIconError;
+    } else if (isSuccess) {
+      MessageIcon = CheckmarkFilled;
+      iconClassName = styles.messageIconSuccess;
+    } else {
+      MessageIcon = InProgress;
+      iconClassName = styles.messageIconInfo;
+    }
   }
 
   return (

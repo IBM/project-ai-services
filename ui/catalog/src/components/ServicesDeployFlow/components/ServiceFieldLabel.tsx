@@ -1,5 +1,6 @@
 import { Toggletip, ToggletipButton, ToggletipContent } from "@carbon/react";
 import { Information } from "@carbon/icons-react";
+import { parseMarkdownLinks } from "@/utils/string";
 import styles from "../ServicesDeployFlow.module.scss";
 
 interface ServiceFieldLabelProps {
@@ -32,7 +33,7 @@ export const ServiceFieldLabel: React.FC<ServiceFieldLabelProps> = ({
           <Information />
         </ToggletipButton>
         <ToggletipContent>
-          <p>{description}</p>
+          <p>{parseMarkdownLinks(description)}</p>
         </ToggletipContent>
       </Toggletip>
     </div>
