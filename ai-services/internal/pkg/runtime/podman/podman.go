@@ -446,19 +446,19 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 
 	// Extract CPU and memory information
 	if info.Host != nil {
-		totalCores := int(info.Host.CPUs)
+		totalCPUs := int(info.Host.CPUs)
 		idlePercent := 0.0
 
 		if info.Host.CPUUtilization != nil {
 			idlePercent = info.Host.CPUUtilization.IdlePercent
 		}
 
-		// Calculate available cores: available_cores = (total_cores * idle_percent) / 100
-		availableCores := (float64(totalCores) * idlePercent) / constants.PercentageDivisor
+		// Calculate available CPUs: available = (total * idle_percent) / 100
+		availableCPUs := (float64(totalCPUs) * idlePercent) / constants.PercentageDivisor
 
 		sysInfo.CPU = &models.CPUInfo{
-			TotalCores:     totalCores,
-			AvailableCores: availableCores,
+			Total:     totalCPUs,
+			Available: availableCPUs,
 		}
 
 		sysInfo.Memory = &models.MemoryInfo{
@@ -523,7 +523,7 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 
 	if len(podInspect.Containers) == 0 {
 		return &types.PodResources{
-			CPUCores:   0,
+			CPU:        0,
 			MemUsage:   0,
 			SpyreCards: []string{},
 		}, nil
@@ -536,7 +536,7 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 // aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
 func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
 	var totalMemUsage uint64
-	var totalCPUCores float64
+	var totalCPUs float64
 	spyreCards := []string{}
 
 	for _, container := range podInspect.Containers {
@@ -565,9 +565,9 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 			totalMemUsage += stats.MemUsage
 
 			// Accumulate CPU usage
-			// The CPU field is a percentage (e.g., 150.0 = 1.5 cores)
-			// Convert percentage to cores by dividing by 100
-			totalCPUCores += stats.CPU / constants.PercentageDivisor
+			// The CPU field is a percentage (e.g., 150.0 = 1.5 CPUs)
+			// Convert percentage to CPUs by dividing by 100
+			totalCPUs += stats.CPU / constants.PercentageDivisor
 		}
 
 		// Inspect container to get Spyre card annotations
@@ -581,7 +581,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 	}
 
 	return &types.PodResources{
-		CPUCores:   totalCPUCores,
+		CPU:        totalCPUs,
 		MemUsage:   totalMemUsage,
 		SpyreCards: spyreCards,
 	}, nil
