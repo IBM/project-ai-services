@@ -110,7 +110,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
 
         // Add service-level resources (the service application itself)
         if (deployOptions.resources) {
-          const serviceResourceKey = `service-${serviceKey}`;
+          const serviceResourceKey = `service-${_serviceKey}`;
           if (!uniqueProviders[serviceResourceKey]) {
             uniqueProviders[serviceResourceKey] = {
               cpu: deployOptions.resources.cpu || 0,
@@ -184,7 +184,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
       accelerators: totalAccelerators,
       storage: storageGB,
     };
-  }, [formData.services, deployOptions.components]);
+  }, [formData.services, deployOptions.components, deployOptions.resources]);
 
   // Format resources for display
   const resourceRequirements = useMemo((): ResourceItem[] => {
