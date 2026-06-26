@@ -1,4 +1,4 @@
-import { useReducer, useMemo } from "react";
+import { useReducer, useMemo, useEffect, useRef } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
 import { ServiceCard, ServiceDetailPanel } from "@/components";
@@ -111,12 +111,24 @@ const Services = () => {
     dispatch({ type: "REFRESH_DEPLOYMENTS_TABLE" });
   };
 
+  const needsRefreshRef = useRef(false);
+
+  useEffect(() => {
+    if (!state.showDeploymentDetails && needsRefreshRef.current) {
+      needsRefreshRef.current = false;
+      handleRefreshDeployments();
+    }
+  }, [state.showDeploymentDetails]);
+
   // If showing deployment details, render DeploymentDetails component
   if (state.showDeploymentDetails && state.selectedDeployment) {
     return (
       <DeploymentDetails
         deployment={state.selectedDeployment}
-        onBack={handleBackFromDetails}
+        onBack={() => {
+          needsRefreshRef.current = true;
+          handleBackFromDetails();
+        }}
         deploymentSource="Services"
         onNameUpdate={(newName) =>
           dispatch({
@@ -124,7 +136,6 @@ const Services = () => {
             payload: newName,
           })
         }
-        onRefresh={handleRefreshDeployments}
       />
     );
   }

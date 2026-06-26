@@ -282,7 +282,10 @@ const DigitalAssistantsPage = () => {
     return (
       <DeploymentDetails
         deployment={state.selectedDeployment}
-        onBack={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS })}
+        onBack={() => {
+          dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS });
+          loadApplications();
+        }}
         deploymentSource="Digital assistants"
         onNameUpdate={(newName) =>
           dispatch({
@@ -290,7 +293,6 @@ const DigitalAssistantsPage = () => {
             payload: newName,
           })
         }
-        onRefresh={loadApplications}
       />
     );
   }
