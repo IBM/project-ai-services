@@ -698,7 +698,6 @@ async def process_summarization_job(job_id: str, level):
                 metadata={
                     "total_chunks": num_chunks,
                     "completed_chunks": 0,
-                    "failed_chunks": 0,
                     "phase": "summarizing"
                 }
             )
@@ -769,7 +768,6 @@ async def process_summarization_job(job_id: str, level):
                 metadata={
                     "total_chunks": num_chunks,
                     "completed_chunks": num_chunks,
-                    "failed_chunks": 0,
                     "phase": "merging"
                 }
             )
