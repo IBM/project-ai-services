@@ -420,6 +420,7 @@ func diffParamKeys(a, b map[string]any) []string {
 	}
 
 	sort.Strings(keys)
+
 	return keys
 }
 
@@ -429,6 +430,7 @@ func formatParamKeys(keys []string) string {
 	for i, k := range keys {
 		quoted[i] = fmt.Sprintf("'%s'", k)
 	}
+
 	return strings.Join(quoted, ", ")
 }
 
