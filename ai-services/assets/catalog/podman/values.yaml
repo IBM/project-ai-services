@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.37
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.38
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.145
+  image: icr.io/ai-services-cicd/ai-services:v0.0.152
   runtime: ""
   adminPasswordHash: ""
   podman:

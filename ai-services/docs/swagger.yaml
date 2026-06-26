@@ -4,8 +4,6 @@ definitions:
     properties:
       component_type:
         type: string
-      instance_id:
-        type: string
       params:
         additionalProperties: {}
         type: object

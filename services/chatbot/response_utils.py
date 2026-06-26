@@ -53,61 +53,17 @@ class ChatCompletionRequest(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "examples": [
-                {
-                    "summary": "Single-turn query",
-                    "description": "Simple query without conversation history",
-                    "value": {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "What is artificial intelligence?"
-                            }
-                        ],
-                        "max_tokens": 512,
-                        "temperature": 0.7,
-                        "stream": False
+            "example": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "What is artificial intelligence?"
                     }
-                },
-                {
-                    "summary": "Multi-turn conversation",
-                    "description": "Query with conversation history for context-aware responses",
-                    "value": {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "What is machine learning?"
-                            },
-                            {
-                                "role": "assistant",
-                                "content": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed."
-                            },
-                            {
-                                "role": "user",
-                                "content": "Can you give me some examples?"
-                            }
-                        ],
-                        "max_tokens": 512,
-                        "temperature": 0.7,
-                        "stream": False
-                    }
-                },
-                {
-                    "summary": "Streaming response",
-                    "description": "Request with streaming enabled for real-time token generation",
-                    "value": {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "Explain neural networks in simple terms"
-                            }
-                        ],
-                        "max_tokens": 512,
-                        "temperature": 0.7,
-                        "stream": True
-                    }
-                }
-            ]
+                ],
+                "max_tokens": 512,
+                "temperature": 0.7,
+                "stream": False
+            }
         }
     }
 
