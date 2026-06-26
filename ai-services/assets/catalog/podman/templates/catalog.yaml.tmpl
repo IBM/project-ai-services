@@ -97,6 +97,8 @@ spec:
       args:
         - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}"
       env:
+        - name: GIN_MODE
+          value: "release"
         - name: AI_SERVICES_LOG_LEVEL
           value: "info"
         - name: AI_SERVICES_LOG_FORMAT

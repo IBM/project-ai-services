@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/project-ai-services/ai-services/docs" // Import generated docs
@@ -15,6 +16,9 @@ import (
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
 func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService *repository.ApplicationService) *gin.Engine {
+	if mode := os.Getenv("GIN_MODE"); mode != "" {
+		gin.SetMode(mode)
+	}
 	router := gin.Default()
 
 	// Apply RequestID middleware to all routes
