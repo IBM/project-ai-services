@@ -7,22 +7,23 @@ metadata:
     ai-services.io/secret: "watsonx-secret-{{ .InstanceSlug }}"
 spec:
   restartPolicy: always
+  volumes:
+    - name: watsonx-secret
+      secret:
+        secretName: "watsonx-secret-{{ .InstanceSlug }}"
   containers:
     - name: litellm
       image: "{{ .Values.image }}"
-      command: ["litellm"]
+      command: ["/bin/sh"]
       args:
-        - --config
-        - /app/config.yaml
-        - --port
-        - "8000"
-        - --debug
+        - "-c"
+        - |
+          export WATSONX_APIKEY=$(cat /etc/secret/watsonx-secret/apiKey)
+          exec litellm \
+            --config /app/config.yaml \
+            --port 8000 \
+            --debug
       env:
-        - name: WATSONX_APIKEY
-          valueFrom:
-            secretKeyRef:
-              name: "watsonx-secret-{{ .InstanceSlug }}"
-              key: apiKey
         - name: WATSONX_PROJECT_ID
           value: "{{ .Values.watsonxProjectId }}"
         - name: WATSONX_URL
@@ -55,3 +56,7 @@ spec:
       ports:
         - containerPort: 8000
           protocol: TCP
+      volumeMounts:
+        - mountPath: /etc/secret/watsonx-secret
+          name: watsonx-secret
+          readOnly: true

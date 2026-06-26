@@ -11,22 +11,27 @@ metadata:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
   restartPolicy: always
+  volumes:
+    - name: opensearch-data
+      persistentVolumeClaim:
+        claimName: "opensearch-{{ .InstanceSlug }}"
+    - name: opensearch-secret
+      secret:
+        secretName: "opensearch-secret-{{ .InstanceSlug }}"
   containers:
     - name: opensearch
       image: "{{ .Values.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
+          export OPENSEARCH_INITIAL_ADMIN_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          exec /usr/share/opensearch/bin/opensearch
       env:
         - name: "discovery.type"
           value: "single-node"
-        - name: OPENSEARCH_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .InstanceSlug }}"
-              key: username
-        - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .InstanceSlug }}"
-              key: password
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
       ports:
@@ -45,6 +50,9 @@ spec:
       volumeMounts:
         - mountPath: /usr/share/opensearch/data:z
           name: opensearch-data
+        - mountPath: /etc/secret/opensearch-secret
+          name: opensearch-secret
+          readOnly: true
       livenessProbe:
         exec:
           command:
@@ -55,7 +63,3 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 20
         failureThreshold: 5
-  volumes:
-    - name: opensearch-data
-      persistentVolumeClaim:
-        claimName: "opensearch-{{ .InstanceSlug }}"

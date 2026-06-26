@@ -9,20 +9,25 @@ metadata:
     io.podman.annotations.pids-limit/postgres: "4096"
 spec:
   restartPolicy: always
+  volumes:
+    - name: postgres-data
+      persistentVolumeClaim:
+        claimName: "postgres-summarize-{{ .InstanceSlug }}"
+    - name: summarize-db-secret
+      secret:
+        secretName: "summarize-db-secret-{{ .InstanceSlug }}"
   containers:
     - name: postgres
       image: "{{ .Values.postgres.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/summarize-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/summarize-db-secret/password)
+          exec docker-entrypoint.sh postgres
       env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: "summarize-db-secret-{{ .InstanceSlug }}"
-              key: username
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "summarize-db-secret-{{ .InstanceSlug }}"
-              key: password
         - name: POSTGRES_DB
           value: "postgres"
         - name: PGDATA
@@ -36,6 +41,9 @@ spec:
       volumeMounts:
         - mountPath: /var/lib/pgsql:z
           name: postgres-data
+        - mountPath: /etc/secret/summarize-db-secret
+          name: summarize-db-secret
+          readOnly: true
       livenessProbe:
         exec:
           command:
@@ -56,8 +64,3 @@ spec:
         periodSeconds: 5
         timeoutSeconds: 3
         failureThreshold: 3
-
-  volumes:
-    - name: postgres-data
-      persistentVolumeClaim:
-        claimName: "postgres-summarize-{{ .InstanceSlug }}"

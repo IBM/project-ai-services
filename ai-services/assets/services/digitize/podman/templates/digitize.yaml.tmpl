@@ -6,6 +6,9 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "digitize-db-secret-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
+    {{- if .Values.llm.apiKey }}
+    ai-services.io/secret: "vllm-secret-{{ .Values.llm.instanceSlug }}"
+    {{- end }}
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"
@@ -16,8 +19,13 @@ spec:
     - name: digitize-db-init
       image: "{{ .Values.digitize.image }}"
       command:
-        - "/var/venv/bin/python"
-        - "db/scripts/init_db.py"
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/digitize-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/digitize-db-secret/password)
+          exec /var/venv/bin/python db/scripts/init_db.py
       env:
         - name: POSTGRES_HOST
           value: "digitize-db-{{ .InstanceSlug }}"
@@ -25,16 +33,10 @@ spec:
           value: "5432"
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
-              key: username
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
-              key: password
+      volumeMounts:
+        - mountPath: /etc/secret/digitize-db-secret
+          name: digitize-db-secret
+          readOnly: true
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -62,18 +64,22 @@ spec:
     - name: backend-server
       image: "{{ .Values.digitize.image }}"
       command:
-        - "/var/venv/bin/python"
-        - "-m"
-        - "uvicorn"
-        - "app:app"
-        - "--host"
-        - "0.0.0.0"
-        - "--port"
-        - "4000"
-        - "--loop"
-        - "uvloop"
-        - "--http"
-        - "httptools"
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/digitize-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/digitize-db-secret/password)
+          export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
+          export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          {{- if .Values.llm.apiKey }}
+          export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+          {{- end }}
+          exec /var/venv/bin/python -m uvicorn app:app \
+            --host 0.0.0.0 \
+            --port 4000 \
+            --loop uvloop \
+            --http httptools
       ports:
         - containerPort: 4000
           name: http
@@ -97,16 +103,6 @@ spec:
           value: "5432"
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
-              key: username
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
-              key: password
         - name: DB_POOL_SIZE
           value: "5"
         - name: DB_MAX_OVERFLOW
@@ -133,29 +129,37 @@ spec:
           value: "RAG_DB"
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
-        - name: OPENSEARCH_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-              key: username
-        - name: OPENSEARCH_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
-        {{- if .Values.llm.apiKey }}
-        - name: LLM_API_KEY
-          value: "{{ .Values.llm.apiKey }}"
-        {{- end }}
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
+        - mountPath: /etc/secret/digitize-db-secret
+          name: digitize-db-secret
+          readOnly: true
+        - mountPath: /etc/secret/opensearch-secret
+          name: opensearch-secret
+          readOnly: true
+        {{- if .Values.llm.apiKey }}
+        - mountPath: /etc/secret/vllm-secret
+          name: vllm-secret
+          readOnly: true
+        {{- end }}
   restartPolicy: Always
   volumes:
     - name: cache
       persistentVolumeClaim:
         claimName: "digitize-cache-{{ .InstanceSlug }}"
+    - name: digitize-db-secret
+      secret:
+        secretName: "digitize-db-secret-{{ .InstanceSlug }}"
+    - name: opensearch-secret
+      secret:
+        secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+    {{- if .Values.llm.apiKey }}
+    - name: vllm-secret
+      secret:
+        secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
+    {{- end }}

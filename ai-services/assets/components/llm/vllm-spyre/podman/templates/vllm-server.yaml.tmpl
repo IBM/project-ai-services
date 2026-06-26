@@ -23,6 +23,11 @@ spec:
       hostPath:
         path: "{{ .BaseDir }}/models"
         type: Directory
+    {{- if .Values.apiKey }}
+    - name: vllm-secret
+      secret:
+        secretName: "vllm-secret-{{ .InstanceSlug }}"
+    {{- end }}
   containers:
     - name: llm
       image: "{{ .Values.image }}"
@@ -30,6 +35,9 @@ spec:
       args:
         - "-c"
         - |
+          {{- if .Values.apiKey }}
+          export VLLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+          {{- end }}
           /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
           -tp ${AIU_WORLD_SIZE} \
@@ -57,13 +65,6 @@ spec:
           value: "{{ .Values.maxBatchSize }}"
         - name: MASTER_PORT
           value: "12355"
-        {{- if .Values.apiKey }}
-        - name: VLLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: "vllm-secret-{{ .InstanceSlug }}"
-              key: apiKey
-        {{- end }}
         {{- /* Check if .env.llm exists and is a non-empty map */}}
         {{- with .env.llm }}
           {{- /* If it does, '.' (dot) is now scoped to .env.llm */}}
@@ -86,3 +87,8 @@ spec:
           readOnly: true
         - mountPath: /dev/shm
           name: dshm
+        {{- if .Values.apiKey }}
+        - mountPath: /etc/secret/vllm-secret
+          name: vllm-secret
+          readOnly: true
+        {{- end }}
