@@ -1096,7 +1096,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 
 			env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
 
-			logger.InfofCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
+			logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
 				spyreCount, containerName, podSpec.Name, pciAddressStr)
 		}
 	}
