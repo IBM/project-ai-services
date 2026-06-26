@@ -52,9 +52,9 @@ spec:
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
-          value: "32768"
+          value: "{{ .Values.maxModelLen }}"
         - name: MAX_BATCH_SIZE
-          value: "32"
+          value: "{{ .Values.maxBatchSize }}"
         - name: MASTER_PORT
           value: "12355"
         {{- if .Values.apiKey }}

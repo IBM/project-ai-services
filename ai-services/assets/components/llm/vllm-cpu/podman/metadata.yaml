@@ -8,5 +8,5 @@ podTemplateExecutions:
 # Resource requirements
 resources:
   cpu: 12
-  memory: 107374182400 # 100Gi in bytes
+  memory: 161061273600 # 150Gi in bytes
   storage: 53687091200 # 50Gi for model storage in bytes

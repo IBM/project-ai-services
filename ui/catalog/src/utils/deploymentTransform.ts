@@ -47,7 +47,9 @@ interface DeploymentService {
   catalog_id: string;
   version: string;
   components: DeploymentComponent[];
-  backend?: Record<string, unknown>;
+  params?: {
+    backend?: Record<string, unknown>;
+  };
 }
 
 export interface DeploymentPayload {
@@ -328,7 +330,9 @@ export function transformToDeploymentPayload(
 
     // Add backend configuration if service has service-level params
     if (serviceParams && Object.keys(serviceParams).length > 0) {
-      deploymentService.backend = serviceParams;
+      deploymentService.params = {
+        backend: serviceParams,
+      };
     }
 
     services.push(deploymentService);

@@ -466,7 +466,7 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 // For OpenShift, this is not yet implemented and returns empty values.
 func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
 	return &types.PodResources{
-		CPUCores:   0,
+		CPU:        0,
 		MemUsage:   0,
 		SpyreCards: []string{},
 	}, nil

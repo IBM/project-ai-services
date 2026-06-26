@@ -3,8 +3,8 @@ import { SERVICE_ENDPOINTS } from "@/constants/api-endpoints.constants";
 
 export interface ResourcesResponse {
   cpu: {
-    total_cores: number;
-    available_cores: number;
+    total_cpu: number;
+    available_cpu: number;
   };
   memory: {
     total_bytes: number;

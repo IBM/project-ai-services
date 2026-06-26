@@ -2,6 +2,7 @@ name: Check Makefile Version Bump
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'services/chatbot/**'
       - 'services/digitize/**'
