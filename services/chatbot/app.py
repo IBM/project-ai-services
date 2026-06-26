@@ -295,6 +295,25 @@ async def locked_stream(stream_g, perf_stat_dict):
     try:
         async for chunk in iterate_in_threadpool(stream_g):
             yield chunk
+    except Exception as e:
+        logging.error(f"Error in streaming response: {str(e)}", exc_info=True)
+        
+        # Determine error status code
+        status_code = 500  # Default to internal server error
+        if isinstance(e, HTTPException):
+            status_code = e.status_code
+        elif hasattr(e, 'status_code'):
+            status_code = getattr(e, 'status_code', 500)
+        
+        # Send error chunk with status information
+        error_chunk = {
+            'error': {
+                'status': status_code,
+                'type': 'stream_error'
+            }
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
     finally:
         perf_registry.add_metric(perf_stat_dict)
         concurrency_limiter.release()
@@ -326,38 +345,82 @@ async def locked_stream(stream_g, perf_stat_dict):
 - `X-Rephrased-Query`: Contains the rephrased query when conversation history is used (only if different from original)
 - `X-Request-ID`: Unique request identifier for tracking and metrics
 """,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "single_turn": {
+                            "summary": "Single-turn query",
+                            "description": "Simple query without conversation history",
+                            "value": {
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "What is artificial intelligence?"
+                                    }
+                                ],
+                                "max_tokens": 512,
+                                "temperature": 0.7,
+                                "stream": False
+                            }
+                        },
+                        "multi_turn": {
+                            "summary": "Multi-turn conversation",
+                            "description": "Query with conversation history for context-aware responses",
+                            "value": {
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "What is machine learning?"
+                                    },
+                                    {
+                                        "role": "assistant",
+                                        "content": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed."
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": "Can you give me some examples?"
+                                    }
+                                ],
+                                "max_tokens": 512,
+                                "temperature": 0.7,
+                                "stream": False
+                            }
+                        },
+                        "streaming": {
+                            "summary": "Streaming response",
+                            "description": "Request with streaming enabled for real-time token generation",
+                            "value": {
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "Explain neural networks in simple terms"
+                                    }
+                                ],
+                                "max_tokens": 512,
+                                "temperature": 0.7,
+                                "stream": True
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
     responses={
         200: {
             "description": "Successful Response",
             "content": {
                 "application/json": {
-                    "examples": {
-                        "single_turn": {
-                            "summary": "Single-turn response",
-                            "description": "Response to a standalone query without conversation history",
-                            "value": {
-                                "choices": [
-                                    {
-                                        "message": {
-                                            "content": "Based on the retrieved documents, artificial intelligence (AI) is the simulation of human intelligence processes by machines, especially computer systems. These processes include learning, reasoning, and self-correction."
-                                        }
-                                    }
-                                ]
+                    "example": {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Based on the retrieved documents, artificial intelligence (AI) is the simulation of human intelligence processes by machines, especially computer systems. These processes include learning, reasoning, and self-correction."
+                                }
                             }
-                        },
-                        "multi_turn": {
-                            "summary": "Multi-turn response",
-                            "description": "Response to a follow-up question with conversation context",
-                            "value": {
-                                "choices": [
-                                    {
-                                        "message": {
-                                            "content": "Some common examples of machine learning applications include: 1) Email spam filtering, 2) Image recognition and classification, 3) Recommendation systems (like Netflix or Amazon), 4) Voice assistants (Siri, Alexa), and 5) Autonomous vehicles."
-                                        }
-                                    }
-                                ]
-                            }
-                        }
+                        ]
                     }
                 },
                 "text/event-stream": {
@@ -365,13 +428,7 @@ async def locked_stream(stream_g, perf_stat_dict):
                         "type": "string",
                         "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n. Stream ends with data: [DONE]\\n\\n"
                     },
-                    "examples": {
-                        "streaming": {
-                            "summary": "Streaming response",
-                            "description": "Real-time token generation for immediate user feedback",
-                            "value": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents,"}}]}\n\ndata: {"choices":[{"delta":{"content":" artificial"}}]}\n\ndata: {"choices":[{"delta":{"content":" intelligence..."}}]}\n\ndata: [DONE]\n\n'
-                        }
-                    }
+                    "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents,"}}]}\n\ndata: {"choices":[{"delta":{"content":" artificial"}}]}\n\ndata: {"choices":[{"delta":{"content":" intelligence..."}}]}\n\ndata: [DONE]\n\n'
                 }
             }
         },
@@ -580,6 +637,16 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 return response_data
 
             APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
+        except HTTPException:
+            # Re-raise HTTPException to preserve status codes
+            raise
+        except Exception as e:
+            # For non-streaming requests, return error in chat response format
+            error_message = f"Error: {str(e)}"
+            logging.error(f"Error in non-streaming response: {error_message}", exc_info=True)
+            return ChatCompletionResponse(
+                choices=[ChatChoice(message=ChatMessage(content=error_message))]
+            )
         finally:
             # Release semaphore for non-streaming requests
             # For streaming requests, release is handled in locked_stream's finally block

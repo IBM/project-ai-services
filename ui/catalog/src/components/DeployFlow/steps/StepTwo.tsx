@@ -159,6 +159,19 @@ export const StepTwo: React.FC<StepProps> = ({
       const service = deployOptions.services.find((s) => s.id === serviceId);
       if (!service) return;
 
+      // Add service-level resources (the service application itself)
+      if (service.resources) {
+        const serviceKey = `service-${serviceId}`;
+        if (!uniqueProviders[serviceKey]) {
+          uniqueProviders[serviceKey] = {
+            cpu: service.resources.cpu || 0,
+            memory: service.resources.memory || 0,
+            storage: service.resources.storage || 0,
+            accelerators: { ...(service.resources.accelerators || {}) },
+          };
+        }
+      }
+
       // Iterate through all components in the service
       service.components.forEach((component) => {
         // Check if this is a global component (already counted above)
@@ -224,8 +237,8 @@ export const StepTwo: React.FC<StepProps> = ({
       });
     });
 
-    const memoryGB = Math.ceil(totalMemory / 1024 ** 3);
-    const storageGB = Math.ceil(totalStorage / 1024 ** 3);
+    const memoryGB = Math.round(totalMemory / 1024 ** 3);
+    const storageGB = Math.round(totalStorage / 1024 ** 3);
 
     return {
       cpu: totalCPU,

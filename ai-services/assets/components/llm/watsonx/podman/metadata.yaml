@@ -7,7 +7,7 @@ podTemplateExecutions:
 
 # Resource requirements
 resources:
-  cpu: 2
+  cpu: 1
   memory: 4294967296 # 4Gi in bytes
   storage: 0 # No persistent storage required (cloud-based service)
 

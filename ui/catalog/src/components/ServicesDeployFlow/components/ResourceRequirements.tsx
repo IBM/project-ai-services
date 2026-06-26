@@ -108,6 +108,19 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
       ([_serviceKey, serviceConfig]) => {
         if (!serviceConfig.enabled) return;
 
+        // Add service-level resources (the service application itself)
+        if (deployOptions.resources) {
+          const serviceResourceKey = `service-${_serviceKey}`;
+          if (!uniqueProviders[serviceResourceKey]) {
+            uniqueProviders[serviceResourceKey] = {
+              cpu: deployOptions.resources.cpu || 0,
+              memory: deployOptions.resources.memory || 0,
+              storage: deployOptions.resources.storage || 0,
+              accelerators: { ...(deployOptions.resources.accelerators || {}) },
+            };
+          }
+        }
+
         // Iterate through service-specific components dynamically
         Object.entries(serviceConfig.components).forEach(
           ([componentType, componentConfig]) => {
@@ -162,8 +175,8 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     });
 
     // Convert memory from bytes to GB for display
-    const memoryGB = Math.ceil(totalMemory / 1024 ** 3);
-    const storageGB = Math.ceil(totalStorage / 1024 ** 3);
+    const memoryGB = Math.round(totalMemory / 1024 ** 3);
+    const storageGB = Math.round(totalStorage / 1024 ** 3);
 
     return {
       cpu: totalCPU,
@@ -171,7 +184,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
       accelerators: totalAccelerators,
       storage: storageGB,
     };
-  }, [formData.services, deployOptions.components]);
+  }, [formData.services, deployOptions.components, deployOptions.resources]);
 
   // Format resources for display
   const resourceRequirements = useMemo((): ResourceItem[] => {

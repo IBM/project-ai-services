@@ -1116,9 +1116,6 @@ const docTemplate = `{
                 "component_type": {
                     "type": "string"
                 },
-                "instance_id": {
-                    "type": "string"
-                },
                 "params": {
                     "type": "object",
                     "additionalProperties": {}
