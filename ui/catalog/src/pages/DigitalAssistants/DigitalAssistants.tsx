@@ -553,15 +553,20 @@ const DigitalAssistantsPage = () => {
                                                 <TableCell>
                                                   {child.name}
                                                 </TableCell>
-                                                <TableCell>
-                                                  <StatusCell
-                                                    value={child.status}
-                                                    rowId={child.id}
-                                                    dispatch={dispatch}
-                                                  />
-                                                </TableCell>
-                                                <TableCell />
-                                                <TableCell />
+                                                {state.visibleColumns
+                                                  .status && (
+                                                  <TableCell>
+                                                    <StatusCell
+                                                      value={child.status}
+                                                      rowId={child.id}
+                                                      dispatch={dispatch}
+                                                    />
+                                                  </TableCell>
+                                                )}
+                                                {state.visibleColumns
+                                                  .uptime && <TableCell />}
+                                                {state.visibleColumns
+                                                  .messages && <TableCell />}
                                                 <TableCell />
                                               </TableRow>
                                             ),
@@ -575,7 +580,7 @@ const DigitalAssistantsPage = () => {
                             {noApplications && (
                               <NoDataEmptyState
                                 title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant, click Deploy."
+                                subtitle="To deploy a new digital assistant, click Deploy."
                                 className={styles.noDataContent}
                               />
                             )}
