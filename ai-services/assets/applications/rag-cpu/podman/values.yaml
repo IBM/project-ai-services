@@ -2,13 +2,13 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.45
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.46
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.20
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.21
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
@@ -102,7 +102,7 @@ litellm:
   # @description Enable LiteLLM proxy for remote LLM service. When true, uses LiteLLM with WatsonX; when false, uses local vLLM server. Default: false
   enable: false
   # @hidden
-  image: icr.io/ai-services-cicd/litellm:v1.89.3-0
+  image: icr.io/ai-services-cicd/litellm:v1.89.3-1
   # @description WatsonX API Key for LiteLLM integration. Required when litellm.enable is true.
   watsonxApiKey: ""
   # @description WatsonX Project ID for LiteLLM integration. Required when litellm.enable is true.
