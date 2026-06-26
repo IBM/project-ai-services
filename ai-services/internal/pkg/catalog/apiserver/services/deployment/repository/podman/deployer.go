@@ -110,7 +110,13 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	}
 
 	// Update application status to Deploying before starting deployment
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, "Deploying application"); err != nil {
+	deployingMsg := "Deploying service"
+	if plan.IsArchitecture {
+		// TODO: Hardcoding architecture name here, should be read from catalog
+		deployingMsg = "Deploying digital assistant"
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, deployingMsg); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
 	}
 
