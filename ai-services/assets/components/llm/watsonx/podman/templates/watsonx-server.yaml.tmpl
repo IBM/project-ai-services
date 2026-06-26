@@ -5,6 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "watsonx-secret-{{ .InstanceSlug }}"
+    ai-services.io/volume: "watsonx-secret-{{ .InstanceSlug }}"
 spec:
   restartPolicy: always
   volumes:

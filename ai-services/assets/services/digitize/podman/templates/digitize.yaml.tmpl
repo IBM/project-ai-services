@@ -4,11 +4,6 @@ metadata:
   name: "digitize-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    ai-services.io/secret: "digitize-db-secret-{{ .InstanceSlug }}"
-    ai-services.io/secret-skip-cleanup: "true"
-    {{- if .Values.llm.apiKey }}
-    ai-services.io/secret: "vllm-secret-{{ .Values.llm.instanceSlug }}"
-    {{- end }}
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"

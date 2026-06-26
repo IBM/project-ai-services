@@ -8,7 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-db-secret"
     ai-services.io/secret-skip-cleanup: "true"
-    ai-services.io/volume: "postgres-catalog"
+    ai-services.io/volume: "postgres-catalog,catalog-db-secret"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
     io.podman.annotations.pids-limit/postgresql: "4096"

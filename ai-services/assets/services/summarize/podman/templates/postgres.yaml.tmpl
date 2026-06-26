@@ -4,7 +4,9 @@ metadata:
   name: "summarize-db-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    ai-services.io/volume: "postgres-summarize-{{ .InstanceSlug }}"
+    ai-services.io/secret: "summarize-db-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "postgres-summarize-{{ .InstanceSlug }},summarize-db-secret-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.pids-limit/postgres: "4096"
 spec:

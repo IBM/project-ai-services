@@ -4,7 +4,9 @@ metadata:
   name: "digitize-db-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    ai-services.io/volume: "postgres-digitize-{{ .InstanceSlug }}"
+    ai-services.io/secret: "digitize-db-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "postgres-digitize-{{ .InstanceSlug }},digitize-db-secret-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.pids-limit/postgres: "4096"
 spec:

@@ -6,6 +6,7 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     {{- if .Values.apiKey }}
     ai-services.io/secret: "vllm-secret-{{ .InstanceSlug }}"
+    ai-services.io/volume: "vllm-secret-{{ .InstanceSlug }}"
     {{- end }}
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"

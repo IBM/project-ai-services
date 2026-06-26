@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret"
-    ai-services.io/volume: "podman-auth-secret"
+    ai-services.io/volume: "podman-auth-secret,catalog-secret"
   annotations:
     run.oci.keep_original_groups: "1"
     ai-services.io/routes: "8081:catalog-ui:ui, 8080:catalog-api:api"
