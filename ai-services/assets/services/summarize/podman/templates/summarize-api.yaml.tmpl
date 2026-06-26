@@ -77,6 +77,10 @@ spec:
           value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
         - name: LLM_MODEL
           value: "{{ .Values.llm.model }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.llm.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.llm.maxBatchSize }}"
         - name: LOG_LEVEL
           value: "{{ .Values.summarize.log_level }}"
       resources:

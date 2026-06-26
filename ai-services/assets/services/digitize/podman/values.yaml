@@ -1,11 +1,9 @@
 digitize:
-  port: ""
   image: icr.io/ai-services-cicd/digitize-service:v0.0.28
   log_level: "INFO"
   database: "digitize_metadata"
 
 digitizeUi:
-  port: ""
   image: icr.io/ai-services-cicd/digitize-ui:v0.0.25
 
 postgres:
