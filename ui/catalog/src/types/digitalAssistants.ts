@@ -85,6 +85,7 @@ export interface Service {
   version: string;
   schema?: string;
   components: Component[];
+  resources?: Resources;
 }
 
 export interface DeployOptionsResponse {
