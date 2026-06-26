@@ -104,45 +104,56 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     > = {};
 
     // Iterate through each enabled service
-    Object.entries(formData.services).forEach(
-      ([_serviceKey, serviceConfig]) => {
-        if (!serviceConfig.enabled) return;
+    Object.entries(formData.services).forEach(([serviceKey, serviceConfig]) => {
+      if (!serviceConfig.enabled) return;
 
-        // Iterate through service-specific components dynamically
-        Object.entries(serviceConfig.components).forEach(
-          ([componentType, componentConfig]) => {
-            const selectedProviderId = componentConfig.providerId;
+      // Add service-level resources (the service application itself)
+      if (deployOptions.resources) {
+        const serviceResourceKey = `service-${serviceKey}`;
+        if (!uniqueProviders[serviceResourceKey]) {
+          uniqueProviders[serviceResourceKey] = {
+            cpu: deployOptions.resources.cpu || 0,
+            memory: deployOptions.resources.memory || 0,
+            storage: deployOptions.resources.storage || 0,
+            accelerators: { ...(deployOptions.resources.accelerators || {}) },
+          };
+        }
+      }
 
-            if (!selectedProviderId) return;
+      // Iterate through service-specific components dynamically
+      Object.entries(serviceConfig.components).forEach(
+        ([componentType, componentConfig]) => {
+          const selectedProviderId = componentConfig.providerId;
 
-            // Find the component definition in deployOptions
-            const component = deployOptions.components.find(
-              (c) => c.type === componentType,
-            );
+          if (!selectedProviderId) return;
 
-            if (!component) return;
+          // Find the component definition in deployOptions
+          const component = deployOptions.components.find(
+            (c) => c.type === componentType,
+          );
 
-            const provider = component.providers.find(
-              (p) => p.id === selectedProviderId,
-            );
+          if (!component) return;
 
-            // Create unique key combining provider ID and component type
-            // This ensures vllm-cpu for embedding, reranker, and llm are counted separately
-            const uniqueKey = `${selectedProviderId}-${componentType}`;
+          const provider = component.providers.find(
+            (p) => p.id === selectedProviderId,
+          );
 
-            if (provider?.resources && !uniqueProviders[uniqueKey]) {
-              // First time seeing this provider-component combination - store its resources
-              uniqueProviders[uniqueKey] = {
-                cpu: provider.resources.cpu || 0,
-                memory: provider.resources.memory || 0,
-                storage: provider.resources.storage || 0,
-                accelerators: { ...(provider.resources.accelerators || {}) },
-              };
-            }
-          },
-        );
-      },
-    );
+          // Create unique key combining provider ID and component type
+          // This ensures vllm-cpu for embedding, reranker, and llm are counted separately
+          const uniqueKey = `${selectedProviderId}-${componentType}`;
+
+          if (provider?.resources && !uniqueProviders[uniqueKey]) {
+            // First time seeing this provider-component combination - store its resources
+            uniqueProviders[uniqueKey] = {
+              cpu: provider.resources.cpu || 0,
+              memory: provider.resources.memory || 0,
+              storage: provider.resources.storage || 0,
+              accelerators: { ...(provider.resources.accelerators || {}) },
+            };
+          }
+        },
+      );
+    });
 
     // Sum up resources from unique providers
     let totalCPU = 0;
@@ -162,8 +173,8 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     });
 
     // Convert memory from bytes to GB for display
-    const memoryGB = Math.ceil(totalMemory / 1024 ** 3);
-    const storageGB = Math.ceil(totalStorage / 1024 ** 3);
+    const memoryGB = Math.round(totalMemory / 1024 ** 3);
+    const storageGB = Math.round(totalStorage / 1024 ** 3);
 
     return {
       cpu: totalCPU,
