@@ -28,7 +28,7 @@ spec:
         - |
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_INITIAL_ADMIN_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
-          exec /usr/share/opensearch/bin/opensearch
+          exec /usr/share/opensearch/opensearch-docker-entrypoint.sh opensearch
       env:
         - name: "discovery.type"
           value: "single-node"
@@ -58,7 +58,7 @@ spec:
           command:
           - sh
           - -c
-          - curl -fk -u "$OPENSEARCH_USERNAME:$OPENSEARCH_INITIAL_ADMIN_PASSWORD" https://localhost:9200/_cluster/health
+          - curl -fk -u "$(cat /etc/secret/opensearch-secret/username):$(cat /etc/secret/opensearch-secret/password)" https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
         timeoutSeconds: 20
