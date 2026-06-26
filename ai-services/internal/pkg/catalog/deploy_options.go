@@ -86,11 +86,25 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 		return nil, err
 	}
 
+	// Load resources from runtime-specific metadata
+	var resources *types.Resources
+	runtimeMetadata, err := p.LoadServiceRuntimeMetadata(service.ID)
+	if err == nil && runtimeMetadata.Resources != nil {
+		// Convert RuntimeResources to types.Resources
+		resources = &types.Resources{
+			CPU:          runtimeMetadata.Resources.CPU,
+			Memory:       runtimeMetadata.Resources.Memory,
+			Storage:      runtimeMetadata.Resources.Storage,
+			Accelerators: runtimeMetadata.Resources.Accelerators,
+		}
+	}
+
 	deployOptionsService := &types.DeployOptionsService{
 		ID:         service.ID,
 		Name:       service.Name,
 		Version:    serviceVersion,
 		Components: components,
+		Resources:  resources,
 	}
 
 	// Only add schema if the service has non-empty schema properties
