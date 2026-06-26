@@ -3,6 +3,7 @@ package templates
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -181,7 +182,7 @@ func displayPropertiesRecursive(properties map[string]any, prefix string) {
 		}
 
 		propType, _ := prop["type"].(string)
-		description, _ := prop["description"].(string)
+		description := cleanDescription(prop["description"])
 
 		// If this is an object type with nested properties, recurse into it
 		if propType == "object" {
@@ -199,4 +200,21 @@ func displayPropertiesRecursive(properties map[string]any, prefix string) {
 			logger.Infof("  %s.%s: %s", prefix, paramName, description)
 		}
 	}
+}
+
+// cleanDescription normalises a JSON schema description for CLI display:
+// it collapses newlines to spaces and strips markdown bold markers.
+func cleanDescription(raw any) string {
+	s, _ := raw.(string)
+	if s == "" {
+		return ""
+	}
+
+	// Collapse newlines (and surrounding whitespace) to a single space
+	s = strings.Join(strings.Fields(s), " ")
+
+	// Strip markdown bold: **text** → text
+	s = strings.ReplaceAll(s, "**", "")
+
+	return s
 }

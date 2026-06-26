@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	experimentalTemplates bool
+	legacyTemplates bool
 )
 
 var templatesCmd = &cobra.Command{
@@ -27,26 +27,29 @@ var templatesCmd = &cobra.Command{
 	Short: "Lists the offered application templates and their supported parameters",
 	Long:  `Retrieves information about the offered application templates and their supported parameters`,
 	Example: `  For Podman:
-  # List all available application templates (Podman)
-  ai-services application templates --runtime podman
+	 # List all available application templates (Podman)
+	 ai-services application templates --runtime podman
 
-  # List parameters for a specific template (see subcommand)
-  ai-services application templates parameters --template digitize --runtime podman
-  
-  For OpenShift:
-  # List all available application templates (OpenShift)
-  ai-services application templates --runtime openshift
+	 # List parameters for a specific template (see subcommand)
+	 ai-services application templates parameters --template digitize --runtime podman
 
-  # List parameters for a specific template (see subcommand)
-  ai-services application templates parameters --template digitize --runtime openshift `,
+	 # List templates using legacy implementation
+	 ai-services application templates --legacy --runtime podman
+
+	 For OpenShift:
+	 # List all available application templates (OpenShift)
+	 ai-services application templates --runtime openshift
+
+	 # List parameters for a specific template (see subcommand)
+	 ai-services application templates parameters --template digitize --runtime openshift `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		// When experimentalTemplates is true and runtime is podman, use experimental catalog templates
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalTemplates && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-			// Use experimental catalog templates listing (architectures and services)
+		// When legacyTemplates is true and runtime is podman, use the older/stable code path
+		// For openshift runtime, always use the older/stable code path regardless of legacy flag
+		if !legacyTemplates && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+			// Use catalog templates listing (architectures and services)
 			return listCatalogTemplates(cmd)
 		}
 
@@ -106,7 +109,7 @@ var templatesCmd = &cobra.Command{
 }
 
 func init() {
-	templatesCmd.Flags().BoolVar(&experimentalTemplates, "experimental", false, "Include experimental application templates")
+	templatesCmd.Flags().BoolVar(&legacyTemplates, "legacy", false, "Use legacy application templates implementation")
 
 	// Add parameters subcommand
 	templatesCmd.AddCommand(appTemplates.NewParametersCmd())
