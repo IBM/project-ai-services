@@ -110,7 +110,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	}
 
 	// Update application status to Deploying before starting deployment
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, "Deploying application"); err != nil {
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, deployingStatusMessage(plan)); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
 	}
 
@@ -147,6 +147,15 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	logger.InfofCtx(ctx, "Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
+}
+
+// deployingStatusMessage returns the human-readable deploying status message based on deployment type.
+func deployingStatusMessage(plan *DeploymentPlan) string {
+	if plan.IsArchitecture {
+		return "Deploying digital assistant"
+	}
+
+	return "Deploying service"
 }
 
 // handleDeploymentStepError updates application status to Error and logs the failure.
@@ -1096,7 +1105,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 
 			env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
 
-			logger.InfofCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
+			logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
 				spyreCount, containerName, podSpec.Name, pciAddressStr)
 		}
 	}

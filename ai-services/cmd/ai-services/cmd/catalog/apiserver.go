@@ -51,7 +51,7 @@ func loadDBConfig() (db.Config, error) {
 func getOrGenerateSecretKey() (string, error) {
 	secretKey := os.Getenv("AUTH_JWT_SECRET")
 	if len(secretKey) == 0 {
-		fmt.Println("** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
+		logger.DebuglnCtx(context.Background(), "** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
 		byteSecretKey, err := auth.GenerateRandomSecretKey(defaultRandomSecretKeyLength)
 		if err != nil {
 			return "", err

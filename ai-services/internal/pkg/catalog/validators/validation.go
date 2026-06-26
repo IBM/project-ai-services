@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -63,7 +65,7 @@ func (v *ApplicationValidator) ValidateArchitectureDeployment(ctx context.Contex
 	if architecture.Version != req.Version {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Architecture '%s' version mismatch: requested '%s', available '%s'", req.CatalogID, req.Version, architecture.Version),
+			Message: fmt.Sprintf("Architecture '%s' version mismatch: requested '%s', available '%s'", architecture.Name, req.Version, architecture.Version),
 		}
 	}
 
@@ -220,7 +222,7 @@ func (v *ApplicationValidator) validateComponentsMatchDependencies(
 				Message: fmt.Sprintf(
 					"Component type '%s' is not supported by service '%s'",
 					component.ComponentType,
-					catalogService.ID,
+					catalogService.Name,
 				),
 			}
 		}
@@ -229,17 +231,8 @@ func (v *ApplicationValidator) validateComponentsMatchDependencies(
 	return nil
 }
 
-// validateServiceCore performs core validation for a service (existence, version, params, components).
-func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service apimodels.Service) error {
-	// Verify service exists in catalog
-	catalogService, err := v.provider.LoadService(service.CatalogID)
-	if err != nil {
-		return &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("Service '%s' not found in catalog", service.CatalogID),
-		}
-	}
-
+// validateServiceCore performs core validation for a service (version, params, components).
+func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service apimodels.Service, catalogService *types.Service) error {
 	// Validate service version
 	if err := v.ValidateServiceVersion(service.CatalogID, service.Version); err != nil {
 		return err
@@ -299,7 +292,7 @@ func (v *ApplicationValidator) ValidateServiceDeployment(ctx context.Context, re
 	if !catalogService.Standalone {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Service '%s' cannot be deployed standalone", req.CatalogID),
+			Message: fmt.Sprintf("Service '%s' cannot be deployed standalone", catalogService.Name),
 		}
 	}
 
@@ -307,7 +300,7 @@ func (v *ApplicationValidator) ValidateServiceDeployment(ctx context.Context, re
 	if len(req.Services) != 1 {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: "When deploying a service, services array must contain exactly one service",
+			Message: "Service deployment should have exactly one service",
 		}
 	}
 
@@ -320,26 +313,7 @@ func (v *ApplicationValidator) ValidateServiceDeployment(ctx context.Context, re
 	}
 
 	// Perform core service validation
-	if err := v.validateServiceCore(ctx, service); err != nil {
-		return err
-	}
-
-	// Validate component consistency
-	return ValidateComponentConsistency(service.Components)
-}
-
-// ValidateSingleServiceInArchitecture validates a single service within an architecture deployment.
-func (v *ApplicationValidator) ValidateSingleServiceInArchitecture(ctx context.Context, service apimodels.Service, validServiceIDs map[string]bool, architectureID string) error {
-	// Verify service is compatible with architecture
-	if !validServiceIDs[service.CatalogID] {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Service '%s' is not compatible with architecture '%s'", service.CatalogID, architectureID),
-		}
-	}
-
-	// Perform core service validation (existence, version, params, components)
-	return v.validateServiceCore(ctx, service)
+	return v.validateServiceCore(ctx, service, catalogService)
 }
 
 // ValidateServices validates all services in the request.
@@ -358,67 +332,106 @@ func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []
 		validServiceIDs[svcRef.ID] = true
 	}
 
-	// Collect all components from all services
-	allComponents := []apimodels.Component{}
+	// seenComponents accumulates the first occurrence of each component type/provider
+	// pair as services are validated, for cross-service consistency checking.
+	seenComponents := make(map[string]seenComponent)
 
 	for _, service := range services {
-		// Validate single service
-		if err := v.ValidateSingleServiceInArchitecture(ctx, service, validServiceIDs, architecture.ID); err != nil {
+		// Load service once — used for name in messages and passed into validation
+		catalogService, err := v.provider.LoadService(service.CatalogID)
+		if err != nil {
+			return &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: fmt.Sprintf("Service '%s' not found in catalog", service.CatalogID),
+			}
+		}
+
+		// Verify service is compatible with architecture
+		if !validServiceIDs[service.CatalogID] {
+			return &ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("Service '%s' is not compatible with architecture '%s'", catalogService.Name, architecture.Name),
+			}
+		}
+
+		if err := v.validateServiceCore(ctx, service, catalogService); err != nil {
 			return err
 		}
 
-		// Collect components for consistency validation
-		allComponents = append(allComponents, service.Components...)
-	}
-
-	// Validate component consistency across all services
-	return ValidateComponentConsistency(allComponents)
-}
-
-// ValidateComponentConsistency validates that the same component (type + provider)
-// has identical parameters across all occurrences.
-func ValidateComponentConsistency(components []apimodels.Component) error {
-	componentKeyToHash := make(map[string]string)
-	componentKeyToFirst := make(map[string]apimodels.Component)
-
-	for _, component := range components {
-		// Create unique key for this component type + provider combination
-		componentKey := fmt.Sprintf("%s:%s", component.ComponentType, component.ProviderID)
-
-		// Calculate hash
-		componentHash := utils.CalculateComponentHash(
-			component.ComponentType,
-			component.ProviderID,
-			component.Params,
-		)
-
-		// Check if this component type+provider was seen before
-		if existingHash, exists := componentKeyToHash[componentKey]; exists {
-			if existingHash != componentHash {
-				// Same component type+provider, but different parameters
-				firstComp := componentKeyToFirst[componentKey]
-
-				return &ValidationError{
-					Code: http.StatusBadRequest,
-					Message: fmt.Sprintf(
-						"Component parameter mismatch: component '%s' with provider '%s' has inconsistent parameters. "+
-							"All instances of the same component must have identical parameters. "+
-							"First instance: %v, Conflicting instance: %v",
-						component.ComponentType,
-						component.ProviderID,
-						firstComp.Params,
-						component.Params,
-					),
-				}
-			}
-		} else {
-			// First occurrence of this component type+provider combination
-			componentKeyToHash[componentKey] = componentHash
-			componentKeyToFirst[componentKey] = component
+		if err := checkComponentConsistency(catalogService.Name, service, seenComponents); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// seenComponent records the first occurrence of a component type/provider pair
+// across architecture services, for cross-service parameter consistency checking.
+type seenComponent struct {
+	hash        string
+	params      map[string]any
+	serviceName string
+}
+
+// checkComponentConsistency checks each component in service against seen,
+// returning an error if any component type/provider pair has mismatched parameters.
+// It updates seen with first-seen entries in place.
+func checkComponentConsistency(serviceName string, service apimodels.Service, seen map[string]seenComponent) error {
+	for _, component := range service.Components {
+		key := fmt.Sprintf("%s/%s", component.ComponentType, component.ProviderID)
+		hash := utils.CalculateComponentHash(component.ComponentType, component.ProviderID, component.Params)
+
+		if first, exists := seen[key]; exists {
+			if first.hash != hash {
+				return &ValidationError{
+					Code: http.StatusBadRequest,
+					Message: fmt.Sprintf(
+						"Parameter mismatch between service '%s' and service '%s': "+
+							"Different values given for %s",
+						first.serviceName,
+						serviceName,
+						formatParamKeys(diffParamKeys(first.params, component.Params)),
+					),
+				}
+			}
+		} else {
+			seen[key] = seenComponent{hash: hash, params: component.Params, serviceName: serviceName}
+		}
+	}
+
+	return nil
+}
+
+// diffParamKeys returns the sorted list of parameter keys whose values differ between a and b,
+// including keys present in one map but not the other.
+func diffParamKeys(a, b map[string]any) []string {
+	var keys []string
+
+	for k, va := range a {
+		if vb, ok := b[k]; !ok || fmt.Sprintf("%v", va) != fmt.Sprintf("%v", vb) {
+			keys = append(keys, k)
+		}
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+
+	sort.Strings(keys)
+
+	return keys
+}
+
+// formatParamKeys wraps each key in single quotes and joins them with commas.
+func formatParamKeys(keys []string) string {
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = fmt.Sprintf("'%s'", k)
+	}
+
+	return strings.Join(quoted, ", ")
 }
 
 // Made with Bob
