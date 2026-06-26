@@ -86,7 +86,7 @@ about:
         ctaLabel: "View source code"
         url: "https://github.com/IBM/project-ai-services"
       - image:
-          source: "images/ragArchDiagram.webp"
+          source: "images/ragArchDiagram.png"
 
   - title: "Demos and prototypes"
     sections:

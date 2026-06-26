@@ -992,7 +992,7 @@ func collectPodResources(
 	}
 
 	// Accumulate used resources
-	totals.usedCPU += resources.CPUCores
+	totals.usedCPU += resources.CPU
 	totals.usedMemory += resources.MemUsage
 
 	return nil
@@ -1015,8 +1015,8 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 	// Build response with total and used resources
 	return &types.ApplicationResourcesResponse{
 		CPU: types.ApplicationCPUInfo{
-			TotalCores: float64(totals.allocatedCPU),
-			UsedCores:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
+			Total: float64(totals.allocatedCPU),
+			Used:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
 		},
 		Memory: types.ApplicationMemInfo{
 			TotalBytes: int64(totals.allocatedMemory),

@@ -10,7 +10,7 @@ import (
 func GetDigitizeAPIURL(appDetails *catalogTypes.Application) (string, error) {
 	// Search through services to find digitize service
 	for _, service := range appDetails.Services {
-		if service.Type == "digitize" {
+		if service.CatalogID == "digitize" {
 			// Look for API endpoint
 			for _, endpoint := range service.Endpoints {
 				if endpointType, ok := endpoint["type"].(string); ok && endpointType == "api" {

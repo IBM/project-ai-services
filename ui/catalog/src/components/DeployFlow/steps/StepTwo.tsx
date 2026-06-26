@@ -252,7 +252,7 @@ export const StepTwo: React.FC<StepProps> = ({
     resourceItems.push({
       label: "Processors",
       required: calculateRequiredResources.cpu.toString(),
-      available: Math.floor(resources.cpu.available_cores).toString(),
+      available: Math.floor(resources.cpu.available_cpu).toString(),
       unit: "vCPUs",
       type: "cpu",
     });

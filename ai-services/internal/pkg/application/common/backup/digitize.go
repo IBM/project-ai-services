@@ -3,6 +3,7 @@ package common
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,10 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 const (
@@ -69,6 +73,25 @@ type DigitizeBackupClient struct {
 // NewDigitizeBackupClient creates a new digitize backup client.
 func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 	client := resty.New().SetBaseURL(serviceURL)
+
+	// Check runtime type
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+
+	switch runtimeType {
+	case runtimeTypes.RuntimeTypeOpenShift:
+		// For OpenShift, always skip TLS verification
+		client.SetTLSClientConfig(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+	case runtimeTypes.RuntimeTypePodman:
+		// For Podman, check the insecure flag from catalog credentials
+		creds, err := config.Load()
+		if err == nil && creds.Insecure {
+			client.SetTLSClientConfig(&tls.Config{
+				InsecureSkipVerify: true,
+			})
+		}
+	}
 
 	return &DigitizeBackupClient{
 		client: client,

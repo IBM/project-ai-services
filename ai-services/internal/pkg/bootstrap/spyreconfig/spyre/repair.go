@@ -148,9 +148,8 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 
 	const expectedRuleCount = 2
 	expectedRules := make([]string, 0, expectedRuleCount)
-	expectedRules = append(expectedRules, `SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
-	expectedRules = append(expectedRules, `KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
-
+	expectedRules = append(expectedRules, `SUBSYSTEM=="vfio", ACTION=="add|change", GROUP="sentient", MODE="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
+	expectedRules = append(expectedRules, `KERNEL=="vfio", SUBSYSTEM=="misc", ACTION=="add|change", GROUP="sentient", MODE="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
 	// Read existing file if it exists.
 	var updatedLines []string
 	if utils.FileExists(confCheck.FilePath) {
@@ -182,7 +181,13 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 
 // isVFIORuleRedundant checks if a udev rule is redundant.
 func isVFIORuleRedundant(rule string) bool {
-	if rule == "" || !strings.Contains(rule, `SUBSYSTEM=="vfio"`) {
+	if rule == "" {
+		return false
+	}
+
+	isVFIOSubsystem := strings.Contains(rule, `SUBSYSTEM=="vfio"`)
+	isVFIOKernel := strings.Contains(rule, `KERNEL=="vfio"`)
+	if !isVFIOSubsystem && !isVFIOKernel {
 		return false
 	}
 
@@ -199,7 +204,7 @@ func isVFIORuleRedundant(rule string) bool {
 		hasMode = hasMode || strings.Contains(part, "MODE")
 	}
 
-	return len(parts) <= 3 && (len(parts) == 1 || hasGroup || hasMode)
+	return len(parts) == 1 || hasGroup || hasMode
 }
 
 // fixVFIOPCIConf repairs VFIO PCI module configuration.

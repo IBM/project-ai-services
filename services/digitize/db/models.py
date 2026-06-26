@@ -65,7 +65,6 @@ class Job(Base):
     documents: Mapped[List["Document"]] = relationship(
         "Document",
         back_populates="job",
-        cascade="all, delete-orphan",
         lazy="select"
     )
 
@@ -100,7 +99,7 @@ class Document(Base):
     # Foreign key to job
     job_id: Mapped[str | None] = mapped_column(
         String(255),
-        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        ForeignKey("jobs.job_id", ondelete="SET NULL"),
         nullable=True
     )
 

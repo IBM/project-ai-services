@@ -6,6 +6,7 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "watsonx-secret-{{ .InstanceSlug }}"
 spec:
+  restartPolicy: always
   containers:
     - name: litellm
       image: "{{ .Values.image }}"
