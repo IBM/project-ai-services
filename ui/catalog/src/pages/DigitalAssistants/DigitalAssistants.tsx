@@ -553,13 +553,16 @@ const DigitalAssistantsPage = () => {
                                                 <TableCell>
                                                   {child.name}
                                                 </TableCell>
-                                                <TableCell>
-                                                  <StatusCell
-                                                    value={child.status}
-                                                    rowId={child.id}
-                                                    dispatch={dispatch}
-                                                  />
-                                                </TableCell>
+                                                {state.visibleColumns
+                                                  .status && (
+                                                  <TableCell>
+                                                    <StatusCell
+                                                      value={child.status}
+                                                      rowId={child.id}
+                                                      dispatch={dispatch}
+                                                    />
+                                                  </TableCell>
+                                                )}
                                                 {state.visibleColumns
                                                   .uptime && <TableCell />}
                                                 {state.visibleColumns
