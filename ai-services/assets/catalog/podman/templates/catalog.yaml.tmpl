@@ -20,9 +20,8 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
+          set -e
           export DB_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
-
-          set -e  # Exit immediately if any command fails
 
           max_retries=5
           retry_delay=5
