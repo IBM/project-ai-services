@@ -219,6 +219,10 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 }
 
 func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID, userID, newName string) (*types.Application, error) {
+	if err := s.validator.ValidateAppName(newName); err != nil {
+		return nil, err
+	}
+
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -236,13 +240,9 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 		}
 	}
 
-	if err := s.validator.ValidateAppName(newName); err != nil {
-		return nil, err
-	}
-
 	err = s.appRepo.UpdateDeploymentName(ctx, id, newName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update application name: %w", err)
+		return nil, fmt.Errorf("failed to update name: %w", err)
 	}
 	updatedApp, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
@@ -268,6 +268,10 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 // for deployment execution, returning 202 Accepted immediately.
 func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
 	// Phase 1: Validate request and check for duplicate application name
+	if err := s.validator.ValidateAppName(req.Name); err != nil {
+		return nil, err
+	}
+
 	existingApp, err := s.appRepo.GetByName(ctx, req.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check for existing application: %w", err)
@@ -281,10 +285,6 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	}
 
 	// Phase 2: Validate request payload
-	if err := s.validator.ValidateAppName(req.Name); err != nil {
-		return nil, err
-	}
-
 	if err := s.validator.ValidateDeploymentRequest(ctx, req); err != nil {
 		return nil, err
 	}

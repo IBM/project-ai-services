@@ -58,7 +58,7 @@ func (v *ApplicationValidator) ValidateAppName(appName string) error {
 	if len(appName) < minAppNameLength || len(appName) > maxAppNameLength {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("application name must be between %d and %d characters", minAppNameLength, maxAppNameLength),
+			Message: fmt.Sprintf("name must be between %d and %d characters", minAppNameLength, maxAppNameLength),
 		}
 	}
 
