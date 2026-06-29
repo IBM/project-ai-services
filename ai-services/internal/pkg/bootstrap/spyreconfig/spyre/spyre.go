@@ -340,36 +340,45 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 	return fileGid == expectedGid && utils.IsReadWriteToOwnerGroupUsers(path), nil
 }
 
-// checkPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
+// checkPodmanServiceSupplementaryGroups validates that both podman.service and podman-restart.service
+// have SupplementaryGroups=sentient configured.
 //
 // Background:
 // When Podman commands are executed directly from the shell, they inherit the user's supplementary groups,
 // including the 'sentient' group which provides access to VFIO devices for Spyre cards. However, when Podman
-// is invoked via the Podman socket (e.g., through systemd or remote API calls), the service runs with its own
-// process context and does not automatically inherit the user's supplementary groups.
+// is invoked via the Podman socket or podman-restart.service (e.g., at system boot), the services run with
+// their own process context and do not automatically inherit the user's supplementary groups.
 //
-// Without the 'sentient' group in SupplementaryGroups, containers started via the socket will not have the
-// necessary permissions to access VFIO devices (/dev/vfio/*), causing failures when trying to use Spyre cards.
+// Without the 'sentient' group in SupplementaryGroups, containers started at boot via podman-restart.service
+// will not have the necessary permissions to access VFIO devices (/dev/vfio/*), causing failures when trying
+// to use Spyre cards after a system reboot.
 //
-// This check ensures that the podman.service systemd unit is configured with:
+// This check ensures that both podman.service and podman-restart.service systemd units are configured with:
 //
 //	SupplementaryGroups=sentient
 //
-// in the [Service] section, allowing socket-based Podman operations to access VFIO devices properly.
+// in the [Service] section.
 func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
-	serviceName := "podman.service"
-	confCheck := check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
+	// Check both services; fail fast if either is missing the configuration.
+	var confCheck *check.ConfigurationFileCheck
+	for _, serviceName := range []string{"podman.service", "podman-restart.service"} {
+		confCheck = check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
 
-	stdout, err := getServiceConfiguration(serviceName)
-	if err != nil {
-		confCheck.AddAttribute("SupplementaryGroups=sentient", false, "", "SupplementaryGroups=sentient")
-		confCheck.SetStatus(false)
+		stdout, err := getServiceConfiguration(serviceName)
+		if err != nil {
+			confCheck.AddAttribute("SupplementaryGroups=sentient", false, "", "SupplementaryGroups=sentient")
+			confCheck.SetStatus(false)
 
-		return confCheck
+			return confCheck
+		}
+
+		found, correctValue := checkSupplementaryGroupsInConfig(stdout)
+		setCheckResult(confCheck, found, correctValue)
+
+		if !confCheck.GetStatus() {
+			return confCheck
+		}
 	}
-
-	found, correctValue := checkSupplementaryGroupsInConfig(stdout)
-	setCheckResult(confCheck, found, correctValue)
 
 	return confCheck
 }
