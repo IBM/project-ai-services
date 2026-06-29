@@ -6,6 +6,7 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     {{- if .Values.apiKey }}
     ai-services.io/secret: "vllm-secret-{{ .InstanceSlug }}"
+    ai-services.io/volume: "vllm-secret-{{ .InstanceSlug }}"
     {{- end }}
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
@@ -16,17 +17,26 @@ spec:
       hostPath:
         path: "{{ .BaseDir }}/models"
         type: Directory
+    {{- if .Values.apiKey }}
+    - name: vllm-secret
+      secret:
+        secretName: "vllm-secret-{{ .InstanceSlug }}"
+    {{- end }}
   containers:
     - name: llm
       image: "{{ .Values.image }}"
+      command: ["/bin/sh"]
       args:
-      - --model
-      - /models/{{ .Values.model }}
-      - --served-model-name
-      - {{ .Values.model }}
-      - --max-num-batched-tokens={{ .Values.maxNumBatchedTokens }}
-      - --max-model-len={{ .Values.maxModelLen }}
-      - --port=8000
+        - "-c"
+        - |
+          {{- if .Values.apiKey }}
+          export VLLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+          {{- end }}
+          exec vllm serve /models/{{ .Values.model }} \
+            --served-model-name {{ .Values.model }} \
+            --max-num-batched-tokens={{ .Values.maxNumBatchedTokens }} \
+            --max-model-len={{ .Values.maxModelLen }} \
+            --port=8000
       livenessProbe:
         httpGet:
           path: /health
@@ -40,13 +50,6 @@ spec:
         value: auto
       - name: VLLM_CPU_KVCACHE_SPACE
         value: "32"
-      {{- if .Values.apiKey }}
-      - name: VLLM_API_KEY
-        valueFrom:
-          secretKeyRef:
-            name: "vllm-secret-{{ .InstanceSlug }}"
-            key: apiKey
-      {{- end }}
       resources:
         requests:
           memory: "150Gi"
@@ -58,3 +61,8 @@ spec:
         - mountPath: /models:z
           name: models
           readOnly: true
+        {{- if .Values.apiKey }}
+        - mountPath: /etc/secret/vllm-secret
+          name: vllm-secret
+          readOnly: true
+        {{- end }}

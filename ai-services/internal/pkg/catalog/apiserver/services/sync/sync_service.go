@@ -696,11 +696,19 @@ func (s *SyncService) extractResourceLabelsFromPodSpec(podSpec *modelpkg.PodSpec
 	}
 
 	if secretLabel, ok := podSpec.Labels["ai-services.io/secret"]; ok && secretLabel != "" {
-		counts.SecretNames = append(counts.SecretNames, secretLabel)
+		for name := range strings.SplitSeq(secretLabel, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				counts.SecretNames = append(counts.SecretNames, name)
+			}
+		}
 	}
 
 	if volumeLabel, ok := podSpec.Labels["ai-services.io/volume"]; ok && volumeLabel != "" {
-		counts.VolumeNames = append(counts.VolumeNames, volumeLabel)
+		for name := range strings.SplitSeq(volumeLabel, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				counts.VolumeNames = append(counts.VolumeNames, name)
+			}
+		}
 	}
 }
 

@@ -8,7 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-db-secret"
     ai-services.io/secret-skip-cleanup: "true"
-    ai-services.io/volume: "postgres-catalog"
+    ai-services.io/volume: "postgres-catalog,catalog-db-secret"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
     io.podman.annotations.pids-limit/postgresql: "4096"
@@ -17,17 +17,19 @@ spec:
   containers:
   - name: postgresql
     image: "{{ .Values.db.image }}"
+    command:
+      - "/bin/sh"
+      - "-c"
+    args:
+      - |
+        export POSTGRES_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
+        exec docker-entrypoint.sh postgres
     ports:
     - containerPort: 5432
       hostPort: {{ .Values.db.port }}
     env:
     - name: POSTGRES_USER
       value: "{{ .Values.db.user }}"
-    - name: POSTGRES_PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: catalog-db-secret
-          key: db-password
     - name: POSTGRES_DB
       value: "{{ .Values.db.database }}"
     - name: PGDATA
@@ -38,6 +40,9 @@ spec:
     volumeMounts:
     - name: postgres-data
       mountPath: /var/lib/pgsql:z
+    - name: catalog-db-secret
+      mountPath: /etc/secret/catalog-db-secret
+      readOnly: true
     livenessProbe:
       exec:
         command:
@@ -67,3 +72,6 @@ spec:
   - name: postgres-data
     persistentVolumeClaim:
       claimName: "postgres-catalog"
+  - name: catalog-db-secret
+    secret:
+      secretName: catalog-db-secret

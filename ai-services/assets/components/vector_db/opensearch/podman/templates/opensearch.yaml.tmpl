@@ -6,27 +6,32 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "opensearch-secret-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
-    ai-services.io/volume: "opensearch-{{ .InstanceSlug }}"
+    ai-services.io/volume: "opensearch-{{ .InstanceSlug }},opensearch-secret-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
   restartPolicy: always
+  volumes:
+    - name: opensearch-data
+      persistentVolumeClaim:
+        claimName: "opensearch-{{ .InstanceSlug }}"
+    - name: opensearch-secret
+      secret:
+        secretName: "opensearch-secret-{{ .InstanceSlug }}"
   containers:
     - name: opensearch
       image: "{{ .Values.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
+          export OPENSEARCH_INITIAL_ADMIN_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          exec /usr/share/opensearch/opensearch-docker-entrypoint.sh opensearch
       env:
         - name: "discovery.type"
           value: "single-node"
-        - name: OPENSEARCH_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .InstanceSlug }}"
-              key: username
-        - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .InstanceSlug }}"
-              key: password
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
       ports:
@@ -45,17 +50,16 @@ spec:
       volumeMounts:
         - mountPath: /usr/share/opensearch/data:z
           name: opensearch-data
+        - mountPath: /etc/secret/opensearch-secret
+          name: opensearch-secret
+          readOnly: true
       livenessProbe:
         exec:
           command:
           - sh
           - -c
-          - curl -fk -u "$OPENSEARCH_USERNAME:$OPENSEARCH_INITIAL_ADMIN_PASSWORD" https://localhost:9200/_cluster/health
+          - curl -fk -u "$(cat /etc/secret/opensearch-secret/username):$(cat /etc/secret/opensearch-secret/password)" https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
         timeoutSeconds: 20
         failureThreshold: 5
-  volumes:
-    - name: opensearch-data
-      persistentVolumeClaim:
-        claimName: "opensearch-{{ .InstanceSlug }}"
