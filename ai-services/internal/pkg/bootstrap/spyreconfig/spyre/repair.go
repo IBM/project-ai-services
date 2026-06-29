@@ -478,17 +478,20 @@ func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) 
 }
 
 func createPodmanServiceDropIn() error {
-	dropInDir := "/etc/systemd/system/podman.service.d"
-	if err := os.MkdirAll(dropInDir, dirPermissions); err != nil {
-		return err
+	dropInContent := "[Service]\nSupplementaryGroups=sentient\n"
+
+	for _, svc := range []string{"podman.service", "podman-restart.service"} {
+		dropInDir := "/etc/systemd/system/" + svc + ".d"
+		if err := os.MkdirAll(dropInDir, dirPermissions); err != nil {
+			return err
+		}
+
+		if err := utils.WriteToFile(dropInDir+"/override.conf", dropInContent); err != nil {
+			return err
+		}
 	}
 
-	dropInFile := dropInDir + "/override.conf"
-	dropInContent := `[Service]
-SupplementaryGroups=sentient
-`
-
-	return utils.WriteToFile(dropInFile, dropInContent)
+	return nil
 }
 
 func reloadAndRestartPodmanServices() error {
@@ -502,24 +505,15 @@ func reloadAndRestartPodmanServices() error {
 		return err
 	}
 
-	// Restart podman service
-	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.service")
-	if err != nil || exitCode != 0 {
-		if err == nil {
-			err = os.ErrInvalid
+	for _, svc := range []string{"podman.service", "podman.socket", "podman-restart.service"} {
+		exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", svc)
+		if err != nil || exitCode != 0 {
+			if err == nil {
+				err = os.ErrInvalid
+			}
+
+			return err
 		}
-
-		return err
-	}
-
-	// Restart podman socket
-	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.socket")
-	if err != nil || exitCode != 0 {
-		if err == nil {
-			err = os.ErrInvalid
-		}
-
-		return err
 	}
 
 	return nil
