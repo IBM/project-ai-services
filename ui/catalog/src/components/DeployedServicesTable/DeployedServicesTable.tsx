@@ -106,15 +106,9 @@ const DeployedServicesTable = ({
 }: DeployedServicesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-  // Zustand store for deployed services caching and services data
-  const {
-    deployedServices,
-    setDeployedServices,
-    setDeployedServicesLoading,
-    setDeployedServicesError,
-    isDeployedServicesStale,
-    services,
-  } = useServiceDeployStore();
+  // Zustand store for services data
+  const { setDeployedServicesLoading, setDeployedServicesError, services } =
+    useServiceDeployStore();
 
   // Generate dynamic service filter options from backend services
   // Only show services where standalone === true
@@ -150,41 +144,10 @@ const DeployedServicesTable = ({
   // Fetch deployed services data
   const fetchDeployedServices = useCallback(
     async (
-      force = false,
       page = state.page,
       pageSize = state.pageSize,
       selectedServices = state.selectedServices,
     ) => {
-      // Skip if cache is fresh and not forcing refresh (only for page 1, no filter active)
-      if (
-        !force &&
-        page === 1 &&
-        selectedServices.length === 0 &&
-        !isDeployedServicesStale()
-      ) {
-        const cachedServices = deployedServices;
-        if (cachedServices.length > 0) {
-          // Use cached data
-          dispatch({
-            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA,
-            payload: transformDeployedServices(
-              cachedServices as ApplicationApiResponse[],
-            ),
-          });
-          dispatch({
-            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS,
-            payload: cachedServices.length,
-          });
-          // Reset loading state when using cached data
-          dispatch({
-            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
-            payload: false,
-          });
-          setDeployedServicesLoading(false);
-          return;
-        }
-      }
-
       setDeployedServicesLoading(true);
       dispatch({
         type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
@@ -200,9 +163,7 @@ const DeployedServicesTable = ({
           `${APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES}&page=${page}&page_size=${pageSize}${catalogIdParam}`,
         );
 
-        // Store raw data in Zustand
         const rawData = response.data?.data || [];
-        setDeployedServices(rawData);
 
         // Capture server-side total so Pagination knows the real count
         const totalItems =
@@ -220,7 +181,7 @@ const DeployedServicesTable = ({
             type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
             payload: false,
           });
-          fetchDeployedServices(true, totalPages, pageSize);
+          fetchDeployedServices(totalPages, pageSize);
           return;
         }
 
@@ -257,9 +218,6 @@ const DeployedServicesTable = ({
       state.page,
       state.pageSize,
       state.selectedServices,
-      deployedServices,
-      isDeployedServicesStale,
-      setDeployedServices,
       setDeployedServicesError,
       setDeployedServicesLoading,
     ],
@@ -274,14 +232,14 @@ const DeployedServicesTable = ({
     // On mount: use cache if fresh (force = false)
     if (!hasFetchedRef.current) {
       hasFetchedRef.current = true;
-      fetchDeployedServices(false);
+      fetchDeployedServices();
       return;
     }
 
     // On refreshTrigger change: force refresh to get latest data
     if (refreshTrigger !== prevRefreshTriggerRef.current) {
       prevRefreshTriggerRef.current = refreshTrigger;
-      fetchDeployedServices(true);
+      fetchDeployedServices();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTrigger]);
@@ -290,7 +248,7 @@ const DeployedServicesTable = ({
   useEffect(() => {
     if (state.rowsData.length > 0) {
       const intervalId = setInterval(() => {
-        fetchDeployedServices(true);
+        fetchDeployedServices();
       }, 120000);
       return () => clearInterval(intervalId);
     }
@@ -404,7 +362,6 @@ const DeployedServicesTable = ({
   const downloadCSV = async () => {
     const name = state.csvFileName.trim();
 
-    // Validate filename before closing modal
     if (!name) {
       dispatch({
         type: ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORT_ERROR,
@@ -421,21 +378,34 @@ const DeployedServicesTable = ({
       return;
     }
 
-    // Close modal immediately
-    dispatch({ type: ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG });
+    // Show exporting state on modal button
+    dispatch({
+      type: ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING,
+      payload: true,
+    });
 
     try {
-      // Fetch up to 100 rows (API max), respecting active service filter
       const catalogIdParam =
         state.selectedServices.length > 0
           ? `&catalog_id=${state.selectedServices[0]}`
           : "";
-      const response = await api.get(
-        `${APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES}&page=1&page_size=100${catalogIdParam}`,
-      );
-      const allRows = transformDeployedServices(
-        response.data?.data || [],
-      ).filter((row) => {
+
+      // Fetch all pages sequentially until has_next is false
+      let currentPage = 1;
+      let hasNext = true;
+      const allData: ApplicationApiResponse[] = [];
+
+      while (hasNext) {
+        const response = await api.get(
+          `${APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES}&page=${currentPage}&page_size=100${catalogIdParam}`,
+        );
+        const pageData = response.data?.data || [];
+        allData.push(...pageData);
+        hasNext = response.data?.pagination?.has_next ?? false;
+        currentPage++;
+      }
+
+      const allRows = transformDeployedServices(allData).filter((row) => {
         if (!state.search) return true;
         return [row.name, row.status, row.uptime, row.messages, row.service]
           .join(" ")
@@ -443,7 +413,6 @@ const DeployedServicesTable = ({
           .includes(state.search.toLowerCase());
       });
 
-      // Only export visible columns
       const visibleHeaders = HEADERS.filter(
         (h) =>
           h.key !== "actions" &&
@@ -456,6 +425,7 @@ const DeployedServicesTable = ({
         name,
       );
 
+      dispatch({ type: ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG });
       dispatch({
         type: ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST,
         payload: {
@@ -470,6 +440,11 @@ const DeployedServicesTable = ({
           message: "Failed to fetch data for export",
           kind: "error",
         },
+      });
+    } finally {
+      dispatch({
+        type: ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING,
+        payload: false,
       });
     }
   };
@@ -583,7 +558,7 @@ const DeployedServicesTable = ({
                             renderIcon={Renew}
                             iconDescription="Refresh"
                             size="lg"
-                            onClick={() => fetchDeployedServices(true)}
+                            onClick={() => fetchDeployedServices()}
                           />
                           <OverflowMenu
                             renderIcon={Filter}
@@ -617,7 +592,6 @@ const DeployedServicesTable = ({
                                     payload: value,
                                   });
                                   fetchDeployedServices(
-                                    true,
                                     1,
                                     state.pageSize,
                                     newSelected,
@@ -642,7 +616,6 @@ const DeployedServicesTable = ({
                                       type: ACTION_TYPES.DEPLOYED_SERVICES_RESET_SERVICE_FILTER,
                                     });
                                     fetchDeployedServices(
-                                      true,
                                       1,
                                       state.pageSize,
                                       [],
@@ -836,7 +809,7 @@ const DeployedServicesTable = ({
                             type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE,
                             payload: pageSize,
                           });
-                          fetchDeployedServices(true, page, pageSize);
+                          fetchDeployedServices(page, pageSize);
                         }}
                       />
                     )}
@@ -900,14 +873,16 @@ const DeployedServicesTable = ({
               open={state.isExportDialogOpen}
               size="sm"
               modalHeading="Export as CSV"
-              primaryButtonText="Export"
+              primaryButtonText={state.isExporting ? "Exporting..." : "Export"}
+              primaryButtonDisabled={state.isExporting}
               secondaryButtonText="Cancel"
               onRequestSubmit={downloadCSV}
-              onRequestClose={() =>
-                dispatch({
-                  type: ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG,
-                })
-              }
+              onRequestClose={() => {
+                if (!state.isExporting)
+                  dispatch({
+                    type: ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG,
+                  });
+              }}
             >
               <TextInput
                 id="csv-file-name"

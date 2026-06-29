@@ -44,6 +44,7 @@ export interface AppState {
   deleteErrorRowName: string;
   isDeleting: boolean;
   isExportDialogOpen: boolean;
+  isExporting: boolean;
   csvFileName: string;
   exportErrorMessage: string;
   hasError: boolean;
@@ -57,6 +58,7 @@ export interface AppState {
 }
 
 export const ACTION_TYPES = {
+  DEPLOYED_SERVICES_SET_EXPORTING: "DEPLOYED_SERVICES_SET_EXPORTING",
   DEPLOYED_SERVICES_SET_TOTAL_ITEMS: "DEPLOYED_SERVICES_SET_TOTAL_ITEMS",
   DEPLOYED_SERVICES_SET_SEARCH: "DEPLOYED_SERVICES_SET_SEARCH",
   DEPLOYED_SERVICES_SET_PAGE: "DEPLOYED_SERVICES_SET_PAGE",
@@ -95,6 +97,10 @@ export const ACTION_TYPES = {
 } as const;
 
 export type AppAction =
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING;
+      payload: boolean;
+    }
   | {
       type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS;
       payload: number;
@@ -200,6 +206,7 @@ export const INITIAL_STATE: AppState = {
   totalItems: 0,
   isDeleteDialogOpen: false,
   isConfirmed: false,
+  isExporting: false,
   // rowsData: [...MOCK_ROWS].sort(
   //   (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
   // ),
@@ -231,6 +238,8 @@ export const INITIAL_STATE: AppState = {
 // Reducer
 export const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING:
+      return { ...state, isExporting: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS:
       return { ...state, totalItems: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH:

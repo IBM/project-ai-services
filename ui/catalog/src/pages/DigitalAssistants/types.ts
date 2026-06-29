@@ -28,6 +28,7 @@ export interface AppState {
   deleteErrorRowName: string;
   isDeleting: boolean;
   isExportDialogOpen: boolean;
+  isExporting: boolean;
   csvFileName: string;
   exportErrorMessage: string;
   visibleColumns: Record<string, boolean>;
@@ -46,6 +47,7 @@ export interface AppState {
 }
 
 export const ACTION_TYPES = {
+  SET_EXPORTING: "SET_EXPORTING",
   SET_SEARCH: "SET_SEARCH",
   SET_PAGE: "SET_PAGE",
   SET_PAGE_SIZE: "SET_PAGE_SIZE",
@@ -78,6 +80,7 @@ export const ACTION_TYPES = {
 } as const;
 
 export type AppAction =
+  | { type: typeof ACTION_TYPES.SET_EXPORTING; payload: boolean }
   | { type: typeof ACTION_TYPES.SET_SEARCH; payload: string }
   | { type: typeof ACTION_TYPES.SET_PAGE; payload: number }
   | { type: typeof ACTION_TYPES.SET_PAGE_SIZE; payload: number }
@@ -144,6 +147,7 @@ export const INITIAL_STATE: AppState = {
   deleteErrorRowName: "",
   isDeleting: false,
   isExportDialogOpen: false,
+  isExporting: false,
   csvFileName: "",
   exportErrorMessage: "",
   visibleColumns: {
@@ -167,6 +171,8 @@ export const INITIAL_STATE: AppState = {
 // Reducer
 export const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
+    case ACTION_TYPES.SET_EXPORTING:
+      return { ...state, isExporting: action.payload };
     case ACTION_TYPES.SET_SEARCH:
       return { ...state, search: action.payload };
     case ACTION_TYPES.SET_PAGE:
