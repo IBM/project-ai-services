@@ -252,9 +252,11 @@
   justify-content: flex-start;
 }
 
-.saveError {
-  margin-bottom: $spacing-05;
-  color: $support-error;
+.toastNotification {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-05;
+  z-index: 9999;
 }
 
 .placeholderContent {
