@@ -219,6 +219,18 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 }
 
 func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID, userID, newName string) (*types.Application, error) {
+	existingApp, err := s.appRepo.GetByName(ctx, newName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing application: %w", err)
+	}
+	if existingApp != nil {
+		// Application with this name already exists - return conflict error
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: fmt.Sprintf(ErrMsgApplicationNameExists, newName),
+		}
+	}
+
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -235,9 +247,10 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 			Message: ErrMsgUserNotOwner,
 		}
 	}
+
 	err = s.appRepo.UpdateDeploymentName(ctx, id, newName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update application name: %w", err)
+		return nil, fmt.Errorf("failed to update name: %w", err)
 	}
 	updatedApp, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
