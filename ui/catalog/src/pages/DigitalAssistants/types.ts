@@ -134,7 +134,7 @@ export const HEADERS: DataTableHeader[] = [
 export const INITIAL_STATE: AppState = {
   search: "",
   page: 1,
-  pageSize: 10,
+  pageSize: 20,
   isDeleteDialogOpen: false,
   isConfirmed: false,
   rowsData: [],

@@ -137,6 +137,14 @@ const DigitalAssistantsPage = () => {
 
       const rows = response.data.map(transformApplicationToRow);
 
+      // If the current page is beyond total_pages (e.g. last item on page N was deleted),
+      // jump back to the last valid page — the useEffect will re-fetch automatically.
+      const totalPages = response.pagination?.total_pages ?? 1;
+      if (state.page > totalPages && totalPages >= 1) {
+        dispatch({ type: ACTION_TYPES.SET_PAGE, payload: totalPages });
+        return;
+      }
+
       dispatch({
         type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
         payload: {
@@ -231,8 +239,7 @@ const DigitalAssistantsPage = () => {
       return;
     }
 
-    // Validate data before closing modal
-    if (filteredRows.length === 0) {
+    if (state.totalItems === 0) {
       dispatch({
         type: ACTION_TYPES.SET_EXPORT_ERROR,
         payload: "No data available to export",
@@ -243,24 +250,48 @@ const DigitalAssistantsPage = () => {
     // Close modal immediately
     dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG });
 
-    // Filter headers to only include visible columns (excluding actions)
-    const visibleHeaders = HEADERS.filter(
-      (h) =>
-        h.key !== "actions" &&
-        state.visibleColumns[h.key as keyof typeof state.visibleColumns],
-    );
+    try {
+      // Fetch up to 100 rows (API max) to export all data
+      const response = await fetchApplications({
+        page: 1,
+        page_size: 100,
+        catalog_id: catalogId,
+      });
+      const allRows = response.data
+        .map(transformApplicationToRow)
+        .filter((row) => {
+          if (!state.search) return true;
+          return [row.name, row.status, row.uptime, row.messages]
+            .join(" ")
+            .toLowerCase()
+            .includes(state.search.toLowerCase());
+        });
 
-    // Use utility function to handle export
-    const result = downloadCSVWithChildren(filteredRows, visibleHeaders, name);
+      // Only export visible columns
+      const visibleHeaders = HEADERS.filter(
+        (h) =>
+          h.key !== "actions" &&
+          state.visibleColumns[h.key as keyof typeof state.visibleColumns],
+      );
 
-    // Show toast based on result
-    dispatch({
-      type: ACTION_TYPES.SHOW_EXPORT_TOAST,
-      payload: {
-        message: result.message,
-        kind: result.success ? "success" : "error",
-      },
-    });
+      const result = downloadCSVWithChildren(allRows, visibleHeaders, name);
+
+      dispatch({
+        type: ACTION_TYPES.SHOW_EXPORT_TOAST,
+        payload: {
+          message: result.message,
+          kind: result.success ? "success" : "error",
+        },
+      });
+    } catch {
+      dispatch({
+        type: ACTION_TYPES.SHOW_EXPORT_TOAST,
+        payload: {
+          message: "Failed to fetch data for export",
+          kind: "error",
+        },
+      });
+    }
   };
 
   const filteredRows = state.rowsData.filter((row) => {
@@ -596,24 +627,26 @@ const DigitalAssistantsPage = () => {
                             )}
                           </TableContainer>
 
-                          {state.totalItems > 20 && (
-                            <Pagination
-                              page={state.page}
-                              pageSize={state.pageSize}
-                              pageSizes={[10, 20, 30, 50]}
-                              totalItems={state.totalItems}
-                              onChange={({ page, pageSize }) => {
-                                dispatch({
-                                  type: ACTION_TYPES.SET_PAGE,
-                                  payload: page,
-                                });
-                                dispatch({
-                                  type: ACTION_TYPES.SET_PAGE_SIZE,
-                                  payload: pageSize,
-                                });
-                              }}
-                            />
-                          )}
+                          {!state.isLoadingApplications &&
+                            state.totalItems > 20 &&
+                            filteredRows.length > 0 && (
+                              <Pagination
+                                page={state.page}
+                                pageSize={state.pageSize}
+                                pageSizes={[20, 30, 50]}
+                                totalItems={state.totalItems}
+                                onChange={({ page, pageSize }) => {
+                                  dispatch({
+                                    type: ACTION_TYPES.SET_PAGE,
+                                    payload: page,
+                                  });
+                                  dispatch({
+                                    type: ACTION_TYPES.SET_PAGE_SIZE,
+                                    payload: pageSize,
+                                  });
+                                }}
+                              />
+                            )}
                         </>
                       )}
                     </DataTable>

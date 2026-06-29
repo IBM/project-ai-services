@@ -29,6 +29,8 @@ import {
   Column,
   Checkbox,
   CheckboxGroup,
+  RadioButton,
+  RadioButtonGroup,
   ActionableNotification,
   Modal,
   TextInput,
@@ -147,9 +149,19 @@ const DeployedServicesTable = ({
 
   // Fetch deployed services data
   const fetchDeployedServices = useCallback(
-    async (force = false) => {
-      // Skip if cache is fresh and not forcing refresh
-      if (!force && !isDeployedServicesStale()) {
+    async (
+      force = false,
+      page = state.page,
+      pageSize = state.pageSize,
+      selectedServices = state.selectedServices,
+    ) => {
+      // Skip if cache is fresh and not forcing refresh (only for page 1, no filter active)
+      if (
+        !force &&
+        page === 1 &&
+        selectedServices.length === 0 &&
+        !isDeployedServicesStale()
+      ) {
         const cachedServices = deployedServices;
         if (cachedServices.length > 0) {
           // Use cached data
@@ -158,6 +170,10 @@ const DeployedServicesTable = ({
             payload: transformDeployedServices(
               cachedServices as ApplicationApiResponse[],
             ),
+          });
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS,
+            payload: cachedServices.length,
           });
           // Reset loading state when using cached data
           dispatch({
@@ -176,13 +192,42 @@ const DeployedServicesTable = ({
       });
 
       try {
+        const catalogIdParam =
+          selectedServices.length > 0
+            ? `&catalog_id=${selectedServices[0]}`
+            : "";
         const response = await api.get(
-          APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES,
+          `${APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES}&page=${page}&page_size=${pageSize}${catalogIdParam}`,
         );
 
         // Store raw data in Zustand
         const rawData = response.data?.data || [];
         setDeployedServices(rawData);
+
+        // Capture server-side total so Pagination knows the real count
+        const totalItems =
+          response.data?.pagination?.total_items ?? rawData.length;
+        const totalPages = response.data?.pagination?.total_pages ?? 1;
+
+        // If the current page is beyond total_pages (e.g. last item on page N was deleted),
+        // jump back to the last valid page and re-fetch.
+        if (page > totalPages && totalPages >= 1) {
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE,
+            payload: totalPages,
+          });
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
+            payload: false,
+          });
+          fetchDeployedServices(true, totalPages, pageSize);
+          return;
+        }
+
+        dispatch({
+          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS,
+          payload: totalItems,
+        });
 
         // Transform and set in local state for table
         const transformedRows = transformDeployedServices(rawData);
@@ -209,6 +254,9 @@ const DeployedServicesTable = ({
       }
     },
     [
+      state.page,
+      state.pageSize,
+      state.selectedServices,
       deployedServices,
       isDeployedServicesStale,
       setDeployedServices,
@@ -365,8 +413,7 @@ const DeployedServicesTable = ({
       return;
     }
 
-    // Validate data before closing modal
-    if (filteredRows.length === 0) {
+    if (state.totalItems === 0) {
       dispatch({
         type: ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORT_ERROR,
         payload: "No data available to export",
@@ -377,49 +424,66 @@ const DeployedServicesTable = ({
     // Close modal immediately
     dispatch({ type: ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG });
 
-    // Filter headers to only include visible columns (excluding actions)
-    const visibleHeaders = HEADERS.filter(
-      (h) =>
-        h.key !== "actions" &&
-        state.visibleColumns[h.key as keyof typeof state.visibleColumns],
-    );
+    try {
+      // Fetch up to 100 rows (API max), respecting active service filter
+      const catalogIdParam =
+        state.selectedServices.length > 0
+          ? `&catalog_id=${state.selectedServices[0]}`
+          : "";
+      const response = await api.get(
+        `${APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES}&page=1&page_size=100${catalogIdParam}`,
+      );
+      const allRows = transformDeployedServices(
+        response.data?.data || [],
+      ).filter((row) => {
+        if (!state.search) return true;
+        return [row.name, row.status, row.uptime, row.messages, row.service]
+          .join(" ")
+          .toLowerCase()
+          .includes(state.search.toLowerCase());
+      });
 
-    // Use utility function to handle export
-    const result = downloadCSVWithChildren(filteredRows, visibleHeaders, name);
+      // Only export visible columns
+      const visibleHeaders = HEADERS.filter(
+        (h) =>
+          h.key !== "actions" &&
+          state.visibleColumns[h.key as keyof typeof state.visibleColumns],
+      );
 
-    // Show toast based on result
-    dispatch({
-      type: ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST,
-      payload: {
-        message: result.message,
-        kind: result.success ? "success" : "error",
-      },
-    });
+      const result = downloadCSVWithChildren(
+        allRows as DeployedServicesRow[],
+        visibleHeaders,
+        name,
+      );
+
+      dispatch({
+        type: ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST,
+        payload: {
+          message: result.message,
+          kind: result.success ? "success" : "error",
+        },
+      });
+    } catch {
+      dispatch({
+        type: ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST,
+        payload: {
+          message: "Failed to fetch data for export",
+          kind: "error",
+        },
+      });
+    }
   };
 
+  // Service filter is server-side (catalog_id param) — only search filters client-side
   const filteredRows = state.rowsData.filter((row) => {
-    const matchesSearch = [
-      row.name,
-      row.status,
-      row.uptime,
-      row.messages,
-      row.service,
-    ]
+    return [row.name, row.status, row.uptime, row.messages, row.service]
       .join(" ")
       .toLowerCase()
       .includes(state.search.toLowerCase());
-
-    const matchesServiceFilter =
-      state.selectedServices.length === 0 ||
-      state.selectedServices.includes(row.service);
-
-    return matchesSearch && matchesServiceFilter;
   });
 
-  const paginatedRows = filteredRows.slice(
-    (state.page - 1) * state.pageSize,
-    state.page * state.pageSize,
-  );
+  // Server already returns the correct page — no client-side slice needed
+  const paginatedRows = filteredRows;
 
   const noApplications =
     !state.isLoading && state.rowsData.length === 0 && !state.fetchError;
@@ -535,33 +599,55 @@ const DeployedServicesTable = ({
                               <h6 className={styles.overflowMenuHeading}>
                                 Filter by service
                               </h6>
-                              <CheckboxGroup legendText="">
+                              <RadioButtonGroup
+                                legendText=""
+                                name="service-filter"
+                                orientation="vertical"
+                                valueSelected={state.selectedServices[0] ?? ""}
+                                onChange={(selection) => {
+                                  const value = String(selection ?? "");
+                                  if (!value) return;
+                                  // Clicking the already-selected option deselects it
+                                  const newSelected =
+                                    state.selectedServices.includes(value)
+                                      ? []
+                                      : [value];
+                                  dispatch({
+                                    type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
+                                    payload: value,
+                                  });
+                                  fetchDeployedServices(
+                                    true,
+                                    1,
+                                    state.pageSize,
+                                    newSelected,
+                                  );
+                                }}
+                              >
                                 {availableServiceFilters.map((service) => (
-                                  <Checkbox
+                                  <RadioButton
                                     key={service.id}
                                     labelText={service.name}
+                                    value={service.id}
                                     id={`filter-${service.id}`}
-                                    checked={state.selectedServices.includes(
-                                      service.name,
-                                    )}
-                                    onChange={() =>
-                                      dispatch({
-                                        type: ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER,
-                                        payload: service.name,
-                                      })
-                                    }
                                   />
                                 ))}
-                              </CheckboxGroup>
+                              </RadioButtonGroup>
                               <div className={styles.overflowMenuActions}>
                                 <Button
                                   kind="secondary"
                                   size="sm"
-                                  onClick={() =>
+                                  onClick={() => {
                                     dispatch({
                                       type: ACTION_TYPES.DEPLOYED_SERVICES_RESET_SERVICE_FILTER,
-                                    })
-                                  }
+                                    });
+                                    fetchDeployedServices(
+                                      true,
+                                      1,
+                                      state.pageSize,
+                                      [],
+                                    );
+                                  }}
                                 >
                                   Reset filter
                                 </Button>
@@ -733,24 +819,27 @@ const DeployedServicesTable = ({
                     )}
                   </TableContainer>
 
-                  {filteredRows.length > 20 && (
-                    <Pagination
-                      page={state.page}
-                      pageSize={state.pageSize}
-                      pageSizes={[5, 10, 20, 30]}
-                      totalItems={filteredRows.length}
-                      onChange={({ page, pageSize }) => {
-                        dispatch({
-                          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE,
-                          payload: page,
-                        });
-                        dispatch({
-                          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE,
-                          payload: pageSize,
-                        });
-                      }}
-                    />
-                  )}
+                  {!state.isLoading &&
+                    state.totalItems > 20 &&
+                    filteredRows.length > 0 && (
+                      <Pagination
+                        page={state.page}
+                        pageSize={state.pageSize}
+                        pageSizes={[20, 30, 50]}
+                        totalItems={state.totalItems}
+                        onChange={({ page, pageSize }) => {
+                          dispatch({
+                            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE,
+                            payload: page,
+                          });
+                          dispatch({
+                            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE,
+                            payload: pageSize,
+                          });
+                          fetchDeployedServices(true, page, pageSize);
+                        }}
+                      />
+                    )}
                 </>
               )}
             </DataTable>
