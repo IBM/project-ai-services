@@ -62,7 +62,6 @@
   display: flex;
   align-items: center;
   gap: $spacing-03;
-  margin-bottom: $spacing-03;
 
   > span {
     @include type-style("label-01");
@@ -512,4 +511,8 @@
     inline-size: calc(100% - 2 * #{$spacing-07}) !important;
     max-block-size: calc(100% - #{$spacing-11}) !important;
   }
+}
+
+:global(.cds--label){
+  
 }

@@ -389,6 +389,10 @@ export const ServicesDeployFlow = ({
   const isNextDisabled =
     state.isDeploying ||
     (state.currentStep === 0 && !state.selectedServiceId) || // Block on step 0 if no service selected
+    (state.currentStep === 1 &&
+      (!state.formData.name ||
+        state.formData.name.trim().length < 3 ||
+        state.formData.name.length > 100)) || // Block on step 1 if name is invalid
     (isLastStep && state.isEditing) ||
     (isLastStep && !areAllRequiredFieldsFilled); // Block deployment if required fields are not filled
 

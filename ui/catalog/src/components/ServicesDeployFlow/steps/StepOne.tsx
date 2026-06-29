@@ -185,6 +185,16 @@ export const StepOne: React.FC<StepProps> = ({
                 labelText="Name"
                 value={formData.name}
                 onChange={(e) => onChange({ name: e.target.value })}
+                invalid={
+                  !formData.name ||
+                  formData.name.trim().length < 3 ||
+                  formData.name.length > 100
+                }
+                invalidText={
+                  !formData.name || formData.name.trim().length < 3
+                    ? "Name must be at least 3 characters"
+                    : "Name must be at most 100 characters"
+                }
               />
             </div>
           </Column>
