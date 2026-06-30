@@ -161,9 +161,28 @@ func (g *podmanGatherer) collectContainersForPod(podDir, podName string) {
 			continue // skip infra/pause containers — no useful data
 		}
 
+		g.collectContainerInspect(podDir, name)
 		g.collectContainerLogs(podDir, name)
-		g.collectContainerEnvVars(podDir, name)
 	}
+}
+
+// collectContainerInspect runs `podman inspect <name>` and writes the full
+// sanitized JSON. This covers Config.Env, Mounts, NetworkSettings, State,
+// Image, Labels — making a separate env-vars extraction step unnecessary.
+func (g *podmanGatherer) collectContainerInspect(podDir, name string) {
+	raw, err := podmanRun("inspect", name)
+	if err != nil {
+		logger.Warningf("Failed to inspect container %q: %v\n", name, err)
+		return
+	}
+
+	inspectDir := filepath.Join(podDir, "inspect")
+	if err := os.MkdirAll(inspectDir, dirPerm); err != nil {
+		logger.Warningf("Failed to create inspect directory: %v\n", err)
+		return
+	}
+
+	g.writeFile(inspectDir, name+".json", g.sanitizeJSON(raw))
 }
 
 func (g *podmanGatherer) collectContainerLogs(podDir, name string) {
@@ -180,30 +199,6 @@ func (g *podmanGatherer) collectContainerLogs(podDir, name string) {
 	}
 
 	g.writeFile(logsDir, name+".log", g.sanitizeText(raw))
-}
-
-func (g *podmanGatherer) collectContainerEnvVars(podDir, name string) {
-	raw, err := podmanRun("inspect", "--format", "{{json .Config.Env}}", name)
-	if err != nil {
-		return // non-fatal; some containers may not expose this
-	}
-
-	var envList []string
-	if err := json.Unmarshal(raw, &envList); err != nil {
-		return
-	}
-
-	redacted := make([]string, 0, len(envList))
-	for _, e := range envList {
-		redacted = append(redacted, redactLine(g.sanitizer, e))
-	}
-
-	envDir := filepath.Join(podDir, "env")
-	if err := os.MkdirAll(envDir, dirPerm); err != nil {
-		return
-	}
-
-	g.writeFile(envDir, name+".env", []byte(strings.Join(redacted, "\n")))
 }
 
 // ── catalog artifact collection ───────────────────────────────────────────────
