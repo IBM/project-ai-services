@@ -12,6 +12,7 @@ import {
   TextInputSkeleton,
   SkeletonText,
   SkeletonPlaceholder,
+  ToastNotification,
 } from "@carbon/react";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
 import {
@@ -32,6 +33,7 @@ import type {
 } from "@/types/digitalAssistants";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
+import axios from "axios";
 import { APPLICATION_ENDPOINTS, SERVICE_ENDPOINTS } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -62,6 +64,7 @@ const DeploymentDetails = ({
   const [editedName, setEditedName] = useState(deployment.name);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -338,17 +341,6 @@ const DeploymentDetails = ({
   };
 
   const handleSave = async () => {
-    // Validate name
-    if (editedName.length < 3 || editedName.length > 100) {
-      setSaveError("Name must be between 3 and 100 characters");
-      return;
-    }
-
-    // Check if name actually changed
-    if (editedName === deployment.name) {
-      return;
-    }
-
     setIsSaving(true);
     setSaveError("");
 
@@ -357,11 +349,17 @@ const DeploymentDetails = ({
         name: editedName,
       });
       onNameUpdate?.(editedName);
+      setSaveSuccess(true);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
+      const rawError: string =
+        axios.isAxiosError(error) && error.response?.data?.error
+          ? error.response.data.error
           : "Failed to update deployment name";
+      const errorIndex = rawError.indexOf("Error:");
+      const errorMessage =
+        errorIndex !== -1
+          ? rawError.slice(errorIndex + "Error:".length).trim()
+          : rawError;
       setSaveError(errorMessage);
     } finally {
       setIsSaving(false);
@@ -375,6 +373,24 @@ const DeploymentDetails = ({
 
   return (
     <>
+      {saveSuccess && (
+        <ToastNotification
+          kind="success"
+          title="Name updated successfully"
+          timeout={5000}
+          onClose={() => setSaveSuccess(false)}
+          className={styles.toastNotification}
+        />
+      )}
+      {saveError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to update name"
+          subtitle={saveError}
+          onClose={() => setSaveError("")}
+          className={styles.toastNotification}
+        />
+      )}
       <div>
         <PageHeader
           breadcrumbs={[
@@ -476,14 +492,6 @@ const DeploymentDetails = ({
                               setEditedName(e.target.value);
                               setSaveError("");
                             }}
-                            invalid={
-                              editedName.length < 3 || editedName.length > 100
-                            }
-                            invalidText={
-                              editedName.length < 3
-                                ? "Name must be at least 3 characters"
-                                : "Name must be at most 100 characters"
-                            }
                             disabled={isSaving}
                           />
                         )}
@@ -635,9 +643,6 @@ const DeploymentDetails = ({
 
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>
-                  {saveError && (
-                    <div className={styles.saveError}>{saveError}</div>
-                  )}
                   <div className={styles.actionButtons}>
                     <Button
                       kind="secondary"
@@ -649,12 +654,7 @@ const DeploymentDetails = ({
                     <Button
                       kind="primary"
                       onClick={handleSave}
-                      disabled={
-                        isSaving ||
-                        editedName === deployment.name ||
-                        editedName.length < 3 ||
-                        editedName.length > 100
-                      }
+                      disabled={isSaving}
                     >
                       {isSaving ? "Saving..." : "Save"}
                     </Button>
