@@ -56,6 +56,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	g.collectApplicationPods(outDir, opts.applicationName)
 	g.collectCatalogArtifacts(outDir)
+	g.collectModelsInfo(outDir)
 	g.collectSecretInfo(outDir)
 	g.collectSystemInfo(outDir)
 	g.collectNetworkInfo(outDir)
@@ -263,23 +264,43 @@ func (g *podmanGatherer) collectCatalogPods(catDir string) {
 	}
 }
 
-// collectCaddyfile copies the Caddyfile from <BaseDir>/common/caddy/Caddyfile.
-// The file contains route definitions only — no credentials.
+// collectCaddyfile copies:
+//   - <BaseDir>/common/caddy/Caddyfile        — static reverse-proxy config
+//   - <BaseDir>/common/caddy-config/caddy/autosave.json — Caddy's live config snapshot
 func (g *podmanGatherer) collectCaddyfile(catDir string) {
-	path := filepath.Join(pkgutils.GetBaseDir(), "common", "caddy", "Caddyfile")
+	baseDir := pkgutils.GetBaseDir()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Warningf("Caddyfile not found at %s (catalog may not be configured)\n", path)
-		} else {
-			logger.Warningf("Failed to read Caddyfile: %v\n", err)
-		}
-
-		return
+	caddyFiles := []struct {
+		src      string
+		dst      string
+		sanitize func([]byte) []byte
+	}{
+		{
+			src:      filepath.Join(baseDir, "common", "caddy", "Caddyfile"),
+			dst:      "Caddyfile",
+			sanitize: g.sanitizeText,
+		},
+		{
+			src:      filepath.Join(baseDir, "common", "caddy-config", "caddy", "autosave.json"),
+			dst:      "caddy-autosave.json",
+			sanitize: g.sanitizeJSON,
+		},
 	}
 
-	g.writeFile(catDir, "Caddyfile", g.sanitizeText(data))
+	for _, f := range caddyFiles {
+		data, err := os.ReadFile(f.src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				logger.Warningf("%s not found (catalog may not be configured)\n", f.src)
+			} else {
+				logger.Warningf("Failed to read %s: %v\n", f.src, err)
+			}
+
+			continue
+		}
+
+		g.writeFile(catDir, f.dst, f.sanitize(data))
+	}
 }
 
 // collectCatalogCredentials saves the CLI credentials file
@@ -305,6 +326,103 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 	}
 
 	g.writeFile(catDir, "catalog-credentials.json", g.sanitizeJSON(data))
+}
+
+// ── models info collection ────────────────────────────────────────────────────
+
+// collectModelsInfo records which models are present under <BaseDir>/models/
+// and how much disk space each one occupies. Model weights are never copied —
+// only the directory listing and per-model disk usage are written.
+func (g *podmanGatherer) collectModelsInfo(outDir string) {
+	logger.Infoln("Collecting models information…")
+
+	modelsPath := pkgutils.GetModelsPath()
+
+	entries, err := os.ReadDir(modelsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warningf("Models directory not found at %s\n", modelsPath)
+		} else {
+			logger.Warningf("Failed to read models directory: %v\n", err)
+		}
+
+		return
+	}
+
+	modelsDir := filepath.Join(outDir, "models")
+	if err := os.MkdirAll(modelsDir, dirPerm); err != nil {
+		logger.Warningf("Failed to create models output directory: %v\n", err)
+		return
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Models directory: %s", modelsPath))
+	lines = append(lines, strings.Repeat("-", 60))
+
+	for _, org := range entries {
+		if !org.IsDir() {
+			continue
+		}
+
+		// Each top-level dir is an org (e.g. ibm-granite); subdirs are model names.
+		orgPath := filepath.Join(modelsPath, org.Name())
+		modelEntries, err := os.ReadDir(orgPath)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("  %s/  (unreadable: %v)", org.Name(), err))
+			continue
+		}
+
+		for _, model := range modelEntries {
+			if !model.IsDir() {
+				continue
+			}
+
+			modelPath := filepath.Join(orgPath, model.Name())
+			size, fileCount := dirStats(modelPath)
+			lines = append(lines, fmt.Sprintf(
+				"  %s/%s  (%s, %d files)",
+				org.Name(), model.Name(), formatBytes(size), fileCount,
+			))
+		}
+	}
+
+	g.writeFile(modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
+}
+
+// dirStats walks dir and returns total byte size and file count.
+func dirStats(dir string) (totalBytes int64, fileCount int) {
+	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		totalBytes += info.Size()
+		fileCount++
+
+		return nil
+	})
+
+	return totalBytes, fileCount
+}
+
+// formatBytes renders a byte count as a human-readable string (GiB / MiB / KiB / B).
+func formatBytes(b int64) string {
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 // ── secret metadata collection ────────────────────────────────────────────────
