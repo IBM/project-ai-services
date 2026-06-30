@@ -231,7 +231,7 @@ func (g *podmanGatherer) collectCatalogArtifacts(outDir string) {
 // and delegates to collectPod for each one.
 func (g *podmanGatherer) collectCatalogPods(catDir string) {
 	raw, err := podmanRun(
-		"pod", "ps", "-a",
+		"pod", "ps",
 		"--filter", "label=ai-services.io/application=ai-services",
 		"--format", "json",
 	)
@@ -317,6 +317,10 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 // collectSecretInfo saves metadata (name, ID, labels, driver, creation time)
 // for all Podman secrets. Secret *values* are never exposed by the Podman CLI
 // after creation, so this step is safe by design.
+//
+// `podman secret ls --format json` does not emit real JSON (it prints the
+// literal string "json"). We therefore list names via `--noheading` and then
+// collect full metadata with `podman secret inspect`, which does emit JSON.
 func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	logger.Infoln("Collecting secret metadata…")
 
@@ -326,39 +330,48 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 		return
 	}
 
-	raw, err := podmanRun("secret", "ls", "--format", "json")
+	// List names only — `--noheading` gives tab-separated lines: ID\tNAME\t…
+	raw, err := podmanRun("secret", "ls", "--noheading")
 	if err != nil {
 		logger.Warningf("podman secret ls failed: %v\n", err)
 		return
 	}
 
-	var secretList []map[string]any
-	if err := json.Unmarshal(raw, &secretList); err != nil {
-		logger.Warningf("Failed to parse secret list: %v\n", err)
-		g.writeFile(secDir, "secrets.json", raw) // write raw on parse error
+	names := parseSecretNames(raw)
+	if len(names) == 0 {
+		logger.Infoln("No Podman secrets found.")
 		return
 	}
 
-	g.writeFile(secDir, "secrets.json", g.sanitizeJSON(raw))
-
-	for _, s := range secretList {
-		name, _ := s["Name"].(string)
-		if name == "" {
-			name, _ = s["ID"].(string)
-		}
-
-		if name == "" {
-			continue
-		}
-
-		inspectRaw, err := podmanRun("secret", "inspect", name)
-		if err != nil {
-			logger.Warningf("Failed to inspect secret %q: %v\n", name, err)
-			continue
-		}
-
-		g.writeFile(secDir, name+"-inspect.json", g.sanitizeJSON(inspectRaw))
+	// Collect full metadata for all secrets in one inspect call.
+	args := append([]string{"secret", "inspect"}, names...)
+	inspectRaw, err := podmanRun(args...)
+	if err != nil {
+		logger.Warningf("podman secret inspect failed: %v\n", err)
+		return
 	}
+
+	g.writeFile(secDir, "secrets.json", g.sanitizeJSON(inspectRaw))
+}
+
+// parseSecretNames extracts secret names from `podman secret ls --noheading`
+// output. Each line is tab-separated: ID\tNAME\tDRIVER\tCREATED\tUPDATED.
+func parseSecretNames(raw []byte) []string {
+	var names []string
+
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) >= 2 { //nolint:mnd // col 0=ID, col 1=NAME
+			names = append(names, fields[1])
+		}
+	}
+
+	return names
 }
 
 // ── system / network / volume collection ──────────────────────────────────────
