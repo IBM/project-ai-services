@@ -34,6 +34,7 @@ export interface AppState {
   search: string;
   page: number;
   pageSize: number;
+  totalItems: number;
   isDeleteDialogOpen: boolean;
   isConfirmed: boolean;
   rowsData: DeployedServicesRow[];
@@ -43,6 +44,7 @@ export interface AppState {
   deleteErrorRowName: string;
   isDeleting: boolean;
   isExportDialogOpen: boolean;
+  isExporting: boolean;
   csvFileName: string;
   exportErrorMessage: string;
   hasError: boolean;
@@ -56,6 +58,8 @@ export interface AppState {
 }
 
 export const ACTION_TYPES = {
+  DEPLOYED_SERVICES_SET_EXPORTING: "DEPLOYED_SERVICES_SET_EXPORTING",
+  DEPLOYED_SERVICES_SET_TOTAL_ITEMS: "DEPLOYED_SERVICES_SET_TOTAL_ITEMS",
   DEPLOYED_SERVICES_SET_SEARCH: "DEPLOYED_SERVICES_SET_SEARCH",
   DEPLOYED_SERVICES_SET_PAGE: "DEPLOYED_SERVICES_SET_PAGE",
   DEPLOYED_SERVICES_SET_PAGE_SIZE: "DEPLOYED_SERVICES_SET_PAGE_SIZE",
@@ -93,6 +97,14 @@ export const ACTION_TYPES = {
 } as const;
 
 export type AppAction =
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING;
+      payload: boolean;
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS;
+      payload: number;
+    }
   | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH; payload: string }
   | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE; payload: number }
   | {
@@ -190,9 +202,11 @@ export const STATUS_SORT_ORDER: Record<string, number> = {
 export const INITIAL_STATE: AppState = {
   search: "",
   page: 1,
-  pageSize: 10,
+  pageSize: 20,
+  totalItems: 0,
   isDeleteDialogOpen: false,
   isConfirmed: false,
+  isExporting: false,
   // rowsData: [...MOCK_ROWS].sort(
   //   (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
   // ),
@@ -224,6 +238,10 @@ export const INITIAL_STATE: AppState = {
 // Reducer
 export const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING:
+      return { ...state, isExporting: action.payload };
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS:
+      return { ...state, totalItems: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH:
       return { ...state, search: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE:
@@ -332,11 +350,12 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         exportToastOpen: false,
       };
     case ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER:
+      // Single-select: selecting same deselects, selecting new replaces previous
       return {
         ...state,
         selectedServices: state.selectedServices.includes(action.payload)
-          ? state.selectedServices.filter((s) => s !== action.payload)
-          : [...state.selectedServices, action.payload],
+          ? []
+          : [action.payload],
         page: 1,
       };
     case ACTION_TYPES.DEPLOYED_SERVICES_RESET_SERVICE_FILTER:

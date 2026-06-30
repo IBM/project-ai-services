@@ -38,6 +38,7 @@ const getInitialState = (): DeployFlowState => ({
     services: {},
   },
   selectedServiceId: null,
+  showStepOneNameError: false,
 });
 
 const deployFlowReducer = (
@@ -58,9 +59,19 @@ const deployFlowReducer = (
     case ACTION_TYPES.SET_FORM_DATA:
       return { ...state, formData: action.payload };
     case ACTION_TYPES.UPDATE_FORM_DATA:
-      return { ...state, formData: { ...state.formData, ...action.payload } };
+      return {
+        ...state,
+        formData: { ...state.formData, ...action.payload },
+        showStepOneNameError:
+          "name" in action.payload
+            ? !String(action.payload.name ?? "").trim() &&
+              state.showStepOneNameError
+            : state.showStepOneNameError,
+      };
     case ACTION_TYPES.SET_SELECTED_SERVICE:
       return { ...state, selectedServiceId: action.payload };
+    case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
+      return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState();
     default:
@@ -308,6 +319,15 @@ export const ServicesDeployFlow = ({
   }, []);
 
   const handleNext = () => {
+    // Show validation error if trying to proceed from step 1 with invalid name
+    if (state.currentStep === 1 && !state.formData.name.trim()) {
+      dispatch({
+        type: ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
+        payload: true,
+      });
+      return;
+    }
+
     if (state.currentStep < 2) {
       dispatch({
         type: ACTION_TYPES.SET_CURRENT_STEP,
@@ -493,6 +513,7 @@ export const ServicesDeployFlow = ({
                   onChange={handleFormDataChange}
                   deployOptions={deployOptions}
                   selectedServiceId={state.selectedServiceId}
+                  showNameError={state.showStepOneNameError}
                 />
               ) : null}
             </>

@@ -333,7 +333,7 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		LEFT JOIN services s ON a.id = s.app_id
-		WHERE a.name = $1
+		WHERE LOWER(a.name) = LOWER($1)
 		ORDER BY s.created_at
 	`
 

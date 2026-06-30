@@ -475,7 +475,7 @@ def generateImageList() {
         env.ICR_AI_SERVICES_IMAGE     
     ]
 
-    def imageList = images.join('\n')
+    def imageList = images.join('\n') + '\n'
 
 
     dir("${CERT_DIR}") {
