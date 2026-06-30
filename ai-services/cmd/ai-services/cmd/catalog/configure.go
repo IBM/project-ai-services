@@ -266,7 +266,7 @@ func configureConfigureFlags(cmd *cobra.Command) {
 		&baseDir,
 		"basedir",
 		"",
-		"Base directory for AI services data (applications, models, cache).\n"+
+		"Base directory for AI services data (models, caddy).\n"+
 			"Example: --basedir /custom/path\n",
 	)
 
