@@ -524,8 +524,15 @@ func GetModelsPath() string {
 // ValidateBaseDir validates that the base directory exists or can be created.
 // It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {
-	// Clean the path and append ai-services subdirectory
-	baseDir = filepath.Join(filepath.Clean(baseDir), "ai-services")
+	// Resolve relative paths to absolute paths to prevent Podman from mounting
+	//the wrong (or empty) host directory.
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
+
+	// Clean the absolute path and append ai-services subdirectory
+	baseDir = filepath.Join(filepath.Clean(absBase), "ai-services")
 
 	// Check if directory exists or can be created
 	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
