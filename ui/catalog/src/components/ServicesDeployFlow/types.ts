@@ -18,6 +18,7 @@ export interface DeployFlowState {
   deployError: string | null;
   formData: DeployFormData;
   selectedServiceId: string | null;
+  showStepOneNameError: boolean;
 }
 
 export const ACTION_TYPES = {
@@ -30,6 +31,7 @@ export const ACTION_TYPES = {
   UPDATE_FORM_DATA: "UPDATE_FORM_DATA",
   SET_SELECTED_SERVICE: "SET_SELECTED_SERVICE",
   RESET_STATE: "RESET_STATE",
+  SET_SHOW_STEP_ONE_NAME_ERROR: "SET_SHOW_STEP_ONE_NAME_ERROR",
 } as const;
 
 export type DeployFlowAction =
@@ -47,7 +49,11 @@ export type DeployFlowAction =
       payload: Partial<DeployFormData>;
     }
   | { type: typeof ACTION_TYPES.SET_SELECTED_SERVICE; payload: string | null }
-  | { type: typeof ACTION_TYPES.RESET_STATE };
+  | { type: typeof ACTION_TYPES.RESET_STATE }
+  | {
+      type: typeof ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR;
+      payload: boolean;
+    };
 
 /**
  * Component configuration for a provider
@@ -91,6 +97,7 @@ export interface StepProps {
   llmModelsWithProviders?: LLMOption[];
   serviceDescription?: string;
   isLoadingLlmModels?: boolean;
+  showNameError?: boolean;
 }
 
 // Made with Bob

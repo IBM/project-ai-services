@@ -19,7 +19,10 @@ export const StepOne: React.FC<StepProps> = ({
   onChange,
   deployOptions,
   selectedServiceId,
+  showNameError = false,
 }) => {
+  const isNameValid = !!formData.name.trim();
+
   // Get component models and provider schemas from store
   const { getComponentModels } = useServiceDeployStore();
   const providerSchemas = useServiceDeployStore(
@@ -184,7 +187,11 @@ export const StepOne: React.FC<StepProps> = ({
                 id="assistant-name"
                 labelText="Name"
                 value={formData.name}
-                onChange={(e) => onChange({ name: e.target.value })}
+                invalid={showNameError && !isNameValid}
+                invalidText="Name is required"
+                onChange={(e) => {
+                  onChange({ name: e.target.value });
+                }}
               />
             </div>
           </Column>
