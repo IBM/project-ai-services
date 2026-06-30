@@ -711,4 +711,28 @@ class Settings(BaseSettings):
 # Global settings instance
 settings = Settings()
 
+from common.lang_utils import LanguageCodes
+
+_QUERY_REPHRASING_CONFIG_MAP: dict = {
+    LanguageCodes.ENGLISH: settings.query_rephrasing.english,
+    LanguageCodes.GERMAN: settings.query_rephrasing.german,
+    LanguageCodes.ITALIAN: settings.query_rephrasing.italian,
+    LanguageCodes.FRENCH: settings.query_rephrasing.french,
+}
+
+_RAG_CONFIG_MAP: dict = {
+    LanguageCodes.ENGLISH: settings.chatbot.english,
+    LanguageCodes.GERMAN: settings.chatbot.german,
+    LanguageCodes.ITALIAN: settings.chatbot.italian,
+    LanguageCodes.FRENCH: settings.chatbot.french,
+}
+
+def get_query_rephrasing_language_config(lang: str):
+    """Get query rephrasing config for a language, falling back to English."""
+    return _QUERY_REPHRASING_CONFIG_MAP.get(lang, _QUERY_REPHRASING_CONFIG_MAP[LanguageCodes.ENGLISH])
+
+def get_rag_language_config(lang: str):
+    """Get RAG config for a language, falling back to English."""
+    return _RAG_CONFIG_MAP.get(lang, _RAG_CONFIG_MAP[LanguageCodes.ENGLISH])
+
 # Made with Bob
