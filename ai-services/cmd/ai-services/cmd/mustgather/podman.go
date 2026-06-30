@@ -2,6 +2,7 @@ package mustgather
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,10 +11,13 @@ import (
 	"time"
 
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
+	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 const (
@@ -33,6 +37,7 @@ type gatherOptions struct {
 // invocations (for logs, network, volume, and system info).
 type podmanGatherer struct {
 	sanitizer *sanitize.SecretSanitizer
+	baseDir   string // resolved once in gather(); never empty
 }
 
 func newPodmanGatherer() *podmanGatherer {
@@ -44,8 +49,29 @@ func newPodmanGatherer() *podmanGatherer {
 // gather creates a timestamped output directory and runs every collection step.
 // Errors within individual steps are logged as warnings so a partial failure
 // never aborts the overall collection.
+//
+// Collection is split into two tiers:
+//   - Catalog-dependent: app pods, catalog artifacts, models — skipped when
+//     no catalog pods exist at all (catalog was never installed).
+//   - Always-on: system info, secrets, network, volumes — Podman-level data
+//     that is useful regardless of catalog state.
 func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 	logger.Infoln("Starting must-gather for Podman runtime…")
+
+	rt, err := podmanRuntime.NewPodmanClient()
+	if err != nil {
+		logger.Warningf("Could not connect to Podman: %v\n", err)
+		return "", fmt.Errorf("failed to connect to Podman: %w", err)
+	}
+
+	catalogInstalled, err := checkCatalogInstalled(rt)
+	if err != nil {
+		logger.Warningf("Failed to check catalog installation: %v\n", err)
+	}
+
+	if catalogInstalled {
+		g.resolveBaseDir(rt)
+	}
 
 	outDir, err := g.createOutputDir(opts.outputDir)
 	if err != nil {
@@ -54,15 +80,61 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	logger.Infof("Output directory: %s\n", outDir)
 
-	g.collectApplicationPods(outDir, opts.applicationName)
-	g.collectCatalogArtifacts(outDir)
-	g.collectModelsInfo(outDir)
+	if catalogInstalled {
+		g.collectApplicationPods(outDir, opts.applicationName)
+		g.collectCatalogArtifacts(outDir)
+		g.collectModelsInfo(outDir)
+	} else {
+		logger.Warningln("No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")
+	}
+
+	// Always collected — independent of catalog state.
 	g.collectSecretInfo(outDir)
 	g.collectSystemInfo(outDir)
 	g.collectNetworkInfo(outDir)
 	g.collectVolumeInfo(outDir)
 
 	return outDir, nil
+}
+
+// checkCatalogInstalled returns true if any pod carrying the
+// ai-services.io/application=ai-services label is present, confirming that
+// the catalog has been installed (covers catalog, db, and caddy pods — any one
+// of them is sufficient).
+func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
+	pods, err := rt.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to list catalog pods: %w", err)
+	}
+
+	return len(pods) > 0, nil
+}
+
+// resolveBaseDir attempts to read AI_SERVICES_BASE_DIR from the running
+// catalog backend container env (same approach as `catalog configure --reset-*`).
+// Sets g.baseDir to the resolved value, or to the default if the backend pod
+// is stopped or the value is empty.
+func (g *podmanGatherer) resolveBaseDir(rt *podmanRuntime.PodmanClient) {
+	g.baseDir = pkgutils.GetBaseDir() // safe fallback
+
+	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
+	if err != nil {
+		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
+			logger.Warningln("Catalog backend pod is stopped — base directory resolved to default.")
+		} else {
+			logger.Warningf("Could not read base dir from catalog pod: %v; using default.\n", err)
+		}
+
+		return
+	}
+
+	if config.BaseDir != "" {
+		g.baseDir = config.BaseDir
+	}
+
+	logger.Infof("Using base directory: %s\n", g.baseDir)
 }
 
 func (g *podmanGatherer) createOutputDir(base string) (string, error) {
@@ -268,20 +340,18 @@ func (g *podmanGatherer) collectCatalogPods(catDir string) {
 //   - <BaseDir>/common/caddy/Caddyfile        — static reverse-proxy config
 //   - <BaseDir>/common/caddy-config/caddy/autosave.json — Caddy's live config snapshot
 func (g *podmanGatherer) collectCaddyfile(catDir string) {
-	baseDir := pkgutils.GetBaseDir()
-
 	caddyFiles := []struct {
 		src      string
 		dst      string
 		sanitize func([]byte) []byte
 	}{
 		{
-			src:      filepath.Join(baseDir, "common", "caddy", "Caddyfile"),
+			src:      filepath.Join(g.baseDir, "common", "caddy", "Caddyfile"),
 			dst:      "Caddyfile",
 			sanitize: g.sanitizeText,
 		},
 		{
-			src:      filepath.Join(baseDir, "common", "caddy-config", "caddy", "autosave.json"),
+			src:      filepath.Join(g.baseDir, "common", "caddy-config", "caddy", "autosave.json"),
 			dst:      "caddy-autosave.json",
 			sanitize: g.sanitizeJSON,
 		},
@@ -336,7 +406,7 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 func (g *podmanGatherer) collectModelsInfo(outDir string) {
 	logger.Infoln("Collecting models information…")
 
-	modelsPath := pkgutils.GetModelsPath()
+	modelsPath := filepath.Join(g.baseDir, "models")
 
 	entries, err := os.ReadDir(modelsPath)
 	if err != nil {
