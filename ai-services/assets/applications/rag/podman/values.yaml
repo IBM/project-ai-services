@@ -2,13 +2,13 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.46
+  image: icr.io/ai-services/chatbot-ui:v0.0.46
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.21
+  image: icr.io/ai-services/chatbot-service:v0.0.21
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
@@ -18,7 +18,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.28
+  image: icr.io/ai-services/digitize-service:v0.0.28
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -28,7 +28,7 @@ digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.26
+  image: icr.io/ai-services/digitize-ui:v0.0.26
 
 ingest:
   # @hidden
@@ -46,7 +46,7 @@ opensearch:
 
 postgres:
   # @hidden
-  image: icr.io/ai-services-cicd/postgres:18-3
+  image: icr.io/ai-services/postgres:18-3
   # @description Password for PostgreSQL default 'postgres' user authentication. Must be at least 8 characters. Use this to override the default password.
   password: "Aiservicesdb@1234"
 
@@ -83,7 +83,7 @@ summarize:
   # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.15
+  image: icr.io/ai-services/summarize-service:v0.0.15
   # @hidden
   log_level: "INFO"
   database: "summarize_metadata"
@@ -92,7 +92,7 @@ similarity:
   # @description Host port for the Similarity Search API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.13
+  image: icr.io/ai-services/similarity-service:v0.0.13
   # @hidden
   log_level: "INFO"
 
