@@ -1,0 +1,201 @@
+name: Python Lint and Type Check
+
+on:
+  pull_request:
+    paths:
+      - 'spyre-rag/src/**/*.py'
+      - 'spyre-rag/requirements*.txt'
+      - '.github/workflows/python-lint.yml'
+    branches:
+      - main
+
+jobs:
+  lint-and-type-check:
+    name: Python Lint and Type Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: spyre-rag
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pylint mypy pyright
+          # Install project dependencies if requirements.txt exists
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run Flake8 (Style Guide Enforcement)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Running Flake8 linter..."
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        continue-on-error: false
+
+      - name: Run Pylint (Code Quality Check)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Running Pylint..."
+          pylint --rcfile=../../.pylintrc $(find . -name "*.py" -not -path "*/venv/*" -not -path "*/__pycache__/*") || true
+        continue-on-error: true
+
+      - name: Run MyPy (Static Type Checking)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Running MyPy type checker..."
+          mypy --ignore-missing-imports --no-strict-optional --check-untyped-defs . || true
+        continue-on-error: true
+
+      - name: Run Pyright (Advanced Type Checking)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Running Pyright type checker..."
+          pyright --pythonversion 3.12 . || true
+        continue-on-error: true
+
+      - name: Python Syntax Check (Compilation)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Checking Python syntax by compiling all .py files..."
+          python -m compileall -q . || {
+            echo "❌ Python syntax errors found!"
+            python -m compileall .
+            exit 1
+          }
+          echo "✅ All Python files compiled successfully!"
+
+      - name: Check for common Python issues
+        working-directory: spyre-rag/src
+        run: |
+          echo "Checking for common Python issues..."
+          
+          # Check for print statements (should use logging)
+          echo "Checking for print() statements..."
+          if grep -r "print(" --include="*.py" --exclude-dir=venv --exclude-dir=__pycache__ . | grep -v "# noqa: T201"; then
+            echo "⚠️  Warning: Found print() statements. Consider using logging instead."
+          fi
+          
+          # Check for TODO/FIXME comments
+          echo "Checking for TODO/FIXME comments..."
+          if grep -r "TODO\|FIXME" --include="*.py" --exclude-dir=venv --exclude-dir=__pycache__ .; then
+            echo "ℹ️  Found TODO/FIXME comments (informational only)"
+          fi
+          
+          # Check for bare except clauses
+          echo "Checking for bare except clauses..."
+          if grep -r "except:" --include="*.py" --exclude-dir=venv --exclude-dir=__pycache__ . | grep -v "# noqa"; then
+            echo "⚠️  Warning: Found bare except clauses. Consider catching specific exceptions."
+          fi
+          
+          echo "✅ Common issues check completed!"
+
+  security-check:
+    name: Python Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+
+      - name: Run Bandit (Security Linter)
+        working-directory: spyre-rag/src
+        run: |
+          echo "Running Bandit security linter..."
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -ll || true
+        continue-on-error: true
+
+      - name: Check dependencies for known vulnerabilities
+        working-directory: spyre-rag
+        run: |
+          echo "Checking dependencies for known vulnerabilities..."
+          if [ -f requirements.txt ]; then
+            safety check --file requirements.txt --json || true
+          fi
+        continue-on-error: true
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: spyre-rag/src/bandit-report.json
+          retention-days: 30
+
+  test-imports:
+    name: Test Python Imports
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: spyre-rag
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Test all imports
+        working-directory: spyre-rag/src
+        run: |
+          echo "Testing that all Python modules can be imported..."
+          python -c "
+          import sys
+          import os
+          from pathlib import Path
+          
+          # Add src to path
+          sys.path.insert(0, os.getcwd())
+          
+          errors = []
+          for py_file in Path('.').rglob('*.py'):
+              if '__pycache__' in str(py_file) or 'venv' in str(py_file):
+                  continue
+              
+              # Convert file path to module path
+              module_path = str(py_file.relative_to('.')).replace('/', '.').replace('.py', '')
+              
+              try:
+                  __import__(module_path)
+                  print(f'✅ {module_path}')
+              except Exception as e:
+                  print(f'❌ {module_path}: {e}')
+                  errors.append((module_path, str(e)))
+          
+          if errors:
+              print(f'\n❌ {len(errors)} module(s) failed to import')
+              sys.exit(1)
+          else:
+              print(f'\n✅ All modules imported successfully!')
+          " || true
+        continue-on-error: true
+
+# Made with Bob
