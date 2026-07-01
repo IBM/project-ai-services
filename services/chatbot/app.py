@@ -439,6 +439,13 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
+def _stream_error_response(message: str, status_code: int = 200) -> StreamingResponse:
+    """Return a one-shot SSE StreamingResponse carrying a plain error message."""
+    async def _gen():
+        yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+    return StreamingResponse(_gen(), media_type="text/event-stream", status_code=status_code)
+
+
 async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
@@ -448,9 +455,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         if not api_key:
             message = "API key is required when vLLM authentication is enabled"
             if req.stream:
-                async def stream_auth_error():
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-                return StreamingResponse(stream_auth_error(), media_type="text/event-stream", status_code=401)
+                return _stream_error_response(message, status_code=401)
             APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
 
     if not req.messages:
@@ -504,10 +509,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         if not is_valid:
             # Return streaming error response for consistency
             if req.stream:
-                async def stream_query_length_error():
-                    message = "Your query is too long. Please shorten it and try again."
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-                return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
+                return _stream_error_response("Your query is too long. Please shorten it and try again.")
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
         max_tokens = req.max_tokens
@@ -550,19 +552,14 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         if not docs:
             message = NO_DOCUMENTS_FOUND_MESSAGES.get(query_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
-                async def stream_docs_not_found():
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-                return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
+                return _stream_error_response(message)
             return ChatCompletionResponse(
                 choices=[ChatChoice(message=ChatMessage(content=message))]
             )
 
         if concurrency_limiter.locked():
             if req.stream:
-                async def stream_server_busy():
-                    message = "Server busy. Try again shortly."
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-                return StreamingResponse(stream_server_busy(), media_type="text/event-stream")
+                return _stream_error_response("Server busy. Try again shortly.")
             APIError.raise_error(ErrorCode.SERVER_BUSY, "Try again shortly.")
         await concurrency_limiter.acquire()
 
