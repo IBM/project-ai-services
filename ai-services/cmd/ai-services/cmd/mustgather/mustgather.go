@@ -35,45 +35,9 @@ information. All sensitive values are automatically redacted.`,
 
   # Write output to a custom directory
   ai-services must-gather --runtime podman --output-dir /tmp/debug`,
-		Args: cobra.NoArgs,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-			rt := types.RuntimeType(runtimeType)
-			if !rt.Valid() {
-				return fmt.Errorf(
-					"invalid runtime type: %s (must be 'podman' or 'openshift'). "+
-						"Please specify runtime using --runtime flag", runtimeType,
-				)
-			}
-			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-			logger.Debugf("Using runtime: %s\n", rt)
-
-			return nil
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			rt := vars.RuntimeFactory.GetRuntimeType()
-
-			if rt != types.RuntimeTypePodman {
-				return fmt.Errorf("must-gather currently supports only the 'podman' runtime")
-			}
-
-			gatherer := newPodmanGatherer()
-			opts := gatherOptions{
-				outputDir:       outputDir,
-				applicationName: applicationName,
-			}
-
-			outDir, err := gatherer.gather(opts)
-			if err != nil {
-				return fmt.Errorf("must-gather failed: %w", err)
-			}
-
-			logger.Infof("Must-gather complete. Output saved to: %s\n", outDir)
-
-			return nil
-		},
+		Args:              cobra.NoArgs,
+		PersistentPreRunE: mustGatherPreRun,
+		RunE:              mustGatherRun,
 	}
 
 	cmd.PersistentFlags().StringVar(&runtimeType, "runtime", "",
@@ -87,4 +51,45 @@ information. All sensitive values are automatically redacted.`,
 		"Limit collection to this application name (default: all applications)")
 
 	return cmd
+}
+
+func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
+	cmd.SilenceUsage = true
+
+	rt := types.RuntimeType(runtimeType)
+	if !rt.Valid() {
+		return fmt.Errorf(
+			"invalid runtime type: %s (must be 'podman' or 'openshift'). "+
+				"Please specify runtime using --runtime flag", runtimeType,
+		)
+	}
+
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
+	logger.Debugf("Using runtime: %s\n", rt)
+
+	return nil
+}
+
+func mustGatherRun(cmd *cobra.Command, _ []string) error {
+	cmd.SilenceUsage = true
+
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	if rt != types.RuntimeTypePodman {
+		return fmt.Errorf("must-gather currently supports only the 'podman' runtime")
+	}
+
+	gatherer := newPodmanGatherer()
+	opts := gatherOptions{
+		outputDir:       outputDir,
+		applicationName: applicationName,
+	}
+
+	outDir, err := gatherer.gather(opts)
+	if err != nil {
+		return fmt.Errorf("must-gather failed: %w", err)
+	}
+
+	logger.Infof("Must-gather complete. Output saved to: %s\n", outDir)
+
+	return nil
 }

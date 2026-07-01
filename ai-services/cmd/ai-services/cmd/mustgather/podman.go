@@ -12,6 +12,7 @@ import (
 
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -21,9 +22,10 @@ import (
 )
 
 const (
-	dirPerm     = 0755
-	filePerm    = 0644
-	maxLogLines = "1000"
+	dirPerm          = 0755
+	filePerm         = 0644
+	maxLogLines      = "1000"
+	modelsSeparatorW = 60 // width of the separator line in models.txt
 )
 
 // gatherOptions carries options forwarded from the cobra command.
@@ -61,6 +63,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 	rt, err := podmanRuntime.NewPodmanClient()
 	if err != nil {
 		logger.Warningf("Could not connect to Podman: %v\n", err)
+
 		return "", fmt.Errorf("failed to connect to Podman: %w", err)
 	}
 
@@ -154,9 +157,29 @@ func (g *podmanGatherer) collectApplicationPods(outDir, appName string) {
 	appClient, err := catalogClient.NewApplicationClient()
 	if err != nil {
 		logger.Warningf("Catalog client unavailable, skipping application pod collection: %v\n", err)
+
 		return
 	}
 
+	apps, ok := fetchApplicationsForGather(appClient, appName)
+	if !ok {
+		return
+	}
+
+	podsDir := filepath.Join(outDir, "pods")
+	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
+		logger.Warningf("Failed to create pods directory: %v\n", err)
+
+		return
+	}
+
+	g.collectPodsForApps(appClient, podsDir, apps)
+}
+
+// fetchApplicationsForGather fetches the application list and logs the
+// appropriate warning on error or empty result. Returns (apps, true) on
+// success, (nil, false) when the caller should skip collection.
+func fetchApplicationsForGather(appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
 	apps, err := cliUtils.FetchApplications(appClient, appName)
 	if err != nil {
 		if appName != "" {
@@ -165,7 +188,7 @@ func (g *podmanGatherer) collectApplicationPods(outDir, appName string) {
 			logger.Warningf("Failed to fetch applications: %v\n", err)
 		}
 
-		return
+		return nil, false
 	}
 
 	if len(apps) == 0 {
@@ -175,19 +198,20 @@ func (g *podmanGatherer) collectApplicationPods(outDir, appName string) {
 			logger.Warningln("No applications found; skipping application pod collection.")
 		}
 
-		return
+		return nil, false
 	}
 
-	podsDir := filepath.Join(outDir, "pods")
-	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create pods directory: %v\n", err)
-		return
-	}
+	return apps, true
+}
 
+// collectPodsForApps iterates over apps, fetches their PS data, and collects
+// each pod. Extracted to keep collectApplicationPods within complexity limits.
+func (g *podmanGatherer) collectPodsForApps(appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
 	for _, app := range apps {
 		psResp, err := appClient.GetApplicationPS(app.ID)
 		if err != nil {
 			logger.Warningf("Failed to get PS for application %q: %v\n", app.Name, err)
+
 			continue
 		}
 
@@ -206,6 +230,7 @@ func (g *podmanGatherer) collectPod(podsDir, podName string) {
 	podDir := filepath.Join(podsDir, podName)
 	if err := os.MkdirAll(podDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create directory for pod %q: %v\n", podName, err)
+
 		return
 	}
 
@@ -217,6 +242,7 @@ func (g *podmanGatherer) collectPodInspect(podDir, podName string) {
 	raw, err := podmanRun("pod", "inspect", podName)
 	if err != nil {
 		logger.Warningf("Failed to inspect pod %q: %v\n", podName, err)
+
 		return
 	}
 
@@ -229,12 +255,14 @@ func (g *podmanGatherer) collectContainersForPod(podDir, podName string) {
 	raw, err := podmanRun("ps", "-a", "--filter", "pod="+podName, "--format", "json")
 	if err != nil {
 		logger.Warningf("Failed to list containers for pod %q: %v\n", podName, err)
+
 		return
 	}
 
 	var containers []map[string]any
 	if err := json.Unmarshal(raw, &containers); err != nil {
 		logger.Warningf("Failed to parse container list for pod %q: %v\n", podName, err)
+
 		return
 	}
 
@@ -256,12 +284,14 @@ func (g *podmanGatherer) collectContainerInspect(podDir, name string) {
 	raw, err := podmanRun("inspect", name)
 	if err != nil {
 		logger.Warningf("Failed to inspect container %q: %v\n", name, err)
+
 		return
 	}
 
 	inspectDir := filepath.Join(podDir, "inspect")
 	if err := os.MkdirAll(inspectDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create inspect directory: %v\n", err)
+
 		return
 	}
 
@@ -272,12 +302,14 @@ func (g *podmanGatherer) collectContainerLogs(podDir, name string) {
 	logsDir := filepath.Join(podDir, "logs")
 	if err := os.MkdirAll(logsDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create logs directory: %v\n", err)
+
 		return
 	}
 
 	raw, err := podmanRun("logs", "--tail", maxLogLines, name)
 	if err != nil {
 		logger.Warningf("Failed to get logs for container %q: %v\n", name, err)
+
 		return
 	}
 
@@ -297,6 +329,7 @@ func (g *podmanGatherer) collectCatalogArtifacts(outDir string) {
 	catDir := filepath.Join(outDir, "catalog")
 	if err := os.MkdirAll(catDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create catalog directory: %v\n", err)
+
 		return
 	}
 
@@ -315,23 +348,27 @@ func (g *podmanGatherer) collectCatalogPods(catDir string) {
 	)
 	if err != nil {
 		logger.Warningf("Failed to list catalog pods: %v\n", err)
+
 		return
 	}
 
 	var pods []map[string]any
 	if err := json.Unmarshal(raw, &pods); err != nil {
 		logger.Warningf("Failed to parse catalog pod list: %v\n", err)
+
 		return
 	}
 
 	if len(pods) == 0 {
 		logger.Warningln("No catalog pods found (catalog may not be configured).")
+
 		return
 	}
 
 	podsDir := filepath.Join(catDir, "pods")
 	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create catalog pods directory: %v\n", err)
+
 		return
 	}
 
@@ -389,6 +426,7 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
 		logger.Warningf("Cannot determine user config dir: %v\n", err)
+
 		return
 	}
 
@@ -432,12 +470,13 @@ func (g *podmanGatherer) collectModelsInfo(outDir string) {
 	modelsDir := filepath.Join(outDir, "models")
 	if err := os.MkdirAll(modelsDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create models output directory: %v\n", err)
+
 		return
 	}
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("Models directory: %s", modelsPath))
-	lines = append(lines, strings.Repeat("-", 60))
+	lines = append(lines, strings.Repeat("-", modelsSeparatorW))
 
 	for _, org := range entries {
 		if !org.IsDir() {
@@ -449,6 +488,7 @@ func (g *podmanGatherer) collectModelsInfo(outDir string) {
 		modelEntries, err := os.ReadDir(orgPath)
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("  %s/  (unreadable: %v)", org.Name(), err))
+
 			continue
 		}
 
@@ -520,6 +560,7 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	secDir := filepath.Join(outDir, "secrets")
 	if err := os.MkdirAll(secDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create secrets directory: %v\n", err)
+
 		return
 	}
 
@@ -527,12 +568,14 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	raw, err := podmanRun("secret", "ls", "--noheading")
 	if err != nil {
 		logger.Warningf("podman secret ls failed: %v\n", err)
+
 		return
 	}
 
 	names := parseSecretNames(raw)
 	if len(names) == 0 {
 		logger.Infoln("No Podman secrets found.")
+
 		return
 	}
 
@@ -541,6 +584,7 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	inspectRaw, err := podmanRun(args...)
 	if err != nil {
 		logger.Warningf("podman secret inspect failed: %v\n", err)
+
 		return
 	}
 
@@ -575,6 +619,7 @@ func (g *podmanGatherer) collectSystemInfo(outDir string) {
 	sysDir := filepath.Join(outDir, "system")
 	if err := os.MkdirAll(sysDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create system directory: %v\n", err)
+
 		return
 	}
 
@@ -591,6 +636,7 @@ func (g *podmanGatherer) collectSystemInfo(outDir string) {
 		raw, err := podmanRun(c.args...)
 		if err != nil {
 			logger.Warningf("podman %s failed: %v\n", strings.Join(c.args, " "), err)
+
 			continue
 		}
 
@@ -604,12 +650,14 @@ func (g *podmanGatherer) collectNetworkInfo(outDir string) {
 	netDir := filepath.Join(outDir, "network")
 	if err := os.MkdirAll(netDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create network directory: %v\n", err)
+
 		return
 	}
 
 	raw, err := podmanRun("network", "ls", "--format", "json")
 	if err != nil {
 		logger.Warningf("podman network ls failed: %v\n", err)
+
 		return
 	}
 
@@ -622,12 +670,14 @@ func (g *podmanGatherer) collectVolumeInfo(outDir string) {
 	volDir := filepath.Join(outDir, "volumes")
 	if err := os.MkdirAll(volDir, dirPerm); err != nil {
 		logger.Warningf("Failed to create volumes directory: %v\n", err)
+
 		return
 	}
 
 	raw, err := podmanRun("volume", "ls", "--format", "json")
 	if err != nil {
 		logger.Warningf("podman volume ls failed: %v\n", err)
+
 		return
 	}
 
