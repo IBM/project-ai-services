@@ -319,6 +319,13 @@ async def locked_stream(stream_g, perf_stat_dict):
         concurrency_limiter.release()
 
 
+def _stream_error_response(message: str, status_code: int = 200) -> StreamingResponse:
+    """Return a one-shot SSE StreamingResponse carrying a plain error message."""
+    async def _gen():
+        yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+    return StreamingResponse(_gen(), media_type="text/event-stream", status_code=status_code)
+
+
 @app.post(
     "/v1/chat/completions",
     response_model=ChatCompletionResponse,
@@ -439,13 +446,6 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
-def _stream_error_response(message: str, status_code: int = 200) -> StreamingResponse:
-    """Return a one-shot SSE StreamingResponse carrying a plain error message."""
-    async def _gen():
-        yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-    return StreamingResponse(_gen(), media_type="text/event-stream", status_code=status_code)
-
-
 async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None

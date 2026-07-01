@@ -74,11 +74,12 @@ def truncate_history_by_tokens(
                 return [message]
 
             if current_tokens + message_tokens <= token_budget:
-                truncated.insert(0, message)
+                truncated.append(message)
                 current_tokens += message_tokens
             else:
                 break
 
+        truncated.reverse()
         dropped_count = len(messages) - len(truncated)
         if dropped_count > 0:
             logger.info(
