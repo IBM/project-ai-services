@@ -15,9 +15,9 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
-	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 const (
@@ -64,6 +64,13 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 		return "", fmt.Errorf("failed to connect to Podman: %w", err)
 	}
 
+	outDir, err := g.createOutputDir(opts.outputDir)
+	if err != nil {
+		return "", err
+	}
+
+	logger.Infof("Output directory: %s\n", outDir)
+
 	catalogInstalled, err := checkCatalogInstalled(rt)
 	if err != nil {
 		logger.Warningf("Failed to check catalog installation: %v\n", err)
@@ -73,25 +80,18 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 		g.resolveBaseDir(rt)
 	}
 
-	outDir, err := g.createOutputDir(opts.outputDir)
-	if err != nil {
-		return "", err
-	}
-
-	logger.Infof("Output directory: %s\n", outDir)
-
 	if catalogInstalled {
-		g.collectApplicationPods(outDir, opts.applicationName)
 		g.collectCatalogArtifacts(outDir)
+		g.collectApplicationPods(outDir, opts.applicationName)
 		g.collectModelsInfo(outDir)
 	} else {
 		logger.Warningln("No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")
 	}
 
 	// Always collected — independent of catalog state.
-	g.collectSecretInfo(outDir)
 	g.collectSystemInfo(outDir)
 	g.collectNetworkInfo(outDir)
+	g.collectSecretInfo(outDir)
 	g.collectVolumeInfo(outDir)
 
 	return outDir, nil
@@ -159,12 +159,22 @@ func (g *podmanGatherer) collectApplicationPods(outDir, appName string) {
 
 	apps, err := cliUtils.FetchApplications(appClient, appName)
 	if err != nil {
-		logger.Warningf("Failed to fetch applications: %v\n", err)
+		if appName != "" {
+			logger.Warningf("Application %q not found: %v\n", appName, err)
+		} else {
+			logger.Warningf("Failed to fetch applications: %v\n", err)
+		}
+
 		return
 	}
 
 	if len(apps) == 0 {
-		logger.Warningln("No applications found; skipping application pod collection.")
+		if appName != "" {
+			logger.Warningf("No application named %q found; skipping application pod collection.\n", appName)
+		} else {
+			logger.Warningln("No applications found; skipping application pod collection.")
+		}
+
 		return
 	}
 
