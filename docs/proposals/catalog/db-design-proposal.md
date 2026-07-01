@@ -1,5 +1,9 @@
 # Database Design Proposal for Catalog Service
 
+**Version:** 2.0
+**Date:** June 2026
+**Status:** Implemented
+
 ## Overview
 
 This document outlines the database design required for the Catalog service, including database selection rationale, schema design, and entity relationships.
@@ -59,32 +63,33 @@ ai_services
 
 **Table Name:** `applications`
 
-| Column Name         | Data Type         | Constraints | Description |
-|---------------------|-------------------|-------------|-------------|
-| id                  | UUID              | PRIMARY KEY | Unique application identifier |
-| name                | VARCHAR(100)      |             | Application name |
-| template            | VARCHAR(100)      |             | Architecture/service template ID (e.g., rag, summarize, digitize) |
-| deployment_type     | DeploymentType    | ENUM        | Deployment type (architectures, services) |
-| status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
-| message             | TEXT              |             | Status message or error details |
-| created_by          | VARCHAR(100)      |             | User who created the application |
-| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
-| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
+| Column Name     | Data Type      | Constraints   | Description |
+|-----------------|----------------|---------------|-------------|
+| id              | UUID           | PRIMARY KEY   | Unique application identifier; generated via `gen_random_uuid()` |
+| name            | VARCHAR(100)   |               | Application name |
+| catalog_id      | VARCHAR(100)   |               | Catalog ID of the deployed architecture or service (e.g., `rag`, `digitize`) |
+| deployment_type | deployment_type | ENUM         | Deployment type: `architectures` or `services` |
+| status          | status         | ENUM          | Current status: `Downloading`, `Deploying`, `Running`, `Deleting`, `Error` |
+| message         | TEXT           |               | Status message or error details |
+| version         | VARCHAR(50)    |               | Version of the catalog item being deployed |
+| created_by      | VARCHAR(100)   |               | User ID who created the application |
+| created_at      | TIMESTAMPTZ    | DEFAULT NOW() | Timestamp of creation |
+| updated_at      | TIMESTAMPTZ    | DEFAULT NOW() | Timestamp of last update; auto-updated via trigger |
 
 **Custom Types:**
 
 ```sql
-CREATE TYPE deployment_type AS ENUM (
-    'architectures',
-    'services'
-);
-
 CREATE TYPE status AS ENUM (
     'Downloading',
     'Deploying',
     'Running',
     'Deleting',
     'Error'
+);
+
+CREATE TYPE deployment_type AS ENUM (
+    'architectures',
+    'services'
 );
 ```
 
@@ -94,21 +99,23 @@ CREATE TYPE status AS ENUM (
 
 **Table Name:** `services`
 
-| Column Name         | Data Type         | Constraints | Description |
-|---------------------|-------------------|-------------|-------------|
-| id                  | UUID              | PRIMARY KEY | Unique service identifier |
-| app_id              | UUID              | FOREIGN KEY | References applications(id) |
-| catalog_id          | VARCHAR(100)      |             | Service catalog ID (e.g., chat, summarize, digitize) |
-| status              | ServiceStatus     | ENUM        | Current status (Running, Error) |
-| endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "ui", "endpoint": "http://..."}, {"name": "backend", "endpoint": "http://..."}]` |
-| version             | TEXT              |             | Service version |
-| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
-| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
+| Column Name | Data Type      | Constraints   | Description |
+|-------------|----------------|---------------|-------------|
+| id          | UUID           | PRIMARY KEY   | Unique service identifier; generated via `gen_random_uuid()` |
+| app_id      | UUID           | FOREIGN KEY, NOT NULL | References `applications(id)` ON DELETE CASCADE |
+| catalog_id  | VARCHAR(100)   |               | Service catalog ID (e.g., `chat`, `summarize`, `digitize`) |
+| status      | service_status | ENUM          | Current status: `Initializing`, `Running`, `Error` |
+| message     | TEXT           |               | Status message or error details |
+| endpoints   | JSONB          |               | Array of endpoint objects: `[{"type": "ui", "url": "http://..."}, {"type": "api", "url": "http://..."}]` |
+| version     | TEXT           |               | Service version |
+| created_at  | TIMESTAMPTZ    | DEFAULT NOW() | Timestamp of creation |
+| updated_at  | TIMESTAMPTZ    | DEFAULT NOW() | Timestamp of last update; auto-updated via trigger |
 
 **Custom Types:**
 
 ```sql
 CREATE TYPE service_status AS ENUM (
+    'Initializing',
     'Running',
     'Error'
 );
@@ -120,36 +127,48 @@ CREATE TYPE service_status AS ENUM (
 
 **Table Name:** `components`
 
-This table stores reusable infrastructure components that can be shared across multiple services and applications. Components are standalone entities that don't belong to a specific application.
+This table stores reusable infrastructure components that can be shared across multiple services and applications. Components are standalone entities that do not belong to a specific application.
 
-| Column Name         | Data Type         | Constraints | Description |
-|---------------------|-------------------|-------------|-------------|
-| id                  | UUID              | PRIMARY KEY | Unique component identifier |
-| type                | VARCHAR(100)      |             | Component type (e.g., vector_store, llm, reranker, embedding) |
-| provider            | VARCHAR(100)      |             | Provider/implementation (e.g., OpenSearch, vLLM) |
-| endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "internal", "endpoint": "http://..."}, {"name": "external", "endpoint": "http://..."}]` |
-| version             | TEXT              |             | Component version |
-| metadata            | JSONB             |             | Additional component-specific configuration and metadata. Example: `{"models": ["granite-7b-lab", "granite-3.0-8b-instruct"]}` |
-| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
-| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
+| Column Name | Data Type        | Constraints   | Description |
+|-------------|------------------|---------------|-------------|
+| id          | UUID             | PRIMARY KEY   | Unique component identifier; generated via `gen_random_uuid()` |
+| type        | VARCHAR(100)     |               | Component type: `vector_store`, `llm`, `embedding`, `reranker` |
+| provider    | VARCHAR(100)     |               | Provider identifier (e.g., `opensearch`, `vllm-cpu`, `vllm-spyre`, `watsonx`) |
+| status      | component_status | ENUM          | Current status: `Initializing`, `Running`, `Error` |
+| message     | TEXT             |               | Status message or error details |
+| endpoints   | JSONB            |               | Array of endpoint objects: `[{"type": "api", "url": "http://..."}]` |
+| version     | TEXT             |               | Component version |
+| metadata    | JSONB            |               | Non-sensitive component configuration (e.g., `{"model": "ibm-granite/granite-3.3-8b-instruct"}`). Sensitive fields are stripped before insert. |
+| created_at  | TIMESTAMPTZ      | DEFAULT NOW() | Timestamp of creation |
+| updated_at  | TIMESTAMPTZ      | DEFAULT NOW() | Timestamp of last update; auto-updated via trigger |
 
-**Note:** Components do not have an `app_id` foreign key as they are shared resources that can be used by multiple services across different applications.
+**Note:** Components have no `app_id` — they are shared resources used by multiple services across different applications.
+
+**Custom Types:**
+
+```sql
+CREATE TYPE component_status AS ENUM (
+    'Initializing',
+    'Running',
+    'Error'
+);
+```
 
 ---
 
-### 4. Service Dependencies Table (Taking it up at the end of Q2)
+### 4. Service Dependencies Table
 
 **Table Name:** `service_dependencies`
 
-This table tracks dependencies between services and components, as well as between services themselves, enabling many-to-many relationships.
+This table tracks which components a service depends on, enabling many-to-many relationships between services and components.
 
-| Column Name         | Data Type         | Constraints | Description |
-|---------------------|-------------------|-------------|-------------|
-| service_id          | UUID              | PRIMARY KEY, FOREIGN KEY | References services(id) - The service that uses a component or another service |
-| dependency_id       | UUID              | PRIMARY KEY, FOREIGN KEY | References either services(id) or components(id) - The service or component being used |
-| dependency_type     | DependencyType    | ENUM, NOT NULL | Type of dependency: 'service' or 'component' |
+| Column Name     | Data Type      | Constraints              | Description |
+|-----------------|----------------|--------------------------|-------------|
+| service_id      | UUID           | PRIMARY KEY, FOREIGN KEY | References `services(id)` ON DELETE CASCADE |
+| dependency_id   | UUID           | PRIMARY KEY              | UUID of the component being used |
+| dependency_type | dependency_type | ENUM, NOT NULL          | Type of dependency: `service` or `component` |
 
-**Composite Primary Key:** (service_id, dependency_id)
+**Composite Primary Key:** `(service_id, dependency_id)`
 
 **Custom Types:**
 
@@ -161,15 +180,16 @@ CREATE TYPE dependency_type AS ENUM (
 ```
 
 **Foreign Key Constraints:**
-- service_id references services(id) ON DELETE CASCADE
-- dependency_id can reference either services(id) or components(id) ON DELETE CASCADE
+- `service_id` references `services(id)` ON DELETE CASCADE
+- `dependency_id` has no database-level FK constraint — it references `components(id)` at the application layer
 
 **Example Usage:**
 ```
-Summarization Service → Vector Store Component (vector_store)
-Chat Bot Service → LLM Component (llm)
-Digitization Service → Vector Store Component (vector_store)
-Summarization Service → Embedding Service (service-to-service)
+Digitize service  → OpenSearch component (vector_store)
+Digitize service  → vllm-cpu component   (embedding)
+Digitize service  → vllm-spyre component (llm)
+Chat service      → OpenSearch component (vector_store)
+Chat service      → vllm-cpu component   (embedding)
 ```
 
 ---
@@ -183,7 +203,7 @@ This table manages blacklisted tokens for both access and refresh tokens. Tokens
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
 | token_hash          | VARCHAR(64)       | PRIMARY KEY | SHA-256 hash of the JWT token (hex-encoded, 64 characters) |
-| token_type          | TokenType         | ENUM, NOT NULL | Token type: "access" or "refresh" |
+| token_type          | token_type        | ENUM, NOT NULL | Token type: `access` or `refresh` |
 | expires_at          | TIMESTAMPTZ       | NOT NULL    | Token expiry timestamp |
 
 **Custom Types:**
@@ -217,10 +237,11 @@ erDiagram
     applications {
         UUID id PK
         VARCHAR name
-        VARCHAR template
-        DeploymentType deployment_type
-        Status status
+        VARCHAR catalog_id
+        deployment_type deployment_type
+        status status
         TEXT message
+        VARCHAR version
         VARCHAR created_by
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
@@ -230,7 +251,8 @@ erDiagram
         UUID id PK
         UUID app_id FK
         VARCHAR catalog_id
-        ServiceStatus status
+        service_status status
+        TEXT message
         JSONB endpoints
         TEXT version
         TIMESTAMPTZ created_at
@@ -241,6 +263,8 @@ erDiagram
         UUID id PK
         VARCHAR type
         VARCHAR provider
+        component_status status
+        TEXT message
         JSONB endpoints
         TEXT version
         JSONB metadata
@@ -316,12 +340,12 @@ PostgreSQL custom types (ENUM) are used for:
 - **service_status**: Standardizes service status values (Running, Error) - services only have operational states
 - **dependency_type**: Standardizes dependency type values (service, component) - ensures type safety for service dependencies
 
-### 4. Application Template Field
-The template field in applications table stores:
-- **Architecture/Service ID**: Stores the identifier of the architecture or service template (e.g., rag, summarize, digitize)
-- **Direct Reference**: Template corresponds to the ID of the architecture/service being deployed
-- **Simpler Schema**: Single template field replaces type and deployment_type columns
-- **Clear Identification**: Template directly identifies which architecture or service is being deployed
+### 4. Application Catalog ID Field
+The `catalog_id` field in the applications table stores:
+- **Architecture/Service ID**: Stores the identifier of the architecture or service being deployed (e.g., `rag`, `summarize`, `digitize`)
+- **Direct Reference**: `catalog_id` corresponds to the ID of the architecture/service in the catalog
+- **Consistent Naming**: Aligns with the `catalog_id` field used in the services table
+- **Clear Identification**: Directly identifies which architecture or service is being deployed
 
 ### 5. Tokens Blacklist Table
 The tokens_blacklist table provides token revocation management with enhanced security:
@@ -392,7 +416,7 @@ SELECT * FROM applications ORDER BY created_at DESC;
 SELECT
     a.*,
     s.id as service_id,
-    s.type as service_type,
+    s.catalog_id as service_catalog_id,
     s.endpoints as service_endpoints,
     s.version as service_version
 FROM applications a
@@ -424,8 +448,8 @@ SELECT
     scd.dependency_type,
     CASE
         WHEN scd.dependency_type = 'component' THEN c.type
-        WHEN scd.dependency_type = 'service' THEN s.type
-    END as dependency_type_name,
+        WHEN scd.dependency_type = 'service' THEN s.catalog_id
+    END as dependency_name,
     CASE
         WHEN scd.dependency_type = 'component' THEN c.id
         WHEN scd.dependency_type = 'service' THEN s.id
@@ -451,7 +475,7 @@ SELECT
     a.id as app_id,
     a.name,
     s.id as service_id,
-    s.type as service_type,
+    s.catalog_id as service_catalog_id,
     scd.dependency_type,
     CASE
         WHEN scd.dependency_type = 'component' THEN c.id
@@ -459,15 +483,15 @@ SELECT
     END as dependency_id,
     CASE
         WHEN scd.dependency_type = 'component' THEN c.type
-        WHEN scd.dependency_type = 'service' THEN dep_s.type
-    END as dependency_type_name
+        WHEN scd.dependency_type = 'service' THEN dep_s.catalog_id
+    END as dependency_name
 FROM applications a
 JOIN services s ON a.id = s.app_id
 LEFT JOIN service_dependencies scd ON s.id = scd.service_id
 LEFT JOIN components c ON scd.dependency_id = c.id AND scd.dependency_type = 'component'
 LEFT JOIN services dep_s ON scd.dependency_id = dep_s.id AND scd.dependency_type = 'service'
 WHERE a.id = 'application-uuid-here'
-ORDER BY s.type, scd.dependency_type;
+ORDER BY s.catalog_id, scd.dependency_type;
 ```
 
 ### 9. Find shared components (components used by multiple services):
@@ -490,14 +514,14 @@ ORDER BY service_count DESC;
 SELECT * FROM applications WHERE id = 'application-uuid-here';
 ```
 
-### 11. Get applications by template:
+### 11. Get applications by catalog ID:
 ```sql
-SELECT * FROM applications WHERE template = 'rag';
+SELECT * FROM applications WHERE catalog_id = 'rag';
 ```
 
-### 12. Get all services by type:
+### 12. Get all services by catalog ID:
 ```sql
-SELECT * FROM services WHERE type = 'Summarization' ORDER BY created_at DESC;
+SELECT * FROM services WHERE catalog_id = 'summarize' ORDER BY created_at DESC;
 ```
 
 ### 13. Check if a service has any dependencies:
