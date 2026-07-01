@@ -1,5 +1,10 @@
 # AI-Services
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![DCO](https://img.shields.io/badge/DCO-1.1-blue)](DCO1.1.txt)
+[![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen)](CONTRIBUTING.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IBM/project-ai-services)
+
 AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
 
 ## 📺 Demo
