@@ -14,33 +14,6 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 
 For detailed platform-specific installation instructions, see [Installation Guide](docs/INSTALLATION.md).
 
-**Quick install for your platform:**
-
-```bash
-# Set version
-VERSION="v0.3.0"
-
-# macOS (Intel)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
-chmod +x ai-services-darwin-amd64
-sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
-
-# macOS (Apple Silicon)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
-chmod +x ai-services-darwin-arm64
-sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
-
-# Linux (x86_64)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
-chmod +x ai-services-linux-amd64
-sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
-
-# Linux (ppc64le/Power)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
-chmod +x ai-services-linux-ppc64le
-sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
-```
-
 **Supported Platforms:**
 - macOS (Intel x86_64, Apple Silicon ARM64) - Client-only mode
 - Linux (x86_64) - Client-only mode
