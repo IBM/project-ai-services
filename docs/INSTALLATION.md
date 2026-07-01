@@ -161,9 +161,6 @@ To see all available container images for a specific application:
 ```bash
 # List images for RAG application
 ai-services application image list --runtime podman -t rag
-
-# List images for other applications
-ai-services application image list --runtime podman -t rag-cpu
 ```
 
 ### Verify Container Images
