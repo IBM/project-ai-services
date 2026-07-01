@@ -4,7 +4,7 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 
 ## 📺 Demo
 
-<video src="https://github.com/user-attachments/assets/958980a7-f653-4474-84a7-28d657b5f7d1" controls="controls" style="max-width: 100%;">
+<video src="https://github-production-user-asset-6210df.s3.amazonaws.com/20432587/615272192-155afcc0-1baf-412d-8c39-93ef7df6ecf7.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20260701%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260701T041911Z&X-Amz-Expires=300&X-Amz-Signature=113d1a4f6dd186fd3331cc7feac8d70762598d0f447a6f6354e163cb8ea8ca3f&X-Amz-SignedHeaders=host&response-content-type=video%2Fmp4" controls="controls" style="max-width: 100%;">
   Your browser does not support the video tag.
 </video>
 
@@ -13,44 +13,6 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 ### Installation
 
 For detailed platform-specific installation instructions, see [Installation Guide](docs/INSTALLATION.md).
-
-**Quick install for your platform:**
-
-```bash
-# Set version
-VERSION="v0.2.0"
-
-# macOS (Intel)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
-chmod +x ai-services-darwin-amd64
-sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
-
-# macOS (Apple Silicon)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
-chmod +x ai-services-darwin-arm64
-sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
-
-# Linux (x86_64)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
-chmod +x ai-services-linux-amd64
-sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
-
-# Linux (ppc64le/Power)
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
-chmod +x ai-services-linux-ppc64le
-sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
-```
-
-**Supported Platforms:**
-- macOS (Intel x86_64, Apple Silicon ARM64) - Client-only mode
-- Linux (x86_64) - Client-only mode
-- Linux (ppc64le/Power) - Local + Remote mode
-
-**Deployment Modes:**
-- **Client-only mode**: CLI connects to remote OpenShift cluster for application deployment
-- **Local + Remote mode**: Supports both local Podman deployments and remote OpenShift cluster connections
-
-For signature verification with Cosign, see the [Installation Guide](docs/INSTALLATION.md).
 
 ### Run the binary to get started
 
@@ -62,10 +24,12 @@ Usage:
   ai-services [command]
 
 Available Commands:
-  application   Deploy and monitor the applications
-  completion    Generate the autocompletion script for the specified shell
-  help          Help about any command
-  version       Prints CLI version with more info
+  application Deploy and monitor the applications
+  bootstrap   Initializes AI Services infrastructure
+  catalog     Manage the AI Services catalog
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  version     Prints CLI version with more info
 
 Flags:
   -h, --help      help for ai-services
