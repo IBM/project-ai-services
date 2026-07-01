@@ -133,7 +133,7 @@ types-requests==2.33.0.20260408
 typing_extensions==4.15.0
 typing-inspection==0.4.2
 tzdata==2025.3
-ujson==5.12.1
+ujson==5.13.0
 urllib3==2.7.0
 uvicorn==0.44.0
 uvloop==0.22.1
