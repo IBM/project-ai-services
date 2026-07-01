@@ -5,10 +5,46 @@ This module provides comprehensive DB mocking to ensure tests run without
 requiring an actual PostgreSQL database connection.
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
+import sys
+import types
+from unittest.mock import MagicMock, Mock, patch
 from datetime import datetime, timezone
 from types import SimpleNamespace
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Stub out docling submodules that are not installed in the test environment.
+# These stubs must be inserted into sys.modules BEFORE any test module is
+# imported (which is why they live here at module-import time rather than in
+# a fixture).
+# ---------------------------------------------------------------------------
+def _stub_module(name: str) -> types.ModuleType:
+    """Insert a bare stub module into sys.modules if not already present."""
+    if name not in sys.modules:
+        mod = types.ModuleType(name)
+        sys.modules[name] = mod
+    return sys.modules[name]
+
+
+# Ensure all package levels exist first.
+for _pkg in [
+    "docling",
+    "docling.datamodel",
+    "docling.datamodel.document",
+    "docling.document_converter",
+    "docling_core",
+    "docling_core.types",
+    "docling_core.types.doc",
+    "docling_core.types.doc.document",
+]:
+    _stub_module(_pkg)
+
+# Expose the symbols that docling_utils.py imports at module level.
+sys.modules["docling.datamodel.document"].ConversionResult = MagicMock(name="ConversionResult")
+sys.modules["docling.document_converter"].DocumentConverter = MagicMock(name="DocumentConverter")
+sys.modules["docling_core.types.doc.document"].DoclingDocument = MagicMock(name="DoclingDocument")
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +57,7 @@ def mock_database_engine():
     mock_engine.dispose = Mock()
     
     with patch('digitize.db.connection.engine', mock_engine):
-        with patch('digitize.db_operations.engine', mock_engine):
+        with patch('digitize.utils.db.engine', mock_engine):
             yield mock_engine
 
 
@@ -98,7 +134,7 @@ def mock_db_manager():
     mock_manager.delete_all_documents = Mock(return_value={"deleted_count": 0, "success": True})
     
     with patch('digitize.db.manager.db_manager', mock_manager):
-        with patch('digitize.db_operations.db_manager', mock_manager):
+        with patch('digitize.utils.db.db_manager', mock_manager):
             yield mock_manager
 
 
@@ -113,8 +149,8 @@ def mock_status_manager():
     mock_manager._update_document = Mock()
     mock_manager._update_job = Mock()
     
-    with patch('digitize.db_operations.DatabaseStatusManager', return_value=mock_manager):
-        with patch('digitize.db_operations.get_status_manager', return_value=mock_manager):
+    with patch('digitize.utils.db.DatabaseStatusManager', return_value=mock_manager):
+        with patch('digitize.utils.db.get_status_manager', return_value=mock_manager):
             yield mock_manager
 
 
@@ -124,14 +160,14 @@ def mock_db_operations():
     Mock all db_operations functions to prevent database access.
     This fixture is automatically used for all tests.
     """
-    with patch('digitize.db_operations.create_job') as mock_create_job, \
-         patch('digitize.db_operations.get_job') as mock_get_job, \
-         patch('digitize.db_operations.get_all_jobs') as mock_get_all_jobs, \
-         patch('digitize.db_operations.create_document') as mock_create_document, \
-         patch('digitize.db_operations.get_document') as mock_get_document, \
-         patch('digitize.db_operations.get_all_documents_paginated') as mock_get_all_docs, \
-         patch('digitize.db_operations.get_all_document_ids') as mock_get_doc_ids, \
-         patch('digitize.db_operations.get_status_manager') as mock_get_status_mgr:
+    with patch('digitize.utils.db.create_job') as mock_create_job, \
+         patch('digitize.utils.db.get_job') as mock_get_job, \
+         patch('digitize.utils.db.get_all_jobs') as mock_get_all_jobs, \
+         patch('digitize.utils.db.create_document') as mock_create_document, \
+         patch('digitize.utils.db.get_document') as mock_get_document, \
+         patch('digitize.utils.db.get_all_documents_paginated') as mock_get_all_docs, \
+         patch('digitize.utils.db.get_all_document_ids') as mock_get_doc_ids, \
+         patch('digitize.utils.db.get_status_manager') as mock_get_status_mgr:
         
         # Set default return values
         mock_create_job.return_value = None

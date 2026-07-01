@@ -1,15 +1,17 @@
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
-import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
 import digitize.app as digitize_app
-import digitize.db_operations as db_ops
+import digitize.api.v1.jobs as jobs_router_module
+import digitize.api.v1.documents as documents_router_module
+import digitize.utils.db as db_ops
 import digitize.db.connection as db_conn
 from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest
+from digitize.workers.concurrency import concurrency_manager
 
 
 @pytest.fixture
@@ -32,16 +34,19 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
 
     monkeypatch.setattr(digitize_app, "settings", fake_settings, raising=False)
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
-    monkeypatch.setattr(digitize_app, "digitization_semaphore", asyncio.BoundedSemaphore(2))
-    monkeypatch.setattr(digitize_app, "ingestion_semaphore", asyncio.BoundedSemaphore(1))
+    # Semaphores now live inside ConcurrencyManager — patch its is_locked and acquire/release
+    # so tests don't block on semaphore state from other tests.
+    monkeypatch.setattr(concurrency_manager, "is_locked", Mock(return_value=False))
+    monkeypatch.setattr(concurrency_manager, "acquire", AsyncMock())
+    monkeypatch.setattr(concurrency_manager, "release", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
     monkeypatch.setattr(digitize_app.dg_util, "get_document_content", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "is_document_in_active_job", Mock(return_value=False))
-    monkeypatch.setattr(digitize_app.dg_util, "delete_document_files", Mock())
-    monkeypatch.setattr(digitize_app, "reset_db", Mock())
+    # reset_db is now imported inside documents_router_module, not in app.py
+    monkeypatch.setattr(documents_router_module, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
 
     return TestClient(digitize_app.app)
@@ -309,7 +314,7 @@ class TestDocumentEndpoints:
 
     def test_delete_document_success(self, digitize_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
-        delete_document_files_mock = cast(Mock, digitize_app.dg_util.delete_document_files)
+        from digitize.utils.storage import storage_manager
         mock_doc = DocumentDetailResponse(
             id="doc-1",
             job_id="job-1",
@@ -324,6 +329,9 @@ class TestDocumentEndpoints:
             "get_document",
             Mock(return_value=mock_doc),
         )
+        # File deletion now goes through StorageManager
+        delete_content_mock = Mock()
+        monkeypatch.setattr(storage_manager, "delete_document_content", delete_content_mock)
 
         fake_vector_store = Mock()
         fake_vector_store.delete_document_by_id.return_value = 5
@@ -333,7 +341,7 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 204
         fake_vector_store.delete_document_by_id.assert_called_once_with("doc-1")
-        delete_document_files_mock.assert_called_once_with("doc-1", output_format="json")
+        delete_content_mock.assert_called_once_with("doc-1", output_format="json")
 
     def test_delete_active_document_returns_409(self, digitize_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
@@ -370,7 +378,8 @@ class TestDocumentEndpoints:
         assert response.status_code == 409
 
     def test_bulk_delete_success(self, digitize_test_client):
-        reset_db_mock = cast(Mock, digitize_app.reset_db)
+        # reset_db now lives in documents_router_module (api/v1/documents.py)
+        reset_db_mock = cast(Mock, documents_router_module.reset_db)
 
         response = digitize_test_client.delete("/v1/documents?confirm=true")
 
@@ -453,7 +462,8 @@ class TestImportExportEndpoints:
 
     def test_import_metadata_rejects_too_many_records(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
-        monkeypatch.setattr(digitize_app, "MAX_IMPORT_RECORDS", 1)
+        # MAX_IMPORT_RECORDS now lives in the jobs router module (api/v1/jobs.py)
+        monkeypatch.setattr(jobs_router_module, "MAX_IMPORT_RECORDS", 1)
 
         response = digitize_test_client.post(
             "/v1/import",
