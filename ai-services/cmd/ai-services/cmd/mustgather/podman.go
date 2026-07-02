@@ -658,4 +658,3 @@ func (g *podmanGatherer) writeFile(ctx context.Context, dir, filename string, co
 		logger.WarningfCtx(ctx, "Failed to write %s: %v\n", path, err)
 	}
 }
-
