@@ -1,8 +1,8 @@
 # Application Deployment API Proposal
 
-**Version:** 1.0
-**Date:** April 17, 2026
-**Status:** Draft
+**Version:** 2.0
+**Date:** June 2026
+**Status:** Implemented
 
 ## Table of Contents
 
@@ -31,15 +31,17 @@
      - 5.2.4 [Update Application](#524-update-application)
      - 5.2.5 [Delete Application](#525-delete-application)
      - 5.2.6 [Get Pod/Container Health Status](#526-get-podcontainer-health-status)
+     - 5.2.7 [Get Application Resources](#527-get-application-resources)
    - 5.3 [Catalog Endpoints](#53-catalog-endpoints)
      - 5.3.1 [List Available Architectures](#531-list-available-architectures)
      - 5.3.2 [Get Architecture Details](#532-get-architecture-details)
      - 5.3.3 [List Available Services](#533-list-available-services)
      - 5.3.4 [Get Service Details](#534-get-service-details)
-  - 5.4 [Deploy Options Endpoints](#54-deploy-options-endpoints)
+   - 5.4 [Deploy Options Endpoints](#54-deploy-options-endpoints)
      - 5.4.1 [Get Architecture Deploy Options](#541-get-architecture-deploy-options)
      - 5.4.2 [Get Service Deploy Options](#542-get-service-deploy-options)
      - 5.4.3 [Get Component Provider Parameters](#543-get-component-provider-parameters)
+     - 5.4.4 [Get Service Parameters](#544-get-service-parameters)
 6. [Error Handling](#6-error-handling)
    - 6.1 [Error Response Format](#61-error-response-format)
    - 6.2 [HTTP Status Codes](#62-http-status-codes)
@@ -115,7 +117,7 @@ http://localhost:8080/api/v1
 
 ### 4.2 Authentication
 
-All endpoints (except `/auth/*`) require JWT Bearer token authentication:
+All endpoints (except `/auth/login` and `/auth/refresh`) require JWT Bearer token authentication:
 
 ```
 Authorization: Bearer <access_token>
@@ -138,21 +140,26 @@ Authorization: Bearer <access_token>
 
 #### Application Management Endpoints
 
-- `GET /api/v1/applications` - List all deployments
+- `GET /api/v1/applications/` - List all deployments
 - `GET /api/v1/applications/{id}` - Get deployment details
-- `POST /api/v1/applications` - Create new deployment
+- `POST /api/v1/applications/` - Create new deployment
 - `PUT /api/v1/applications/{id}` - Update deployment
 - `DELETE /api/v1/applications/{id}` - Delete deployment
 - `GET /api/v1/applications/{id}/ps` - Get pod/container health status
+- `GET /api/v1/applications/{id}/resources` - Get application resource usage
 
 #### Catalog Endpoints
 
 - `GET /api/v1/architectures` - List available architectures
 - `GET /api/v1/architectures/{id}` - Get architecture details
+- `GET /api/v1/architectures/{id}/deploy-options` - Get architecture deploy options
 
 - `GET /api/v1/services` - List available services
 - `GET /api/v1/services/{id}` - Get service details
-- `GET /api/v1/services/{id}/params` - Get service custom params
+- `GET /api/v1/services/{id}/deploy-options` - Get service deploy options
+- `GET /api/v1/services/{id}/params` - Get service parameters
+
+- `GET /api/v1/components/{component_type}/providers/{provider_id}/params` - Get component provider params
 
 ## 5. API Endpoint Details
 
@@ -193,8 +200,7 @@ Content-Type: application/json
 {
   "access_token": "eyJhbGc...",
   "refresh_token": "eyJhbGc...",
-  "token_type": "Bearer",
-  "expires_in": 900
+  "token_type": "Bearer"
 }
 ```
 
@@ -204,7 +210,6 @@ Content-Type: application/json
 | access_token | string | JWT access token for API authentication |
 | refresh_token | string | JWT refresh token for obtaining new access tokens |
 | token_type | string | Token type (always "Bearer") |
-| expires_in | integer | Access token expiration time in seconds (900 = 15 minutes) |
 
 **Error Responses:**
 
@@ -269,8 +274,7 @@ Content-Type: application/json
 {
   "access_token": "eyJhbGc...",
   "refresh_token": "eyJhbGc...",
-  "token_type": "Bearer",
-  "expires_in": 900
+  "token_type": "Bearer"
 }
 ```
 
@@ -280,7 +284,6 @@ Content-Type: application/json
 | access_token | string | New JWT access token |
 | refresh_token | string | New JWT refresh token |
 | token_type | string | Token type (always "Bearer") |
-| expires_in | integer | Access token expiration time in seconds |
 
 **Error Responses:**
 
@@ -289,7 +292,7 @@ Content-Type: application/json
 
 **Implementation Notes:**
 
-1. **Request Validation**: Use Gin's `ShouldBindJSON` to validate request body against `refreshReq` struct (refresh_token required)
+1. **Request Validation**: Use Gin's `ShouldBind` to validate request body against `refreshReq` struct (refresh_token required)
 2. **Verify Refresh Token Signature**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
    - Parse JWT token with HS256 signature verification
    - Validate token expiry and claims
@@ -323,13 +326,13 @@ Content-Type: application/json
 
 **Endpoint:** `POST /api/v1/auth/logout`
 
-**Description:** Invalidates the current access token and deletes the specified refresh token.
+**Description:** Invalidates the current access token and optionally invalidates the provided refresh token.
 
 **Request Headers:**
 
 ```
 Authorization: Bearer <access_token>
-X-Refresh-Token: <refresh_token>
+X-Refresh-Token: <refresh_token>   (optional)
 ```
 
 **Request Body:** None
@@ -338,39 +341,38 @@ X-Refresh-Token: <refresh_token>
 
 ```json
 {
-  "message": "Successfully logged out"
+  "message": "logged out"
 }
 ```
 
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| message | string | Success message |
+| message | string | Success message ("logged out") |
 
 **Error Responses:**
 
-- `400 Bad Request` - Missing refresh token in X-Refresh-Token header
+- `400 Bad Request` - Missing access token in context
 - `401 Unauthorized` - Invalid or missing access token
+- `500 Internal Server Error` - Failed to logout
 
 **Implementation Notes:**
 
 1. **Access Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
    - Token was previously extracted and validated by `AuthMiddleware`
+   - Return 400 if access token is missing from context
 2. **Refresh Token Extraction**: Retrieve refresh token from `X-Refresh-Token` header
-   - Return 400 if header is missing
-3. **Access Token Validation**: Call `TokenManager.ValidateAccessToken(accessToken)` to:
-   - Parse token and extract expiry time
-   - If token is already invalid, treat as success (idempotent operation)
-4. **Blacklist Access Token**: Hash and store access token in database:
+   - The `X-Refresh-Token` header is **optional** — if not provided, only the access token is blacklisted
+3. **Blacklist Access Token**: Hash and store access token in database:
    - Call `TokenStore.Add(HashToken(accessToken), "access", accessTokenExpiry)`
    - Inserts into `tokens_blacklist` table with token_type='access'
    - Use ON CONFLICT DO NOTHING to handle duplicate logout attempts
-5. **Blacklist Refresh Token**: Hash and store refresh token in database:
+5. **Blacklist Refresh Token** (if provided): Hash and store refresh token in database:
    - Call `TokenStore.Add(HashToken(refreshToken), "refresh", refreshTokenExpiry)`
    - Inserts into `tokens_blacklist` table with token_type='refresh'
    - Use ON CONFLICT DO NOTHING to handle duplicate logout attempts
 6. **Response**: Return success message "logged out"
-7. **Error Handling**: Return 400 for missing refresh token header, 500 for database failures
+7. **Error Handling**: Return 400 for missing access token, 500 for database failures
 
 **Token Storage Implementation:**
 
@@ -382,7 +384,6 @@ X-Refresh-Token: <refresh_token>
 - Token type is stored as PostgreSQL ENUM with values: 'access', 'refresh'
 - Periodic cleanup job removes expired tokens: `DELETE FROM tokens_blacklist WHERE expires_at < NOW()`
 - Database-backed implementation supports multi-instance deployments
-- Replaces the in-memory `InMemoryTokenBlacklist` for production use
 - Server does NOT store plaintext tokens - only SHA-256 hashes
 
 **Middleware Integration:**
@@ -485,7 +486,7 @@ Authorization: Bearer <access_token>
 
 #### 5.2.1 List Applications
 
-**Endpoint:** `GET /api/v1/applications`
+**Endpoint:** `GET /api/v1/applications/`
 
 **Description:** Retrieves a paginated list of all applications for the authenticated user.
 
@@ -511,47 +512,48 @@ Authorization: Bearer <access_token>
 {
   "data": [
     {
-      "id": "123e4567-e89b-12d3-a456-426614174000",
-      "name": "RAG Production",
+      "id": "6bc66d76-65eb-46d5-aeb7-7914033dc869",
+      "name": "Digital assistant (copy)",
+      "catalog_id": "rag",
       "deployment_type": "architectures",
       "type": "Digital Assistant",
       "status": "Running",
-      "message": "All services are operational",
+      "message": "Deployment completed successfully",
+      "version": "v0.0.1",
       "services": [
         {
-          "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-          "type": "Questions and Answers",
-          "status": "Running"
+          "id": "b970e387-d3e3-4cbc-8495-e30431de953f",
+          "type": "Digitize documents",
+          "status": "Running",
+          "message": "Service deployed successfully"
         },
         {
-          "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-          "type": "Digitize",
-          "status": "Running"
+          "id": "2bacec3f-6109-4e47-afd9-8161f4c88746",
+          "type": "Find similar items",
+          "status": "Running",
+          "message": "Service deployed successfully"
         },
         {
-          "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+          "id": "2fc7a858-5b85-4b4a-9ee6-aa2b4e1cd7a6",
           "type": "Summarize",
-          "status": "Running"
+          "status": "Running",
+          "message": "Service deployed successfully"
+        },
+        {
+          "id": "9229e7a5-5e17-4208-8e01-19ccbe649c1d",
+          "type": "Question and answer",
+          "status": "Running",
+          "message": "Service deployed successfully"
         }
       ],
-      "created_at": "2026-04-15T10:30:00Z",
-      "updated_at": "2026-04-15T10:35:00Z"
-    },
-    {
-      "id": "223e4567-e89b-12d3-a456-426614174001",
-      "name": "Summarization Dev",
-      "deployment_type": "services",
-      "type": "Summary",
-      "status": "Running",
-      "message": "Service deployed successfully",
-      "created_at": "2026-04-15T11:00:00Z",
-      "updated_at": "2026-04-15T11:05:00Z"
+      "created_at": "2026-06-30T15:15:06Z",
+      "updated_at": "2026-06-30T15:21:56Z"
     }
   ],
   "pagination": {
     "page": 1,
     "page_size": 20,
-    "total_items": 2,
+    "total_items": 1,
     "total_pages": 1,
     "has_next": false,
     "has_prev": false
@@ -572,20 +574,23 @@ Authorization: Bearer <access_token>
 |-------|------|-------------|
 | id | string | Application ID (UUID) |
 | name | string | Application name |
-| deployment_type | string | Type of deployment: "architecture" or "service" |
-| type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
+| catalog_id | string | Catalog ID used to create this application (e.g., "rag") |
+| deployment_type | string | Type of deployment: "architectures" or "services" |
+| type | string | Application type display name (e.g., "Digital Assistant", "Summary") |
 | status | string | Current status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
 | message | string | Status message or error details |
-| services | array | Array of service objects (only present for Digital Assistant type) |
+| version | string | Application version |
+| services | array | Array of service summary objects (omitted if empty) |
 | created_at | string | ISO 8601 timestamp of creation |
 | updated_at | string | ISO 8601 timestamp of last update |
 
-**Service Object (services[]):**
+**Service Summary Object (services[]) — list view:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Service ID (UUID) |
-| type | string | Service type: "Questions and Answers", "Digitize", "Summarize" |
-| status | string | Service status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
+| type | string | Service type display name (e.g., "Digitize documents", "Question and answer") |
+| status | string | Service status |
+| message | string | Status message |
 
 **Pagination Object:**
 | Field | Type | Description |
@@ -599,7 +604,7 @@ Authorization: Bearer <access_token>
 
 **Error Responses:**
 
-- `400 Bad Request` - Invalid query parameters (e.g., page < 1, page_size > 100)
+- `400 Bad Request` - Invalid query parameters (e.g., page < 1, page_size > 100, invalid deployment_type)
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
@@ -607,35 +612,27 @@ Authorization: Bearer <access_token>
 
 1. Validate JWT token from Authorization header via `AuthMiddleware`
 2. Validate pagination parameters (page >= 1, page_size between 1-100)
-3. Validate filter parameters:
-   - deployment_type: must be "architectures" or "services" if provided
-   - type: must match valid application types if provided
-4. Query applications table with pagination and filters:
-   - Apply WHERE clauses for deployment_type and type if provided
-   - Use template field to fetch corresponding type and deployment_type from metadata
-5. For Digital Assistant applications (type="Digital Assistant"), fetch and include services array with id, type (display name from catalog), and status from the services table
-6. Construct paginated response with application data and metadata
+3. Validate `deployment_type` — must be `"architectures"` or `"services"` if provided
+4. Query applications table with pagination and filters
+5. Construct paginated response with application data and metadata
 
 **Example Requests:**
 
 ```
 # Get first page with default settings
-GET /api/v1/applications
+GET /api/v1/applications/
 
 # Get second page with 50 items per page
-GET /api/v1/applications?page=2&page_size=50
+GET /api/v1/applications/?page=2&page_size=50
 
 # Filter by deployment type (architectures only)
-GET /api/v1/applications?deployment_type=architectures
+GET /api/v1/applications/?deployment_type=architectures
 
-# Filter by application type (Digital Assistant only)
-GET /api/v1/applications?type=Digital%20Assistant
+# Filter by catalog ID
+GET /api/v1/applications/?catalog_id=rag
 
 # Combine filters
-GET /api/v1/applications?deployment_type=architectures&type=Digital%20Assistant&page=1&page_size=10
-
-# Filter services only
-GET /api/v1/applications?deployment_type=services
+GET /api/v1/applications/?deployment_type=architectures&catalog_id=rag&page=1&page_size=10
 ```
 
 ---
@@ -655,129 +652,144 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Application ID |
+| id | string | Yes | Application ID (UUID) |
 
 **Request Body:** None
 
-**Response (200 OK) - Deployable Architecture:**
+**Response (200 OK) — Architecture Deployment:**
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "RAG Production",
-  "deployment_type": "architecture",
+  "id": "6bc66d76-65eb-46d5-aeb7-7914033dc869",
+  "name": "Digital assistant (copy)",
+  "catalog_id": "rag",
+  "deployment_type": "architectures",
   "type": "Digital Assistant",
   "status": "Running",
-  "message": "All services are operational",
-  "created_at": "2026-04-15T10:30:00Z",
-  "updated_at": "2026-04-15T10:35:00Z",
+  "message": "Deployment completed successfully",
+  "version": "1.0.0",
+  "created_at": "2026-06-30T15:15:06Z",
+  "updated_at": "2026-06-30T15:21:56Z",
   "services": [
     {
-      "id": "chat",
-      "type": "QA-Chatbot",
-      "endpoints": [
-        {
-          "name": "ui",
-          "url": "https://rag-production-chat-ui.apps.cluster.example.com"
-        },
-        {
-          "name": "backend",
-          "url": "https://rag-production-chat-api.apps.cluster.example.com"
-        }
-      ],
+      "id": "b970e387-d3e3-4cbc-8495-e30431de953f",
+      "type": "Digitize documents",
+      "catalog_id": "digitize",
+      "status": "Running",
+      "message": "",
       "version": "1.0.0",
+      "endpoints": [
+        { "type": "ui",  "url": "https://digitize-ui-74a76872bd.10.20.185.165.nip.io" },
+        { "type": "api", "url": "https://digitize-backend-74a76872bd.10.20.185.165.nip.io" }
+      ],
       "components": [
         {
-          "type": "vector_db",
-          "provider": "opensearch"
+          "id": "40667240-8af2-413f-b6b2-0be8ebc88d63",
+          "type": "vector_store",
+          "provider": { "id": "opensearch", "name": "OpenSearch" },
+          "status": "Running",
+          "message": "Component deployed successfully"
         },
         {
-          "type": "llm",
-          "provider": "vllm",
-          "metadata": {
-            "model": "ibm-granite/granite-3.3-8b-instruct"
-          }
-        },
-        {
+          "id": "fbc9862c-045e-4d0a-bbb6-b9e290f7acb8",
           "type": "embedding",
-          "provider": "vllm",
-          "metadata": {
-            "model": "BAAI/bge-base-en-v1.5"
-          }
+          "provider": { "id": "vllm-cpu", "name": "AI Inference on CPU" },
+          "status": "Running",
+          "message": "Component deployed successfully",
+          "metadata": { "model": "ibm-granite/granite-embedding-278m-multilingual" }
+        },
+        {
+          "id": "fc01cd00-9f97-4086-8946-eca13a1c96a1",
+          "type": "llm",
+          "provider": { "id": "vllm-cpu", "name": "AI Inference on CPU" },
+          "status": "Running",
+          "message": "Component deployed successfully",
+          "metadata": { "model": "ibm-granite/granite-3.3-8b-instruct" }
         }
       ],
-      "created_at": "2026-04-15T10:31:00Z",
-      "updated_at": "2026-04-15T10:35:00Z"
+      "created_at": "2026-06-30T15:15:06Z",
+      "updated_at": "2026-06-30T15:21:54Z"
     },
     {
-      "id": "summarize",
-      "type": "Summary",
-      "endpoints": [
-        {
-          "name": "backend",
-          "url": "https://rag-production-summarization-api.apps.cluster.example.com"
-        }
-      ],
+      "id": "9229e7a5-5e17-4208-8e01-19ccbe649c1d",
+      "type": "Question and answer",
+      "catalog_id": "chat",
+      "status": "Running",
+      "message": "",
       "version": "1.0.0",
+      "endpoints": [
+        { "type": "ui",  "url": "https://chat-bot-ui-74a76872bd.10.20.185.165.nip.io" },
+        { "type": "api", "url": "https://chat-bot-backend-74a76872bd.10.20.185.165.nip.io" }
+      ],
       "components": [
         {
-          "type": "vector_db",
-          "provider": "opensearch"
+          "id": "40667240-8af2-413f-b6b2-0be8ebc88d63",
+          "type": "vector_store",
+          "provider": { "id": "opensearch", "name": "OpenSearch" },
+          "status": "Running",
+          "message": "Component deployed successfully"
         },
         {
+          "id": "fbc9862c-045e-4d0a-bbb6-b9e290f7acb8",
+          "type": "embedding",
+          "provider": { "id": "vllm-cpu", "name": "AI Inference on CPU" },
+          "status": "Running",
+          "message": "Component deployed successfully",
+          "metadata": { "model": "ibm-granite/granite-embedding-278m-multilingual" }
+        },
+        {
+          "id": "fc01cd00-9f97-4086-8946-eca13a1c96a1",
           "type": "llm",
-          "provider": "watsonx",
-          "metadata": {
-            "model": "ibm/granite-13b-chat-v2",
-            "project_id": "wx-project-123"
-          }
+          "provider": { "id": "vllm-cpu", "name": "AI Inference on CPU" },
+          "status": "Running",
+          "message": "Component deployed successfully",
+          "metadata": { "model": "ibm-granite/granite-3.3-8b-instruct" }
         }
       ],
-      "created_at": "2026-04-15T10:32:00Z",
-      "updated_at": "2026-04-15T10:35:00Z"
+      "created_at": "2026-06-30T15:15:06Z",
+      "updated_at": "2026-06-30T15:21:52Z"
     }
   ]
 }
 ```
 
-**Response (200 OK) - Services Deployment:**
+**Response (200 OK) — Service Deployment:**
 
 ```json
 {
-  "id": "223e4567-e89b-12d3-a456-426614174001",
-  "name": "Summarization Dev",
-  "deployment_type": "service",
-  "type": "Summary",
+  "id": "2fc7a858-5b85-4b4a-9ee6-aa2b4e1cd7a6",
+  "name": "Summarize",
+  "catalog_id": "summarize",
+  "deployment_type": "services",
+  "type": "Summarize",
   "status": "Running",
-  "message": "Service deployed successfully",
-  "created_at": "2026-04-15T11:00:00Z",
-  "updated_at": "2026-04-15T11:05:00Z",
+  "message": "Deployment completed successfully",
+  "version": "1.0.0",
+  "created_at": "2026-06-30T15:15:06Z",
+  "updated_at": "2026-06-30T15:21:56Z",
   "services": [
     {
-      "id": "summarize",
-      "type": "Summary",
-      "endpoints": [
-        {
-          "name": "backend",
-          "url": "http://localhost:8081"
-        }
-      ],
+      "id": "2fc7a858-5b85-4b4a-9ee6-aa2b4e1cd7a6",
+      "type": "Summarize",
+      "catalog_id": "summarize",
+      "status": "Running",
+      "message": "",
       "version": "1.0.0",
+      "endpoints": [
+        { "type": "api", "url": "https://summarize-api-74a76872bd.10.20.185.165.nip.io" }
+      ],
       "components": [
         {
-          "type": "vector_db",
-          "provider": "opensearch"
-        },
-        {
+          "id": "fc01cd00-9f97-4086-8946-eca13a1c96a1",
           "type": "llm",
-          "provider": "vllm",
-          "metadata": {
-            "model": "ibm-granite/granite-3.3-8b-instruct"
-          }
+          "provider": { "id": "vllm-cpu", "name": "AI Inference on CPU" },
+          "status": "Running",
+          "message": "Component deployed successfully",
+          "metadata": { "model": "ibm-granite/granite-3.3-8b-instruct" }
         }
       ],
-      "created_at": "2026-04-15T11:00:00Z",
-      "updated_at": "2026-04-15T11:05:00Z"
+      "created_at": "2026-06-30T15:15:06Z",
+      "updated_at": "2026-06-30T15:21:56Z"
     }
   ]
 }
@@ -785,68 +797,80 @@ Authorization: Bearer <access_token>
 
 **Response Schema:**
 
-**Application Level:**
+**Application Object:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Application ID (UUID) |
 | name | string | Application name |
-| deployment_type | string | "architecture" or "service" |
-| type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
+| catalog_id | string | Catalog ID used to create this application |
+| deployment_type | string | "architectures" or "services" |
+| type | string | Application type display name |
 | status | string | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message | string | Status message or error details |
-| created_at | string | Creation timestamp |
-| updated_at | string | Last update timestamp |
-| services | array | Array of service objects |
+| version | string | Application version |
+| created_at | string | Creation timestamp (ISO 8601) |
+| updated_at | string | Last update timestamp (ISO 8601) |
+| services | array | Array of service detail objects |
 
-**Service Object:**
+**Service Detail Object (services[]):**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Service identifier (e.g., "chat", "summarize", "digitize") |
-| type | string | Service type (e.g., "QA-Chatbot", "Summary", "Digitization") |
-| endpoints | array | Array of endpoint objects |
+| id | string | Service ID (UUID) |
+| type | string | Service type display name |
+| catalog_id | string | Catalog ID of this service |
+| status | string | Service status |
+| message | string | Status message or error details |
 | version | string | Service version |
-| components | array | Array of component objects used by this service |
-| created_at | string | Creation timestamp |
-| updated_at | string | Last update timestamp |
+| endpoints | array | Array of endpoint objects |
+| components | array | Array of component objects |
+| created_at | string | Creation timestamp (ISO 8601) |
+| updated_at | string | Last update timestamp (ISO 8601) |
 
 **Endpoint Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| name | string | Endpoint name: "ui", "backend", or "api". This will be the container name for each service in Podman |
+| type | string | Endpoint type: `"ui"` or `"api"` |
 | url | string | Full endpoint URL |
 
 **Component Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
-| provider | string | Provider/implementation (e.g., "opensearch", "vllm", "watsonx") |
-| metadata | object | Optional component-specific configuration and metadata (e.g., model, project_id). Only included when relevant for the component type. |
+| id | string | Component instance ID (UUID) |
+| type | string | Component type (e.g., `"vector_store"`, `"llm"`, `"embedding"`, `"reranker"`) |
+| provider | object | Provider info with `id` and `name` fields |
+| status | string | Component status |
+| message | string | Status message or error details |
+| metadata | object | Non-sensitive component metadata (e.g., model name). Omitted when empty. Sensitive fields (passwords, API keys) are filtered out. |
+
+**Provider Info Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Provider identifier (e.g., `"opensearch"`, `"vllm-cpu"`, `"vllm-spyre"`, `"watsonx"`) |
+| name | string | Provider display name |
 
 **Error Responses:**
 
+- `400 Bad Request` - Invalid application ID format (not a UUID)
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Application not found
-- `403 Forbidden` - User doesn't have access to this application
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
 
-1. Validate the incoming JWT token from Authorization header
+1. Validate the application ID is a valid UUID
 2. Execute database query on applications table using `id` as the filter
 3. Perform JOIN with services table to fetch associated services
-4. For each service, perform JOIN with service_dependencies table to fetch component dependencies
-5. For each component dependency, fetch component details from components table including metadata (excluding endpoints)
-6. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecture or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service)
-7. Map service IDs to their service identifiers (e.g., "chat", "summarize", "digitize") from the service metadata
-8. Return the mapped response with appropriate HTTP status code including nested components within each service
+4. For each service, fetch associated component instances including provider info and filtered metadata
+5. Sensitive metadata fields (e.g., passwords, API keys) are excluded from the response based on the component's JSON Schema (`format: "password"`)
+6. Return the mapped response with appropriate HTTP status code
 
 ---
 
 #### 5.2.3 Create Application
 
-**Endpoint:** `POST /api/v1/applications`
+**Endpoint:** `POST /api/v1/applications/`
 
-**Description:** Creates a new application (architecture or service) with optional custom parameters.
+**Description:** Creates a new application (architecture or service) with required component and version selections.
 
 **Request Headers:**
 
@@ -855,28 +879,22 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
-**Request Body Example 1 (Architecture):**
+**Request Body:**
 
 ```json
 {
-  "name": "Production RAG System",
-  "catalogid": "rag",
+  "name": "Digitize",
+  "catalog_id": "digitize",
   "services": [
     {
       "type": "service",
-      "service_id": "digitize",
-      "enabled": true,
+      "catalog_id": "digitize",
       "version": "1.0.0",
       "components": [
         {
           "type": "component",
-          "component_type": "vector_db",
-          "provider_id": "opensearch"
-        },
-        {
-          "type": "component",
           "component_type": "llm",
-          "provider_id": "vllm",
+          "provider_id": "vllm-spyre",
           "params": {
             "model": "ibm-granite/granite-3.3-8b-instruct"
           }
@@ -884,41 +902,15 @@ Content-Type: application/json
         {
           "type": "component",
           "component_type": "embedding",
-          "provider_id": "vllm",
+          "provider_id": "vllm-cpu",
           "params": {
             "model": "ibm-granite/granite-embedding-278m-multilingual"
           }
-        }
-      ]
-    },
-    {
-      "type": "service",
-      "service_id": "chat",
-      "version": "1.0.0",
-      "components": [
+        },
         {
           "type": "component",
-          "component_type": "vector_db",
+          "component_type": "vector_store",
           "provider_id": "opensearch"
-        },
-        {
-          "type": "component",
-          "component_type": "llm",
-          "provider_id": "watsonx",
-          "params": {
-            "model": "ibm/granite-13b-chat-v2",
-            "apiKey": "ibm-cloud-api-key-456",
-            "projectId": "wx-project-123",
-            "endpoint": "https://us-south.ml.cloud.ibm.com"
-          }
-        },
-        {
-          "type": "component",
-          "component_type": "embedding",
-          "provider_id": "vllm",
-          "params": {
-            "model": "ibm-granite/granite-embedding-278m-multilingual"
-          }
         }
       ]
     }
@@ -930,118 +922,101 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | name | string | Yes | Application name (3-100 chars) |
-| catalogid | string | Yes | Catalog ID (e.g., rag) |
-| services | array | Yes | Array of service objects to deploy with their component selections |
+| catalog_id | string | Yes | Catalog ID (e.g., "rag", "digitize", "chat", "summarization") |
+| services | array | Yes | Array of service configurations |
 
 **Service Object (in services array):**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| type | string | Yes | Must be "service" |
-| service_id | string | Yes | Service identifier (e.g., "digitize", "chat", "summarize") |
-| version | string | No | Service version to deploy. If not specified, uses the latest compatible version |
-| components | array | Yes | Array of component selections for this service |
+| type | string | Yes | Must be `"service"` |
+| catalog_id | string | Yes | Service catalog ID (e.g., "digitize", "chat", "summarization") |
+| version | string | Yes | Service version to deploy |
+| components | array | Yes | Array of component configurations |
 
 **Component Object (in components array):**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| type | string | Yes | Must be "component" |
-| component_type | string | Yes | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
-| provider_id | string | Yes | Provider identifier (e.g., "opensearch", "vllm", "watsonx") |
-| instance_id | string | Conditional | Required when reusing an existing component instance |
-| params | object | Conditional | Required when creating a new component (not reusing). Contains provider-specific configuration |
-
-**Component Selection Logic:**
-
-Each component can be specified in one of two ways:
-
-1. **Reuse Existing Component** - When `instance_id` field is present:
-   - The backend will use an existing, already-deployed component instance
-   - Required fields: `type`, `component_type`, `instance_id`, `provider_id`
-   - Example: `{ "type": "component", "component_type": "vector_db", "instance_id": "opensearch-instance-1", "provider_id": "opensearch" }`
-
-2. **Create New Component** - When `instance_id` field is absent:
-   - The backend will create and deploy a new component instance
-   - Required fields: `type`, `component_type`, `provider_id`, `params`
-   - Example: `{ "type": "component", "component_type": "vector_db", "provider_id": "opensearch", "params": { "memoryLimit": "8Gi", "auth": {...} } }`
+| type | string | Yes | Must be `"component"` |
+| component_type | string | Yes | Component type (e.g., `"llm"`, `"embedding"`, `"vector_store"`, `"reranker"`) |
+| provider_id | string | Yes | Provider identifier (e.g., `"vllm-spyre"`, `"vllm-cpu"`, `"opensearch"`, `"watsonx"`) |
+| params | object | No | Provider-specific configuration parameters (omit if no params needed) |
 
 **Response (202 Accepted):**
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "status": "Downloading",
-  "message": "Deployment initiated successfully"
+  "id": "123e4567-e89b-12d3-a456-426614174000"
 }
 ```
 
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Auto-generated application ID (UUID) |
-| status | string | Initial status ("Downloading") |
-| message | string | Status message |
+| id | string | Auto-generated application ID (UUID v4) |
 
 **Error Responses:**
 
 - `400 Bad Request` - Invalid request body or validation errors
 - `401 Unauthorized` - Invalid or missing access token
-- `409 Conflict` - Application name already exists (normalized deployment_name conflicts)
-- `422 Unprocessable Entity` - Parameter validation failed or invalid template
+- `409 Conflict` - Application name already exists
+- `422 Unprocessable Entity` - Parameter validation failed or invalid catalog ID/version
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
 
-1. **Token Validation**: Validate JWT token from Authorization header
+The create flow executes synchronously up through database insertion, then hands off to an async goroutine. The handler returns `202 Accepted` with the application ID as soon as the DB records are committed.
 
-2. **ID Generation**:
-   - Auto-generate `id` as UUID v4
-   - Use standard UUID generation library (e.g., `github.com/google/uuid`)
-   - No need to check uniqueness as UUIDs are globally unique
+**Phase 1 — Duplicate Name Check**
 
-3. **Architecture Validation**:
-   - Verify architecture exists in catalog
-   - Retrieve architecture metadata and available services
+Query the `applications` table for an existing record with the same name. Return `409 Conflict` if found.
 
-4. **Services Validation**:
-   - Validate each service in the services array
-   - Verify `service_id` exists in the catalog and is compatible with the architecture
-   - Check that service versions meet architecture requirements
-   - Validate `enabled` flag is boolean
-   - Return 422 error if any service validation fails
+**Phase 2 — Request Validation** (`ApplicationValidator`)
 
-5. **Components Validation** (for each service):
-   - Validate each component in the service's components array
-   - Verify `component_type` is valid and required by the service
-   - Verify `provider_id` exists for the given component type
-   - For components with `instance_id`:
-     - Verify the instance exists in the system
-     - Verify the instance's provider matches the specified `provider_id`
-     - Verify the instance is compatible with the service requirements
-   - For components without `instance_id` (new components):
-     - Validate `params` object against the provider's JSON Schema
-     - Verify all required fields are present in params
-     - Validate field values against schema constraints (type, pattern, min/max, etc.)
-   - Validate component dependencies are satisfied
-   - Return 422 error with details if validation fails
+Validate the request payload against catalog metadata:
+- Verify `catalog_id` exists as an architecture or standalone service in the catalog.
+- For each service, verify its `catalog_id` and `version` exist in the catalog.
+- For each component, verify `component_type` and `provider_id` are valid and that `params` conform to the provider's JSON Schema.
 
-7. **Database Operations**:
-   - Begin transaction
-   - Insert record in applications table with:
-     - Generated id (UUID, Primary Key)
-     - name, template, created_by
-     - params as JSONB
-     - status = "Downloading"
-   - Insert corresponding records in services table
-   - Commit transaction
+**Phase 3 — Deployment Planning** (`DeploymentPlanner`)
 
-8. **Async Deployment**:
-   - Initiate background deployment job with id
-   - Return immediately with 202 Accepted
-   - Background worker handles actual deployment
+Produces a `DeploymentPlan` synchronously before any DB writes or runtime calls:
 
-9. **Deployment Status Updates**:
-   - On success: Update status to "Running" and populate endpoints in services table
-   - On failure: Update status to "Error" with error message
+1. **Catalog resolution** — Determine whether `catalog_id` maps to an architecture or a standalone service.
+2. **Generate application ID** — Create a UUID v4 for the application.
+3. **Process each service** — For every service in the request:
+   - Resolve the service's catalog path (`services/<catalog_id>/podman`).
+   - Build merged parameter values via `ParamBuilder`, combining request `params` with defaults from the service's `values.yaml`.
+4. **Process each component** — For every component in a service:
+   - Compute a **component hash** from `(component_type, provider_id, params)`. Components with identical hashes are deduplicated — only one instance is deployed and shared across services.
+   - Resolve the component's catalog path (`components/<component_type>/<provider_id>/podman`).
+5. **Spyre card allocation** — For each component that requires IBM Spyre accelerator cards, query free PCI addresses from the host. Fail fast if the total required exceeds available cards.
+
+**Phase 4 — Database Insertion**
+
+Write all records before starting the async goroutine:
+
+1. Insert `applications` row: `status = "Downloading"`, `message = "Initializing deployment"`.
+2. Insert one `components` row per deduplicated component: `status = "Initializing"`. Sensitive `params` fields (marked `format: "password"` in the provider schema) are stripped before writing to `metadata`.
+3. Insert one `services` row per service: `status = "Initializing"`.
+4. Insert `service_dependencies` rows linking each service to its component IDs.
+
+**Phase 5 — Async Execution** (`PodmanDeployer` via `DeploymentExecutor`)
+
+A background goroutine executes the deployment. The requestID from the HTTP context is preserved for log tracing. Panics are caught and result in a status update to `"Error"`.
+
+The deployer runs the following steps in order:
+
+| Step | Action |
+|------|--------|
+| 1a | Pull all required container images (collected from service and component templates) |
+| 1b | Download any AI models specified in component `params` |
+| — | Update application status → `"Deploying"` |
+| 2 | Deploy infrastructure components **concurrently** (e.g., opensearch, vllm-spyre). Each component's pod templates are rendered and started via Podman. Endpoints discovered after startup are propagated back into the plan for use by services. |
+| 3 | Deploy services **sequentially**. Pod templates are rendered with merged values (service params + injected component endpoints), then started via Podman. |
+| 4 | Register all service routes with the Caddy reverse proxy. |
+| — | Update application status → `"Running"` |
+
+On any step failure, the application status is updated to `"Error"` with the error message stored in `message`.
 
 ---
 
@@ -1061,7 +1036,7 @@ Content-Type: application/json
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Application ID |
+| id | string | Yes | Application ID (UUID) |
 
 **Request Body:**
 
@@ -1078,32 +1053,11 @@ Content-Type: application/json
 
 **Response (200 OK):**
 
-```json
-{
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "RAG Production Updated",
-  "deployment_type": "architecture",
-  "type": "Digital Assistant",
-  "status": "Running",
-  "message": "Deployment name updated successfully",
-  "updated_at": "2026-04-15T11:00:00Z"
-}
-```
-
-**Response Schema:**
-| Field | Type | Description |
-|-------|------|-------------|
-| id | string | Application ID (UUID, unchanged) |
-| name | string | Updated name |
-| deployment_type | string | Deployment type |
-| type | string | Application type |
-| status | string | Current status |
-| message | string | Status message |
-| updated_at | string | Update timestamp |
+Returns the full `Application` object (same schema as [Get Application Details](#522-get-application-details)), with the updated `name` and `updated_at` fields.
 
 **Error Responses:**
 
-- `400 Bad Request` - Invalid request body or name validation failed
+- `400 Bad Request` - Invalid request body, invalid UUID, or name validation failed
 - `401 Unauthorized` - Invalid or missing access token
 - `403 Forbidden` - User doesn't own this application
 - `404 Not Found` - Application not found
@@ -1111,13 +1065,12 @@ Content-Type: application/json
 
 **Implementation Notes:**
 
-1. **Token Validation**: Validate JWT token from Authorization header
-2. **Request Validation**: Validate deployment_name format and length (3-100 chars)
-3. **Database Update**:
-   - Execute UPDATE query on applications table to update name field
-   - Use id as the filter (WHERE id = $1)
-   - Update updated_at timestamp
-4. **Response**: Fetch and return the complete updated application object
+1. **Token Validation**: Validate JWT token from Authorization header; extract user ID from context
+2. **ID Validation**: Validate the path parameter is a valid UUID
+3. **Request Validation**: Validate name format and length (3-100 chars)
+4. **Ownership Check**: Verify the authenticated user owns this application
+5. **Database Update**: UPDATE applications SET name=$1, updated_at=NOW() WHERE id=$2 AND created_by=$3
+6. **Response**: Fetch and return the complete updated application object
 
 ---
 
@@ -1125,7 +1078,7 @@ Content-Type: application/json
 
 **Endpoint:** `DELETE /api/v1/applications/{id}`
 
-**Description:** Deletes an application and all associated resources.
+**Description:** Initiates async deletion of an application and all associated resources. Returns 202 immediately.
 
 **Request Headers:**
 
@@ -1136,12 +1089,12 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Application ID |
+| id | string | Yes | Application ID (UUID) |
 
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| skip-cleanup | boolean | No | If true, skips data cleanup (default: false) |
+| keep_data | boolean | No | When `"true"`, preserves underlying data (volumes of databases/service resources). Default: `"false"` |
 
 **Request Body:** None
 
@@ -1150,7 +1103,7 @@ Authorization: Bearer <access_token>
 ```json
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
-  "status": "deleting",
+  "status": "Deleting",
   "message": "Deletion initiated successfully"
 }
 ```
@@ -1159,11 +1112,12 @@ Authorization: Bearer <access_token>
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Application ID (UUID) |
-| status | string | Status (deleting) |
+| status | string | Status ("Deleting") |
 | message | string | Status message |
 
 **Error Responses:**
 
+- `400 Bad Request` - Invalid application ID or invalid `keep_data` parameter value
 - `401 Unauthorized` - Invalid or missing access token
 - `403 Forbidden` - User doesn't own this application
 - `404 Not Found` - Application not found
@@ -1172,13 +1126,12 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-- Update database status to "deleting"
-- Initiate async deletion job
+- `keep_data` must be exactly `"true"` or `"false"` if provided; any other value returns 400
+- Update database status to "Deleting" synchronously before returning
+- Initiate async deletion job via background goroutine
+- When `keep_data=false` (default): delete all application data (volumes, secrets, etc.)
+- When `keep_data=true`: preserve underlying data volumes; only delete secrets not marked with `skip-cleanup="true"`
 - Delete in order: services → infrastructure → namespace/pods
-- Handle partial deletion failures gracefully
-- If skip-cleanup=true, preserve application data (documents, embeddings, etc.)
-- If skip-cleanup=false (default), clean up all application data
-- Clean up database records after successful deletion
 - For OpenShift: delete namespace and all resources
 - For Podman: stop and remove all containers
 
@@ -1188,7 +1141,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `GET /api/v1/applications/{id}/ps`
 
-**Description:** Retrieves health status of all pods/containers in the deployment.
+**Description:** Retrieves process status and runtime information for all pods/containers in the deployment.
 
 **Request Headers:**
 
@@ -1199,7 +1152,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Application ID |
+| id | string | Yes | Application ID (UUID) |
 
 **Request Body:** None
 
@@ -1208,35 +1161,29 @@ Authorization: Bearer <access_token>
 ```json
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
-  "pods": [
+  "name": "RAG Production",
+  "services": [
     {
       "pod_id": "a1b2c3d4e5f6",
       "pod_name": "rag-production-chat",
-      "status": "Running (Ready)",
+      "status": "running",
       "created": "2d5h",
-      "exposed": [8080, 8081],
+      "healthy": true,
       "containers": [
-        {
-          "name": "chat-ui",
-          "status": "Ready"
-        },
-        {
-          "name": "nginx",
-          "status": "Ready"
-        }
+        { "name": "chat-ui", "status": "running", "healthy": true },
+        { "name": "nginx",   "status": "running", "healthy": true }
       ]
-    },
+    }
+  ],
+  "components": [
     {
       "pod_id": "c3d4e5f6g7h8",
-      "pod_name": "rag-production-summarization-api",
-      "status": "Running (NotReady)",
+      "pod_name": "rag-production-opensearch",
+      "status": "running",
       "created": "2d5h",
-      "exposed": "8083",
+      "healthy": true,
       "containers": [
-        {
-          "name": "summarization-api",
-          "status": "starting"
-        }
+        { "name": "opensearch", "status": "running", "healthy": true }
       ]
     }
   ]
@@ -1244,52 +1191,119 @@ Authorization: Bearer <access_token>
 ```
 
 **Response Schema:**
+
+**Root Object:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Application ID (UUID) |
-| pods | array | Array of pod objects |
+| name | string | Application name |
+| services | array | Array of pod objects for application services |
+| components | array | Array of pod objects for infrastructure components |
 
-**Pod Object Schema:**
+**Pod Object Schema (services[] and components[]):**
 | Field | Type | Description |
 |-------|------|-------------|
-| pod_id | string | Pod ID (first 12 characters) |
-| pod_name | string | Pod name |
-| status | string | Pod status with health indicator (e.g., "Running (Ready)", "Running (NotReady)") |
+| pod_id | string | Pod/container ID (first 12 characters) |
+| pod_name | string | Pod/container name |
+| status | string | Pod status — one of: `waiting`, `running`, `terminated`, `created`, `paused`, `restarting`, `exited`, `removing`, `dead` |
 | created | string | Time since pod creation (e.g., "2d5h", "30m") |
-| exposed | string | Comma-separated list of exposed ports or "none" |
+| healthy | boolean | Whether the pod is considered healthy |
 | containers | array | Array of container objects within the pod |
 
 **Container Object Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
 | name | string | Container name |
-| status | string | Container status (Ready, running, starting, exited, etc.) |
+| status | string | Container status (same enum as pod status) |
+| healthy | boolean | Whether the container is considered healthy |
 
 **Error Responses:**
 
+- `400 Bad Request` - Invalid application ID format
 - `401 Unauthorized` - Invalid or missing access token
-- `403 Forbidden` - User doesn't own this application
 - `404 Not Found` - Application not found
 - `500 Internal Server Error` - Server error
-- `503 Service Unavailable` - Cannot connect to runtime
 
 **Implementation Notes:**
 
-- Use the same output format for both Podman and OpenShift runtimes
-- Pod status includes health indicator: "Running (Ready)" when all containers are healthy, "Running (NotReady)" when some containers are unhealthy
-- Container status shows health check results: "Ready" for healthy containers, actual status (starting, exited, etc.) for others
-- Filter pods by application label: `ai-services.io/application=<id>`
+- Results are split into `services` (application pods) and `components` (infrastructure component pods)
+- `healthy` field reflects whether the pod/container passed health checks
+- Status values use lowercase normalized strings matching the `Status` enum
 - For OpenShift: query pods using Kubernetes API
 - For Podman: use `podman pod ps` and `podman pod inspect`
-- Cache results for 5-10 seconds to reduce API calls
-- Handle cases where runtime is temporarily unavailable
-- Return partial results if some pods are inaccessible
+
+---
+
+---
+
+### 5.2.7 Get Application Resources
+
+**Endpoint:** `GET /api/v1/applications/{id}/resources`
+
+**Description:** Retrieves used and total allocated CPU (in cores) and memory (in bytes), along with hardware accelerator cards for an application and its services.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Application ID (UUID) |
+
+**Request Body:** None
+
+**Response (200 OK):**
+
+```json
+{
+  "cpu": {
+    "total_cpu": 4.0,
+    "used_cpu": 1.25
+  },
+  "memory": {
+    "total_bytes": 8589934592,
+    "used_bytes": 2147483648
+  },
+  "accelerators": {
+    "ibm.com/spyre_pf": ["card0", "card1"]
+  }
+}
+```
+
+**Response Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| cpu | object | CPU allocation and usage |
+| memory | object | Memory allocation and usage |
+| accelerators | object | Map of accelerator type to list of allocated card identifiers |
+
+**CPU Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| total_cpu | number | Total allocated CPU cores |
+| used_cpu | number | Currently used CPU cores |
+
+**Memory Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| total_bytes | integer | Total allocated memory in bytes |
+| used_bytes | integer | Currently used memory in bytes |
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid application ID format
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Application not found
+- `500 Internal Server Error` - Server error
 
 ---
 
 ### 5.3 Catalog Endpoints
 
-#### 5.3.1 List Available Deployable Architectures
+#### 5.3.1 List Available Architectures
 
 **Endpoint:** `GET /api/v1/architectures`
 
@@ -1311,21 +1325,18 @@ Authorization: Bearer <access_token>
     "id": "rag",
     "name": "Digital Assistant",
     "description": "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
-    "version": "1.0.0",
     "certified_by": "IBM",
     "services": ["chat", "digitization", "summarization"]
   }
 ]
 ```
 
-**Response Schema:**
+**Response Schema (ArchitectureSummary[]):**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Architecture template ID |
 | name | string | Architecture template name |
 | description | string | Description of the architecture |
-| version | string | Architecture version |
-| type | string | Type (architecture) |
 | certified_by | string | Certification authority |
 | services | array | Array of service IDs included in this architecture |
 
@@ -1336,10 +1347,9 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read architectures from `ai-services/assets/architectures/` directory
-- Parse metadata.yaml files and convert to JSON response format
-- Return all available architecture templates
+- Parse metadata.yaml files and convert to summary JSON response format
+- Return only summary fields (no version, runtimes, links, or global_components in list view)
 
 ---
 
@@ -1378,20 +1388,14 @@ GET /api/v1/architectures/rag
   "version": "1.0.0",
   "type": "architecture",
   "certified_by": "IBM",
+  "runtimes": ["podman", "openshift"],
+  "global_components": [
+    { "type": "vector_db" }
+  ],
   "services": [
-    {
-      "id": "chat",
-      "version": ">=1.0.0"
-    },
-    {
-      "id": "digitization",
-      "version": ">=1.0.0"
-    },
-    {
-      "id": "summarization",
-      "version": ">=1.0.0",
-      "optional": true
-    }
+    { "id": "chat", "version": ">=1.0.0" },
+    { "id": "digitization", "version": ">=1.0.0" },
+    { "id": "summarization", "version": ">=1.0.0", "optional": true }
   ],
   "links": {
     "demo": "https://example.com/demo/rag",
@@ -1401,38 +1405,45 @@ GET /api/v1/architectures/rag
 }
 ```
 
-**Response Schema:**
+**Response Schema (Architecture):**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Architecture template ID |
 | name | string | Architecture name |
 | description | string | Detailed description |
 | version | string | Architecture version |
-| type | string | Type (architecture) |
+| type | string | Always "architecture" |
 | certified_by | string | Certification authority |
-| services | array | Array of service objects |
+| runtimes | array | List of supported runtime environments (e.g., "podman", "openshift") |
+| global_components | array | Component types shared across all services (e.g., `{ "type": "vector_db" }`) |
+| services | array | Array of service reference objects |
 | links | object | Related links (demo, code, documentation) |
 
-**Service Object Schema:**
+**Service Reference Object:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Service ID |
 | version | string | Version constraint |
 | optional | boolean | Whether service is optional (only present if true) |
 
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Architecture not found
+
 **Implementation Notes:**
 
-- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read architecture metadata from `ai-services/assets/architectures/{id}/metadata.yaml`
 - Parse YAML and convert to JSON response format
+- Return 404 if the architecture directory or metadata file does not exist
 
 ---
 
-#### 5.3.3 List Available Deployable Services
+#### 5.3.3 List Available Services
 
 **Endpoint:** `GET /api/v1/services`
 
-**Description:** Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list.
+**Description:** Retrieves a list of all deployable service templates. Dependency-only services are excluded. The response is filtered based on the active runtime.
 
 **Request Headers:**
 
@@ -1450,39 +1461,38 @@ Authorization: Bearer <access_token>
     "id": "chat",
     "name": "Question and Answer",
     "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
-    "version": "1.0.0",
-    "type": "service",
-    "certified_by": "IBM"
+    "certified_by": "IBM",
+    "architectures": ["rag"],
+    "standalone": true
   },
   {
     "id": "summarization",
     "name": "Summarization",
     "description": "Consolidates input text into a brief statement of main points",
-    "version": "1.0.0",
-    "type": "service",
-    "certified_by": "IBM"
+    "certified_by": "IBM",
+    "architectures": ["rag"],
+    "standalone": true
   },
   {
     "id": "digitization",
     "name": "Digitize Documents",
     "description": "Transforms documents such as manuals, invoices, and more into texts",
-    "version": "1.0.0",
-    "type": "service",
-    "certified_by": "IBM"
+    "certified_by": "IBM",
+    "architectures": ["rag"],
+    "standalone": false
   }
 ]
 ```
 
-**Response Schema:**
+**Response Schema (ServiceSummary[]):**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Service template ID |
 | name | string | Service display name |
 | description | string | Description of the service |
-| version | string | Service version |
-| type | string | Service type |
 | certified_by | string | Certification authority |
 | architectures | array | Array of architecture IDs that include this service |
+| standalone | boolean | Whether this service can be deployed standalone (without an architecture) |
 
 **Error Responses:**
 
@@ -1491,11 +1501,10 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
-- Read services from `ai-services/assets/services/` directory
+- Read services from `ai-services/assets/services/` directory filtered by the active runtime
 - Filter OUT services that have `dependency_only: true` in their metadata
 - Only return deployable services (chat, summarization, digitization)
-- Dependency-only services (opensearch, embedding, instruct, reranker) should NOT be included in the response
+- Dependency-only services (opensearch, embedding, instruct, reranker) are NOT included in the response
 
 ---
 
@@ -1514,7 +1523,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Service template ID (e.g., "summarize") |
+| id | string | Yes | Service template ID (e.g., "chat", "summarization") |
 
 **Request Body:** None
 
@@ -1531,29 +1540,39 @@ GET /api/v1/services/chat
   "id": "chat",
   "name": "Question and Answer",
   "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
-  "version": "1.0.0",
   "type": "service",
-  "certified_by": "IBM"
+  "certified_by": "IBM",
+  "architectures": ["rag"],
+  "dependencies": [
+    { "id": "opensearch" },
+    { "id": "vllm-instruct" }
+  ],
+  "standalone": true
 }
 ```
 
-**Response Schema:**
+**Response Schema (Service):**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Service template ID |
 | name | string | Service display name |
 | description | string | Detailed description |
-| version | string | Service version |
-| type | string | Service type |
+| type | string | Always "service" |
 | certified_by | string | Certification authority |
 | architectures | array | Architecture IDs that include this service |
+| dependencies | array | Array of dependency references (`{ "id": "<component-id>" }`) |
+| standalone | boolean | Whether this service can be deployed standalone |
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Service not found
 
 **Implementation Notes:**
 
-- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read service metadata from `ai-services/assets/services/{id}/metadata.yaml`
 - Parse YAML and convert to JSON response format
-- Include all fields from metadata.yaml in response
+- Return 404 if the service directory or metadata file does not exist
 
 ---
 
@@ -1565,7 +1584,7 @@ This section describes the endpoints for retrieving deployment options, componen
 
 **Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
 
-**Description:** Retrieves available providers and dependency rules for all services and their components within an architecture. This endpoint returns providers (blueprints) for creating new components and dependency rules, but does NOT include running instances.
+**Description:** Retrieves available providers and dependency rules for all services and their components within an architecture. Returns providers (blueprints) for creating new components and dependency rules.
 
 **Request Headers:**
 
@@ -1586,6 +1605,7 @@ Authorization: Bearer <access_token>
 {
   "id": "rag",
   "name": "Digital Assistant",
+  "version": "1.0.0",
   "global_components": [
     {
       "type": "vector_db",
@@ -1594,39 +1614,20 @@ Authorization: Bearer <access_token>
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "description": "Distributed search and analytics engine"
-        }
-      ]
-    },
-    {
-      "type": "embedding",
-      "name": "Embedding Model",
-      "providers": [
-        {
-          "id": "vllm",
-          "name": "vLLM Embeddings",
-          "schema": "/api/v1/components/embedding/providers/vllm/params"
+          "description": "Distributed search and analytics engine",
+          "default": true,
+          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
         }
       ]
     }
   ],
   "services": [
     {
-      "type": "service",
       "id": "digitize",
       "name": "Digitize documents",
+      "version": "1.0.0",
+      "schema": "/api/v1/services/digitize/params",
       "components": [
-        {
-          "type": "vector_db",
-          "name": "Vector store",
-          "providers": [
-            {
-              "id": "opensearch",
-              "name": "OpenSearch",
-              "description": "Distributed search and analytics engine"
-            }
-          ]
-        },
         {
           "type": "llm",
           "name": "LLM Model",
@@ -1651,20 +1652,21 @@ Authorization: Bearer <access_token>
 }
 ```
 
-**Response Schema:**
+**Response Schema (DeployOptionsArchitecture):**
 
 **Root Object:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Architecture identifier |
 | name | string | Architecture display name |
+| version | string | Architecture version |
 | global_components | array | Array of global component objects shared across services |
 | services | array | Array of service objects with their specific components |
 
 **Global Component Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Component type (e.g., "vector_db", "embedding", "llm", "reranker") |
+| type | string | Component type (e.g., "vector_db", "embedding") |
 | name | string | Display name for the component |
 | providers | array | Array of provider objects available for this component type |
 
@@ -1674,18 +1676,22 @@ Authorization: Bearer <access_token>
 | id | string | Provider identifier (e.g., "opensearch", "vllm", "watsonx") |
 | name | string | Provider display name |
 | description | string | Provider description |
-| specifications | object | Optional provider specifications (e.g., supported_models) |
-| schema | string | URL endpoint to fetch configuration parameters for this provider. Empty string if no parameters are exposed |
+| version | string | Provider version |
+| default | boolean | Whether this is the default provider |
+| schema | string | URL to fetch configuration parameters for this provider; empty string if no parameters exposed |
+| resources | object | Optional resource requirements for this provider |
 
-**Service Object:**
+**Service Object (in services array):**
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Always "service" |
 | id | string | Service identifier |
 | name | string | Service display name |
+| version | string | Service version |
+| schema | string | URL to fetch service-level parameters (e.g., `/api/v1/services/{id}/params`) |
 | components | array | Array of component objects specific to this service |
+| resources | object | Optional resource requirements for this service |
 
-**Component Object (in services):**
+**Component Object (in service.components):**
 | Field | Type | Description |
 |-------|------|-------------|
 | type | string | Component type |
@@ -1696,15 +1702,6 @@ Authorization: Bearer <access_token>
 
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Architecture not found
-- `500 Internal Server Error` - Server error
-
-**Implementation Notes:**
-
-1. Read architecture metadata from `ai-services/assets/architectures/{id}/`
-2. Parse component dependencies and available providers
-3. Return providers for creating new components (not existing instances)
-4. Include dependency rules and metadata for UI rendering
-5. Separate global components (shared across services) from service-specific components
 
 ---
 
@@ -1733,6 +1730,8 @@ Authorization: Bearer <access_token>
 {
   "id": "digitize",
   "name": "Digitize documents",
+  "version": "1.0.0",
+  "schema": "/api/v1/services/digitize/params",
   "components": [
     {
       "type": "vector_db",
@@ -1776,6 +1775,22 @@ Authorization: Bearer <access_token>
 }
 ```
 
+**Response Schema (DeployOptionsService):**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Service identifier |
+| name | string | Service display name |
+| version | string | Service version |
+| schema | string | URL to fetch service-level parameters |
+| components | array | Array of component objects with providers |
+| resources | object | Optional resource requirements for this service |
+
+Component and Provider object schemas are the same as in [5.4.1](#541-get-architecture-deploy-options).
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Service not found
 
 ---
 
@@ -1879,11 +1894,69 @@ Returns a JSON Schema (draft-07) object that defines:
 6. User selects a model from the dropdown and fills in other configuration values
 7. Configuration is submitted as part of the deployment request
 
-1. Validate the `id` query parameter is provided
-2. Check if the template exists in architectures or services catalog
-3. Read the values.schema.json file from the template's asset directory
-4. Wrap the schema properties under the template ID as a nested object
-5. Return the complete JSON Schema with the template ID as the top-level property key
+1. Validate component_type and provider_id parameters
+2. Read provider metadata from component assets directory
+3. Load the `values.schema.json` file for the specific provider
+4. Return JSON Schema for provider-specific configuration
+5. Include `x-model-selector: "supported_models"` for model fields that should be populated from deploy-options
+6. UI uses this schema to generate dynamic configuration forms
+
+---
+
+### 5.4.4 Get Service Parameters
+
+**Endpoint:** `GET /api/v1/services/{id}/params`
+
+**Description:** Retrieves the configuration schema (JSON Schema) for service-level parameters. Used to render service-specific configuration options during deployment.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Service ID (e.g., "chat", "digitize", "similarity") |
+
+**Request Body:** None
+
+**Example Request:**
+
+```
+GET /api/v1/services/chat/params
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "chat": {
+      "type": "object",
+      "properties": {
+        "systemPrompt": {
+          "type": "string",
+          "title": "System prompt",
+          "description": "Custom system prompt for the chat service"
+        }
+      }
+    }
+  }
+}
+```
+
+Returns a JSON Schema (draft-07) object with service-level configuration properties, nested under the service ID as the top-level key.
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid service ID
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Service not found
+- `500 Internal Server Error` - Server error
 
 ---
 
@@ -1891,26 +1964,24 @@ Returns a JSON Schema (draft-07) object that defines:
 
 ### 6.1 Error Response Format
 
+All error responses follow a consistent format:
+
 ```json
 {
-  "error": "error_code",
-  "message": "Human-readable error message",
-  "details": [
-    {
-      "field": "field_name",
-      "message": "Field-specific error"
-    }
-  ]
+  "error": "Human-readable error message"
 }
 ```
+
+The `error` field contains a plain string message. There is no separate `error_code` or nested `details` array.
 
 ### 6.2 HTTP Status Codes
 
 - `200 OK` - Successful request
-- `202 Accepted` - Async operation initiated
-- `400 Bad Request` - Invalid request
-- `401 Unauthorized` - Authentication required
+- `202 Accepted` - Async operation initiated (Create Application, Delete Application)
+- `400 Bad Request` - Invalid request (malformed body, invalid UUID, invalid parameter value)
+- `401 Unauthorized` - Authentication required or token invalid/revoked
+- `403 Forbidden` - Authenticated but not authorized (e.g., not the owner)
 - `404 Not Found` - Resource not found
-- `409 Conflict` - Resource conflict (e.g., duplicate name)
-- `422 Unprocessable Entity` - Validation failed
-- `500 Internal Server Error` - Server error
+- `409 Conflict` - Resource conflict (e.g., duplicate name, already being deleted)
+- `422 Unprocessable Entity` - Validation failed (invalid catalog ID, schema validation failure)
+- `500 Internal Server Error` - Unexpected server error
