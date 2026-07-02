@@ -1,6 +1,7 @@
 package mustgather
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,11 +59,13 @@ func newPodmanGatherer() *podmanGatherer {
 //   - Always-on: system info, secrets, network, volumes — Podman-level data
 //     that is useful regardless of catalog state.
 func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
-	logger.Infoln("Starting must-gather for Podman runtime…")
+	ctx := context.Background()
+
+	logger.InfolnCtx(ctx, "Starting must-gather for Podman runtime…")
 
 	rt, err := podmanRuntime.NewPodmanClient()
 	if err != nil {
-		logger.Warningf("Could not connect to Podman: %v\n", err)
+		logger.WarningfCtx(ctx, "Could not connect to Podman: %v\n", err)
 
 		return "", fmt.Errorf("failed to connect to Podman: %w", err)
 	}
@@ -72,30 +75,30 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 		return "", err
 	}
 
-	logger.Infof("Output directory: %s\n", outDir)
+	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 
 	catalogInstalled, err := checkCatalogInstalled(rt)
 	if err != nil {
-		logger.Warningf("Failed to check catalog installation: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
 
 	if catalogInstalled {
-		g.resolveBaseDir(rt)
+		g.resolveBaseDir(ctx, rt)
 	}
 
 	if catalogInstalled {
-		g.collectCatalogArtifacts(outDir)
-		g.collectApplicationPods(outDir, opts.applicationName)
-		g.collectModelsInfo(outDir)
+		g.collectCatalogArtifacts(ctx, outDir)
+		g.collectApplicationPods(ctx, outDir, opts.applicationName)
+		g.collectModelsInfo(ctx, outDir)
 	} else {
-		logger.Warningln("No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")
+		logger.WarninglnCtx(ctx, "No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")
 	}
 
 	// Always collected — independent of catalog state.
-	g.collectSystemInfo(outDir)
-	g.collectNetworkInfo(outDir)
-	g.collectSecretInfo(outDir)
-	g.collectVolumeInfo(outDir)
+	g.collectSystemInfo(ctx, outDir)
+	g.collectNetworkInfo(ctx, outDir)
+	g.collectSecretInfo(ctx, outDir)
+	g.collectVolumeInfo(ctx, outDir)
 
 	return outDir, nil
 }
@@ -119,15 +122,15 @@ func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
 // catalog backend container env (same approach as `catalog configure --reset-*`).
 // Sets g.baseDir to the resolved value, or to the default if the backend pod
 // is stopped or the value is empty.
-func (g *podmanGatherer) resolveBaseDir(rt *podmanRuntime.PodmanClient) {
+func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.PodmanClient) {
 	g.baseDir = pkgutils.GetBaseDir() // safe fallback
 
 	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
-			logger.Warningln("Catalog backend pod is stopped — base directory resolved to default.")
+			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")
 		} else {
-			logger.Warningf("Could not read base dir from catalog pod: %v; using default.\n", err)
+			logger.WarningfCtx(ctx, "Could not read base dir from catalog pod: %v; using default.\n", err)
 		}
 
 		return
@@ -137,7 +140,7 @@ func (g *podmanGatherer) resolveBaseDir(rt *podmanRuntime.PodmanClient) {
 		g.baseDir = config.BaseDir
 	}
 
-	logger.Infof("Using base directory: %s\n", g.baseDir)
+	logger.InfofCtx(ctx, "Using base directory: %s\n", g.baseDir)
 }
 
 func (g *podmanGatherer) createOutputDir(base string) (string, error) {
@@ -153,39 +156,39 @@ func (g *podmanGatherer) createOutputDir(base string) (string, error) {
 
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one), then collects inspect/logs/env for each.
-func (g *podmanGatherer) collectApplicationPods(outDir, appName string) {
+func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, appName string) {
 	appClient, err := catalogClient.NewApplicationClient()
 	if err != nil {
-		logger.Warningf("Catalog client unavailable, skipping application pod collection: %v\n", err)
+		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
 
 		return
 	}
 
-	apps, ok := fetchApplicationsForGather(appClient, appName)
+	apps, ok := fetchApplicationsForGather(ctx, appClient, appName)
 	if !ok {
 		return
 	}
 
 	podsDir := filepath.Join(outDir, "pods")
 	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create pods directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create pods directory: %v\n", err)
 
 		return
 	}
 
-	g.collectPodsForApps(appClient, podsDir, apps)
+	g.collectPodsForApps(ctx, appClient, podsDir, apps)
 }
 
 // fetchApplicationsForGather fetches the application list and logs the
 // appropriate warning on error or empty result. Returns (apps, true) on
 // success, (nil, false) when the caller should skip collection.
-func fetchApplicationsForGather(appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
+func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
 	apps, err := cliUtils.FetchApplications(appClient, appName)
 	if err != nil {
 		if appName != "" {
-			logger.Warningf("Application %q not found: %v\n", appName, err)
+			logger.WarningfCtx(ctx, "Application %q not found: %v\n", appName, err)
 		} else {
-			logger.Warningf("Failed to fetch applications: %v\n", err)
+			logger.WarningfCtx(ctx, "Failed to fetch applications: %v\n", err)
 		}
 
 		return nil, false
@@ -193,9 +196,9 @@ func fetchApplicationsForGather(appClient *catalogClient.ApplicationClient, appN
 
 	if len(apps) == 0 {
 		if appName != "" {
-			logger.Warningf("No application named %q found; skipping application pod collection.\n", appName)
+			logger.WarningfCtx(ctx, "No application named %q found; skipping application pod collection.\n", appName)
 		} else {
-			logger.Warningln("No applications found; skipping application pod collection.")
+			logger.WarninglnCtx(ctx, "No applications found; skipping application pod collection.")
 		}
 
 		return nil, false
@@ -206,62 +209,62 @@ func fetchApplicationsForGather(appClient *catalogClient.ApplicationClient, appN
 
 // collectPodsForApps iterates over apps, fetches their PS data, and collects
 // each pod. Extracted to keep collectApplicationPods within complexity limits.
-func (g *podmanGatherer) collectPodsForApps(appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
+func (g *podmanGatherer) collectPodsForApps(ctx context.Context, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
 	for _, app := range apps {
 		psResp, err := appClient.GetApplicationPS(app.ID)
 		if err != nil {
-			logger.Warningf("Failed to get PS for application %q: %v\n", app.Name, err)
+			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
 
 			continue
 		}
 
 		for _, p := range psResp.Services {
-			g.collectPod(podsDir, p.PodName)
+			g.collectPod(ctx, podsDir, p.PodName)
 		}
 
 		for _, p := range psResp.Components {
-			g.collectPod(podsDir, p.PodName)
+			g.collectPod(ctx, podsDir, p.PodName)
 		}
 	}
 }
 
 // collectPod collects inspect JSON, container logs, and env vars for one pod.
-func (g *podmanGatherer) collectPod(podsDir, podName string) {
+func (g *podmanGatherer) collectPod(ctx context.Context, podsDir, podName string) {
 	podDir := filepath.Join(podsDir, podName)
 	if err := os.MkdirAll(podDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create directory for pod %q: %v\n", podName, err)
+		logger.WarningfCtx(ctx, "Failed to create directory for pod %q: %v\n", podName, err)
 
 		return
 	}
 
-	g.collectPodInspect(podDir, podName)
-	g.collectContainersForPod(podDir, podName)
+	g.collectPodInspect(ctx, podDir, podName)
+	g.collectContainersForPod(ctx, podDir, podName)
 }
 
-func (g *podmanGatherer) collectPodInspect(podDir, podName string) {
+func (g *podmanGatherer) collectPodInspect(ctx context.Context, podDir, podName string) {
 	raw, err := podmanRun("pod", "inspect", podName)
 	if err != nil {
-		logger.Warningf("Failed to inspect pod %q: %v\n", podName, err)
+		logger.WarningfCtx(ctx, "Failed to inspect pod %q: %v\n", podName, err)
 
 		return
 	}
 
-	g.writeFile(podDir, "inspect.json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, podDir, "inspect.json", g.sanitizeJSON(raw))
 }
 
 // collectContainersForPod lists every non-infra container in podName and
 // collects its logs and environment variables.
-func (g *podmanGatherer) collectContainersForPod(podDir, podName string) {
+func (g *podmanGatherer) collectContainersForPod(ctx context.Context, podDir, podName string) {
 	raw, err := podmanRun("ps", "-a", "--filter", "pod="+podName, "--format", "json")
 	if err != nil {
-		logger.Warningf("Failed to list containers for pod %q: %v\n", podName, err)
+		logger.WarningfCtx(ctx, "Failed to list containers for pod %q: %v\n", podName, err)
 
 		return
 	}
 
 	var containers []map[string]any
 	if err := json.Unmarshal(raw, &containers); err != nil {
-		logger.Warningf("Failed to parse container list for pod %q: %v\n", podName, err)
+		logger.WarningfCtx(ctx, "Failed to parse container list for pod %q: %v\n", podName, err)
 
 		return
 	}
@@ -272,48 +275,48 @@ func (g *podmanGatherer) collectContainersForPod(podDir, podName string) {
 			continue // skip infra/pause containers — no useful data
 		}
 
-		g.collectContainerInspect(podDir, name)
-		g.collectContainerLogs(podDir, name)
+		g.collectContainerInspect(ctx, podDir, name)
+		g.collectContainerLogs(ctx, podDir, name)
 	}
 }
 
 // collectContainerInspect runs `podman inspect <name>` and writes the full
 // sanitized JSON. This covers Config.Env, Mounts, NetworkSettings, State,
 // Image, Labels — making a separate env-vars extraction step unnecessary.
-func (g *podmanGatherer) collectContainerInspect(podDir, name string) {
+func (g *podmanGatherer) collectContainerInspect(ctx context.Context, podDir, name string) {
 	raw, err := podmanRun("inspect", name)
 	if err != nil {
-		logger.Warningf("Failed to inspect container %q: %v\n", name, err)
+		logger.WarningfCtx(ctx, "Failed to inspect container %q: %v\n", name, err)
 
 		return
 	}
 
 	inspectDir := filepath.Join(podDir, "inspect")
 	if err := os.MkdirAll(inspectDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create inspect directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create inspect directory: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(inspectDir, name+".json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, inspectDir, name+".json", g.sanitizeJSON(raw))
 }
 
-func (g *podmanGatherer) collectContainerLogs(podDir, name string) {
+func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name string) {
 	logsDir := filepath.Join(podDir, "logs")
 	if err := os.MkdirAll(logsDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create logs directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create logs directory: %v\n", err)
 
 		return
 	}
 
 	raw, err := podmanRun("logs", "--tail", maxLogLines, name)
 	if err != nil {
-		logger.Warningf("Failed to get logs for container %q: %v\n", name, err)
+		logger.WarningfCtx(ctx, "Failed to get logs for container %q: %v\n", name, err)
 
 		return
 	}
 
-	g.writeFile(logsDir, name+".log", g.sanitizeText(raw))
+	g.writeFile(ctx, logsDir, name+".log", g.sanitizeText(raw))
 }
 
 // ── catalog artifact collection ───────────────────────────────────────────────
@@ -323,51 +326,51 @@ func (g *podmanGatherer) collectContainerLogs(podDir, name string) {
 //   - catalog pods (ai-services--catalog, ai-services--db, ai-services--caddy)
 //   - Caddyfile from <BaseDir>/common/caddy/ (reverse-proxy route config)
 //   - catalog-credentials.json with tokens redacted
-func (g *podmanGatherer) collectCatalogArtifacts(outDir string) {
-	logger.Infoln("Collecting catalog artifacts…")
+func (g *podmanGatherer) collectCatalogArtifacts(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting catalog artifacts…")
 
 	catDir := filepath.Join(outDir, "catalog")
 	if err := os.MkdirAll(catDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create catalog directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create catalog directory: %v\n", err)
 
 		return
 	}
 
-	g.collectCatalogPods(catDir)
-	g.collectCaddyfile(catDir)
-	g.collectCatalogCredentials(catDir)
+	g.collectCatalogPods(ctx, catDir)
+	g.collectCaddyfile(ctx, catDir)
+	g.collectCatalogCredentials(ctx, catDir)
 }
 
 // collectCatalogPods lists all pods labelled ai-services.io/application=ai-services
 // and delegates to collectPod for each one.
-func (g *podmanGatherer) collectCatalogPods(catDir string) {
+func (g *podmanGatherer) collectCatalogPods(ctx context.Context, catDir string) {
 	raw, err := podmanRun(
 		"pod", "ps",
 		"--filter", "label=ai-services.io/application=ai-services",
 		"--format", "json",
 	)
 	if err != nil {
-		logger.Warningf("Failed to list catalog pods: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to list catalog pods: %v\n", err)
 
 		return
 	}
 
 	var pods []map[string]any
 	if err := json.Unmarshal(raw, &pods); err != nil {
-		logger.Warningf("Failed to parse catalog pod list: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to parse catalog pod list: %v\n", err)
 
 		return
 	}
 
 	if len(pods) == 0 {
-		logger.Warningln("No catalog pods found (catalog may not be configured).")
+		logger.WarninglnCtx(ctx, "No catalog pods found (catalog may not be configured).")
 
 		return
 	}
 
 	podsDir := filepath.Join(catDir, "pods")
 	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create catalog pods directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create catalog pods directory: %v\n", err)
 
 		return
 	}
@@ -379,14 +382,14 @@ func (g *podmanGatherer) collectCatalogPods(catDir string) {
 			continue
 		}
 
-		g.collectPod(podsDir, name)
+		g.collectPod(ctx, podsDir, name)
 	}
 }
 
 // collectCaddyfile copies:
 //   - <BaseDir>/common/caddy/Caddyfile        — static reverse-proxy config
 //   - <BaseDir>/common/caddy-config/caddy/autosave.json — Caddy's live config snapshot
-func (g *podmanGatherer) collectCaddyfile(catDir string) {
+func (g *podmanGatherer) collectCaddyfile(ctx context.Context, catDir string) {
 	caddyFiles := []struct {
 		src      string
 		dst      string
@@ -408,24 +411,24 @@ func (g *podmanGatherer) collectCaddyfile(catDir string) {
 		data, err := os.ReadFile(f.src)
 		if err != nil {
 			if os.IsNotExist(err) {
-				logger.Warningf("%s not found (catalog may not be configured)\n", f.src)
+				logger.WarningfCtx(ctx, "%s not found (catalog may not be configured)\n", f.src)
 			} else {
-				logger.Warningf("Failed to read %s: %v\n", f.src, err)
+				logger.WarningfCtx(ctx, "Failed to read %s: %v\n", f.src, err)
 			}
 
 			continue
 		}
 
-		g.writeFile(catDir, f.dst, f.sanitize(data))
+		g.writeFile(ctx, catDir, f.dst, f.sanitize(data))
 	}
 }
 
 // collectCatalogCredentials saves the CLI credentials file
 // (~/.config/ai-services/catalog-credentials.json) with tokens redacted.
-func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
+func (g *podmanGatherer) collectCatalogCredentials(ctx context.Context, catDir string) {
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
-		logger.Warningf("Cannot determine user config dir: %v\n", err)
+		logger.WarningfCtx(ctx, "Cannot determine user config dir: %v\n", err)
 
 		return
 	}
@@ -435,15 +438,15 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 	data, err := os.ReadFile(credsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Warningln("Catalog credentials file not found (not logged in).")
+			logger.WarninglnCtx(ctx, "Catalog credentials file not found (not logged in).")
 		} else {
-			logger.Warningf("Failed to read catalog credentials: %v\n", err)
+			logger.WarningfCtx(ctx, "Failed to read catalog credentials: %v\n", err)
 		}
 
 		return
 	}
 
-	g.writeFile(catDir, "catalog-credentials.json", g.sanitizeJSON(data))
+	g.writeFile(ctx, catDir, "catalog-credentials.json", g.sanitizeJSON(data))
 }
 
 // ── models info collection ────────────────────────────────────────────────────
@@ -451,17 +454,17 @@ func (g *podmanGatherer) collectCatalogCredentials(catDir string) {
 // collectModelsInfo records which models are present under <BaseDir>/models/
 // and how much disk space each one occupies. Model weights are never copied —
 // only the directory listing and per-model disk usage are written.
-func (g *podmanGatherer) collectModelsInfo(outDir string) {
-	logger.Infoln("Collecting models information…")
+func (g *podmanGatherer) collectModelsInfo(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting models information…")
 
 	modelsPath := filepath.Join(g.baseDir, "models")
 
 	entries, err := os.ReadDir(modelsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Warningf("Models directory not found at %s\n", modelsPath)
+			logger.WarningfCtx(ctx, "Models directory not found at %s\n", modelsPath)
 		} else {
-			logger.Warningf("Failed to read models directory: %v\n", err)
+			logger.WarningfCtx(ctx, "Failed to read models directory: %v\n", err)
 		}
 
 		return
@@ -469,7 +472,7 @@ func (g *podmanGatherer) collectModelsInfo(outDir string) {
 
 	modelsDir := filepath.Join(outDir, "models")
 	if err := os.MkdirAll(modelsDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create models output directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create models output directory: %v\n", err)
 
 		return
 	}
@@ -506,7 +509,7 @@ func (g *podmanGatherer) collectModelsInfo(outDir string) {
 		}
 	}
 
-	g.writeFile(modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
+	g.writeFile(ctx, modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
 }
 
 // dirStats walks dir and returns total byte size and file count.
@@ -554,12 +557,12 @@ func formatBytes(b int64) string {
 // `podman secret ls --format json` does not emit real JSON (it prints the
 // literal string "json"). We therefore list names via `--noheading` and then
 // collect full metadata with `podman secret inspect`, which does emit JSON.
-func (g *podmanGatherer) collectSecretInfo(outDir string) {
-	logger.Infoln("Collecting secret metadata…")
+func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting secret metadata…")
 
 	secDir := filepath.Join(outDir, "secrets")
 	if err := os.MkdirAll(secDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create secrets directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create secrets directory: %v\n", err)
 
 		return
 	}
@@ -567,14 +570,14 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	// List names only — `--noheading` gives tab-separated lines: ID\tNAME\t…
 	raw, err := podmanRun("secret", "ls", "--noheading")
 	if err != nil {
-		logger.Warningf("podman secret ls failed: %v\n", err)
+		logger.WarningfCtx(ctx, "podman secret ls failed: %v\n", err)
 
 		return
 	}
 
 	names := parseSecretNames(raw)
 	if len(names) == 0 {
-		logger.Infoln("No Podman secrets found.")
+		logger.InfolnCtx(ctx, "No Podman secrets found.")
 
 		return
 	}
@@ -583,12 +586,12 @@ func (g *podmanGatherer) collectSecretInfo(outDir string) {
 	args := append([]string{"secret", "inspect"}, names...)
 	inspectRaw, err := podmanRun(args...)
 	if err != nil {
-		logger.Warningf("podman secret inspect failed: %v\n", err)
+		logger.WarningfCtx(ctx, "podman secret inspect failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(secDir, "secrets.json", g.sanitizeJSON(inspectRaw))
+	g.writeFile(ctx, secDir, "secrets.json", g.sanitizeJSON(inspectRaw))
 }
 
 // parseSecretNames extracts secret names from `podman secret ls --noheading`
@@ -613,12 +616,12 @@ func parseSecretNames(raw []byte) []string {
 
 // ── system / network / volume collection ──────────────────────────────────────
 
-func (g *podmanGatherer) collectSystemInfo(outDir string) {
-	logger.Infoln("Collecting system information…")
+func (g *podmanGatherer) collectSystemInfo(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting system information…")
 
 	sysDir := filepath.Join(outDir, "system")
 	if err := os.MkdirAll(sysDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create system directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create system directory: %v\n", err)
 
 		return
 	}
@@ -635,53 +638,53 @@ func (g *podmanGatherer) collectSystemInfo(outDir string) {
 	for _, c := range cmds {
 		raw, err := podmanRun(c.args...)
 		if err != nil {
-			logger.Warningf("podman %s failed: %v\n", strings.Join(c.args, " "), err)
+			logger.WarningfCtx(ctx, "podman %s failed: %v\n", strings.Join(c.args, " "), err)
 
 			continue
 		}
 
-		g.writeFile(sysDir, c.filename, g.sanitizeText(raw))
+		g.writeFile(ctx, sysDir, c.filename, g.sanitizeText(raw))
 	}
 }
 
-func (g *podmanGatherer) collectNetworkInfo(outDir string) {
-	logger.Infoln("Collecting network information…")
+func (g *podmanGatherer) collectNetworkInfo(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting network information…")
 
 	netDir := filepath.Join(outDir, "network")
 	if err := os.MkdirAll(netDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create network directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create network directory: %v\n", err)
 
 		return
 	}
 
 	raw, err := podmanRun("network", "ls", "--format", "json")
 	if err != nil {
-		logger.Warningf("podman network ls failed: %v\n", err)
+		logger.WarningfCtx(ctx, "podman network ls failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(netDir, "networks.json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, netDir, "networks.json", g.sanitizeJSON(raw))
 }
 
-func (g *podmanGatherer) collectVolumeInfo(outDir string) {
-	logger.Infoln("Collecting volume information…")
+func (g *podmanGatherer) collectVolumeInfo(ctx context.Context, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting volume information…")
 
 	volDir := filepath.Join(outDir, "volumes")
 	if err := os.MkdirAll(volDir, dirPerm); err != nil {
-		logger.Warningf("Failed to create volumes directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create volumes directory: %v\n", err)
 
 		return
 	}
 
 	raw, err := podmanRun("volume", "ls", "--format", "json")
 	if err != nil {
-		logger.Warningf("podman volume ls failed: %v\n", err)
+		logger.WarningfCtx(ctx, "podman volume ls failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(volDir, "volumes.json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, volDir, "volumes.json", g.sanitizeJSON(raw))
 }
 
 // ── sanitize helpers ──────────────────────────────────────────────────────────
@@ -748,10 +751,10 @@ func redactLine(s *sanitize.SecretSanitizer, line string) string {
 
 // ── file I/O ──────────────────────────────────────────────────────────────────
 
-func (g *podmanGatherer) writeFile(dir, filename string, content []byte) {
+func (g *podmanGatherer) writeFile(ctx context.Context, dir, filename string, content []byte) {
 	path := filepath.Join(dir, filename)
 	if err := os.WriteFile(path, content, filePerm); err != nil {
-		logger.Warningf("Failed to write %s: %v\n", path, err)
+		logger.WarningfCtx(ctx, "Failed to write %s: %v\n", path, err)
 	}
 }
 
