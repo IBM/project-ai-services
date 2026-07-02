@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -242,20 +241,20 @@ func (g *podmanGatherer) collectPod(ctx context.Context, podsDir, podName string
 }
 
 func (g *podmanGatherer) collectPodInspect(ctx context.Context, podDir, podName string) {
-	raw, err := podmanRun("pod", "inspect", podName)
+	raw, err := cliUtils.PodmanRun("pod", "inspect", podName)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to inspect pod %q: %v\n", podName, err)
 
 		return
 	}
 
-	g.writeFile(ctx, podDir, "inspect.json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, podDir, "inspect.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // collectContainersForPod lists every non-infra container in podName and
 // collects its logs and environment variables.
 func (g *podmanGatherer) collectContainersForPod(ctx context.Context, podDir, podName string) {
-	raw, err := podmanRun("ps", "-a", "--filter", "pod="+podName, "--format", "json")
+	raw, err := cliUtils.PodmanRun("ps", "-a", "--filter", "pod="+podName, "--format", "json")
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to list containers for pod %q: %v\n", podName, err)
 
@@ -270,7 +269,7 @@ func (g *podmanGatherer) collectContainersForPod(ctx context.Context, podDir, po
 	}
 
 	for _, c := range containers {
-		name := podmanContainerName(c)
+		name := cliUtils.PodmanContainerName(c)
 		if name == "" || strings.HasSuffix(name, "-infra") {
 			continue // skip infra/pause containers — no useful data
 		}
@@ -284,7 +283,7 @@ func (g *podmanGatherer) collectContainersForPod(ctx context.Context, podDir, po
 // sanitized JSON. This covers Config.Env, Mounts, NetworkSettings, State,
 // Image, Labels — making a separate env-vars extraction step unnecessary.
 func (g *podmanGatherer) collectContainerInspect(ctx context.Context, podDir, name string) {
-	raw, err := podmanRun("inspect", name)
+	raw, err := cliUtils.PodmanRun("inspect", name)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to inspect container %q: %v\n", name, err)
 
@@ -298,7 +297,7 @@ func (g *podmanGatherer) collectContainerInspect(ctx context.Context, podDir, na
 		return
 	}
 
-	g.writeFile(ctx, inspectDir, name+".json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, inspectDir, name+".json", g.sanitizer.SanitizeJSON(raw))
 }
 
 func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name string) {
@@ -309,14 +308,14 @@ func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name 
 		return
 	}
 
-	raw, err := podmanRun("logs", "--tail", maxLogLines, name)
+	raw, err := cliUtils.PodmanRun("logs", "--tail", maxLogLines, name)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to get logs for container %q: %v\n", name, err)
 
 		return
 	}
 
-	g.writeFile(ctx, logsDir, name+".log", g.sanitizeText(raw))
+	g.writeFile(ctx, logsDir, name+".log", g.sanitizer.SanitizeText(raw))
 }
 
 // ── catalog artifact collection ───────────────────────────────────────────────
@@ -344,7 +343,7 @@ func (g *podmanGatherer) collectCatalogArtifacts(ctx context.Context, outDir str
 // collectCatalogPods lists all pods labelled ai-services.io/application=ai-services
 // and delegates to collectPod for each one.
 func (g *podmanGatherer) collectCatalogPods(ctx context.Context, catDir string) {
-	raw, err := podmanRun(
+	raw, err := cliUtils.PodmanRun(
 		"pod", "ps",
 		"--filter", "label=ai-services.io/application=ai-services",
 		"--format", "json",
@@ -398,12 +397,12 @@ func (g *podmanGatherer) collectCaddyfile(ctx context.Context, catDir string) {
 		{
 			src:      filepath.Join(g.baseDir, "common", "caddy", "Caddyfile"),
 			dst:      "Caddyfile",
-			sanitize: g.sanitizeText,
+			sanitize: g.sanitizer.SanitizeText,
 		},
 		{
 			src:      filepath.Join(g.baseDir, "common", "caddy-config", "caddy", "autosave.json"),
 			dst:      "caddy-autosave.json",
-			sanitize: g.sanitizeJSON,
+			sanitize: g.sanitizer.SanitizeJSON,
 		},
 	}
 
@@ -446,7 +445,7 @@ func (g *podmanGatherer) collectCatalogCredentials(ctx context.Context, catDir s
 		return
 	}
 
-	g.writeFile(ctx, catDir, "catalog-credentials.json", g.sanitizeJSON(data))
+	g.writeFile(ctx, catDir, "catalog-credentials.json", g.sanitizer.SanitizeJSON(data))
 }
 
 // ── models info collection ────────────────────────────────────────────────────
@@ -501,51 +500,15 @@ func (g *podmanGatherer) collectModelsInfo(ctx context.Context, outDir string) {
 			}
 
 			modelPath := filepath.Join(orgPath, model.Name())
-			size, fileCount := dirStats(modelPath)
+			size, fileCount := pkgutils.DirStats(modelPath)
 			lines = append(lines, fmt.Sprintf(
 				"  %s/%s  (%s, %d files)",
-				org.Name(), model.Name(), formatBytes(size), fileCount,
+				org.Name(), model.Name(), pkgutils.FormatBytes(size), fileCount,
 			))
 		}
 	}
 
 	g.writeFile(ctx, modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
-}
-
-// dirStats walks dir and returns total byte size and file count.
-func dirStats(dir string) (totalBytes int64, fileCount int) {
-	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-
-		totalBytes += info.Size()
-		fileCount++
-
-		return nil
-	})
-
-	return totalBytes, fileCount
-}
-
-// formatBytes renders a byte count as a human-readable string (GiB / MiB / KiB / B).
-func formatBytes(b int64) string {
-	const (
-		kib = 1024
-		mib = 1024 * kib
-		gib = 1024 * mib
-	)
-
-	switch {
-	case b >= gib:
-		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
-	case b >= mib:
-		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mib))
-	case b >= kib:
-		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kib))
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
 }
 
 // ── secret metadata collection ────────────────────────────────────────────────
@@ -568,7 +531,7 @@ func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
 	}
 
 	// List names only — `--noheading` gives tab-separated lines: ID\tNAME\t…
-	raw, err := podmanRun("secret", "ls", "--noheading")
+	raw, err := cliUtils.PodmanRun("secret", "ls", "--noheading")
 	if err != nil {
 		logger.WarningfCtx(ctx, "podman secret ls failed: %v\n", err)
 
@@ -584,14 +547,14 @@ func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
 
 	// Collect full metadata for all secrets in one inspect call.
 	args := append([]string{"secret", "inspect"}, names...)
-	inspectRaw, err := podmanRun(args...)
+	inspectRaw, err := cliUtils.PodmanRun(args...)
 	if err != nil {
 		logger.WarningfCtx(ctx, "podman secret inspect failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(ctx, secDir, "secrets.json", g.sanitizeJSON(inspectRaw))
+	g.writeFile(ctx, secDir, "secrets.json", g.sanitizer.SanitizeJSON(inspectRaw))
 }
 
 // parseSecretNames extracts secret names from `podman secret ls --noheading`
@@ -636,14 +599,14 @@ func (g *podmanGatherer) collectSystemInfo(ctx context.Context, outDir string) {
 	}
 
 	for _, c := range cmds {
-		raw, err := podmanRun(c.args...)
+		raw, err := cliUtils.PodmanRun(c.args...)
 		if err != nil {
 			logger.WarningfCtx(ctx, "podman %s failed: %v\n", strings.Join(c.args, " "), err)
 
 			continue
 		}
 
-		g.writeFile(ctx, sysDir, c.filename, g.sanitizeText(raw))
+		g.writeFile(ctx, sysDir, c.filename, g.sanitizer.SanitizeText(raw))
 	}
 }
 
@@ -657,14 +620,14 @@ func (g *podmanGatherer) collectNetworkInfo(ctx context.Context, outDir string) 
 		return
 	}
 
-	raw, err := podmanRun("network", "ls", "--format", "json")
+	raw, err := cliUtils.PodmanRun("network", "ls", "--format", "json")
 	if err != nil {
 		logger.WarningfCtx(ctx, "podman network ls failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(ctx, netDir, "networks.json", g.sanitizeJSON(raw))
+	g.writeFile(ctx, netDir, "networks.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 func (g *podmanGatherer) collectVolumeInfo(ctx context.Context, outDir string) {
@@ -677,76 +640,14 @@ func (g *podmanGatherer) collectVolumeInfo(ctx context.Context, outDir string) {
 		return
 	}
 
-	raw, err := podmanRun("volume", "ls", "--format", "json")
+	raw, err := cliUtils.PodmanRun("volume", "ls", "--format", "json")
 	if err != nil {
 		logger.WarningfCtx(ctx, "podman volume ls failed: %v\n", err)
 
 		return
 	}
 
-	g.writeFile(ctx, volDir, "volumes.json", g.sanitizeJSON(raw))
-}
-
-// ── sanitize helpers ──────────────────────────────────────────────────────────
-
-// sanitizeJSON redacts sensitive keys in a JSON byte slice.
-// Falls back to sanitizeText when the input is not valid JSON.
-func (g *podmanGatherer) sanitizeJSON(raw []byte) []byte {
-	var obj any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return g.sanitizeText(raw)
-	}
-
-	out, err := json.MarshalIndent(sanitizeAny(g.sanitizer, obj), "", "  ")
-	if err != nil {
-		return raw
-	}
-
-	return out
-}
-
-// sanitizeText redacts KEY=VALUE patterns line-by-line in plain-text output.
-func (g *podmanGatherer) sanitizeText(raw []byte) []byte {
-	lines := strings.Split(string(raw), "\n")
-	for i, line := range lines {
-		lines[i] = redactLine(g.sanitizer, line)
-	}
-
-	return []byte(strings.Join(lines, "\n"))
-}
-
-// sanitizeAny recursively sanitizes maps inside an arbitrary JSON-decoded value.
-func sanitizeAny(s *sanitize.SecretSanitizer, v any) any {
-	switch typed := v.(type) {
-	case map[string]any:
-		return s.SanitizeArgs([]any{typed})[0]
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = sanitizeAny(s, item)
-		}
-
-		return out
-	default:
-		return v
-	}
-}
-
-// redactLine redacts the value side of a KEY=VALUE line when the key is sensitive.
-func redactLine(s *sanitize.SecretSanitizer, line string) string {
-	const kvParts = 2
-
-	kv := strings.SplitN(line, "=", kvParts)
-	if len(kv) != kvParts {
-		return line
-	}
-
-	result := s.SanitizeArgs([]any{map[string]any{kv[0]: kv[1]}})
-	if m, ok := result[0].(map[string]any); ok {
-		return kv[0] + "=" + fmt.Sprintf("%v", m[kv[0]])
-	}
-
-	return line
+	g.writeFile(ctx, volDir, "volumes.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // ── file I/O ──────────────────────────────────────────────────────────────────
@@ -758,30 +659,3 @@ func (g *podmanGatherer) writeFile(ctx context.Context, dir, filename string, co
 	}
 }
 
-// ── podman CLI helpers ────────────────────────────────────────────────────────
-
-// podmanRun executes `podman <args>` and returns combined stdout+stderr.
-func podmanRun(args ...string) ([]byte, error) {
-	out, err := exec.Command("podman", args...).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("podman %s: %w (output: %s)",
-			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-
-	return out, nil
-}
-
-// podmanContainerName extracts the container name from a `podman ps --format json` entry.
-// The "Names" field is a JSON array of strings.
-func podmanContainerName(c map[string]any) string {
-	switch v := c["Names"].(type) {
-	case []any:
-		if len(v) > 0 {
-			return fmt.Sprintf("%v", v[0])
-		}
-	case string:
-		return v
-	}
-
-	return ""
-}

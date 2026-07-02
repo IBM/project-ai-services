@@ -700,3 +700,39 @@ func GetNumericValFromMap(m map[string]interface{}, key string) int {
 
 	return 0
 }
+
+// FormatBytes renders a byte count as a human-readable string (GiB / MiB / KiB / B).
+func FormatBytes(b int64) string {
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
+// DirStats walks dir and returns total byte size and file count.
+func DirStats(dir string) (totalBytes int64, fileCount int) {
+	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		totalBytes += info.Size()
+		fileCount++
+
+		return nil
+	})
+
+	return totalBytes, fileCount
+}
