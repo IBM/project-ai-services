@@ -12,6 +12,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
