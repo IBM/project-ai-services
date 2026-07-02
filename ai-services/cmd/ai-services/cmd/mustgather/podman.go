@@ -513,13 +513,9 @@ func (g *podmanGatherer) collectModelsInfo(ctx context.Context, outDir string) {
 
 // ── secret metadata collection ────────────────────────────────────────────────
 
-// collectSecretInfo saves metadata (name, ID, labels, driver, creation time)
-// for all Podman secrets. Secret *values* are never exposed by the Podman CLI
-// after creation, so this step is safe by design.
-//
-// `podman secret ls --format json` does not emit real JSON (it prints the
-// literal string "json"). We therefore list names via `--noheading` and then
-// collect full metadata with `podman secret inspect`, which does emit JSON.
+// collectSecretInfo lists all Podman secrets and writes their metadata
+// (ID, name, driver, created/updated timestamps). Secret values are never
+// exposed — `podman secret ls` never outputs stored secret data.
 func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
 	logger.InfolnCtx(ctx, "Collecting secret metadata…")
 
@@ -530,51 +526,14 @@ func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
 		return
 	}
 
-	// List names only — `--noheading` gives tab-separated lines: ID\tNAME\t…
-	raw, err := cliUtils.PodmanRun("secret", "ls", "--noheading")
+	raw, err := cliUtils.PodmanRun("secret", "ls", "--format", "json")
 	if err != nil {
 		logger.WarningfCtx(ctx, "podman secret ls failed: %v\n", err)
 
 		return
 	}
 
-	names := parseSecretNames(raw)
-	if len(names) == 0 {
-		logger.InfolnCtx(ctx, "No Podman secrets found.")
-
-		return
-	}
-
-	// Collect full metadata for all secrets in one inspect call.
-	args := append([]string{"secret", "inspect"}, names...)
-	inspectRaw, err := cliUtils.PodmanRun(args...)
-	if err != nil {
-		logger.WarningfCtx(ctx, "podman secret inspect failed: %v\n", err)
-
-		return
-	}
-
-	g.writeFile(ctx, secDir, "secrets.json", g.sanitizer.SanitizeJSON(inspectRaw))
-}
-
-// parseSecretNames extracts secret names from `podman secret ls --noheading`
-// output. Each line is tab-separated: ID\tNAME\tDRIVER\tCREATED\tUPDATED.
-func parseSecretNames(raw []byte) []string {
-	var names []string
-
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) >= 2 { //nolint:mnd // col 0=ID, col 1=NAME
-			names = append(names, fields[1])
-		}
-	}
-
-	return names
+	g.writeFile(ctx, secDir, "secrets.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // ── system / network / volume collection ──────────────────────────────────────
