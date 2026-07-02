@@ -1,3 +1,10 @@
+"""
+Ingestion pipeline entry-point.
+
+Drives the multi-document ingestion job lifecycle:
+process → chunk → index into vector database → mark status.
+Moved from digitize/ingest.py as part of the pipeline/ package reorganisation.
+"""
 from pathlib import Path
 import time
 from typing import Optional
@@ -5,11 +12,11 @@ from typing import Optional
 import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
-from digitize.doc_utils import process_documents
-from digitize.digitize_utils import get_job_document_stats
+from digitize.processing.orchestrator import process_documents
+from digitize.utils.jobs import get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
-from digitize.db_operations import get_status_manager, DatabaseStatusManager
+from digitize.utils.db import get_status_manager, DatabaseStatusManager
 from common.misc_utils import get_utc_timestamp
 
 logger = get_logger("ingest")

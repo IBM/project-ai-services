@@ -1,9 +1,11 @@
 """
-Database operations module for digitize service.
+Database operations — utils/db.py
 
-This module contains all functions that directly interact with the database
-using db_manager. It provides a clean separation between database operations
-and other utility functions.
+All functions that directly interact with the database via db_manager:
+CRUD for jobs and documents, advisory import/export lock, DatabaseStatusManager,
+and the get_status_manager factory.
+
+Moved from digitize/db_operations.py as part of the utils/ package consolidation.
 """
 
 from datetime import datetime, timezone

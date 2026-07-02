@@ -1,10 +1,17 @@
+"""
+Digitization pipeline entry-point.
+
+Drives the single-document digitization job lifecycle:
+convert → mark status → emit output file.
+Moved from digitize/digitize_core.py as part of the pipeline/ package reorganisation.
+"""
 from common.misc_utils import *
 from pathlib import Path
 from common.misc_utils import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus, OutputFormat
-from digitize.pdf_utils import get_pdf_page_count, get_document_page_count
-from digitize.docling_utils import convert_document_format
-from digitize.db_operations import get_status_manager
+from digitize.parsing.pdf import get_pdf_page_count, get_document_page_count
+from digitize.parsing.converter import convert_document_format
+from digitize.utils.db import get_status_manager
 from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
@@ -14,7 +21,8 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
     Digitize a single document file (PDF or DOCX) in the staging directory.
 
     Args:
-        directory_path: Path to staging directory containing exactly one document (pre-validated and staged by app.py)
+        directory_path: Path to staging directory containing exactly one document
+                        (pre-validated and staged by app.py)
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "txt"
