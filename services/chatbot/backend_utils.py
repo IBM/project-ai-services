@@ -1,10 +1,21 @@
 import time
 import requests
+from requests.adapters import HTTPAdapter
 from common.misc_utils import get_logger
 from common.validation_utils import validate_query_length as _validate_query_length
 from chatbot.settings import settings
 
 logger = get_logger("backend_utils")
+
+_similarity_session = None
+
+def get_similarity_session():
+    global _similarity_session
+    if _similarity_session is None:
+        _similarity_session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=5, pool_maxsize=10)
+        _similarity_session.mount("http://", adapter)
+    return _similarity_session
 
 
 def validate_query_length(query, emb_endpoint):
@@ -35,7 +46,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
     similarity_url = settings.chatbot.similarity_service_url
 
     try:
-        response = requests.post(
+        response = get_similarity_session().post(
             f"{similarity_url}/v1/similarity-search",
             json={
                 "query": question,

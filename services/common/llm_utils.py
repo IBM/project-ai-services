@@ -207,26 +207,16 @@ def query_vllm_payload(
     token_buffer_ratio: float | None = None,
 ):
     # Lazy import to avoid circular dependencies
-    from chatbot.settings import settings as chatbot_settings
+    from chatbot.settings import get_rag_language_config, settings as chatbot_settings
     from chatbot.conversation_utils import truncate_history_by_tokens
     
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
     logger.debug(f"Original Context: {context}")
 
-    match lang:
-        case "DE":
-            system_prompt = chatbot_settings.chatbot.german.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
-        case "IT":
-            system_prompt = chatbot_settings.chatbot.italian.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
-        case "FR":
-            system_prompt = chatbot_settings.chatbot.french.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
-        case _:
-            system_prompt = chatbot_settings.chatbot.english.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
+    lang_config = get_rag_language_config(lang)
+    system_prompt = lang_config.system_prompt
+    query_system_prompt = lang_config.query_system_prompt
 
     # Calculate token counts
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
