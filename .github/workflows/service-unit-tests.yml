@@ -8,6 +8,10 @@ on:
       - 'services/**'
       - '.github/workflows/service-unit-tests.yml'
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-24.04-ppc64le
