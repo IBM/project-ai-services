@@ -13,8 +13,9 @@ def get_similarity_session():
     global _similarity_session
     if _similarity_session is None:
         _similarity_session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=5, pool_maxsize=10)
+        adapter = HTTPAdapter(pool_connections=3, pool_maxsize=settings.common.llm.max_batch_size)
         _similarity_session.mount("http://", adapter)
+        _similarity_session.mount("https://", adapter)
     return _similarity_session
 
 
