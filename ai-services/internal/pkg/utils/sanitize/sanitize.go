@@ -1,6 +1,11 @@
 package sanitize
 
-import "regexp"
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // Redacted is the placeholder written in place of a sensitive value.
 const Redacted = "[REDACTED]"
@@ -133,4 +138,64 @@ func (s *SecretSanitizer) sanitizeArg(arg any) any {
 	default:
 		return arg
 	}
+}
+
+// SanitizeJSON redacts sensitive keys in a JSON byte slice.
+// Falls back to SanitizeText when the input is not valid JSON.
+func (s *SecretSanitizer) SanitizeJSON(raw []byte) []byte {
+	var obj any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return s.SanitizeText(raw)
+	}
+
+	out, err := json.MarshalIndent(s.sanitizeAny(obj), "", "  ")
+	if err != nil {
+		return raw
+	}
+
+	return out
+}
+
+// SanitizeText redacts KEY=VALUE patterns line-by-line in plain-text output.
+func (s *SecretSanitizer) SanitizeText(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		lines[i] = s.redactLine(line)
+	}
+
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// sanitizeAny recursively sanitizes maps inside an arbitrary JSON-decoded value.
+func (s *SecretSanitizer) sanitizeAny(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		return s.SanitizeArgs([]any{typed})[0]
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = s.sanitizeAny(item)
+		}
+
+		return out
+	default:
+		return v
+	}
+}
+
+// redactLine redacts the value side of a KEY=VALUE line when the key is sensitive.
+func (s *SecretSanitizer) redactLine(line string) string {
+	const kvParts = 2
+
+	kv := strings.SplitN(line, "=", kvParts)
+	if len(kv) != kvParts {
+		return line
+	}
+
+	result := s.SanitizeArgs([]any{map[string]any{kv[0]: kv[1]}})
+	if m, ok := result[0].(map[string]any); ok {
+		return kv[0] + "=" + fmt.Sprintf("%v", m[kv[0]])
+	}
+
+	return line
 }

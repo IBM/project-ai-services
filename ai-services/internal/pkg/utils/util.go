@@ -524,8 +524,15 @@ func GetModelsPath() string {
 // ValidateBaseDir validates that the base directory exists or can be created.
 // It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {
-	// Clean the path and append ai-services subdirectory
-	baseDir = filepath.Join(filepath.Clean(baseDir), "ai-services")
+	// Resolve relative paths to absolute paths to prevent Podman from mounting
+	//the wrong (or empty) host directory.
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
+
+	// Clean the absolute path and append ai-services subdirectory
+	baseDir = filepath.Join(filepath.Clean(absBase), "ai-services")
 
 	// Check if directory exists or can be created
 	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
@@ -699,4 +706,40 @@ func GetNumericValFromMap(m map[string]interface{}, key string) int {
 	}
 
 	return 0
+}
+
+// FormatBytes renders a byte count as a human-readable string (GiB / MiB / KiB / B).
+func FormatBytes(b int64) string {
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
+// DirStats walks dir and returns total byte size and file count.
+func DirStats(dir string) (totalBytes int64, fileCount int) {
+	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		totalBytes += info.Size()
+		fileCount++
+
+		return nil
+	})
+
+	return totalBytes, fileCount
 }
