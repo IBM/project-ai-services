@@ -434,8 +434,7 @@ export const StepTwo: React.FC<StepProps> = ({
               // Handle LLM model (stored in params.model)
               else if (field.key === "llm") {
                 value = selectedServiceConfig.components.llm?.params?.model as
-                  | string
-                  | undefined;
+                  string | undefined;
                 // Use first option as fallback if no value is set
                 if (!value && field.options.length > 0) {
                   value = field.options[0].id;
