@@ -698,6 +698,7 @@ async def process_summarization_job(job_id: str, level):
                 metadata={
                     "total_chunks": num_chunks,
                     "completed_chunks": 0,
+                    "failed_chunks": 0,
                     "phase": "summarizing"
                 }
             )
@@ -760,7 +761,7 @@ async def process_summarization_job(job_id: str, level):
 
                     except asyncio.CancelledError:
                         # Sibling cancellation — propagate silently so the task ends cleanly
-                        logger.debug(f"Chunk {chunk_index + 1} cancelled due to sibling failure")
+                        logger.error(f"Chunk {chunk_index + 1} cancelled due to sibling failure")
                         raise
 
                     except Exception as chunk_exc:

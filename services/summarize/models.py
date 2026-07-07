@@ -83,7 +83,6 @@ class JobState(BaseModel):
     document_word_count: Optional[int] = 0
     level: Optional[str] = None
     job_type: Optional[str] = None
-    metadata: JobMetadata = Field(default_factory=JobMetadata)
     error: Optional[str] = None
 
     @field_validator('status', mode='before')
@@ -97,18 +96,6 @@ class JobState(BaseModel):
         except (ValueError, TypeError):
             return JobStatus.ACCEPTED
 
-    @field_validator('metadata', mode='before')
-    @classmethod
-    def validate_stats(cls, v):
-        """Ensure stats is valid, return default if not."""
-        if isinstance(v, JobMetadata):
-            return v
-        if isinstance(v, dict):
-            try:
-                return JobMetadata(**v)
-            except Exception:
-                return JobMetadata()
-        return JobMetadata()
 
     def to_dict(self) -> dict:
         """
