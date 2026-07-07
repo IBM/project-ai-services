@@ -9,7 +9,9 @@ venv
 vendor
 .claude/
 .vscode/
-
+.bob/
 # Coverage reports
 .coverage
 coverage.xml
+
+ui/node_modules/
