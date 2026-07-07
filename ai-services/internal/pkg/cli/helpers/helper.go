@@ -117,7 +117,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 // CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
 func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
 	// check existing pods for the application
-	podsToSkip, err := existingPods(ctx, runtime, appName)
+	podsToSkip, err := existingRunningPods(ctx, runtime, appName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing pods: %w", err)
 	}
@@ -133,7 +133,7 @@ func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.R
 	return resourcesToSkip, nil
 }
 
-func existingPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
+func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	pods, err := runtime.ListPods(map[string][]string{
@@ -151,6 +151,9 @@ func existingPods(ctx context.Context, runtime runtime.Runtime, appName string) 
 	logger.InfolnCtx(ctx, "Checking status of existing pods...")
 	for _, pod := range pods {
 		logger.InfofCtx(ctx, "Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
+		if pod.Status != "Running" {
+			return nil, fmt.Errorf("pod %q is in %q state — uninstall and re-run configure", pod.Name, pod.Status)
+		}
 		podsToSkip = append(podsToSkip, pod.Name)
 	}
 
