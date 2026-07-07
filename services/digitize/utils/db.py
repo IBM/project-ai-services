@@ -4,8 +4,6 @@ Database operations — utils/db.py
 All functions that directly interact with the database via db_manager:
 CRUD for jobs and documents, advisory import/export lock, DatabaseStatusManager,
 and the get_status_manager factory.
-
-Moved from digitize/db_operations.py as part of the utils/ package consolidation.
 """
 
 from datetime import datetime, timezone

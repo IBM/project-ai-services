@@ -3,7 +3,6 @@ DOCX parsing utilities.
 
 Format-specific, read-only inspection of DOCX files:
 page count estimation, TOC extraction, Docling caption recovery.
-Moved from digitize/docx_utils.py as part of the parsing/ package reorganisation.
 """
 import json
 import time
@@ -483,6 +482,16 @@ def extract_toc_combined(docx_path: str) -> Dict[str, int]:
     """
     Extract TOC from BOTH 'Table Paragraph' and 'List Paragraph' styles.
     This captures TOC entries whether they're in tables or as list items.
+
+    This is the recommended approach as it handles various TOC formats:
+    - TOC in tables (Table Paragraph style)
+    - TOC as lists (List Paragraph style)
+
+    Args:
+        docx_path: Path to the DOCX file
+
+    Returns:
+        Dictionary mapping TOC text to level
     """
     try:
         doc = Document(docx_path)
@@ -523,14 +532,21 @@ def extract_toc_combined(docx_path: str) -> Dict[str, int]:
 
 def _infer_toc_level_from_text(text: str) -> int:
     """
-    Infer TOC level from text content heuristics.
-    
-    - "Chapter X"      -> level 1
-    - "X "             -> level 2
-    - "X.Y "           -> level 2
-    - "X.Y.Z "         -> level 3
-    - Common sections  -> level 1
-    - Default          -> level 2
+    Infer TOC level from text content.
+
+    Heuristics:
+    - "Chapter X" -> level 1
+    - "X " (single number) -> level 2
+    - "X.Y " (two numbers) -> level 3
+    - "X.Y.Z " (three numbers) -> level 4
+    - Common sections -> level 1
+    - Default -> level 2
+
+    Args:
+        text: TOC entry text
+
+    Returns:
+        Inferred level (1-5)
     """
     if text.lower().startswith('chapter '):
         return 1

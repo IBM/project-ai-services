@@ -4,8 +4,6 @@ Job lifecycle utilities — utils/jobs.py
 Coordinator layer between the API routers and the DB/storage layers:
 job initialisation, file staging, active-job guards, document content
 retrieval, and bulk deletion helpers.
-
-Moved from digitize/digitize_utils.py as part of the utils/ package consolidation.
 """
 import uuid
 from typing import Optional

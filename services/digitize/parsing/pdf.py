@@ -3,7 +3,6 @@ PDF parsing utilities.
 
 Format-specific, read-only inspection of PDF files:
 page count, TOC extraction, font-size analysis, page loading.
-Moved from digitize/pdf_utils.py as part of the parsing/ package reorganisation.
 """
 # Standard library imports
 import logging

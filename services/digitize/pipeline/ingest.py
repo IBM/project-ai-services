@@ -3,7 +3,6 @@ Ingestion pipeline entry-point.
 
 Drives the multi-document ingestion job lifecycle:
 process → chunk → index into vector database → mark status.
-Moved from digitize/ingest.py as part of the pipeline/ package reorganisation.
 """
 from pathlib import Path
 import time

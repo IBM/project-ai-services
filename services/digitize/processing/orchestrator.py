@@ -8,8 +8,6 @@ Responsibilities:
 - chunk_text / chunk_tables / chunk_single_file / flush_chunk
 - split_text_into_token_chunks
 - count_chunks / merge_chunked_documents
-
-Moved from digitize/doc_utils.py as part of the processing/ package reorganisation.
 """
 
 import json
@@ -60,6 +58,16 @@ HEAVY_DOC_PAGE_THRESHOLD = settings.digitize.heavy_doc_page_threshold
 def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language=LanguageCodes.ENGLISH):
     """
     Split text into token-based chunks using sentence boundaries.
+
+    Args:
+        text: The text to split
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        overlap: Number of tokens to overlap between chunks
+        language: Language code ('en', 'de', 'it', 'fr'). Defaults to 'en'.
+
+    Returns:
+        List of text chunks
     """
     logger.debug(f"Using language for chunking: {language}")
 
@@ -125,6 +133,14 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=Langua
 def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Chunk text content from a document into smaller pieces based on token limits.
+
+    Args:
+        input_path: Path to the text JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -218,6 +234,15 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
 def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
+    Called internally by chunk_single_file() for sequential processing.
+
+    Args:
+        input_path: Path to the table JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
@@ -270,6 +295,15 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
 def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Orchestrates chunking of both text and tables for a single document.
+
+    Args:
+        input_path: Path to the text JSON file
+        table_json_path: Path to the table JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     try:
@@ -378,6 +412,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
 def process_converted_document(converted_json_path, doc_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
     """
     Process converted document to extract text and tables.
+    No caching - always process fresh.
     Returns detected language along with other results.
     """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
@@ -438,6 +473,7 @@ def clean_intermediate_files(doc_id, out_path):
 def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict, indexing_callback=None):
     """
     Process documents for ingestion pipeline.
+    Each request is treated as fresh.
 
     Args:
         input_paths: List of input file paths
@@ -448,7 +484,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         max_tokens: Maximum tokens for chunking
         job_id: Job ID for status tracking
         doc_id_dict: Mapping of filenames to document IDs
-        indexing_callback: Optional callback(doc_id, chunks, path) -> bool
+        indexing_callback: Optional callback function to index chunks immediately after chunking.
+                          Signature: callback(doc_id: str, chunks: list, path: str) -> bool
     """
     light_files, heavy_files = [], []
     for path in input_paths:

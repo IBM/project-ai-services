@@ -3,7 +3,6 @@ Digitization pipeline entry-point.
 
 Drives the single-document digitization job lifecycle:
 convert → mark status → emit output file.
-Moved from digitize/digitize_core.py as part of the pipeline/ package reorganisation.
 """
 from common.misc_utils import *
 from pathlib import Path

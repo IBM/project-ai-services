@@ -4,8 +4,6 @@ Text processing: extraction from PDF and DOCX converted documents.
 Responsibilities:
 - process_text      — PDF text extraction with TOC / font-size header levels
 - process_text_docx — DOCX text extraction with TOC / fallback header levels
-
-Moved from digitize/doc_utils.py as part of the processing/ package reorganisation.
 """
 
 import json

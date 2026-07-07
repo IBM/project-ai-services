@@ -7,8 +7,6 @@ Responsibilities:
 - headers_match — compare two header lists
 - merge_markdown_tables — combine two markdown tables by dropping the second header
 - merge_consecutive_tables — merge tables spanning consecutive pages
-
-Moved from digitize/doc_utils.py as part of the processing/ package reorganisation.
 """
 
 import json
@@ -27,6 +25,12 @@ def extract_table_headers(markdown_table: str) -> list[str]:
     """
     Extract headers from a markdown table by parsing the first row with pipe symbols.
     Handles cases where the first line might be a caption without pipes.
+
+    Args:
+        markdown_table: Markdown formatted table string
+
+    Returns:
+        List of header strings, or empty list if no headers found
     """
     if not markdown_table or not markdown_table.strip():
         return []
@@ -62,6 +66,13 @@ def extract_table_headers(markdown_table: str) -> list[str]:
 def headers_match(headers1: list[str], headers2: list[str]) -> bool:
     """
     Check if two header lists match (case-insensitive, whitespace normalized).
+
+    Args:
+        headers1: First list of headers
+        headers2: Second list of headers
+
+    Returns:
+        True if headers match, False otherwise
     """
     if not headers1 or not headers2:
         return False
@@ -76,6 +87,14 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
     """
     Merge two markdown tables by removing the header from the second table
     and appending its rows to the first table.
+    Handles cases where tables might have captions before the actual table.
+
+    Args:
+        table1_md: First markdown table (with headers)
+        table2_md: Second markdown table (headers will be removed)
+
+    Returns:
+        Merged markdown table
     """
     if not table1_md or not table2_md:
         return table1_md or table2_md or ""
@@ -100,6 +119,13 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
 def merge_consecutive_tables(table_dict: dict) -> dict:
     """
     Merge tables that span multiple consecutive pages with matching headers.
+
+    Args:
+        table_dict: Dictionary with table index as key and table data as value
+                   Each value should have 'markdown', 'caption', and 'page_number' keys
+
+    Returns:
+        Dictionary with merged tables, using same structure as input
     """
     if not table_dict:
         return {}

@@ -3,7 +3,6 @@ Docling conversion engine wrapper.
 
 Encapsulates all interaction with the Docling library:
 DocumentConverter setup, chunked conversion, format export.
-Moved from digitize/docling_utils.py as part of the parsing/ package reorganisation.
 """
 import logging
 import shutil

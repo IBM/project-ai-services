@@ -6,8 +6,6 @@ Responsibilities:
 - Token counting via the embedding endpoint
 - Header font-size collection and header-level derivation
 - Sentence splitting helpers
-
-Moved from digitize/doc_utils.py as part of the processing/ package reorganisation.
 """
 
 import random
