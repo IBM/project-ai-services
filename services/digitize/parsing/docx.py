@@ -386,16 +386,24 @@ def get_docx_toc(docx_path: str) -> Dict[str, int]:
 def extract_toc_level_from_style(style_name: str) -> int:
     """
     Extract TOC level from Word style name.
-    
+
     Examples:
         'TOC 1' -> 1
         'TOC 2' -> 2
         'toc 3' -> 3
         'TOC Heading' -> 1 (default)
+
+    Args:
+        style_name: Word paragraph style name
+
+    Returns:
+        TOC level as integer (defaults to 1 if no number found)
     """
+    # Try to extract number from style name
     match = re.search(r'toc\s*(\d+)', style_name, re.IGNORECASE)
     if match:
         return int(match.group(1))
+    # If no number found (e.g., 'TOC Heading'), default to level 1
     return 1
 
 
@@ -403,6 +411,14 @@ def extract_toc_from_toc_styles(docx_path: str) -> Dict[str, int]:
     """
     Extract TOC from DOCX file by looking for TOC styles.
     This works ONLY if the document has a formal TOC field with TOC styles.
+
+    Word TOC styles are typically named: 'TOC 1', 'TOC 2', 'TOC 3', 'TOC Heading', etc.
+
+    Args:
+        docx_path: Path to the DOCX file
+
+    Returns:
+        Dictionary mapping TOC text to level (similar to PDF TOC format)
     """
     try:
         doc = Document(docx_path)
@@ -435,6 +451,12 @@ def extract_toc_from_headings(docx_path: str) -> Dict[str, int]:
     """
     Extract TOC from DOCX Heading styles (Heading 1, Heading 2, etc.).
     This is a fallback when document doesn't have formal TOC field.
+
+    Args:
+        docx_path: Path to the DOCX file
+
+    Returns:
+        Dictionary mapping heading text to level
     """
     try:
         doc = Document(docx_path)

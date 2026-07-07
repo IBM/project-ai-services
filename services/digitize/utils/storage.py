@@ -184,7 +184,7 @@ class StorageManager:
                 f"Content file not found (may have been deleted already): {content_file}"
             )
 
-    def delete_all_content(self) -> dict:
+    def delete_all_contents(self) -> dict:
         """
         Delete all digitized content files from the cache directory.
 

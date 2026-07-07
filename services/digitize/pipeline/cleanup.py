@@ -1,8 +1,7 @@
 """
 System reset / cleanup pipeline.
 
-Full cleanup: VDB reset → PostgreSQL wipe → filesystem cleanup.
-Moved from digitize/cleanup.py as part of the pipeline/ package reorganisation.
+Full digitize service reset: VDB reset → PostgreSQL wipe → filesystem cleanup.
 """
 import common.db_utils as db
 from common.misc_utils import get_logger
@@ -76,7 +75,7 @@ def reset_db():
     # Step 4: Delete all document files LAST
     try:
         logger.debug("Deleting all document files...")
-        deletion_stats = storage_manager.delete_all_content()
+        deletion_stats = storage_manager.delete_all_contents()
 
         total_deleted = deletion_stats["content_files_deleted"]
         logger.info(
