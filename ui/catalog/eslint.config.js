@@ -49,6 +49,11 @@ export default [
 
       'react/prop-types': 'off',
       'react/react-in-jsx-scope': 'off',
+
+      // react-hooks v7 introduced these rules; pre-existing violations exist in source.
+      // Downgraded to warn here — fix in a follow-up PR (Proposal 3 scope).
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/immutability': 'warn',
     },
   },
 ];

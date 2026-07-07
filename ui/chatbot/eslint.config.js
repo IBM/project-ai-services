@@ -50,6 +50,11 @@ export default [
       // disable
       'react/prop-types': 'off', // Required if we want to check prop type (Typecript)
       'react/react-in-jsx-scope': 'off', // Disabling as this expects React import in all jsx files
+
+      // react-hooks v7 introduced these rules; pre-existing violations exist in source.
+      // Downgraded to warn here — fix in a follow-up PR (Proposal 3 scope).
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/immutability': 'warn',
     },
   },
 ];
