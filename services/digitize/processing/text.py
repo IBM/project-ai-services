@@ -30,6 +30,8 @@ def process_text_docx(converted_doc, docx_path, out_path):
 
     page_count = 0
     process_time = 0.0
+
+    # Initialize TocHeaders to get the Table of Contents (TOC)
     t0 = time.time()
 
     toc_headers = None
@@ -39,6 +41,7 @@ def process_text_docx(converted_doc, docx_path, out_path):
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
+    # --- Text Extraction ---
     if not converted_doc.texts:
         logger.debug(f"No text content found in '{docx_path}'")
         out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
@@ -51,18 +54,23 @@ def process_text_docx(converted_doc, docx_path, out_path):
         if label in excluded_labels:
             continue
 
+        # Check if it's a section header
         if label == "section_header":
+            # For DOCX files, use TOC for heading levels
             page_no = None
             header_text = text_obj.text
             text_content = text_obj.text.strip()
 
+            # Check if we have TOC for this header
             if toc_headers:
                 header_prefix = get_matching_header_lvl(toc_headers, text_content)
                 if header_prefix:
+                    # Use TOC level
                     header_text = f"{header_prefix} {text_content}"
                     last_header_level = len(header_prefix.strip())
                     logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_header_level}")
                 else:
+                    # No TOC match, use previous level + 1
                     new_header_level = last_header_level + 1
                     header_text = f"{'#' * new_header_level} {text_content}"
                     logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
@@ -71,15 +79,16 @@ def process_text_docx(converted_doc, docx_path, out_path):
                 "label": label,
                 "text": header_text,
                 "page": page_no,
-                "font_size": None,
+                "font_size": None
             })
         else:
+            # For non-header elements
             page_no = None
             structured_output.append({
                 "label": label,
                 "text": text_obj.text,
                 "page": page_no,
-                "font_size": None,
+                "font_size": None
             })
 
     process_time = time.time() - t0
@@ -93,6 +102,8 @@ def process_text(converted_doc, doc_path, out_path):
 
     page_count = 0
     process_time = 0.0
+
+    # Initialize TocHeaders to get the Table of Contents (TOC)
     t0 = time.time()
 
     toc_headers = None
@@ -101,11 +112,13 @@ def process_text(converted_doc, doc_path, out_path):
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
+    # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
     pdf_pages = None
     if not toc_headers:
         pdf_pages = load_pdf_pages(doc_path)
         page_count = len(pdf_pages)
 
+    # --- Text Extraction ---
     if not converted_doc.texts:
         logger.debug(f"No text content found in '{doc_path}'")
         out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
@@ -118,6 +131,7 @@ def process_text(converted_doc, doc_path, out_path):
         if label in excluded_labels:
             continue
 
+        # Check if it's a section header and process TOC or fallback to font size extraction
         if label == "section_header":
             prov_list = text_obj.prov
 
@@ -127,23 +141,27 @@ def process_text(converted_doc, doc_path, out_path):
                 if toc_headers:
                     header_prefix = get_matching_header_lvl(toc_headers, text_obj.text)
                     if header_prefix:
+                        # If TOC matches, use the level from TOC
                         structured_output.append({
                             "label": label,
                             "text": f"{header_prefix} {text_obj.text}",
                             "page": page_no,
-                            "font_size": None,
+                            "font_size": None,  # Font size isn't necessary if TOC matches
                         })
-                        last_header_level = len(header_prefix.strip())
+                        last_header_level = len(header_prefix.strip())  # Update last header level
                     else:
+                        # If no match, use the previous header level + 1
                         new_header_level = last_header_level + 1
                         structured_output.append({
                             "label": label,
                             "text": f"{'#' * new_header_level} {text_obj.text}",
                             "page": page_no,
-                            "font_size": None,
+                            "font_size": None,  # Font size isn't necessary if TOC matches
                         })
                 else:
+                    # Try font size extraction
                     if pdf_pages:
+                        # PDF font size extraction
                         matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
                         if len(matches):
                             font_size = 0
@@ -157,15 +175,16 @@ def process_text(converted_doc, doc_path, out_path):
                                 "label": label,
                                 "text": text_obj.text,
                                 "page": page_no,
-                                "font_size": round(font_size, 2) if font_size else None,
+                                "font_size": round(font_size, 2) if font_size else None
                             })
         else:
+            # For non-header elements, safely get page number
             page_no = text_obj.prov[0].page_no if text_obj.prov else None
             structured_output.append({
                 "label": label,
                 "text": text_obj.text,
                 "page": page_no,
-                "font_size": None,
+                "font_size": None
             })
 
     process_time = time.time() - t0

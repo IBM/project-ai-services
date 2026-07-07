@@ -40,6 +40,7 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         if not lines:
             return []
 
+        # Find the first line that contains pipe symbols (actual table row)
         header_line = None
         for line in lines:
             line = line.strip()
@@ -50,12 +51,16 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         if not header_line:
             return []
 
+        # Remove leading and trailing pipes and split by pipe
         if header_line.startswith('|'):
             header_line = header_line[1:]
         if header_line.endswith('|'):
             header_line = header_line[:-1]
 
+        # Split by pipe and strip whitespace from each header
         headers = [h.strip() for h in header_line.split('|')]
+
+        # Filter out empty headers
         headers = [h for h in headers if h]
         return headers
     except Exception as e:
@@ -78,6 +83,7 @@ def headers_match(headers1: list[str], headers2: list[str]) -> bool:
         return False
     if len(headers1) != len(headers2):
         return False
+    # Normalize and compare headers
     normalized1 = [h.lower().strip() for h in headers1]
     normalized2 = [h.lower().strip() for h in headers2]
     return normalized1 == normalized2
@@ -99,20 +105,26 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
     if not table1_md or not table2_md:
         return table1_md or table2_md or ""
 
+    # Split tables into lines
     lines1 = table1_md.strip().split('\n')
     lines2 = table2_md.strip().split('\n')
 
+    # Find where the data rows start in table2 (skip caption, header and separator)
+    # Look for the separator line (contains dashes and pipes: |---|---|)
     data_start_idx = 0
     for i, line in enumerate(lines2):
         line = line.strip()
+        # Separator line typically contains dashes and pipes: |---|---|
         if '|' in line and '---' in line:
             data_start_idx = i + 1
             break
 
+    # If we found a separator, append only the data rows from table2
     if 0 < data_start_idx < len(lines2):
         merged_lines = lines1 + lines2[data_start_idx:]
         return '\n'.join(merged_lines)
 
+    # Fallback: just append all lines from table2 (shouldn't happen with valid markdown tables)
     return table1_md + '\n' + table2_md
 
 
@@ -130,7 +142,9 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
     if not table_dict:
         return {}
 
+    # Sort tables by index to process in order
     sorted_indices = sorted(table_dict.keys())
+
     merged_dict = {}
     skip_indices = set()
 
@@ -143,25 +157,31 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
         current_page = current_table.get('page_number')
         current_headers = extract_table_headers(current_markdown)
 
+        # Try to merge with subsequent tables on consecutive pages
         merged_markdown = current_markdown
         last_merged_page = current_page
+        # look at the next 2 pages
         for j in range(i + 1, min(i + 3, len(sorted_indices))):
             next_idx = sorted_indices[j]
             next_table = table_dict[next_idx]
             next_markdown = next_table.get('markdown', '')
             next_page = next_table.get('page_number')
             next_headers = extract_table_headers(next_markdown)
+            # Check if tables are on consecutive pages and have matching headers
             if (next_page is not None and
                     last_merged_page is not None and
                     next_page == last_merged_page + 1 and
                     headers_match(current_headers, next_headers)):
+                # Merge the tables
                 merged_markdown = merge_markdown_tables(merged_markdown, next_markdown)
                 last_merged_page = next_page
                 skip_indices.add(next_idx)
                 logger.debug(f"Merged table {next_idx} (page {next_page}) into table {idx} (page {current_page})")
             else:
+                # Stop looking if pages are not consecutive or headers don't match
                 break
 
+        # Store the merged (or original) table
         merged_dict[idx] = {
             'markdown': merged_markdown,
             'caption': current_table.get('caption', ''),
@@ -177,11 +197,13 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     filtered_table_dicts = {}
     t0 = time.time()
 
+    # --- Table Extraction ---
     if not converted_doc.tables:
         logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
 
+    # Determine if this is a DOCX file
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
 
@@ -191,6 +213,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     table_dict = {}
     for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{doc_path}'")):
         table_dict[table_ix] = {}
+        # Use Markdown format for better LLM understanding
         table_dict[table_ix]["markdown"] = table.export_to_markdown(doc=converted_doc)
 
         caption = table.caption_text(doc=converted_doc)
@@ -199,9 +222,13 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
         table_dict[table_ix]["caption"] = caption
 
+        # Get page number from provenance if available (PDF files)
+        # For DOCX files, assign sequential page numbers based on table order
         if table.prov and table.prov[0].page_no is not None:
             table_dict[table_ix]["page_number"] = table.prov[0].page_no
         elif is_docx:
+            # Assign sequential page numbers for DOCX files (1-based)
+            # This enables table merging logic to work for DOCX files
             table_dict[table_ix]["page_number"] = table_ix + 1
             logger.debug(f"Assigned page number {table_ix + 1} to DOCX table {table_ix}")
         else:
@@ -212,12 +239,15 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
     table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
+    # For PDF files: extract actual page numbers
+    # For DOCX files: create list of None values (same length as other lists for zip())
     table_page_numbers = (
         [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
         if not is_docx
         else [None] * len(merged_table_dict)
     )
 
+    # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
         LanguageCodes.ENGLISH: settings.table_summary.english.prompt,
         LanguageCodes.GERMAN: settings.table_summary.german.prompt,
@@ -226,6 +256,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
 
+    # Select appropriate max_tokens based on document language
     max_tokens_config = {
         LanguageCodes.ENGLISH: settings.table_summary.english.max_tokens,
         LanguageCodes.GERMAN: settings.table_summary.german.max_tokens,
@@ -239,6 +270,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         f"for table summarization"
     )
 
+    # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,

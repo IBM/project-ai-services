@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import digitize.app as digitize_app
-import digitize.api.v1.jobs as jobs_router_module
+import digitize.api.v1.admin as jobs_router_module
 import digitize.api.v1.documents as documents_router_module
 import digitize.utils.db as db_ops
 import digitize.db.connection as db_conn
@@ -462,7 +462,7 @@ class TestImportExportEndpoints:
 
     def test_import_metadata_rejects_too_many_records(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
-        # MAX_IMPORT_RECORDS now lives in the jobs router module (api/v1/jobs.py)
+        # MAX_IMPORT_RECORDS lives in the admin router module (api/v1/admin.py)
         monkeypatch.setattr(jobs_router_module, "MAX_IMPORT_RECORDS", 1)
 
         response = digitize_test_client.post(

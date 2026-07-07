@@ -48,16 +48,25 @@ def detect_document_language(data) -> str:
         return default_lang
 
     try:
+        # Sample 3 random blocks from the data
         detected_languages = []
+        # Generate random indices and collect valid text blocks without looping through all data
         sampled_blocks = []
         attempted_indices = set()
-        max_attempts = min(len(data), 50)
+        max_attempts = min(len(data), 50)  # Limit attempts to avoid infinite loop
 
+        # Keep trying random indices until we get 3 valid blocks or exhaust attempts
         while len(sampled_blocks) < 3 and len(attempted_indices) < max_attempts:
+            # Generate a random index
             idx = random.randint(0, len(data) - 1)
+
+            # Skip if already tried this index
             if idx in attempted_indices:
                 continue
+
             attempted_indices.add(idx)
+
+            # Check if this block has valid text
             block = data[idx]
             if isinstance(block.get("text"), str) and block.get("text", "").strip():
                 sampled_blocks.append(block.get("text", ""))
@@ -67,7 +76,10 @@ def detect_document_language(data) -> str:
             return default_lang
 
         for block_text in sampled_blocks:
+            # Truncate to 500 characters
             chunk = block_text[:500]
+
+            # Detect language for this chunk
             if chunk.strip():
                 detected_lang = detect_language(chunk)
                 detected_languages.append(detected_lang)
@@ -76,9 +88,12 @@ def detect_document_language(data) -> str:
             logger.warning(f"No languages detected from samples, falling back to '{default_lang}'")
             return default_lang
 
+        # Get the most common detected language (returns lingua ISO code like 'EN', 'DE')
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
         logger.debug(f"Detected languages: {detected_languages}, using: {most_common_lang}")
 
+        # Check if the detected language is supported
+        # Use the keys from _TO_SENTENCE_SPLITTER mapping which contains all supported languages
         supported_langs = list(LanguageCodes._TO_SENTENCE_SPLITTER.keys())
         if most_common_lang not in supported_langs:
             logger.warning(f"Detected language '{most_common_lang}' is not supported, falling back to '{default_lang}'")

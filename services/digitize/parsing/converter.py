@@ -98,6 +98,8 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         return _convert_single_doc()
 
     # Process in chunks
+    # Calculate total chunks using ceiling division for the configured PDF chunk size.
+    # This ensures all pages are covered even if the last chunk is smaller.
     total_chunks = (total_pages + settings.digitize.doc_chunk_size - 1) // settings.digitize.doc_chunk_size
     logger.debug(
         f"Converting {path} document with {total_pages} pages in {total_chunks} "
@@ -113,6 +115,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     chunk_cache_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        # Process document in chunks and save each chunk
         chunk_files = []
 
         for start_page in range(1, total_pages + 1, settings.digitize.doc_chunk_size):
@@ -123,13 +126,16 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
             chunk_files.append(chunk_file)
 
+        # Load all chunk documents and concatenate
         docs = [DoclingDocument.load_from_json(filename=f) for f in chunk_files]
         concatenated_doc = DoclingDocument.concatenate(docs=docs)
 
         logger.debug(f"Successfully concatenated {path}'s {len(docs)} chunks into single document")
+
         return concatenated_doc
 
     finally:
+        # Always cleanup cache directory
         try:
             shutil.rmtree(chunk_cache_dir)
             logger.debug(f"Cleaned up cache directory: {chunk_cache_dir}")

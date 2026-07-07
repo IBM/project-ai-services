@@ -4,7 +4,8 @@ FastAPI application entry point.
 Implements the Digitize Documents API.  Following the digitize-api-sample
 pattern, all endpoint logic lives in dedicated router modules:
 
-  - api/v1/jobs.py      — job creation, listing, detail, deletion, import/export
+  - api/v1/jobs.py      — job creation, listing, detail, deletion
+  - api/v1/admin.py     — import/export metadata operations
   - api/v1/documents.py — document listing, detail, content, deletion
 
 This file is responsible only for:
@@ -202,11 +203,12 @@ async def health_check():
 # Router registration                                                 #
 # ------------------------------------------------------------------ #
 
-from digitize.api.v1.jobs import router as jobs_router, meta_router as jobs_meta_router
+from digitize.api.v1.jobs import router as jobs_router
+from digitize.api.v1.admin import router as admin_router
 from digitize.api.v1.documents import router as documents_router
 
 app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"])
-app.include_router(jobs_meta_router, prefix="/v1", tags=["jobs"])
+app.include_router(admin_router, prefix="/v1", tags=["jobs"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["documents"])
 
 
