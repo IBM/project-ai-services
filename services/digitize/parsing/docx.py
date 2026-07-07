@@ -382,6 +382,11 @@ def get_docx_toc(docx_path: str) -> Dict[str, int]:
         return {}
 
 
+# ============================================================================
+# NEW: TOC Style-Based Extraction Functions
+# These functions extract TOC from Word's TOC field styles ('TOC 1', 'TOC 2', etc.)
+# ============================================================================
+
 def extract_toc_level_from_style(style_name: str) -> int:
     """
     Extract TOC level from Word style name.
@@ -426,9 +431,12 @@ def extract_toc_from_toc_styles(docx_path: str) -> Dict[str, int]:
         for paragraph in doc.paragraphs:
             if paragraph.style and paragraph.style.name:
                 style_name = paragraph.style.name
+                
+                # Check for TOC styles: 'TOC 1', 'TOC 2', 'TOC Heading', etc.
                 if 'toc' in style_name.lower():
                     text = paragraph.text.strip()
                     if text:
+                        # Extract level from style name
                         level = extract_toc_level_from_style(style_name)
                         toc[text] = level
         
@@ -465,6 +473,7 @@ def extract_toc_from_headings(docx_path: str) -> Dict[str, int]:
             if para.style and para.style.name.startswith('Heading'):
                 text = para.text.strip()
                 if text:
+                    # Extract level: 'Heading 1' -> 1, 'Heading 2' -> 2
                     match = re.match(r'Heading (\d+)', para.style.name)
                     if match:
                         level = int(match.group(1))
@@ -508,12 +517,18 @@ def extract_toc_combined(docx_path: str) -> Dict[str, int]:
                         if para.style and para.style.name == 'Table Paragraph':
                             text = para.text.strip()
                             if text:
+                                # Skip header row (usually "Contents")
                                 if text.lower() in ['contents', 'table of contents']:
                                     continue
+                                
+                                # Remove page numbers (e.g., "Chapter 1    45" -> "Chapter 1")
                                 text_clean = re.sub(r'\s+\d+$', '', text).strip()
+                                # Remove trailing dots/leader characters (e.g., "Chapter 1. . . . ." -> "Chapter 1")
+                                # Pattern matches dots with spaces between them: ". . . . ." or "....."
                                 text_clean = re.sub(r'[\.\s]+$', '', text_clean).strip()
                                 
                                 if text_clean and text_clean not in toc:
+                                    # Skip standalone numbers (likely page numbers or section markers)
                                     if re.match(r'^\d+$', text_clean):
                                         continue
                                     level = _infer_toc_level_from_text(text_clean)
@@ -548,15 +563,21 @@ def _infer_toc_level_from_text(text: str) -> int:
     Returns:
         Inferred level (1-5)
     """
+    # Check for chapter
     if text.lower().startswith('chapter '):
         return 1
     
+    # Check for numbered sections (e.g., "1.1", "1.2.3")
     match = re.match(r'^(\d+(?:\.\d+)*)\s+', text)
     if match:
         dots = match.group(1).count('.')
+        # Correct mapping: "1" (0 dots) -> 2, "1.1" (1 dot) -> 2, "1.2.1" (2 dots) -> 3
+        # This ensures "1.1" and "1.2" are at the same level as their parent "1"
         return min(max(dots, 1) + 1, 5)
     
+    # Check for common top-level sections
     if text in ['Preface', 'Introduction', 'Contents', 'Notices', 'Trademarks', 'Appendix']:
         return 1
     
+    # Default to level 2 for other entries
     return 2
