@@ -137,10 +137,12 @@ func (s *ApplicationService) buildApplication(app models.Application) (types.App
 	appData := types.Application{
 		ID:             app.ID.String(),
 		Name:           app.Name,
+		CatalogID:      app.CatalogID,
 		DeploymentType: string(app.DeploymentType),
 		Type:           typeName,
 		Status:         string(app.Status),
 		Message:        app.Message,
+		Version:        app.Version,
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
