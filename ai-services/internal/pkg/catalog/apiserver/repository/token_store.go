@@ -92,4 +92,13 @@ func (b *DBTokenBlacklist) gc() {
 	}
 }
 
+
+// NoopTokenBlacklist is a no-op implementation of TokenBlacklist for use in tests.
+type NoopTokenBlacklist struct{}
+
+func (n *NoopTokenBlacklist) Add(_ context.Context, _ string, _ string, _ time.Time) {}
+func (n *NoopTokenBlacklist) Contains(_ context.Context, _ string, _ string) bool    { return false }
+func (n *NoopTokenBlacklist) Stop()                                                   {}
+
+
 // Made with Bob

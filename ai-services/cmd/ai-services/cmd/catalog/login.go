@@ -22,6 +22,7 @@ func NewLoginCmd() *cobra.Command {
 		serverURL     string
 		username      string
 		passwordStdin bool
+		miqToken      string
 		insecure      bool
 		runtimeType   string
 	)
@@ -29,50 +30,88 @@ func NewLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in to the catalog API server",
-		Long: `Authenticate with the catalog API server using a username and password.
+		Long: `Authenticate with the catalog API server using either a username and password
+(Flow A), or a pre-existing ManageIQ token (Flow B).
 
-The generated access and refresh tokens are stored in the OS user config directory
-and are used automatically by subsequent catalog commands. The exact path is
-printed after a successful login.
+Flow A — Interactive login with username and password:
+  The Catalog API authenticates your credentials against ManageIQ and issues
+  an internal JWT.
 
-The stored access token is reused for subsequent commands as long as it is still
-valid. It is refreshed automatically only when it is about to expire, avoiding
-unnecessary round-trips to the server.
+Flow B — ManageIQ token passthrough (IBM Power Mission Control):
+  Supply a ManageIQ token via --miq-token. The Catalog API validates it against
+  ManageIQ and issues an internal JWT without requiring a password.
+
+The resulting tokens are stored in the OS user config directory and reused
+automatically by subsequent catalog commands.
 
 To get the Catalog backend endpoint, use: ai-services catalog info`,
-		Example: `  # Interactive login (password is prompted securely)
+		Example: `  # Flow A: interactive login (password is prompted securely)
   ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
 
-  # Non-interactive login via stdin pipe (password not recorded in shell history)
+  # Flow A: non-interactive via stdin
   echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
 
-  # Login with insecure TLS (skip certificate verification)
-  ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
+  # Flow B: ManageIQ token passthrough (IBM Power Mission Control)
+  ai-services catalog login --server <catalog_backend_endpoint> --miq-token <miq_token> --runtime podman
+
+  # Flow B: with insecure TLS (self-signed cert)
+  ai-services catalog login --server <catalog_backend_endpoint> --miq-token <miq_token> --insecure --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 				return err
 			}
+			if err := validateServerURL(serverURL); err != nil {
+				return err
+			}
+			// Exactly one auth method must be provided.
+			if miqToken == "" && username == "" {
+				return fmt.Errorf("one of --username or --miq-token is required")
+			}
+			if miqToken != "" && username != "" {
+				return fmt.Errorf("--username and --miq-token are mutually exclusive")
+			}
 
-			return validateServerURL(serverURL)
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if miqToken != "" {
+				return runLoginWithMIQToken(serverURL, miqToken, insecure)
+			}
+
 			return runLogin(serverURL, username, passwordStdin, insecure)
 		},
 	}
 
 	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog backend endpoint (required)")
-	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
+	cmd.Flags().StringVar(&username, "username", "", "Username for password-based login (Flow A)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
+	cmd.Flags().StringVar(&miqToken, "miq-token", "", "ManageIQ token for token passthrough login (Flow B / IBM Power Mission Control)")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	_ = cmd.MarkFlagRequired("server")
-	_ = cmd.MarkFlagRequired("username")
 
 	return cmd
 }
 
-// runLogin executes the login flow with the provided parameters.
+// runLoginWithMIQToken executes Flow B: exchange a ManageIQ token for a Catalog API JWT.
+func runLoginWithMIQToken(serverURL, miqToken string, insecure bool) error {
+	if insecure {
+		logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
+	}
+
+	logger.Infof("Logging in to %s using ManageIQ token...\n", serverURL)
+
+	if _, err := client.NewWithMIQToken(serverURL, miqToken, insecure); err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	logger.Infoln("Login successful.")
+
+	return nil
+}
+
+// runLogin executes Flow A: authenticate with username and password.
 func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
 	password, err := promptPassword(passwordStdin)
 	if err != nil {

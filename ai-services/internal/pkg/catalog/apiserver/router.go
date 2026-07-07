@@ -45,6 +45,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	v1 := router.Group("/api/v1")
 	{
 		v1.POST("/auth/login", authHandler.Login)
+		v1.POST("/auth/token", authHandler.TokenLogin)
 		v1.POST("/auth/logout", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Logout)
 		v1.POST("/auth/refresh", authHandler.Refresh)
 		v1.GET("/auth/me", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Me)

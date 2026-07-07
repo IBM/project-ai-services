@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/miq"
 )
 
 type AuthHandler struct {
@@ -151,5 +154,45 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"id":       u.ID,
 		"username": u.UserName,
 		"name":     u.Name,
+	})
+}
+
+// TokenLogin godoc
+//
+//	@Summary		Exchange a ManageIQ token for a Catalog API JWT
+//	@Description	IBM Power Mission Control and other ManageIQ-integrated products use this
+//	@Description	endpoint to exchange a pre-existing ManageIQ token for an internal JWT
+//	@Description	without supplying username/password credentials.
+//	@Tags			Authentication
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	map[string]interface{}	"Returns access_token, refresh_token, and token_type"
+//	@Failure		401	{object}	map[string]interface{}	"Invalid or expired ManageIQ token"
+//	@Failure		503	{object}	map[string]interface{}	"ManageIQ client not configured"
+//	@Router			/auth/token [post]
+func (h *AuthHandler) TokenLogin(c *gin.Context) {
+	raw := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if raw == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing ManageIQ token in Authorization header"})
+
+		return
+	}
+
+	access, refresh, err := h.svc.LoginWithToken(c.Request.Context(), raw)
+	if err != nil {
+		if errors.Is(err, miq.ErrUnauthorized) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired ManageIQ token"})
+
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":  access,
+		"refresh_token": refresh,
+		"token_type":    "Bearer",
 	})
 }
