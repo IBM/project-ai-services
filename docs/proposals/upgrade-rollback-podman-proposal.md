@@ -112,41 +112,19 @@ ai-services catalog upgrade --version v5
 
 #### Phase 1: Pre-Upgrade Preparation
 
-**Step 1: Verify Current State**
+**Step 1: Create Manual Backups**
+
+Users must manually create backups before upgrade:
 
 ```bash
-# Check current system version
-ai-services catalog info --versions
+# Backup catalog using catalog backup command
+ai-services catalog backup --filename backup_catalog.tar.gz
 
-# Output:
-# System Version: v4
-# Catalog: v4
-# Components: 3 (all v4)
-# Services: 3 (all v4)
-# Applications: 1 (v4)
+# Backup applications using application backup command
+ai-services application backup <app-name> --target <opensearch|digitize>
 ```
 
-**Step 2: Create Database Backups**
-
-```bash
-# Backup catalog database
-podman exec catalog--db pg_dump -U admin ai_services > backup_catalog_v4.sql
-
-# Backup digitize database (if deployed)
-podman exec digitize-db-<instance> pg_dump -U admin digitize > backup_digitize_v4.sql
-
-# Backup summarize database (if deployed)
-podman exec summarize-db-<instance> pg_dump -U admin summarize > backup_summarize_v4.sql
-```
-
-**Step 3: Verify Disk Space**
-
-```bash
-# Check available disk space for new images
-df -h /var/lib/containers
-```
-
-**Step 4: Resolve Image Versions**
+**Step 2: Resolve Image Versions**
 
 ```go
 // CLI v5 binary resolves all image versions from embedded values.yaml
@@ -401,63 +379,24 @@ ai-services catalog rollback --version v4
 ### Prerequisites
 
 1. **Previous CLI Binary**: v4 CLI binary must be available
-2. **Database Backups**: Database backups from v4 must exist
-3. **Image Availability**: v4 images must be available in registry
+2. **Image Availability**: v4 images must be available in registry
 
 ### Step-by-Step Process
 
 #### Phase 1: Pre-Rollback Preparation
 
-**Step 1: Verify Rollback Version**
-
-```bash
-# Check version history
-ai-services catalog info --upgrade-history
-
-# Output:
-# v3 → v4 (2024-01-15)
-# v4 → v5 (2024-01-20) ← Current
-```
-
-**Step 2: Confirm Rollback**
+**Step 1: Confirm Rollback**
 
 ```bash
 # User confirmation required
 echo "Rolling back from v5 to v4. This will:"
-echo "  - Restore database backups"
 echo "  - Recreate all pods with v4 images"
 echo "  - Estimated downtime: 5-7 minutes"
+echo "Note: If data is lost, restore manually using restore commands after rollback"
 read -p "Continue? (yes/no): " confirm
 ```
 
-#### Phase 2: Database Rollback
-
-**Step 1: Stop All Services**
-
-```bash
-# Stop all service pods to prevent database writes
-for pod in $(podman pod ps --format "{{.Name}}" | grep -v "catalog\|db"); do
-    podman pod stop $pod
-done
-```
-
-**Step 2: Restore Catalog Database**
-
-```bash
-podman exec -i catalog--db psql -U admin ai_services < backup_catalog_v4.sql
-```
-
-**Step 3: Restore Service Databases**
-
-```bash
-# Restore digitize database
-podman exec -i digitize-db-<instance> psql -U admin digitize < backup_digitize_v4.sql
-
-# Restore summarize database
-podman exec -i summarize-db-<instance> psql -U admin summarize < backup_summarize_v4.sql
-```
-
-#### Phase 3: Catalog Rollback
+#### Phase 2: Catalog Rollback
 
 **Step 1: Resolve v4 Image Versions**
 
@@ -589,41 +528,32 @@ INSERT INTO version_history (component_type, previous_version, current_version, 
 VALUES ('system', 'v5', 'v4', NOW());
 ```
 
-## Database Schema
+## Data Management
 
-### Version Tracking Table
+### Backup and Restore
 
-```sql
-CREATE TABLE version_history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    component_type VARCHAR(50) NOT NULL,  -- 'system', 'catalog', 'service', 'component', 'application'
-    component_id UUID,                     -- NULL for system-wide upgrades
-    previous_version VARCHAR(50),          -- e.g., 'v4'
-    current_version VARCHAR(50) NOT NULL,  -- e.g., 'v5'
-    upgraded_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    upgraded_by VARCHAR(255),
-    rollback_available BOOLEAN DEFAULT TRUE,
-    backup_path VARCHAR(500),              -- Path to database backup
-    notes TEXT                             -- Additional notes about upgrade/rollback
-);
+Users are responsible for manually creating backups before upgrade:
 
-CREATE INDEX idx_version_history_component ON version_history(component_type, component_id);
-CREATE INDEX idx_version_history_version ON version_history(current_version);
-CREATE INDEX idx_version_history_date ON version_history(upgraded_at DESC);
+**Catalog Backup:**
+
+```bash
+ai-services catalog backup --filename backup_catalog.tar.gz
 ```
 
-### System Metadata Table
+**Application Backup:**
 
-```sql
-CREATE TABLE catalog_metadata (
-    component VARCHAR(50) PRIMARY KEY,     -- 'catalog', 'system'
-    version VARCHAR(50) NOT NULL,          -- Current version
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
+```bash
+ai-services application backup <app-name> --target <opensearch|digitize>
+```
 
--- Initialize with current version
-INSERT INTO catalog_metadata (component, version) VALUES ('system', 'v4');
-INSERT INTO catalog_metadata (component, version) VALUES ('catalog', 'v4');
+**Restore (if needed after rollback):**
+
+```bash
+# Restore catalog
+ai-services catalog restore --filename backup_catalog.tar.gz
+
+# Restore application
+ai-services application restore <app-name> --target <opensearch|digitize> --filename backup_app.tar.gz
 ```
 
 ## Implementation
@@ -750,16 +680,6 @@ func (m *SystemUpgradeManager) UpgradeSystem(ctx context.Context, targetVersion 
     }
     logger.Infof("✓ All %d applications upgraded successfully", len(apps))
 
-    // Update system version
-    if err := m.updateSystemVersion(ctx, targetVersion); err != nil {
-        logger.Warnf("Failed to update system version: %v", err)
-    }
-
-    // Record upgrade
-    if err := m.recordUpgrade(ctx, "system", nil, currentVersion, targetVersion); err != nil {
-        logger.Warnf("Failed to record upgrade: %v", err)
-    }
-
     logger.Infof("✅ System upgrade completed successfully: %s → %s", currentVersion, targetVersion)
     return nil
 }
@@ -773,13 +693,7 @@ func (m *SystemUpgradeManager) RollbackSystem(ctx context.Context, targetVersion
         return fmt.Errorf("failed to get current version: %w", err)
     }
 
-    // Restore databases
-    logger.Info("Restoring databases...")
-    if err := m.restoreDatabases(ctx, targetVersion); err != nil {
-        return fmt.Errorf("database restore failed: %w", err)
-    }
-
-    // Rollback in reverse order
+    // Rollback in reverse order (no automatic database restore)
     logger.Info("Phase 1/4: Rolling back Applications...")
     apps, _ := m.appRepo.GetAll(ctx, &repository.ApplicationFilters{
         DeploymentType: "architectures",
@@ -805,13 +719,8 @@ func (m *SystemUpgradeManager) RollbackSystem(ctx context.Context, targetVersion
         return fmt.Errorf("catalog rollback failed: %w", err)
     }
 
-    // Update system version
-    m.updateSystemVersion(ctx, targetVersion)
-
-    // Record rollback
-    m.recordUpgrade(ctx, "system", nil, currentVersion, targetVersion)
-
     logger.Infof("✅ System rollback completed successfully: %s → %s", currentVersion, targetVersion)
+    logger.Info("Note: If data is lost, restore manually using restore commands")
     return nil
 }
 
@@ -907,9 +816,6 @@ ai-services catalog upgrade --version v5
 
 # Dry run (show what would be upgraded)
 ai-services catalog upgrade --version v5 --dry-run
-
-# With automatic backup
-ai-services catalog upgrade --version v5 --backup
 ```
 
 ### Rollback Command
@@ -923,19 +829,6 @@ ai-services catalog rollback --to-previous
 
 # Dry run
 ai-services catalog rollback --version v4 --dry-run
-```
-
-### Info Commands
-
-```bash
-# Show current system version
-ai-services catalog info --versions
-
-# Show upgrade history
-ai-services catalog info --upgrade-history
-
-# Show system health
-ai-services catalog info --health
 ```
 
 ## Usage Examples
@@ -1148,22 +1041,19 @@ If health checks fail during upgrade:
 ### Pre-Upgrade Checklist
 
 - [ ] Review release notes for v5
-- [ ] Verify disk space (at least 20GB free)
+- [ ] Create manual backups using backup commands
 - [ ] Check image availability in registry
 - [ ] Test upgrade in non-production environment
 - [ ] Schedule maintenance window
 - [ ] Notify users of planned downtime
 - [ ] Ensure previous CLI version (v4) is available for rollback
-- [ ] Verify database backup locations
 
 ### Post-Upgrade Verification
 
-- [ ] Verify all pods are running (`podman pod ps`)
-- [ ] Check system version (`ai-services catalog info --versions`)
+- [ ] Verify all pods are running
 - [ ] Test catalog UI access
 - [ ] Test service endpoints
 - [ ] Review logs for errors
-- [ ] Verify database migrations completed
 - [ ] Check resource usage
 - [ ] Test critical user workflows
 - [ ] Update documentation
@@ -1174,9 +1064,20 @@ Rollback immediately if:
 
 - Catalog fails to start after 2 minutes
 - More than 50% of components fail health checks
-- Database migrations fail
 - Critical functionality is broken
 - Resource usage exceeds 90% of available
+
+### Post-Rollback Data Restore
+
+If data is lost after rollback, manually restore using:
+
+```bash
+# Restore catalog
+ai-services catalog restore --filename backup_catalog.tar.gz
+
+# Restore applications
+ai-services application restore <app-name> --target <opensearch|digitize> --filename backup_app.tar.gz
+```
 
 ## Monitoring and Logging
 
@@ -1213,15 +1114,16 @@ type UpgradeProgress struct {
 
 ## Summary
 
-This design provides a coordinated system-wide upgrade and rollback mechanism:
+This design provides a simplified coordinated system-wide upgrade and rollback mechanism:
 
 - **System-Wide Only**: All components upgraded together in coordinated sequence
 - **Simple**: Uses pod recreation, no complex orchestration
-- **Reliable**: Preserves data, tracks versions, enables rollback
+- **Reliable**: Preserves data, enables rollback
 - **Sequential**: Upgrades in order: Catalog → Components → Services → Applications
 - **Minimal Downtime**: 15-30 seconds per component, ~3-5 minutes total
 - **Version-Driven**: CLI version (v4, v5) maps to image versions via embedded values.yaml
-- **Database-Tracked**: All upgrades tracked in version history
+- **Manual Backups**: Users create backups using catalog backup and application backup commands
+- **Manual Restore**: If data is lost after rollback, users restore using restore commands
 - **Rollback-Ready**: Automatic rollback on failure, manual rollback supported
 - **Production-Ready**: Error handling, health checks, progress tracking
 
