@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -133,6 +134,9 @@ func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.R
 	return resourcesToSkip, nil
 }
 
+// existingRunningPods lists pods for the given application. Any pod that is not in
+// Running state is deleted so that the deployment layer can recreate it cleanly.
+// Only Running pod names are returned for the skip list.
 func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
@@ -152,7 +156,13 @@ func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName s
 	for _, pod := range pods {
 		logger.InfofCtx(ctx, "Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
 		if pod.Status != "Running" {
-			return nil, fmt.Errorf("pod %q is in %q state — uninstall and re-run configure", pod.Name, pod.Status)
+			logger.WarningfCtx(ctx, "Pod %q is in %q state — deleting it so it can be redeployed\n", pod.Name, pod.Status)
+
+			if err := runtime.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
+				return nil, fmt.Errorf("failed to delete non-running pod %q: %w", pod.Name, err)
+			}
+
+			continue
 		}
 		podsToSkip = append(podsToSkip, pod.Name)
 	}
