@@ -173,6 +173,8 @@ def limit_concurrency(f):
             concurrency_limiter.release()
     return wrapper
 
+_SPECIAL_TOKENS = frozenset(["[/assistant]", "</s>", "<|endoftext|>", "<|im_end|>"])
+
 def get_stop_words_with_special_tokens(request_stop_words):
     """
     Add common special tokens to stop words to prevent them from appearing in responses.
@@ -184,10 +186,9 @@ def get_stop_words_with_special_tokens(request_stop_words):
         List of stop words including special tokens
     """
     stop_words = list(request_stop_words) if request_stop_words else []
-    # Add common special tokens that should stop generation
-    special_tokens = ["[/assistant]", "</s>", "<|endoftext|>", "<|im_end|>"]
-    for token in special_tokens:
-        if token not in stop_words:
+    existing = set(stop_words)
+    for token in _SPECIAL_TOKENS:
+        if token not in existing:
             stop_words.append(token)
     return stop_words
 
