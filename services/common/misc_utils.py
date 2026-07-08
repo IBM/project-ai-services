@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+import sys
 import shutil
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def get_logger(name):
         # Add the filter to inject request_id
         logger.addFilter(RequestIDFilter())
 
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(LOG_LEVEL)
 
         # Use custom formatter that conditionally includes request_id
