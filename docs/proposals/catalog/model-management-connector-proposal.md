@@ -379,33 +379,39 @@ erDiagram
 
 ### 6.1 Component Endpoints (models and connectors)
 
-All endpoints require `Authorization: Bearer <access_token>`. Models and connectors are both `components` rows — distinguished by `source` and filtered by query parameters. This extends the existing read-only `GET /api/v1/components/{type}/providers/{id}/params` catalog endpoint with full lifecycle management.
+All endpoints require `Authorization: Bearer <access_token>`. Models and connectors are both `components` rows — distinguished by `source`. `component_type` (`llm`, `embedding`, `reranker`) is a path segment on collection-level operations so the router enforces it before any handler logic runs; instance-level operations address by UUID only.
 
 | Method | Path | Description | Response |
 |---|---|---|---|
-| `POST` | `/api/v1/components` | Deploy a model or register a connector | `202 Accepted` / `201 Created` |
-| `GET` | `/api/v1/components` | List managed components (models and/or connectors) | `200 OK` |
+| `POST` | `/api/v1/components/:type` | Deploy a model or register a connector of the given type | `202 Accepted` / `201 Created` |
+| `GET` | `/api/v1/components/:type` | List managed components of the given type | `200 OK` |
 | `GET` | `/api/v1/components/:id` | Get status/details of a specific component | `200 OK` |
 | `PUT` | `/api/v1/components/:id` | Update a connector's endpoint, credentials, or config | `200 OK` |
 | `DELETE` | `/api/v1/components/:id` | Undeploy a model or delete a connector | `202 Accepted` / `204 No Content` |
 | `GET` | `/api/v1/components/:id/resources` | Live resource usage for a deployed `platform` component | `200 OK` |
 | `POST` | `/api/v1/components/:id/validate` | Probe a connector's endpoint and update status | `200 OK` |
-| `GET` | `/api/v1/components/providers/:provider/params?source=<source>` | List supported parameters for a given provider; `source` is required | `200 OK` |
+| `GET` | `/api/v1/components/:type/providers/:provider/params?source=<source>` | List supported parameters for a provider + source; both required | `200 OK` |
 
-> **Existing read-only endpoint unchanged:** `GET /api/v1/components/{component_type}/providers/{provider_id}/params` continues to serve JSON Schema config params for the deployment wizard — it is not affected by this proposal.
+> **`:type`** is one of `llm`, `embedding`, `reranker`. The router rejects any other value with `400 Bad Request` before the handler is invoked.
+>
+> **`:id` vs `:type` routing:** collection routes use `:type` literals; instance routes use UUIDs. They occupy the same path depth so route registration must declare the `:type` routes explicitly before the `:id` catch-all, or use a router that validates the `:type` enum at parse time.
+>
+> **Existing read-only endpoint superseded:** `GET /api/v1/components/{component_type}/providers/{provider_id}/params` is replaced by `GET /api/v1/components/:type/providers/:provider/params?source=<source>` which adds the mandatory `source` query parameter. The old path should be aliased during a transition period.
 
 ### 6.2 Query Parameters for Filtering
 
-The `GET /api/v1/components` list endpoint uses query parameters to scope results:
+The `GET /api/v1/components/:type` list endpoint uses query parameters to further scope results within the typed collection:
 
 | Parameter | Values | Effect |
 |---|---|---|
 | `source` | `platform`, `connector` | Filter by deployment kind |
-| `type` | `llm`, `embedding`, `reranker` | Filter by component type |
 | `provider` | e.g., `watsonx`, `vllm-spyre` | Filter by backend provider |
 
-Example: `GET /api/v1/components?type=llm` → all LLM components.
-Example: `GET /api/v1/components?source=connector` → all connectors.
+> `type` is no longer a query parameter — it is the `:type` path segment. The old `?type=llm` query parameter is dropped; callers must migrate to the path form.
+
+Example: `GET /api/v1/components/llm` → all LLM components.
+Example: `GET /api/v1/components/llm?source=connector` → LLM connectors only.
+Example: `GET /api/v1/components/embedding?source=platform` → platform embedding models only.
 
 ### 6.3 Extensions to Existing Endpoints
 
@@ -420,14 +426,20 @@ Example: `GET /api/v1/components?source=connector` → all connectors.
 
 ### 7.1 Create / Deploy a Component
 
-**Endpoint:** `POST /api/v1/components`
+**Endpoint:** `POST /api/v1/components/:type`
 
-**Description:** Creates a new managed component. The server reads `deployment_strategy` from `assets/components/<type>/<provider>/metadata.yaml` to determine the execution path:
+**Path Parameters:**
 
-- **`deployment_strategy: pod`** (`vllm-cpu`, `vllm-spyre`): starts a pod and registers a LiteLLM route. Returns `202 Accepted` — creation is async.
-- **`deployment_strategy: connector`** (`watsonx`, `openai-compatible`, `huggingface`): writes credentials to a Podman secret and registers a LiteLLM route — no pod. Returns `201 Created` — creation is synchronous.
+| Parameter | Description |
+|---|---|
+| `:type` | Component type: `llm`, `embedding`, `reranker` |
 
-> **One endpoint. One request shape.** `provider` determines which path is taken. The client never branches — it always posts to `POST /api/v1/components`.
+**Description:** Creates a new managed component of the given type. The `source` field in the request body drives the execution path:
+
+- **`source: platform`** (`vllm-cpu`, `vllm-spyre`): starts a pod and registers a LiteLLM route. Returns `202 Accepted` — creation is async.
+- **`source: connector`** (`watsonx`, `openai-compatible`, `huggingface`): writes credentials to a Podman secret and registers a LiteLLM route — no pod. Returns `201 Created` — creation is synchronous.
+
+> **One endpoint shape per type.** `source` + `provider` together determine which execution path is taken. The client posts to `POST /api/v1/components/llm`, `POST /api/v1/components/embedding`, or `POST /api/v1/components/reranker` as appropriate — never to the bare `/api/v1/components`.
 
 **Request Headers:**
 ```
@@ -435,12 +447,11 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
-**Request Body — platform model (`vllm-spyre`):**
+**Request Body — platform model (`POST /api/v1/components/llm`, `vllm-spyre`):**
 
 ```json
 {
   "tags": { "name": "granite-llm" },
-  "type": "llm",
   "source": "platform",
   "provider": "vllm-spyre",
   "metadata": {
@@ -449,12 +460,11 @@ Content-Type: application/json
 }
 ```
 
-**Request Body — connector (`watsonx`):**
+**Request Body — connector (`POST /api/v1/components/llm`, `watsonx`):**
 
 ```json
 {
   "tags": { "name": "prod-watsonx" },
-  "type": "llm",
   "source": "connector",
   "provider": "watsonx",
   "auth_type": "api-key",
@@ -474,9 +484,8 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `tags` | object | Yes | Label bag. Must include `"name"` key (3–100 chars, slug-safe). Additional keys (`"env"`, `"team"`, etc.) stored as-is |
-| `type` | string | Yes | Component type: `llm`, `embedding`, `reranker` |
-| `provider` | string | Yes | Backend: `vllm-cpu`, `vllm-spyre`, `watsonx`, `openai-compatible`, `huggingface`, `generic-http` |
 | `source` | string | **Yes** | `"platform"` or `"connector"`. The client must be explicit — `provider` alone does not uniquely identify the deployment kind (e.g. `vllm-spyre` can be deployed as a pod or registered as a connector pointing at an external vLLM instance). |
+| `provider` | string | Yes | Backend: `vllm-cpu`, `vllm-spyre`, `watsonx`, `openai-compatible`, `huggingface`, `generic-http` |
 | `metadata` | object | Conditional | Provider-specific key-value bag. Stored as-is in `components.metadata` alongside server-generated keys. **Platform**: must include `model_name`. **Connector (watsonx)**: must include `model_name`, `endpoint_url`, `project_id` |
 | `auth_type` | string | Conditional | Required for `connector` providers. `api-key`, `bearer-token`, `basic`, `none` |
 | `credentials` | object | Conditional | Required when `auth_type` != `none`. Written to Podman secret; **never stored in DB** |
@@ -551,16 +560,21 @@ Content-Type: application/json
 
 ### 7.2 List Components
 
-**Endpoint:** `GET /api/v1/components`
+**Endpoint:** `GET /api/v1/components/:type`
 
-**Description:** Lists `components` rows. Both platform models and connector components appear in a single unified list; use `source` to filter.
+**Path Parameters:**
+
+| Parameter | Description |
+|---|---|
+| `:type` | Component type: `llm`, `embedding`, `reranker` |
+
+**Description:** Lists `components` rows for the given type. Use `source` to further filter by deployment kind within the typed collection.
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `source` | string | No | — | `platform` or `connector` |
-| `type` | string | No | — | Component type: `llm`, `embedding`, `reranker` |
 | `provider` | string | No | — | Provider: `vllm-spyre`, `watsonx`, etc. |
 | `page` | integer | No | 1 | Page number (1-indexed) |
 | `page_size` | integer | No | 20 | Items per page (max 100) |
@@ -604,7 +618,7 @@ Content-Type: application/json
 }
 ```
 
-> `source` on each item identifies pod-backed (`platform`) vs external connector (`connector`). Filter `?source=connector` for connectors only; `?source=platform` for pods only.
+> `source` on each item identifies pod-backed (`platform`) vs external connector (`connector`). Filter `?source=connector` for connectors only; `?source=platform` for pods only. `type` is implicit from the path — all items in the response share the same `component_type`.
 
 ---
 
@@ -845,19 +859,20 @@ WHERE sd.dependency_id = :id
 
 ### 7.8 List Supported Parameters for a Provider
 
-**Endpoint:** `GET /api/v1/components/providers/:provider/params`
+**Endpoint:** `GET /api/v1/components/:type/providers/:provider/params`
 
-**Description:** Returns the set of supported configuration parameters for a given `provider` + `source` combination. Both parameters are required — `provider` alone does not uniquely identify the deployment kind because the same provider (e.g. `vllm-spyre`) can appear as a `platform` pod *or* as a `connector` pointing at an external vLLM instance. The client must be explicit about which it intends.
+**Description:** Returns the set of supported configuration parameters for a given `type` + `provider` + `source` combination. All three are required — `provider` alone does not uniquely identify the deployment kind (e.g. `vllm-spyre` can be a `platform` pod or a `connector`) and `type` scopes which asset schema is loaded (`llm` vs `embedding` vs `reranker`). This mirrors the shape of the existing deployment wizard endpoint exactly.
 
 For `source=connector` the platform additionally fetches live model info from the LiteLLM Admin API (`GET /model/info`) and merges it with the static schema from `metadata.yaml`. For `source=platform` only the static schema is returned.
 
-This endpoint is called by the UI *before* `POST /api/v1/components` to render the correct form fields. Because `source` is now required on `POST /api/v1/components` as well, the client already knows both values at form-render time.
+This endpoint is called by the UI *before* `POST /api/v1/components/:type` to render the correct form fields.
 
 **Path Parameters:**
 
 | Parameter | Description |
 |---|---|
-| `provider` | Provider identifier — e.g. `watsonx`, `openai-compatible`, `huggingface`, `generic-http`, `vllm-spyre`, `vllm-cpu` |
+| `:type` | Component type: `llm`, `embedding`, `reranker` |
+| `:provider` | Provider identifier — e.g. `watsonx`, `openai-compatible`, `huggingface`, `generic-http`, `vllm-spyre`, `vllm-cpu` |
 
 **Query Parameters:**
 
@@ -872,14 +887,17 @@ Authorization: Bearer <access_token>
 
 **Examples:**
 ```
-# WatsonX connector form
-GET /api/v1/components/providers/watsonx/params?source=connector
+# WatsonX LLM connector form
+GET /api/v1/components/llm/providers/watsonx/params?source=connector
 
-# vLLM-Spyre registered as an external connector (points at a remote vLLM instance)
-GET /api/v1/components/providers/vllm-spyre/params?source=connector
+# vLLM-Spyre registered as an external LLM connector
+GET /api/v1/components/llm/providers/vllm-spyre/params?source=connector
 
-# vLLM-Spyre deployed as a local pod
-GET /api/v1/components/providers/vllm-spyre/params?source=platform
+# vLLM-Spyre deployed as a local LLM pod
+GET /api/v1/components/llm/providers/vllm-spyre/params?source=platform
+
+# Embedding model connector params
+GET /api/v1/components/embedding/providers/openai-compatible/params?source=connector
 ```
 
 **LiteLLM source of truth — `watsonx` example:**
