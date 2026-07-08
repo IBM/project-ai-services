@@ -12,7 +12,7 @@ func TestExtractProviderParams_FalseSkipsProvider(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if _, exists := providerParams["vllm-cpu"]; exists {
 		t.Error("expected vllm-cpu to be skipped when value is 'false'")
@@ -25,7 +25,7 @@ func TestExtractProviderParams_TrueSelectsProvider(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if _, exists := providerParams["vllm-cpu"]; !exists {
 		t.Error("expected vllm-cpu to be selected when value is 'true'")
@@ -38,7 +38,7 @@ func TestExtractProviderParams_FalseCaseInsensitive(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if _, exists := providerParams["vllm-cpu"]; exists {
 		t.Error("expected vllm-cpu to be skipped when value is 'False' (case insensitive)")
@@ -51,7 +51,7 @@ func TestExtractProviderParams_TrueCaseInsensitive(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if _, exists := providerParams["vllm-cpu"]; !exists {
 		t.Error("expected vllm-cpu to be selected when value is 'True' (case insensitive)")
@@ -76,7 +76,7 @@ func TestExtractProviderParams_InvalidValueTreatedAsFalse(t *testing.T) {
 			}
 			providerParams := make(map[string]map[string]string)
 
-			extractProviderParams("llm.", allParams, providerParams)
+			extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 			if _, exists := providerParams["vllm-cpu"]; exists {
 				t.Errorf("expected vllm-cpu to be skipped for invalid value '%s' (treated as false)", tc.value)
@@ -92,7 +92,7 @@ func TestExtractProviderParams_NestedParamNotAffectedByFalse(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if _, exists := providerParams["vllm-cpu"]; !exists {
 		t.Fatal("expected vllm-cpu to exist with nested param")
@@ -110,7 +110,7 @@ func TestExtractProviderParams_AllFalseResultsInEmpty(t *testing.T) {
 	}
 	providerParams := make(map[string]map[string]string)
 
-	extractProviderParams("llm.", allParams, providerParams)
+	extractProviderParams("llm.", allParams, providerParams, make(map[string]bool))
 
 	if len(providerParams) != 0 {
 		t.Errorf("expected empty providerParams when all providers are false, got %v", providerParams)
@@ -118,6 +118,7 @@ func TestExtractProviderParams_AllFalseResultsInEmpty(t *testing.T) {
 }
 
 func TestExtractComponentParamsForService_OneTrueOneFalse(t *testing.T) {
+	// vllm-spyre=false alongside vllm-cpu=true — no warning, vllm-cpu selected.
 	allParams := map[string]string{
 		"llm.vllm-spyre": "false",
 		"llm.vllm-cpu":   "true",
@@ -131,6 +132,19 @@ func TestExtractComponentParamsForService_OneTrueOneFalse(t *testing.T) {
 
 	if _, exists := providerParams["vllm-cpu"]; !exists {
 		t.Error("expected vllm-cpu to be selected")
+	}
+}
+
+func TestExtractComponentParamsForService_OnlyFalse_DefaultApplies(t *testing.T) {
+	// vllm-spyre=false with no other provider selected — warning logged, providerParams empty so default kicks in.
+	allParams := map[string]string{
+		"llm.vllm-spyre": "false",
+	}
+
+	providerParams := extractComponentParamsForService("chat", "llm", allParams)
+
+	if len(providerParams) != 0 {
+		t.Errorf("expected empty providerParams so default is used, got %v", providerParams)
 	}
 }
 

@@ -861,14 +861,23 @@ func isComponentParameter(param string, componentTypes map[string]bool) bool {
 // - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model).
 // - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model).
 // Returns a map with provider as key and params as value.
+// Warns if a provider is explicitly set to false with no other provider selected.
 func extractComponentParamsForService(serviceID string, componentType string, allParams map[string]string) map[string]map[string]string {
 	providerParams := make(map[string]map[string]string)
+	falseProviders := make(map[string]bool)
 
 	// Extract global component params: {componentType}.{providerID}[.{param}].
-	extractProviderParams(componentType+".", allParams, providerParams)
+	extractProviderParams(componentType+".", allParams, providerParams, falseProviders)
 
 	// Extract service-specific component params (these override global).
-	extractProviderParams(serviceID+"."+componentType+".", allParams, providerParams)
+	extractProviderParams(serviceID+"."+componentType+".", allParams, providerParams, falseProviders)
+
+	// Warn if any provider was explicitly set to false but no other provider was selected.
+	if len(falseProviders) > 0 && len(providerParams) == 0 {
+		for providerID := range falseProviders {
+			logger.Warningf("Provider '%s' for component type '%s' is set to 'false' but no other provider was specified; the default provider will be used\n", providerID, componentType)
+		}
+	}
 
 	return providerParams
 }
@@ -876,9 +885,9 @@ func extractComponentParamsForService(serviceID string, componentType string, al
 // extractProviderParams extracts provider parameters from allParams with the given prefix.
 // For bare provider keys (e.g., llm.vllm-cpu=true/false):
 //   - "true" selects the provider.
-//   - "false" opts out of the provider (skipped).
+//   - "false" records the provider in falseProviders and skips it.
 //   - Any other value logs a warning and is treated as "false".
-func extractProviderParams(prefix string, allParams map[string]string, providerParams map[string]map[string]string) {
+func extractProviderParams(prefix string, allParams map[string]string, providerParams map[string]map[string]string, falseProviders map[string]bool) {
 	for key, value := range allParams {
 		after, ok := strings.CutPrefix(key, prefix)
 		if !ok {
@@ -899,6 +908,8 @@ func extractProviderParams(prefix string, allParams map[string]string, providerP
 			if !strings.EqualFold(value, "false") {
 				logger.Warningf("Invalid value '%s' for provider parameter '%s': expected 'true' or 'false', treating as 'false'\n", value, key)
 			}
+
+			falseProviders[providerID] = true
 
 			continue
 		}
