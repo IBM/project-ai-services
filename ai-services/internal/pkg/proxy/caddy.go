@@ -113,9 +113,68 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	return c.createRoute(routeConfig)
 }
 
-// Helper to append a new route to the server's route array.
+// ensureSubroute guarantees the persistent subroute container exists in Caddy's live config.
+// It uses GET /id/app-routes-handler to check; if absent it creates the outer catch-all route
+// via a single POST to the top-level routes array (one reload, tolerated at first-use time).
+// On every subsequent call the GET returns 200 and the function is a no-op.
+func (c *caddyManager) ensureSubroute() error {
+	checkURL, err := url.JoinPath(c.adminURL, "id", constants.CaddySubrouteHandlerID)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.R().Get(checkURL)
+	if err != nil {
+		return fmt.Errorf("failed to check subroute existence: %w", err)
+	}
+
+	if resp.StatusCode() == http.StatusOK {
+		// Already present — nothing to do.
+		return nil
+	}
+
+	// Subroute is absent; seed it via a single top-level POST.
+	// @id tags are JSON-only: Caddyfile has no syntax for them, so we create
+	// the subroute container here through the Admin API instead of the Caddyfile.
+	outerRoute := map[string]any{
+		"@id": "app-routes",
+		"handle": []map[string]any{{
+			"handler": "subroute",
+			"@id":     constants.CaddySubrouteHandlerID,
+			"routes":  []any{},
+		}},
+		"terminal": false,
+	}
+
+	topLevelURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
+	if err != nil {
+		return err
+	}
+
+	createResp, err := c.httpClient.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(outerRoute).
+		Post(topLevelURL)
+	if err != nil {
+		return fmt.Errorf("failed to seed subroute container: %w", err)
+	}
+
+	if createResp.StatusCode() != http.StatusOK && createResp.StatusCode() != http.StatusCreated {
+		return fmt.Errorf("caddy returned status %d seeding subroute: %s", createResp.StatusCode(), createResp.String())
+	}
+
+	return nil
+}
+
+// createRoute appends a route into the persistent subroute handler's inner routes array.
+// Posting to /id/<subrouteHandlerID>/routes mutates a handler's sub-config, which Caddy
+// applies in-place without a config reload — no connections are dropped on route add/remove.
 func (c *caddyManager) createRoute(routeConfig map[string]any) error {
-	routeURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
+	if err := c.ensureSubroute(); err != nil {
+		return fmt.Errorf("failed to ensure subroute container: %w", err)
+	}
+
+	routeURL, err := url.JoinPath(c.adminURL, "id", constants.CaddySubrouteHandlerID, "routes")
 	if err != nil {
 		return err
 	}
@@ -127,6 +186,7 @@ func (c *caddyManager) createRoute(routeConfig map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("failed to create route: %w", err)
 	}
+
 	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusCreated {
 		return fmt.Errorf("caddy returned status %d on creation: %s", resp.StatusCode(), resp.String())
 	}

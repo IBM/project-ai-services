@@ -13,7 +13,8 @@ const (
 	DSCIKind             = "DSCInitialization"
 	SMTLevel             = 2
 	ErrSecretNotFound    = "no secret with name or id"
-	CaddyServerName      = "ai_services" // Caddy server name used for route registration
+	CaddyServerName          = "ai_services"      // Caddy server name used for route registration
+	CaddySubrouteHandlerID   = "app-routes-handler" // Stable @id of the subroute handler that owns all dynamic routes
 )
 
 const (
