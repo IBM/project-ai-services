@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse, Response
 import json
+import requests
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
 from functools import wraps
@@ -637,6 +638,20 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         except HTTPException:
             # Re-raise HTTPException to preserve status codes
             raise
+        except requests.exceptions.HTTPError as e:
+            # Propagate upstream 4xx/5xx status codes (vLLM/LiteLLM) back to the caller
+            status_code = e.response.status_code if e.response is not None else 502
+            logging.error(f"Error in non-streaming response: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status_code,
+                detail={
+                    "error": {
+                        "code": ErrorCode.LLM_ERROR.value,
+                        "message": f"Upstream service error: {e}",
+                        "status": status_code,
+                    }
+                },
+            )
         except Exception as e:
             # For non-streaming requests, return error in chat response format
             error_message = f"Error: {str(e)}"
