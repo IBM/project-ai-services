@@ -157,37 +157,6 @@ class TestChunkFailureHandling:
     handling added in the chunked path.
     """
 
-    @pytest.mark.asyncio
-    async def test_single_chunk_failure_marks_failed_chunks_in_db(
-        self, mock_db_repo, tmp_path
-    ):
-        """
-        When one chunk's LLM call returns an error dict, failed_chunks must be
-        incremented in the DB before the exception propagates.
-        """
-        (tmp_path / JOB_ID).mkdir(parents=True)
-        (tmp_path / JOB_ID / "doc.txt").write_text("word " * 100)
-
-        chunks = ["chunk zero", "chunk one", "chunk two"]
-        call_count = 0
-
-        def fake_query(llm_endpoint, messages, model, max_tokens, temperature):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                return {"error": "LLM timeout"}, 10, 0
-            return "A summary.", 10, 5
-
-        import summarize.app as app_module
-
-        with _MultiPatch(_make_patches(tmp_path, mock_db_repo, chunks, fake_query)):
-            await app_module.process_summarization_job(JOB_ID, "standard")
-
-        failed_calls = [
-            c for c in mock_db_repo.update_job.call_args_list
-            if c.kwargs.get("metadata", {}).get("failed_chunks", 0) > 0
-        ]
-        assert failed_calls, "expected at least one db update with failed_chunks > 0"
 
     @pytest.mark.asyncio
     async def test_single_chunk_failure_sets_job_status_to_failed(

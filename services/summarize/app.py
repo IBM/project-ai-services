@@ -768,6 +768,7 @@ async def process_summarization_job(job_id: str, level):
                             f"Chunk {chunk_index + 1}/{num_chunks} failed for job {job_id}: {chunk_exc}",
                             exc_info=True
                         )
+                        raise
 
             # Process all chunks in parallel.
             # Use explicit tasks so that when one chunk fails we can cancel the siblings
