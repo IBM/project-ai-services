@@ -5,12 +5,14 @@ Responsibilities:
 - process_table  — extract/summarise tables from a converted document
 - extract_table_headers — parse markdown table header row
 - headers_match — compare two header lists
+- is_table_continuation — [NEW] verify continuation via structure & fuzzy caption matching
 - merge_markdown_tables — combine two markdown tables by dropping the second header
 - merge_consecutive_tables — merge tables spanning consecutive pages
 """
 
 import json
 import time
+import difflib
 from pathlib import Path
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
@@ -89,19 +91,47 @@ def headers_match(headers1: list[str], headers2: list[str]) -> bool:
     return normalized1 == normalized2
 
 
+def is_table_continuation(headers1: list[str], headers2: list[str], caption1: str, caption2: str, fuzzy_threshold: float = 0.85) -> bool:
+    """
+    Determines if a table is a continuation across pages.
+    Uses structural column matching and fuzzy caption matching to remain language-agnostic.
+    """
+    # 1. STRUCTURAL CHECK: Column headers MUST match perfectly
+    if not headers_match(headers1, headers2):
+        return False
+
+    # 2. CAPTION PREPARATION
+    cap1 = (caption1 or "").strip().lower()
+    cap2 = (caption2 or "").strip().lower()
+
+    # Normalize whitespaces (removes duplicate spaces from OCR)
+    cap1 = " ".join(cap1.split())
+    cap2 = " ".join(cap2.split())
+
+    # If neither has a caption but columns match exactly, they are a continuation.
+    if not cap1 and not cap2:
+        return True
+
+    # If the parser missed a caption on one page but found it on the other,
+    # the exact header match on consecutive pages is enough to trust it.
+    if (cap1 and not cap2) or (cap2 and not cap1):
+        return True
+
+    # 3. PREFIX MATCHING (Fast Path)
+    # Checks if one is a direct prefix of the other (e.g. "Tabelle 19" vs "Tabelle 19 (Forts.)")
+    if cap1 and cap2:
+        if cap2.startswith(cap1) or cap1.startswith(cap2):
+            return True
+
+        # 4. FUZZY MATCHING (Robust Path)
+        # Handles OCR errors or cases where prefixing is slightly broken
+        similarity = difflib.SequenceMatcher(None, cap1, cap2).ratio()
+        if similarity >= fuzzy_threshold:
+            return True
+
+    return False
+
 def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
-    """
-    Merge two markdown tables by removing the header from the second table
-    and appending its rows to the first table.
-    Handles cases where tables might have captions before the actual table.
-
-    Args:
-        table1_md: First markdown table (with headers)
-        table2_md: Second markdown table (headers will be removed)
-
-    Returns:
-        Merged markdown table
-    """
     if not table1_md or not table2_md:
         return table1_md or table2_md or ""
 
@@ -114,8 +144,8 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
     data_start_idx = 0
     for i, line in enumerate(lines2):
         line = line.strip()
-        # Separator line typically contains dashes and pipes: |---|---|
-        if '|' in line and '---' in line:
+        # Bulletproof separator check: Line has a pipe, a dash, and NO alphanumeric characters
+        if '|' in line and '-' in line and not any(c.isalnum() for c in line):
             data_start_idx = i + 1
             break
 
@@ -130,11 +160,11 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
 
 def merge_consecutive_tables(table_dict: dict) -> dict:
     """
-    Merge tables that span multiple consecutive pages with matching headers.
+    Merge tables that span multiple consecutive pages with matching headers and captions.
 
     Args:
         table_dict: Dictionary with table index as key and table data as value
-                   Each value should have 'markdown', 'caption', and 'page_number' keys
+                    Each value should have 'markdown', 'caption', and 'page_number' keys
 
     Returns:
         Dictionary with merged tables, using same structure as input
@@ -155,36 +185,41 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
         current_table = table_dict[idx]
         current_markdown = current_table.get('markdown', '')
         current_page = current_table.get('page_number')
+        current_caption = current_table.get('caption', '')
         current_headers = extract_table_headers(current_markdown)
 
         # Try to merge with subsequent tables on consecutive pages
         merged_markdown = current_markdown
         last_merged_page = current_page
+
         # look at the next 2 pages
         for j in range(i + 1, min(i + 3, len(sorted_indices))):
             next_idx = sorted_indices[j]
             next_table = table_dict[next_idx]
             next_markdown = next_table.get('markdown', '')
             next_page = next_table.get('page_number')
+            next_caption = next_table.get('caption', '')
             next_headers = extract_table_headers(next_markdown)
-            # Check if tables are on consecutive pages and have matching headers
+
+            # Check if tables are on consecutive pages, have matching headers AND pass the robust continuation check
             if (next_page is not None and
                     last_merged_page is not None and
                     next_page == last_merged_page + 1 and
-                    headers_match(current_headers, next_headers)):
+                    is_table_continuation(current_headers, next_headers, current_caption, next_caption)):
+
                 # Merge the tables
                 merged_markdown = merge_markdown_tables(merged_markdown, next_markdown)
                 last_merged_page = next_page
                 skip_indices.add(next_idx)
                 logger.debug(f"Merged table {next_idx} (page {next_page}) into table {idx} (page {current_page})")
             else:
-                # Stop looking if pages are not consecutive or headers don't match
+                # Stop looking if pages are not consecutive or tables don't match
                 break
 
         # Store the merged (or original) table
         merged_dict[idx] = {
             'markdown': merged_markdown,
-            'caption': current_table.get('caption', ''),
+            'caption': current_caption, # Retain the primary/first caption
             'page_number': current_page,
         }
 
