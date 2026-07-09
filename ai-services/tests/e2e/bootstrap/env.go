@@ -24,7 +24,7 @@ func PrepareRuntime(runID string) string {
 	}
 
 	logger.Infof("[BOOTSTRAP] Temp runtime environment created at: %s", tempDir)
-	
+
 	return tempDir
 }
 
@@ -51,6 +51,40 @@ func GetLLMasJudgeModelDetails() (downloadPath string, modelName string) {
 // GetLLMasJudgePodDetails returns the registry details.
 func GetLLMasJudgePodDetails() (portNumber string, llmImage string) {
 	return os.Getenv("LLM_JUDGE_PORT"), os.Getenv("LLM_JUDGE_IMAGE")
+}
+
+// GetCatalogCreds returns the catalog API server credentials from environment variables.
+//
+//	CATALOG_SERVER_URL  – base URL of the catalog API server (e.g. http://localhost:8080)
+//	CATALOG_USERNAME    – username to authenticate with (constant: "admin")
+//	CATALOG_PASSWORD    – password to authenticate with (default: "1234")
+func GetCatalogCreds() (serverURL string, username string, password string) {
+	return os.Getenv("CATALOG_SERVER_URL"), catalogAdminUsername, GetCatalogAdminPassword()
+}
+
+// catalogAdminUsername is the fixed admin username — never changes across environments.
+const catalogAdminUsername = "admin"
+
+// GetCatalogAdminPassword returns the catalog admin password.
+// Defaults to "1234" (the known e2e default) so CATALOG_PASSWORD does not need
+// to be exported manually before running tests.
+// Override by setting CATALOG_PASSWORD in the environment.
+func GetCatalogAdminPassword() string {
+	if v := os.Getenv("CATALOG_PASSWORD"); v != "" {
+		return v
+	}
+
+	return "1234"
+}
+
+// GetCatalogInsecure returns true when TLS certificate verification should be skipped for the catalog server.
+// This is the default for e2e environments because the catalog uses nip.io / self-signed certificates.
+// Set CATALOG_INSECURE=false to force strict TLS verification.
+func GetCatalogInsecure() bool {
+	v := os.Getenv("CATALOG_INSECURE")
+	// Default is true (skip verification) — e2e catalog always uses self-signed certs.
+	// Only disable when explicitly set to "false".
+	return v != "false"
 }
 
 // GetGoldenDatasetFile returns the name of the golden dataset file.

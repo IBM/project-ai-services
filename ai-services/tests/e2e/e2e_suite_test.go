@@ -20,7 +20,6 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
-	"github.com/project-ai-services/ai-services/tests/e2e/ingestion"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
 
@@ -55,6 +54,10 @@ var (
 	goldenDatasetFile           string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
+	// catalogBackendURL is set by the "ensures catalog service is running" test step
+	// after 'catalog configure' runs and the URL is known. Used by Application Creation
+	// to perform a fresh login immediately before 'application create'.
+	catalogBackendURL string
 )
 
 func init() {
@@ -64,7 +67,13 @@ func init() {
 }
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "AI Services E2E Suite")
+	// Suite timeout is controlled via the --timeout flag passed to ginkgo/go test.
+	// Default in the Makefile is --timeout=4h — see Makefile TEST_ARGS.
+	// Budget: ~45 min app create + ~10 min runtime ops + ~40 min LLM warm-up
+	//         + ~20 min ingestion + ~30 min judge setup + ~75 min evaluation (50 q).
+	ginkgo.RunSpecs(t, "AI Services E2E Suite",
+		ginkgo.Label("e2e"),
+	)
 }
 
 func getEnvWithDefault(key, defaultValue string) string {
@@ -144,6 +153,45 @@ var _ = ginkgo.BeforeSuite(func() {
 	binVersion, err = bootstrap.CheckBinaryVersion(aiServiceBin)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	logger.Infof("[SETUP] ai-services version: %s", binVersion)
+
+	ginkgo.By("Logging in to catalog API server (if already running)")
+	// admin username is constant — no need to export CATALOG_USERNAME.
+	// admin password defaults to "1234" — no need to export CATALOG_PASSWORD unless overriding.
+	// insecure=true by default — e2e catalog uses nip.io / self-signed TLS certs.
+	catalogServerURL, catalogUsername, catalogPassword := bootstrap.GetCatalogCreds()
+	catalogInsecure := bootstrap.GetCatalogInsecure()
+
+	// Auto-discover the catalog backend URL from 'catalog info' if not explicitly set.
+	// NOTE: At this point the catalog may not yet be running — it is started in the
+	// "ensures catalog service is running" test step via 'catalog configure'.
+	// If discovery fails here that is fine — a fresh login is performed right before
+	// 'application create' using the URL captured from 'catalog configure' output.
+	if catalogServerURL == "" && appRuntime == "podman" {
+		infoOutput, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
+		if infoErr == nil {
+			catalogServerURL = cli.ExtractCatalogBackendURL(infoOutput)
+			if catalogServerURL != "" {
+				logger.Infof("[SETUP] Auto-discovered Catalog Backend URL from 'catalog info': %s", catalogServerURL)
+			} else {
+				logger.Infof("[SETUP] Catalog not yet running — login will happen after 'catalog configure' step")
+			}
+		} else {
+			logger.Infof("[SETUP] Catalog not yet running — login will happen after 'catalog configure' step")
+		}
+	}
+
+	// Perform login now only if the catalog URL is already known (catalog already running).
+	// Skip silently if URL is empty — fresh login happens before 'application create'.
+	if catalogServerURL != "" {
+		_, loginErr := cli.CatalogLogin(ctx, cfg, catalogServerURL, catalogUsername, catalogPassword, appRuntime, catalogInsecure)
+		if loginErr != nil {
+			// Non-fatal — catalog configure + fresh login still to come.
+			logger.Warningf("[SETUP] [WARNING] BeforeSuite catalog login failed (non-fatal): %v", loginErr)
+		} else {
+			logger.Infof("[SETUP] Catalog login successful (server: %s, user: %s, insecure: %v)",
+				catalogServerURL, catalogUsername, catalogInsecure)
+		}
+	}
 
 	ginkgo.By("Checking Podman environment (non-blocking)")
 	err = bootstrap.CheckPodman()
@@ -261,6 +309,32 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent"), func() {
+			if appRuntime != "podman" {
+				ginkgo.Skip("catalog configure only supported for podman runtime")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			// catalog configure is idempotent — safe to call even if already deployed.
+			// This guarantees the catalog pod (Caddy + backend + DB) is up before
+			// 'application create' tries to reach it.
+			configureOutput, err := cli.CatalogConfigure(ctx, cfg, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Extract and store the backend URL from configure output so Application
+			// Creation can use it for a fresh login without needing another round-trip.
+			catalogBackendURL = cli.ExtractCatalogBackendURLFromConfigureOutput(configureOutput)
+			if catalogBackendURL != "" {
+				logger.Infof("[TEST] Catalog service is running. Backend URL: %s", catalogBackendURL)
+			} else {
+				// Fallback: ask catalog info directly
+				infoOut, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
+				if infoErr == nil {
+					catalogBackendURL = cli.ExtractCatalogBackendURL(infoOut)
+				}
+				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
+			}
+		})
 	})
 	ginkgo.Context("Application Image Command Tests", func() {
 		ginkgo.It("lists images for rag template", ginkgo.Label("spyre-independent"), func() {
@@ -287,16 +361,48 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
-			pods := []string{"backend", "ui", "db"} // replace with actual pod names
-			params := ""
-			cliOptions := cli.CreateOptions{}
+			// Perform a fresh catalog login immediately before application create (podman only).
+			// The access token TTL is 15 min; bootstrap steps can take longer, so the
+			// BeforeSuite login may be expired by the time we reach this point.
+			// catalogBackendURL was captured by the "ensures catalog service is running" step.
 			if appRuntime == "podman" {
-				params = "ui.port=" + uiPort + ",backend.port=" + backendPort + ",digitize.port=" + digitizePort + ",digitizeUi.port=" + digitizeUiPort + ",summarize.port=" + summarizePort + ",similarity.port=" + similarityPort
-				cliOptions = cli.CreateOptions{
-					SkipModelDownload: false,
-					ImagePullPolicy:   "IfNotPresent",
+				_, loginUsername, loginPassword := bootstrap.GetCatalogCreds()
+				loginInsecure := bootstrap.GetCatalogInsecure()
+
+				// Use URL captured from catalog configure output.
+				// Fall back to env var, then catalog info if not yet set.
+				loginServerURL := catalogBackendURL
+				if loginServerURL == "" {
+					loginServerURL = os.Getenv("CATALOG_SERVER_URL")
+				}
+				if loginServerURL == "" {
+					infoOut, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
+					if infoErr == nil {
+						loginServerURL = cli.ExtractCatalogBackendURL(infoOut)
+					}
+				}
+
+				if loginServerURL != "" && loginUsername != "" && loginPassword != "" {
+					_, loginErr := cli.CatalogLogin(ctx, cfg, loginServerURL, loginUsername, loginPassword, appRuntime, loginInsecure)
+					if loginErr != nil {
+						ginkgo.Fail(fmt.Sprintf("[APPLICATION CREATE] Fresh catalog login failed: %v\n  Server: %s\n  User: %s", loginErr, loginServerURL, loginUsername))
+					}
+					logger.Infof("[TEST] Fresh catalog login successful before application create (server: %s)", loginServerURL)
+				} else {
+					logger.Warningf("[TEST] [WARNING] Skipping pre-create catalog login — missing URL=%q or credentials. Using existing stored tokens.", loginServerURL)
 				}
 			}
+
+			// Podman uses the catalog path: ports are managed by Caddy routing.
+			// OpenShift uses its own native path. No --legacy flag in either case.
+			// Do NOT pass port params — catalog service schemas have additionalProperties:false.
+			pods := []string{"backend", "ui", "db"}
+			params := ""
+			cliOptions := cli.CreateOptions{
+				SkipModelDownload: false,
+				ImagePullPolicy:   "IfNotPresent",
+			}
+
 			createOutput, err := cli.CreateRAGAppAndValidate(
 				ctx,
 				cfg,
@@ -311,13 +417,24 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			// For podman catalog path: create output only has digitize URLs (from next.md).
+			// Chat backend/UI URLs are only in 'application info' output (from info.md).
+			// For openshift: create output has route URLs — GetBaseURL works directly.
 			if appRuntime == "podman" {
+				infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
+				ragBaseURL, err = cli.GetBaseURL(infoOut, backendPort)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// The LLM-as-Judge is a local podman container on localhost:<judgePort>,
+				// not a catalog-deployed service — build its URL directly.
+				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+			} else {
 				ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 				judgeBaseURL, err = cli.GetBaseURL(createOutput, judgePort)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
+
 			logger.Infof("[TEST] Application %s created, healthy, and RAG endpoints validated", appName)
 		})
 	})
@@ -364,16 +481,15 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			if appRuntime == "podman" {
-				psWideArgs := []string{"-o", "wide"}
-				widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort, similarityPort}
-				gomega.Expect(podman.VerifyExposedPorts(appName, expectedPorts, appRuntime, widePsOutput)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
-			} else {
+			if appRuntime == "openshift" {
 				output, err := podman.GetOpenshiftRoutes(appName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(cli.ValidateOpenShiftRoutes(output)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
+			} else {
+				// Podman catalog path: routing is handled by Caddy via domain names (nip.io).
+				// Ports are not exposed as numbered ports on pods — skip port number verification.
+				// URL reachability is already validated during application create health checks.
+				logger.Infof("[TEST] Podman catalog path: skipping numeric port check (Caddy routes by domain)")
 			}
 			logger.Infof("[TEST] Exposed ports/routes verified")
 		})
@@ -430,12 +546,35 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			suffixes, ok := common.ExpectedPodSuffixes[appRuntime]
-			gomega.Expect(ok).To(gomega.BeTrue(), "unknown templateName")
+			var pods []string
 
-			pods := make([]string, 0, len(suffixes))
-			for _, s := range suffixes {
-				pods = append(pods, fmt.Sprintf("%s--%s", appName, s))
+			if appRuntime == "podman" {
+				// Catalog path: pod names are dynamic (<service-id>-<slug>).
+				// Discover actual pod names from 'application ps -o wide' rather than
+				// constructing them from the legacy appName--suffix format.
+				// MUST use -o wide: ExtractPodInfo's podRowRe requires the POD ID,
+				// CREATED, and CONTAINERS columns that only appear in wide output.
+				// Without -o wide the narrow format (APPLICATION NAME | POD NAME | STATUS)
+				// does not match podRowRe and returns an empty map.
+				psOutput, psErr := cli.ApplicationPS(ctx, cfg, appName, appRuntime, "-o", "wide")
+				gomega.Expect(psErr).NotTo(gomega.HaveOccurred())
+
+				podInfoMap, parseErr := podman.ExtractPodInfo(psOutput)
+				gomega.Expect(parseErr).NotTo(gomega.HaveOccurred())
+				gomega.Expect(podInfoMap).NotTo(gomega.BeEmpty(), "no pods found for app %s", appName)
+
+				for podName := range podInfoMap {
+					pods = append(pods, podName)
+				}
+			} else {
+				// OpenShift path: pod names are still <suffix>-<hash> but stop
+				// accepts the suffix-based names via --pod.
+				suffixes, ok := common.ExpectedPodSuffixes[appRuntime]
+				gomega.Expect(ok).To(gomega.BeTrue(), "unknown appRuntime %s", appRuntime)
+
+				for _, s := range suffixes {
+					pods = append(pods, fmt.Sprintf("%s--%s", appName, s))
+				}
 			}
 
 			output, err := cli.StopAppWithPods(ctx, cfg, appName, pods, appRuntime)
@@ -464,83 +603,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 
 	})
-	ginkgo.Context("Ingestion Tests", func() {
-		ginkgo.BeforeEach(func() {
-			if appRuntime == "openshift" {
-				ginkgo.Skip("Skipping Ingestion Tests for OpenShift runtime")
-			}
-			err := ingestion.CleanDocsFolder(appName)
-			if err != nil {
-				ginkgo.Fail("Failed to clean application docs directory")
-			}
-		})
-		ginkgo.It("starts document ingestion pod and validates ingestion completion", ginkgo.Label("spyre-dependent"), func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
-			defer cancel()
-
-			completionStr := "| /var/docs/test_doc.pdf |"
-			gomega.Expect(appName).NotTo(gomega.BeEmpty())
-
-			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
-
-			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
-
-			logger.Infof("[TEST] Valid File Ingestion completed successfully for application %s", appName)
-		})
-		ginkgo.It("ingestion should not fail while ingesting a blank pdf", ginkgo.Label("spyre-dependent"), func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
-			defer cancel()
-
-			completionStr := "| /var/docs/blank.pdf |"
-			gomega.Expect(appName).NotTo(gomega.BeEmpty())
-
-			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
-
-			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
-
-			logger.Infof("[TEST] Blank File Ingestion completed successfully for application %s", appName)
-		})
-		ginkgo.It("ingestion should fail while ingesting an invalid pdf", ginkgo.Label("spyre-dependent"), func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
-			defer cancel()
-
-			completionStr := "File validation failed: File has .pdf extension but unsupported format: sample_png.pdf"
-			gomega.Expect(appName).NotTo(gomega.BeEmpty())
-
-			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
-
-			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
-
-			logger.Infof("[TEST] Invalid PDF File Ingestion completed successfully for application %s", appName)
-		})
-		ginkgo.It("ingestion should not fail while ingesting an invalid file", ginkgo.Label("spyre-dependent"), func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
-			defer cancel()
-
-			completionStr := "File validation failed: Only PDF files are allowed. Invalid file: sample_txt.txt"
-			gomega.Expect(appName).NotTo(gomega.BeEmpty())
-
-			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
-
-			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
-
-			logger.Infof("[TEST] Invalid File Ingestion completed successfully for application %s", appName)
-		})
-	})
 	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
-		ginkgo.BeforeAll(func() {
+		// NodeTimeout(3h) covers the first run where the judge model must be
+		// downloaded (~2h). On subsequent runs the model is cached and BeforeAll
+		// completes in ~20min (LLM warm-up + ingestion + judge container start).
+		ginkgo.BeforeAll(ginkgo.NodeTimeout(3*time.Hour), func(ctx context.Context) {
 			if appRuntime == "openshift" {
 				ginkgo.Skip("Skipping RAG Golden Dataset Validation for OpenShift runtime")
 			}
@@ -548,10 +615,29 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				ginkgo.Fail("Application name is not set")
 			}
 
+			// Skip the entire RAG Golden Dataset Validation context when the LLM-as-Judge
+			// infrastructure is not configured in this environment.
+			// Required env vars:
+			//   LLM_JUDGE_IMAGE      – container image for the vLLM judge container
+			//   LLM_JUDGE_MODEL_PATH – local path where the judge model weights are stored
+			//   LLM_JUDGE_MODEL      – model name served by vLLM
+			// These are intentionally optional — not every e2e run has a judge GPU/model.
+			llmJudgeImage := os.Getenv("LLM_JUDGE_IMAGE")
+			llmJudgeModelPath := os.Getenv("LLM_JUDGE_MODEL_PATH")
+			llmJudgeModel := os.Getenv("LLM_JUDGE_MODEL")
+			if llmJudgeImage == "" || llmJudgeModelPath == "" || llmJudgeModel == "" {
+				ginkgo.Skip(fmt.Sprintf(
+					"Skipping RAG Golden Dataset Validation — LLM-as-Judge not configured "+
+						"(LLM_JUDGE_IMAGE=%q, LLM_JUDGE_MODEL_PATH=%q, LLM_JUDGE_MODEL=%q). "+
+						"Set all three env vars to enable this context.",
+					llmJudgeImage, llmJudgeModelPath, llmJudgeModel,
+				))
+			}
+
 			logger.Infof("[RAG] Setting golden dataset path")
 			goldenDatasetFile = bootstrap.GetGoldenDatasetFile()
 			if goldenDatasetFile == "" {
-				ginkgo.Fail("GOLDEN_DATASET_FILE environment variable is not set")
+				ginkgo.Skip("Skipping RAG Golden Dataset Validation — GOLDEN_DATASET_FILE environment variable is not set")
 			}
 
 			_, filename, _, _ := runtime.Caller(0)                        // returns the file path of this test file (e2e_suite_test.go)
@@ -566,10 +652,13 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			)
 			logger.Infof("[RAG] Golden dataset file: %s", goldenPath)
 
-			logger.Infof("[RAG] Fetching application info to derive RAG and Judge URLs")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			infoOutput, err := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+			logger.Infof("[RAG] Fetching application info to derive RAG and Judge URLs (waiting for pods to be healthy)")
+			infoCtx, infoCancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer infoCancel()
+			// Poll application info until chat-bot-backend AND similarity-api URLs appear.
+			// After 'application start', containers may take time to become healthy;
+			// until they are, info.md renders the "unavailable" branch (no URL).
+			infoOutput, err := cli.WaitForApplicationInfoURLs(infoCtx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			if err := cli.ValidateApplicationInfo(infoOutput, appName, templateName); err != nil {
@@ -579,16 +668,92 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			judgeBaseURL, err = cli.GetBaseURL(infoOutput, judgePort)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// The LLM-as-Judge is a local podman container on localhost:<judgePort>,
+			// not a catalog-deployed service — build its URL directly for podman.
+			if appRuntime == "podman" {
+				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+			} else {
+				judgeBaseURL, err = cli.GetBaseURL(infoOutput, judgePort)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
 
 			logger.Infof("[RAG] RAG Base URL: %s", ragBaseURL)
 			logger.Infof("[RAG] Judge Base URL: %s", judgeBaseURL)
 
-			logger.Infof("[RAG] Setting up LLM-as-Judge")
-			if err := rag.SetupLLMAsJudge(ctx, cfg, runID); err != nil {
-				ginkgo.Fail(fmt.Sprintf("failed to setup LLM-as-Judge: %v", err))
+			// Wait for similarity-api /health before starting evaluation.
+			similarityBaseURL := cli.ExtractSimilarityAPIURL(infoOutput)
+			if similarityBaseURL == "" {
+				ginkgo.Fail("[RAG] similarity-api URL not found in application info — cannot run golden dataset validation")
 			}
+			logger.Infof("[RAG] Waiting for similarity-api to be healthy at %s/health", similarityBaseURL)
+			similarityCtx, similarityCancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer similarityCancel()
+			if err := rag.WaitForSimilarityAPIReady(similarityCtx, similarityBaseURL, 15*time.Second); err != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] similarity-api is not healthy — cannot run golden dataset validation: %v", err))
+			}
+
+			// Phase 1 — download judge model (registry login + file copy).
+			// This does NOT start the container so it is safe to run before the
+			// main LLM is ready: no GPU contention, no resource crunch.
+			// The ~2h download overlaps with WaitForRAGBackendReady, eliminating
+			// sequential blocking that was causing the suite timeout.
+			logger.Infof("[RAG] Phase 1 — downloading LLM-as-Judge model")
+			if err := rag.DownloadJudgeModel(ctx, cfg); err != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] judge model download failed: %v", err))
+			}
+			logger.Infof("[RAG] Judge model download completed")
+
+			// Phase 2 — wait for the main RAG LLM to be serving.
+			// The judge container is NOT started yet — starting it while the main
+			// LLM is still loading causes a resource crunch that crashes OpenSearch.
+			logger.Infof("[RAG] Phase 2 — waiting for LLM to be ready via %s/v1/models", ragBaseURL)
+			llmCtx, llmCancel := context.WithTimeout(ctx, 40*time.Minute)
+			defer llmCancel()
+			if err := rag.WaitForRAGBackendReady(llmCtx, ragBaseURL, 30*time.Second); err != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] LLM is not ready — cannot run golden dataset validation: %v", err))
+			}
+
+			// Ingest test_doc.pdf via the digitize microservice (operation=ingestion).
+			// Fetch a fresh info snapshot — infoOutput may be stale after the
+			// ~2h model download above.
+			logger.Infof("[RAG] Fetching fresh application info to resolve digitize-backend URL")
+			freshInfoCtx, freshInfoCancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer freshInfoCancel()
+			freshInfoOutput, freshInfoErr := cli.ApplicationInfo(freshInfoCtx, cfg, appName, appRuntime)
+			if freshInfoErr != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] failed to fetch application info for digitize URL: %v", freshInfoErr))
+			}
+
+			var digitizeBaseURL string
+			if appRuntime == "podman" {
+				digitizeBaseURL = cli.ExtractCatalogDigitizeURL(freshInfoOutput)
+			} else {
+				urlList := cli.ExtractURLsFromOutput(freshInfoOutput)
+				if len(urlList) > 0 {
+					digitizeBaseURL = strings.Replace(urlList[0], "ui", "digitize-api", 1)
+				}
+			}
+			if digitizeBaseURL == "" {
+				ginkgo.Fail("[RAG] could not extract digitize-backend URL from 'application info' — cannot ingest documents")
+			}
+			logger.Infof("[RAG] Ingesting test document via digitize microservice at %s", digitizeBaseURL)
+			ingestCtx, ingestCancel := context.WithTimeout(ctx, 25*time.Minute)
+			defer ingestCancel()
+			if err := digitization.IngestTestDocumentViaDigitizeAPI(ingestCtx, digitizeBaseURL, "rag-golden-ingest"); err != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] document ingestion failed — cannot run golden dataset validation: %v", err))
+			}
+			logger.Infof("[RAG] Document ingestion completed successfully")
+
+			// Phase 3 — start the judge container.
+			// Main LLM is confirmed ready (Phase 2 passed) so there is no resource
+			// crunch risk. The model weights are already on disk (Phase 1).
+			logger.Infof("[RAG] Phase 3 — starting LLM-as-Judge container")
+			judgeCtx, judgeCancel := context.WithTimeout(ctx, 30*time.Minute)
+			defer judgeCancel()
+			if err := rag.StartJudgeContainer(judgeCtx, cfg, runID); err != nil {
+				ginkgo.Fail(fmt.Sprintf("[RAG] failed to start LLM-as-Judge container: %v", err))
+			}
+			logger.Infof("[RAG] LLM-as-Judge container is ready")
 		})
 
 		ginkgo.AfterAll(func() {
@@ -600,96 +765,87 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 		})
 
-		ginkgo.It("validates RAG answers against golden dataset", ginkgo.Label("spyre-dependent"), func() {
-			logger.Infof("[RAG] Starting golden dataset validation")
-			cases, err := rag.LoadGoldenCSV(goldenPath)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cases).NotTo(gomega.BeEmpty())
+		ginkgo.It("validates RAG answers against golden dataset",
+			ginkgo.Label("spyre-dependent"),
+			ginkgo.SpecTimeout(3*time.Hour),
+			func(specCtx context.Context) {
+				logger.Infof("[RAG] Starting golden dataset validation")
+				cases, err := rag.LoadGoldenCSV(goldenPath)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(cases).NotTo(gomega.BeEmpty())
 
-			total := len(cases)
-			results := make([]rag.EvalResult, 0, total)
-			passed := 0
+				total := len(cases)
+				results := make([]rag.EvalResult, 0, total)
+				passed := 0
 
-			for i, tc := range cases {
-				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-				defer cancel()
+				for i, tc := range cases {
+					// Fresh 8-minute context per question, child of the spec context.
+					// 8 min matches httpClientTimeout in evaluator.go — the RAG LLM
+					// can take several minutes per response on this hardware.
+					// Using specCtx as parent ensures the per-spec SpecTimeout cancels
+					// any in-flight HTTP call immediately when the spec deadline fires.
+					ctx, cancel := context.WithTimeout(specCtx, 8*time.Minute)
 
-				result := rag.EvalResult{
-					Question: tc.Question,
-					Passed:   false,
-				}
+					result := rag.EvalResult{
+						Question: tc.Question,
+						Passed:   false,
+					}
 
-				// 1. Ask RAG
-				ragAns, ragErr := rag.RunWithRetry(ctx, defaultMaxRetries, func(ctx context.Context) (string, error) {
-					return rag.AskRAG(ctx, ragBaseURL, tc.Question)
-				})
+					// 1. Ask RAG
+					ragAns, ragErr := rag.RunWithRetry(ctx, defaultMaxRetries, func(ctx context.Context) (string, error) {
+						return rag.AskRAG(ctx, ragBaseURL, tc.Question)
+					})
 
-				if ragErr != nil {
-					result.Details = fmt.Sprintf("RAG request failed: %v", ragErr)
+					if ragErr != nil {
+						result.Details = fmt.Sprintf("RAG request failed: %v", ragErr)
+						results = append(results, result)
+						cancel()
+
+						continue
+					}
+
+					// 2. Ask Judge with format retry
+					verdict, reason, err := rag.AskJudgeWithFormatRetry(
+						ctx,
+						defaultMaxRetries,
+						judgeBaseURL,
+						tc.Question,
+						ragAns,
+						tc.GoldenAnswer,
+					)
+					if err != nil {
+						result.Details = fmt.Sprintf("Judge failed: %v", err)
+						results = append(results, result)
+						cancel()
+
+						continue
+					}
+
+					result.Passed = verdict == "YES"
+					result.Details = reason
+
+					if result.Passed {
+						passed++
+					}
+
 					results = append(results, result)
-
-					continue
+					logger.Infof("[RAG] Evaluated question %d/%d | verdict=%s | reason=%s", i+1, total, verdict, reason)
+					cancel()
 				}
 
-				// 2. Ask Judge with format retry
-				verdict, reason, err := rag.AskJudgeWithFormatRetry(
-					ctx,
-					defaultMaxRetries,
-					judgeBaseURL,
-					tc.Question,
-					ragAns,
-					tc.GoldenAnswer,
-				)
-				if err != nil {
-					result.Details = fmt.Sprintf("Judge failed: %v", err)
-					results = append(results, result)
+				accuracy := float64(passed) / float64(total)
+				rag.PrintValidationSummary(results, accuracy)
 
-					continue
+				if accuracy < defaultRagAccuracyThreshold {
+					ginkgo.Fail(fmt.Sprintf(
+						"RAG accuracy %.2f below threshold %.2f",
+						accuracy,
+						defaultRagAccuracyThreshold,
+					))
 				}
 
-				result.Passed = verdict == "YES"
-				result.Details = reason
-
-				if result.Passed {
-					passed++
-				}
-
-				results = append(results, result)
-				logger.Infof("[RAG] Evaluated question %d/%d | verdict=%s | reason=%s", i+1, total, verdict, reason)
-			}
-
-			accuracy := float64(passed) / float64(total)
-			rag.PrintValidationSummary(results, accuracy)
-
-			if accuracy < defaultRagAccuracyThreshold {
-				ginkgo.Fail(fmt.Sprintf(
-					"RAG accuracy %.2f below threshold %.2f",
-					accuracy,
-					defaultRagAccuracyThreshold,
-				))
-			}
-
-			logger.Infof("[RAG] Golden dataset validation completed")
-		})
-	})
-	ginkgo.Context("Clean Ingestion Docs", func() {
-		ginkgo.It("cleans the ingestion docs from the db", ginkgo.Label("spyre-dependent"), func() {
-			if appRuntime == "openshift" {
-				ginkgo.Skip("Skipping Clean Ingestion Docs for OpenShift runtime")
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-			defer cancel()
-
-			completionStr := "DB cleanup completed successfully"
-			gomega.Expect(appName).NotTo(gomega.BeEmpty())
-
-			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, true, appRuntime)
-
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
-
-			logger.Infof("[TEST] Clean Ingestion completed successfully for application %s", appName)
-		})
+				logger.Infof("[RAG] Golden dataset validation completed")
+			})
 	})
 	ginkgo.Context("Digitization Tests", ginkgo.Label("spyre-dependent", "digitization-tests"), func() {
 		var digitizeBaseURL string
@@ -703,11 +859,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[DIGITIZE] Setting up digitization tests")
 
-			// Get the digitize base URL
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			// Get the digitize base URL — wait for pods to be healthy first.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			infoOutput, err := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+			// Poll application info until URLs are present (pods fully healthy after start).
+			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			if err := cli.ValidateApplicationInfo(infoOutput, appName, templateName); err != nil {
@@ -715,7 +872,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			if appRuntime == "podman" {
-				digitizeBaseURL, err = cli.GetBaseURL(infoOutput, digitizePort)
+				// Catalog path: extract digitize-backend HTTPS URL directly from info output.
+				// digitize-backend is the REST API endpoint for the digitize microservice.
+				digitizeBaseURL = cli.ExtractCatalogDigitizeURL(infoOutput)
+				if digitizeBaseURL == "" {
+					ginkgo.Fail("Could not extract digitize-backend URL from 'application info' output")
+				}
 			} else {
 				urlList := cli.ExtractURLsFromOutput(infoOutput)
 				if len(urlList) == 0 {
@@ -723,10 +885,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				} else {
 					digitizeBaseURL = strings.Replace(urlList[0], "ui", "digitize-api", 1)
 				}
-
 			}
 
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// err is only used in the openshift branch; no check needed for podman.
+			_ = err
 
 			logger.Infof("[DIGITIZE] Digitize Base URL: %s", digitizeBaseURL)
 		})

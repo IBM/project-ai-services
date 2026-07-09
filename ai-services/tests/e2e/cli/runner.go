@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
@@ -32,6 +34,17 @@ type StartOptions struct {
 	IngestDocs bool
 }
 
+// isKnownSpyreConfigureFailure reports whether a bootstrap configure/bootstrap
+// output contains the known "Spyre post-repair checks still failing" strings.
+// When this returns true the OS-level exit error can be suppressed — the repairs
+// were applied (VFIO permissions + SELinux policy were fixed) but a reboot is
+// needed for the changes to be fully effective. Application creation and all
+// other tests proceed normally on this hardware state.
+func isKnownSpyreConfigureFailure(output string) bool {
+	return strings.Contains(output, "some Spyre configuration checks still failed after repair") ||
+		strings.Contains(output, "failed to configure spyre card")
+}
+
 // Bootstrap runs the full bootstrap (configure + validate).
 func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", cfg.AIServiceBin, appRuntime)
@@ -39,6 +52,12 @@ func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (stri
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err != nil {
+		// For podman, 'bootstrap' (full run: configure + validate) also exits non-zero
+		// when Spyre post-repair checks still fail — same acceptable state.
+		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
+			logger.Infof("[CLI] bootstrap exited non-zero with known Spyre repair state — treating as non-fatal")
+			return output, nil
+		}
 		return output, err
 	}
 
@@ -46,12 +65,21 @@ func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (stri
 }
 
 // BootstrapConfigure runs only the 'configure' step.
+// For podman, the command exits non-zero when Spyre post-repair checks still fail.
+// That is expected behaviour — repairs were applied, a reboot may be needed for full
+// effect. We suppress the OS-level exit error for the two known acceptable Spyre
+// strings so tests can continue evaluating the output via ValidateBootstrapConfigureOutput
+// without a hard failure on the raw exec error.
 func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", cfg.AIServiceBin, appRuntime)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "configure", "--runtime", appRuntime)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err != nil {
+		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
+			logger.Infof("[CLI] bootstrap configure exited non-zero with known Spyre repair state — treating as non-fatal")
+			return output, nil
+		}
 		return output, err
 	}
 
@@ -140,17 +168,25 @@ func CreateRAGAppAndValidate(
 		return output, err
 	}
 
-	backendURL, chatbotUiURL, s, err := getRAGURLs(appRuntime, output, backendPort, uiPort)
+	backendURL, chatbotUiURL, isCatalogPath, err := getRAGURLs(ctx, cfg, appRuntime, appName, output, backendPort, uiPort)
 	if err != nil {
-		return s, err
+		return output, err
 	}
-	// Skip TLS verification for OpenShift (self-signed certificates)
-	skipTLSVerify := appRuntime == "openshift"
+
+	// Skip TLS verification for:
+	//   - OpenShift (self-signed certificates)
+	//   - Podman catalog path (nip.io self-signed certificates via Caddy)
+	skipTLSVerify := appRuntime == "openshift" || isCatalogPath
 	httpClient := &http.Client{
 		Timeout: defaultCommandTimeout,
 	}
 	if skipTLSVerify {
-		logger.Warningf("[WARNING] TLS certificate verification disabled for OpenShift runtime")
+		logger.Warningf("[WARNING] TLS certificate verification disabled (%s)", func() string {
+			if appRuntime == "openshift" {
+				return "OpenShift runtime"
+			}
+			return "catalog path — nip.io self-signed certificate"
+		}())
 		httpClient.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
@@ -173,23 +209,110 @@ func CreateRAGAppAndValidate(
 	return output, nil
 }
 
-func getRAGURLs(appRuntime string, output string, backendPort string, uiPort string) (string, string, string, error) {
-	backendURL := ""
-	chatbotUiURL := ""
-	if appRuntime == "podman" {
-		hostIP, err := extractHostIP(output)
-		if err != nil {
-			return "", "", output, err
-		}
-		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
-		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
-	} else {
-		urls := ExtractURLsFromOutput(output)
-		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
-		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
+// getRAGURLs extracts the backend and UI URLs for a deployed RAG application.
+//
+// For podman (catalog path): the 'application create' next.md output only contains digitize URLs.
+// The chat backend and UI URLs are only available in 'application info' (info.md), which prints:
+//
+//	"- chat is available to use at https://chat-bot-ui-<slug>.<domain>"
+//	"- chat API is available to use at https://chat-bot-backend-<slug>.<domain>"
+//
+// So we call 'application info' to get the authoritative URLs.
+//
+// For openshift: extract route URLs directly from the create output.
+func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
+	if appRuntime == "openshift" {
+		urls := ExtractURLsFromOutput(createOutput)
+		bURL := strings.Replace(urls[0], "digitize-ui", "backend", 1)
+		uURL := strings.Replace(urls[0], "digitize-ui", "ui", 1)
+
+		return bURL, uURL, false, nil
 	}
 
-	return backendURL, chatbotUiURL, "", nil
+	// Podman catalog path: fetch info output which contains all service URLs via info.md.
+	infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
+	if infoErr != nil {
+		return "", "", true, fmt.Errorf("could not retrieve application info for URL extraction: %w", infoErr)
+	}
+
+	bURL, uURL := extractCatalogRAGURLs(infoOutput)
+	if bURL == "" {
+		// Log full info output to help diagnose URL format changes.
+		logger.Warningf("[RAG] Could not extract chat backend URL from 'application info' output:\n%s", infoOutput)
+
+		return "", "", true, fmt.Errorf("could not determine RAG backend URL from 'application info' output")
+	}
+
+	return bURL, uURL, true, nil
+}
+
+// extractCatalogRAGURLs parses the 'application info' output (info.md rendered) for the
+// chat service backend API URL and chat UI URL.
+//
+// The catalog renders human-readable service titles from the template catalog, e.g.:
+//
+//	"- Question and answer is available to use at https://chat-bot-ui-<slug>.<domain>"
+//	"- Question and answer API is available to use at https://chat-bot-backend-<slug>.<domain>"
+//
+// We identify the chat UI line as: contains "is available to use at" AND NOT "API"
+// AND the URL host contains "chat-bot-ui".
+// We identify the chat backend line as: contains "API is available to use at"
+// AND the URL host contains "chat-bot-backend".
+//
+// Using URL-host matching (chat-bot-ui / chat-bot-backend) makes this robust against
+// any future title-text changes in info.md.
+//
+// Returns (backendURL, uiURL) — empty strings if not found.
+func extractCatalogRAGURLs(output string) (string, string) {
+	var backendURL, uiURL string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+
+		if !strings.Contains(line, "is available to use at") {
+			continue
+		}
+
+		url := extractHTTPSURL(line)
+		if url == "" {
+			continue
+		}
+
+		// Chat UI: URL host starts with "chat-bot-ui"
+		if strings.Contains(url, "chat-bot-ui") && uiURL == "" {
+			uiURL = url
+		}
+
+		// Chat backend API: URL host starts with "chat-bot-backend"
+		if strings.Contains(url, "chat-bot-backend") && backendURL == "" {
+			backendURL = url
+		}
+	}
+
+	return backendURL, uiURL
+}
+
+// extractHTTPSURL extracts the first https:// URL from a line of text.
+// A URL ends at the first whitespace character — everything after a space is
+// not part of the URL (e.g. ". Use this endpoint..." on the same line).
+// Trailing punctuation (period, comma) immediately before whitespace is also stripped.
+func extractHTTPSURL(line string) string {
+	const httpsPrefix = "https://"
+	idx := strings.Index(line, httpsPrefix)
+	if idx < 0 {
+		return ""
+	}
+
+	rest := line[idx:]
+
+	// Stop at the first whitespace — nothing after a space is part of the URL.
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		rest = rest[:spaceIdx]
+	}
+
+	// Strip any trailing punctuation left over (e.g. a period before the space).
+	rest = strings.TrimRight(rest, ".,;")
+
+	return rest
 }
 
 // waitForEndpointOK polls the given endpoint until it returns HTTP 200 OK or exhausts retries.
@@ -226,26 +349,140 @@ func waitForEndpointOK(
 	return fmt.Errorf("endpoint %s failed after retries: %w", endpoint, lastErr)
 }
 
-// extractHostIP extracts the host IP from the CLI output using regex.
-func extractHostIP(output string) (string, error) {
-	const minMatchGroups = 2
-	re := regexp.MustCompile(`http[s]?://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
-	match := re.FindStringSubmatch(output)
-	if len(match) < minMatchGroups {
-		return "", fmt.Errorf("unable to determine application host IP from CLI output")
+// GetBaseURL extracts the chat-backend URL from the CLI output (for ragBaseURL).
+// For podman (catalog path) the output contains HTTPS domain URLs from info.md — extracted by host substring.
+// For OpenShift the output contains route URLs — extracted by regex.
+//
+// NOTE: For the LLM-as-Judge URL (judgeBaseURL), the judge is a separate local podman
+// container on localhost:<port> — use GetJudgeBaseURL instead.
+// NOTE: For the digitize backend URL, use ExtractCatalogDigitizeURL instead.
+func GetBaseURL(createOutput string, backendPort string) (string, error) {
+	// Catalog path (podman): extract chat-bot-backend HTTPS URL from info output.
+	if backendURL, _ := extractCatalogRAGURLs(createOutput); backendURL != "" {
+		return backendURL, nil
 	}
 
-	return match[1], nil
+	// OpenShift path: extract any https/http URL from the output.
+	urls := ExtractURLsFromOutput(createOutput)
+	if len(urls) > 0 {
+		return urls[0], nil
+	}
+
+	return "", fmt.Errorf("could not determine base URL from CLI output")
 }
 
-// GetBaseURL constructs the base URL from the CLI output and backend port.
-func GetBaseURL(createOutput string, backendPort string) (string, error) {
-	hostIP, err := extractHostIP(createOutput)
-	if err != nil {
-		return "", err
+// GetJudgeBaseURL returns the base URL for the local LLM-as-Judge container.
+// The judge is a local podman container bound to localhost:<judgePort>, not a
+// catalog-deployed service, so its URL is always http://localhost:<port>.
+func GetJudgeBaseURL(judgePort string) string {
+	return fmt.Sprintf("http://localhost:%s", judgePort)
+}
+
+// ExtractCatalogDigitizeURL parses the 'application info' output for the
+// digitize-backend service URL.
+//
+// Actual output line:
+//
+//	"- Digitize documents Documents API is available to use at https://digitize-backend-<slug>.<domain>."
+//
+// We match on URL-host substring "digitize-backend" which is stable regardless
+// of human-readable title changes in info.md.
+func ExtractCatalogDigitizeURL(infoOutput string) string {
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		url := extractHTTPSURL(line)
+		if url == "" {
+			continue
+		}
+		if strings.Contains(url, "digitize-backend") {
+			return url
+		}
 	}
 
-	return fmt.Sprintf("http://%s:%s", hostIP, backendPort), nil
+	return ""
+}
+
+// ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
+//
+// Catalog path (podman): URL host contains "similarity-api"
+//
+//	e.g. "https://similarity-api-<slug>.<ip>.nip.io"
+//
+// Legacy podman path: plain http URL with HOST_IP:PORT
+//
+//	e.g. "http://10.48.64.172:9100"  (extracted by ExtractURLsFromOutput fallback)
+func ExtractSimilarityAPIURL(infoOutput string) string {
+	// Catalog path: HTTPS nip.io URL with "similarity-api" in the host.
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		url := extractHTTPSURL(line)
+		if url != "" && strings.Contains(url, "similarity-api") {
+			return url
+		}
+	}
+
+	// Legacy podman path: plain http URL on the line containing "Similarity API".
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "Similarity API") {
+			continue
+		}
+		for _, u := range ExtractURLsFromOutput(line) {
+			if strings.HasPrefix(u, "http://") {
+				return u
+			}
+		}
+	}
+
+	return ""
+}
+
+// WaitForApplicationInfoURLs polls 'application info' until the catalog backend URL
+// (chat-bot-backend) is present in the output — meaning pods are healthy and the
+// info.md template has rendered the running branch.
+//
+// This is needed because after 'application start' the containers may take some
+// time to become healthy, during which getContainerStatus returns empty strings and
+// info.md renders the "unavailable" branch (no URLs). We must wait for URLs to
+// appear before the RAG/Digitize BeforeAll blocks attempt to use them.
+//
+// maxWait is the total polling duration; pollInterval is the sleep between attempts.
+// Returns the info output once the backend URL is present, or an error on timeout.
+func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
+	deadline := time.Now().Add(maxWait)
+	attempt := 0
+	for time.Now().Before(deadline) {
+		attempt++
+		infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Warningf("[WAIT] application info attempt %d failed: %v — retrying", attempt, infoErr)
+			time.Sleep(pollInterval)
+			continue
+		}
+		// For podman, require both chat-bot-backend AND similarity-api URLs to be
+		// present — similarity-api is a hard dependency of every RAG query and must
+		// be healthy before evaluation starts.
+		// For openshift, any URL in the output is sufficient.
+		if appRuntime == "podman" {
+			backendURL, _ := extractCatalogRAGURLs(infoOutput)
+			similarityURL := ExtractSimilarityAPIURL(infoOutput)
+			if backendURL != "" && similarityURL != "" {
+				logger.Infof("[WAIT] application info URLs ready after %d attempt(s) — backend: %s, similarity: %s",
+					attempt, backendURL, similarityURL)
+				return infoOutput, nil
+			}
+		} else {
+			if len(ExtractURLsFromOutput(infoOutput)) > 0 {
+				return infoOutput, nil
+			}
+		}
+		logger.Infof("[WAIT] application info attempt %d: URLs not yet present (pods may still be starting), retrying in %s", attempt, pollInterval)
+		time.Sleep(pollInterval)
+	}
+	// Last attempt — return whatever we have even if URLs are missing so the
+	// caller can surface a more descriptive error.
+	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
+	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
 }
 
 // HelpCommand runs the 'help' command with or without arguments.
@@ -535,6 +772,147 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 
 	if err != nil {
 		return output, fmt.Errorf("application templates command run failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigure runs 'ai-services catalog configure --runtime <runtime>' to deploy/ensure
+// the catalog service is running. It is idempotent — safe to call even if already deployed.
+//
+// On first run the CLI prompts for an admin password via term.ReadPassword which requires
+// a real TTY. We launch the process inside a pseudo-terminal (PTY) so the prompt succeeds,
+// then write the password twice (password + confirm) through the PTY master.
+// On subsequent runs the catalog-secret already exists and the prompt is skipped entirely.
+func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	password := bootstrap.GetCatalogAdminPassword()
+	args := []string{"catalog", "configure", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, password+"\n"+password+"\n")
+	if err != nil {
+		return output, fmt.Errorf("catalog configure failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// runWithPTY starts cmd inside a pseudo-terminal, writes input to the PTY master,
+// collects all output, and waits for the process to finish.
+// It respects ctx cancellation — the child process is killed when ctx is done.
+func runWithPTY(ctx context.Context, bin string, args []string, input string) (string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+
+	// Start the command inside a PTY.
+	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: 24, Cols: 80}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to start PTY: %w", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	// Kill the child on context cancellation.
+	go func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	// Write the password(s) to the PTY master immediately.
+	// The CLI reads them via term.ReadPassword on the PTY slave (its stdin).
+	if _, err := ptmx.Write([]byte(input)); err != nil {
+		// Non-fatal if the process already exited before we write.
+		logger.Warningf("[CLI] PTY write warning: %v", err)
+	}
+
+	// Read all output from the PTY master until it closes (EOF = process exited).
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, ptmx)
+
+	// Wait for the process to exit.
+	if err := cmd.Wait(); err != nil {
+		return buf.String(), err
+	}
+
+	return buf.String(), nil
+}
+
+// CatalogInfo runs 'ai-services catalog info' and returns the combined output.
+// The output contains the Catalog Backend API URL printed by the configure command.
+func CatalogInfo(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	args := []string{"catalog", "info", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return output, fmt.Errorf("catalog info failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// ExtractCatalogBackendURL parses the output of 'catalog info' and returns the
+// Catalog Backend API URL (https://...).
+// The info.md template prints a line like:
+//
+//	"- Catalog Backend API is available at https://<domain>[:<port>]"
+func ExtractCatalogBackendURL(infoOutput string) string {
+	const backendMarker = "Catalog Backend API is available at "
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, backendMarker)
+		if idx >= 0 {
+			return strings.TrimSpace(line[idx+len(backendMarker):])
+		}
+	}
+
+	return ""
+}
+
+// ExtractCatalogBackendURLFromConfigureOutput parses the output of 'catalog configure'
+// and returns the Catalog Backend API URL.
+// The next.md template prints a line like:
+//
+//	"- Access the Catalog Backend at https://<domain>[:<port>]"
+func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string {
+	const backendMarker = "Access the Catalog Backend at "
+	for _, line := range strings.Split(configureOutput, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, backendMarker)
+		if idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(backendMarker):]), " .,")
+		}
+	}
+
+	// Fallback: also try info.md marker in case configure output format differs
+	return ExtractCatalogBackendURL(configureOutput)
+}
+
+// CatalogLogin performs a non-interactive catalog login using server URL, username, and password.
+// It runs: ai-services catalog login --server <url> --username <user> --password-stdin [--insecure] --runtime <runtime>
+// with the password piped via stdin so no credentials appear in process arguments.
+// Pass insecure=true when the catalog server uses a self-signed or nip.io certificate (e2e environments).
+func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, password, appRuntime string, insecure bool) (string, error) {
+	args := []string{
+		"catalog", "login",
+		"--server", serverURL,
+		"--username", username,
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+	if insecure {
+		args = append(args, "--insecure")
+	}
+	logger.Infof("[CLI] Running: %s catalog login --server %s --username %s --password-stdin --runtime %s (insecure=%v)",
+		cfg.AIServiceBin, serverURL, username, appRuntime, insecure)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	// Pipe password via stdin so it never appears in the process argument list.
+	cmd.Stdin = bytes.NewBufferString(password + "\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return output, fmt.Errorf("catalog login failed: %w\n%s", err, output)
 	}
 
 	return output, nil

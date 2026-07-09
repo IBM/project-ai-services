@@ -30,19 +30,18 @@ func SetAppRuntime(runtime string) {
 	appRuntime = runtime
 }
 
-// getHTTPClient returns an HTTP client configured based on the runtime.
-// For OpenShift, it skips TLS certificate verification.
+// getHTTPClient returns an HTTP client that skips TLS certificate verification.
+// Both the podman catalog path (nip.io self-signed certs) and OpenShift use
+// HTTPS with certificates that are not trusted by the system root CA store.
+// This is intentional for e2e test environments only — same pattern used by
+// rag/evaluator.go PostJSON and the similarity health-check client.
 func getHTTPClient(timeout time.Duration) *http.Client {
-	client := &http.Client{Timeout: timeout}
-
-	if appRuntime == "openshift" {
-		// Skip TLS certificate verification for OpenShift
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
 	}
-
-	return client
 }
 
 // GetTestPDFPath returns the path to a test PDF file.
@@ -358,32 +357,39 @@ func handleJobStatus(status *JobStatusResponse, jobID string) (*JobStatusRespons
 	}
 }
 
-// WaitForJobCompletion waits for a job to complete.
+// WaitForJobCompletion polls job status until the job reaches a terminal state
+// (completed or failed) or the timeout is exceeded.
+//
+// It checks immediately on entry, then every 30 seconds — so jobs that finish
+// quickly are not held waiting for a long ticker interval.
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobStatusResponse, error) {
+	const pollInterval = 30 * time.Second
+
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ctx.Done():
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for job %s to complete after %s", jobID, timeout)
+		}
+
+		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("timeout waiting for job completion")
-			}
+		}
 
-			status, err := GetJobStatus(ctx, baseURL, jobID)
-			if err != nil {
-				logger.Warningf("[DIGITIZE] Failed to get job status: %v", err)
-
-				continue
-			}
-
+		status, err := GetJobStatus(ctx, baseURL, jobID)
+		if err != nil {
+			logger.Warningf("[DIGITIZE] Failed to get job status for %s: %v — retrying in %s", jobID, err, pollInterval)
+		} else {
 			result, resultErr, done := handleJobStatus(status, jobID)
 			if done {
 				return result, resultErr
 			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(pollInterval):
 		}
 	}
 }
@@ -841,6 +847,45 @@ func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths [
 	}
 
 	return nil, fmt.Errorf("unexpected status code %d: %s", statusCode, string(respBody))
+}
+
+// IngestTestDocumentViaDigitizeAPI ingests the standard test_doc.pdf fixture
+// through the digitize microservice (operation=ingestion).
+//
+// This is the replacement for the legacy CLI-based ingestion path
+// (hostpath copy + `application start --pod ingest-docs/clean-docs`).
+// The document is embedded and indexed into OpenSearch so it becomes
+// queryable by the RAG chat-bot backend before golden dataset evaluation runs.
+//
+// digitizeBaseURL — base URL of the running digitize microservice.
+// jobName         — name to tag the submitted job with (e.g. "rag-golden-ingest").
+func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobName string) error {
+	pdfPath := GetTestPDFPath()
+	if pdfPath == "" {
+		return fmt.Errorf("could not resolve test PDF path")
+	}
+
+	logger.Infof("[INGEST] Submitting ingestion job for %s (job name: %s)", filepath.Base(pdfPath), jobName)
+
+	jobResp, err := CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", jobName)
+	if err != nil {
+		return fmt.Errorf("failed to create ingestion job: %w", err)
+	}
+
+	logger.Infof("[INGEST] Job submitted (job_id=%s) — waiting for completion", jobResp.JobID)
+
+	// Ingestion involves OCR + embedding + OpenSearch indexing; allow 20 minutes.
+	const ingestTimeout = 20 * time.Minute
+
+	finalStatus, err := WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, ingestTimeout)
+	if err != nil {
+		return fmt.Errorf("ingestion job %s did not complete: %w", jobResp.JobID, err)
+	}
+
+	logger.Infof("[INGEST] Job %s completed — status=%s docs=%d",
+		jobResp.JobID, finalStatus.Status, len(finalStatus.Documents))
+
+	return nil
 }
 
 // Made with Bob
