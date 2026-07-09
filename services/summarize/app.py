@@ -698,7 +698,6 @@ async def process_summarization_job(job_id: str, level):
                 metadata={
                     "total_chunks": num_chunks,
                     "completed_chunks": 0,
-                    "failed_chunks": 0,
                     "phase": "summarizing"
                 }
             )
@@ -769,14 +768,6 @@ async def process_summarization_job(job_id: str, level):
                             f"Chunk {chunk_index + 1}/{num_chunks} failed for job {job_id}: {chunk_exc}",
                             exc_info=True
                         )
-                        # Record the failure immediately in DB metadata before re-raising
-                        async with metadata_lock:
-                            job_record = db_repo.get_job_by_id(job_id)
-                            if job_record:
-                                current_metadata = job_record.job_metadata or {}
-                                current_metadata["failed_chunks"] = current_metadata.get("failed_chunks", 0) + 1
-                                db_repo.update_job(job_id, metadata=current_metadata)
-                        raise
 
             # Process all chunks in parallel.
             # Use explicit tasks so that when one chunk fails we can cancel the siblings
