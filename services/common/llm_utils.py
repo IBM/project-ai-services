@@ -228,7 +228,7 @@ def query_vllm_payload(
     token_buffer_ratio: float | None = None,
 ):
     # Lazy import to avoid circular dependencies
-    from chatbot.settings import get_rag_language_config, settings as chatbot_settings
+    from chatbot.settings import get_rag_language_config, get_history_token_budget, settings as chatbot_settings
     from chatbot.conversation_utils import truncate_history_by_tokens
     
     context = "\n\n".join([doc.get("page_content") for doc in documents])
@@ -271,7 +271,10 @@ def query_vllm_payload(
         # Context fits completely, use remaining budget for history
         remaining_budget_for_history = budget_for_context - context_token_count
         # Cap history budget at configured limit or remaining budget, whichever is smaller
-        history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+        history_budget = min(
+            get_history_token_budget(lang, chatbot_settings.chatbot.history_token_budget),
+            remaining_budget_for_history
+        )
         logger.debug(
             f"Context fits completely ({context_token_count} tokens). "
             f"History budget: {history_budget} tokens"
