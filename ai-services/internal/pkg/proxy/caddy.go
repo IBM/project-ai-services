@@ -134,7 +134,7 @@ func (c *caddyManager) ensureSubroute() error {
 	}
 
 	// Subroute is absent; seed it via a single top-level POST.
-	// @id tags are JSON-only: Caddyfile has no syntax for them, so we create
+	//	@id	tags are JSON-only: Caddyfile has no syntax for them, so we create
 	// the subroute container here through the Admin API instead of the Caddyfile.
 	outerRoute := map[string]any{
 		"@id": "app-routes",
