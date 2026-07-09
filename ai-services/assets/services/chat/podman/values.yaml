@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services/chatbot-service:v0.0.22
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.22
   log_level: "INFO"
   chatbot:
     searchMode: "hybrid"
