@@ -164,6 +164,80 @@ class TestCreateJobs:
             "My Job",
         )
 
+    def test_successful_digitization_job_creation_with_docx(self, digitize_test_client):
+        """Test successful digitization job creation with DOCX file."""
+        stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
+        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+
+        # DOCX file signature: PK\x03\x04 (ZIP format)
+        docx_header = b"PK\x03\x04\x14\x00\x06\x00"
+        
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
+        )
+
+        assert response.status_code == 202
+        assert response.json() == {"job_id": "job-123"}
+        stage_upload_files_mock.assert_awaited_once()
+        initialize_job_state_mock.assert_called_once_with(
+            "job-123",
+            OperationType.DIGITIZATION,
+            OutputFormat.JSON,
+            ["document.docx"],
+            None,
+        )
+
+    def test_successful_ingestion_job_creation_with_docx(self, digitize_test_client):
+        """Test successful ingestion job creation with DOCX file."""
+        docx_header = b"PK\x03\x04\x14\x00\x06\x00"
+        
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
+    def test_rejects_invalid_docx_file(self, digitize_test_client):
+        """Test rejection of invalid DOCX file (not a valid ZIP/DOCX)."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization",
+            files=[("files", ("document.docx", b"not-a-docx-file", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
+        )
+
+        assert response.status_code == 415
+
+    def test_accepts_docx_with_uppercase_extension(self, digitize_test_client):
+        """Test that DOCX files with uppercase extension are accepted."""
+        stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
+        docx_header = b"PK\x03\x04\x14\x00\x06\x00"
+        
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", ("DOCUMENT.DOCX", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
+        )
+
+        assert response.status_code == 202
+        stage_upload_files_mock.assert_awaited_once()
+
+    def test_mixed_pdf_and_docx_ingestion(self, digitize_test_client):
+        """Test ingestion job with both PDF and DOCX files."""
+        pdf_header = b"%PDF-1.4 test"
+        docx_header = b"PK\x03\x04\x14\x00\x06\x00"
+        
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("document.pdf", pdf_header, "application/pdf")),
+                ("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
 
 @pytest.mark.unit
 class TestJobsEndpoints:
