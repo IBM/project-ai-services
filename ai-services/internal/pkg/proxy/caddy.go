@@ -114,8 +114,8 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 }
 
 // ensureSubroute guarantees the persistent subroute container exists in Caddy's live config.
-// It uses GET /id/app-routes-handler to check; if absent it creates the outer catch-all route
-// via a single POST to the top-level routes array (one reload, tolerated at first-use time).
+// It checks via GET /id/app-routes-handler; if absent it seeds the outer catch-all route
+// containing the subroute handler via a single top-level POST (one reload, first-use only).
 // On every subsequent call the GET returns 200 and the function is a no-op.
 func (c *caddyManager) ensureSubroute() error {
 	checkURL, err := url.JoinPath(c.adminURL, "id", constants.CaddySubrouteHandlerID)
@@ -169,11 +169,8 @@ func (c *caddyManager) ensureSubroute() error {
 // createRoute appends a route into the persistent subroute handler's inner routes array.
 // Posting to /id/<subrouteHandlerID>/routes mutates a handler's sub-config, which Caddy
 // applies in-place without a config reload — no connections are dropped on route add/remove.
+// ensureSubroute must be called once before the first createRoute call in a batch.
 func (c *caddyManager) createRoute(routeConfig map[string]any) error {
-	if err := c.ensureSubroute(); err != nil {
-		return fmt.Errorf("failed to ensure subroute container: %w", err)
-	}
-
 	routeURL, err := url.JoinPath(c.adminURL, "id", constants.CaddySubrouteHandlerID, "routes")
 	if err != nil {
 		return err
@@ -317,7 +314,14 @@ func RegisterRoutesForAppAndReturn(
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 3: Register each route with Caddy
+	// Step 3: Ensure the subroute container exists exactly once before registering any routes.
+	if cm, ok := proxyManager.(*caddyManager); ok {
+		if err := cm.ensureSubroute(); err != nil {
+			return nil, fmt.Errorf("failed to ensure subroute container: %w", err)
+		}
+	}
+
+	// Step 4: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(ctx, route); err != nil {

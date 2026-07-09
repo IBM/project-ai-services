@@ -1,19 +1,26 @@
 {
 	admin 0.0.0.0:2019
 
-	servers :443 {
-		name {{ .CaddyServerName }}
-	}
+    servers :443 {
+        name {{ .CaddyServerName }}
+    }
+
+    # 1. Enable On-Demand TLS globally and point it to your local health check
+    on_demand_tls {
+        ask http://127.0.0.1:8080/health
+    }
 }
 
 :443 {
-	# 1. This initializes the routes array natively so it's never empty
-	handle /internal/health {
+    handle /internal/health {
         # @id internal-health
         respond "OK" 200
     }
 
-	tls internal
+    # 2. Tell the internal CA to generate certs when requested
+    tls internal {
+        on_demand
+    }
 }
 
 # Internal health check endpoint (Bypasses automatic HTTPS redirection)
