@@ -1,0 +1,237 @@
+# Applications Table Refactor
+
+**Components:** `pages/DigitalAssistants` & `components/DeployedServicesTable`
+
+---
+
+## Problem
+
+The Digital Assistants table and Deployed Services table were developed independently but provide many of the same functionalities, including:
+
+* Search
+* Filtering
+* Column management
+* Export
+* Confirmation dialogs
+* Data fetching and refresh
+
+Because these features were implemented separately, both tables contain significant duplicated logic and UI code.
+This duplication increases maintenance effort, requires bug fixes to be applied in multiple places, 
+
+---
+
+## Proposed Solution
+
+Create a shared table framework that contains the common functionality used by both Digital Assistants and Deployed Services tables.
+Common functionality will be centralized into reusable components, hooks, and utilities.This approach reduces duplication
+
+```
+src/components/
+  table/
+    shared/
+      types.ts
+      table.shared.module.scss
+      utils/
+        reducerUtils.ts
+        tableUtils.ts
+      hooks/
+        useAutoRefresh.ts
+        useCSVExport.ts
+        useExportToastAutoDismiss.ts
+      components/
+        CellRenderers.tsx
+        DeleteModal.tsx
+        ExportModal.tsx
+        TableToasts.tsx
+        TableEmptyStates.tsx
+        TableToolbarActions.tsx
+  DeployedServicesTable/
+    DeployedServicesTable.tsx     ← adopts shared components and hooks
+    DeployedServices.module.scss  ← retains only DS-specific rules
+    CellRenderers.tsx             ← retains NameCell
+    types.ts                      ← retains only DS-specific state and actions
+    index.ts                      ← unchanged
+
+src/pages/
+  DigitalAssistants/
+    DigitalAssistants.tsx         ← adopts shared components and hooks
+    DigitalAssistants.module.scss ← retains only DA-specific and AboutTab rules
+    CellRenderers.tsx             ← retains NameCell
+    types.ts                      ← retains only DA-specific state and actions
+    index.ts                      ← unchanged
+```
+
+All shared table infrastructure lives in one place with a clear label, and both consumers remain as independent files that only import what they need from it.
+
+The `shared/` directory contains everything both tables import from:
+
+- **`types.ts`** — Provides the base TypeScript contracts used by both tables, including shared row models, table state, and column definitions.
+
+- **`table.shared.module.scss`** — Contains styles that are duplicated across both table implementations, including toast notifications, status tags, menu styling, and shared table presentation. Table-specific styles remain within their respective modules.
+
+- **`reducerUtils.ts`** — Helper functions for the state update cases that both reducers implement identically: search updates with pagination reset, pagination updates, export state updates, column visibility updates, and column reset.
+
+- **`tableUtils.ts`** — Three utility functions: `filterRowsBySearch(rows, search, fields)` (both tables filter rows by joining field values and lowercasing — the only difference is which fields are included, which becomes a parameter), `getVisibleHeaders(headers, visibleColumns)` (identical in both files ), and `getToggleableHeaders(headers)`.
+
+- **`useAutoRefresh.ts`** — A hook that encapsulates the shared refresh lifecycle. Currently both tables set up the same `setInterval` effect independently.
+
+- **`useCSVExport.ts`** — A hook that implements the complete CSV export flow: filename validation, the multi-page fetch loop , visible-column filtering, `downloadCSVWithChildren` call, and success/error toast state.
+
+- **`useExportToastAutoDismiss.ts`** — A hook for the 5-second auto-dismiss of successful export toasts.Currently both files have an identical `useEffect` that sets a `setTimeout` when `exportToastOpen && exportToastKind === "success"`.
+
+- **`CellRenderers.tsx`** — Exports `StatusCell` and `MessageCell`, which are same in both `CellRenderers.tsx` files . Also exports the merged `STATUS_CONFIG` map covering the union of both tables' status  (`Initializing`, `Downloading`, `Deploying`, `Running`, `Deleting`, `Stopped`, `Error`).
+
+- **`DeleteModal.tsx`** — The Carbon `Modal` for delete confirmation: a warning message, a `Checkbox` requiring the user to confirm, and primary/secondary buttons. Accepts `isOpen`, `itemName`, `onConfirm`, and `onClose` as props.
+
+- **`ExportModal.tsx`** — The Carbon `Modal` for CSV filename input: a `TextInput`, inline error message, and primary/secondary buttons. Accepts `isOpen`, `defaultFileName`, `onConfirm`, and `onClose` as props.
+
+- **`TableToasts.tsx`** — Renders the two `ActionableNotification` blocks that appear in both files: the delete-error toast (with a "Try again" action button) and the export success/error toast. 
+
+- **`TableEmptyStates.tsx`** — Renders all three empty/error state variants used by both tables: no data, no search results, and fetch error. Accepts `entityName` (e.g. `"service"` or `"digital assistant"`) 
+
+- **`TableToolbarActions.tsx`** — The shared toolbar providing search, refresh, export, and column visibility management. Currently both tables render a `TableToolbar` with the same search input, export button, and column-visibility overflow menu. The service filter `RadioButtonGroup` unique to `DeployedServicesTable` is injected via a `filterSlot` prop so the toolbar remains usable by both without hardcoding.
+
+
+---
+
+## Pull Requests
+
+### PR 1 — Shared Types, Utilities, and Styles
+
+Create a shared foundation by extracting common types, utility functions, and styling that are currently duplicated across both tables. This provides a consistent base for the reusable hooks and components introduced in later phases.
+
+**Implementation:**
+
+* `shared/types.ts` — `RowStatus`, `TableHeaders`, `BaseTableState`
+* `utils/reducerUtils.ts` — shared pure reducer helper functions
+* `utils/tableUtils.ts` — `filterRowsBySearch`, `getVisibleHeaders`, `getToggleableHeaders`
+* `shared/table.shared.module.scss` — shared CSS rules extracted from both `.module.scss` files: `.customToast`, `.deleteConfirmation`, `.overflowMenu*`, `.deleteMenuItem`, `.messageWithIcon`, `.messageIcon*`, `.statusTag*`
+
+---
+
+### PR 2 — Shared Hooks
+
+Extract common lifecycle and workflow logic into reusable hooks. This centralizes functionality such as auto-refresh, export processing, and notification handling.
+
+**Implementation:**
+
+* `hooks/useAutoRefresh.ts` — mount fetch + interval + `refreshTrigger` lifecycle
+* `hooks/useCSVExport.ts` — full 8-step CSV export flow
+* `hooks/useExportToastAutoDismiss.ts` — 5-second success toast auto-dismiss
+
+---
+
+### PR 3 — Shared UI Components
+
+Create reusable components for common table functionality and interactions. This reduces duplicated UI code and ensures a consistent experience across both tables.
+
+**Implementation:**
+
+* `shared/TableToolbarActions.tsx` — toolbar with search, refresh, export, and column visibility
+* `shared/CellRenderers.tsx` — `StatusCell`, `MessageCell`, and the merged `STATUS_CONFIG` map covering all status values from both tables
+* `shared/ExportModal.tsx` — CSV filename input modal with text input and inline validation error
+* `shared/DeleteModal.tsx` — delete confirmation modal with warning message and confirmation checkbox
+* `shared/TableToasts.tsx` — renders both the delete-error and export status 
+* `shared/TableEmptyStates.tsx` — renders the no-data, no-search-results, and fetch-error empty states
+
+### PR 4 — Migrate DigitalAssistants to shared infrastructure
+
+Replace duplicated implementations in `DigitalAssistants.tsx` and its supporting files with the shared hooks, utilities, and components from PRs 1–3. 
+
+**Key changes:**
+
+- Replace existing toolbar JSX with `<TableToolbarActions>`
+- Replace inline delete modal JSX with `<DeleteModal>`
+- Replace inline export modal JSX with `<ExportModal>`
+- Replace inline delete-error and export toast JSX with `<TableToasts>`
+- Replace inline empty state JSX with `<TableEmptyStates entityName="digital assistant">` 
+- Remove `StatusCell` and `MessageCell` from `DigitalAssistants/CellRenderers.tsx` — import from shared
+- Remove inline `downloadCSV` function — adopt `useCSVExport`
+- Remove fetch lifecycle `useEffect`s — adopt `useAutoRefresh`
+- Remove export toast auto-dismiss `useEffect` — adopt `useExportToastAutoDismiss`
+- Replace inline search filter logic with `tableUtils.filterRowsBySearch`
+- Replace inline visible-header calculation with `tableUtils.getVisibleHeaders`
+- Replace column reset hardcoded object with `reducerUtils.resetColumnVisibility(DEFAULT_VISIBLE_COLUMNS)`
+- Rename `isLoadingApplications` → `isLoading` 
+- Extend `DigitalAssistants.module.scss` to compose from `table.shared.module.scss`; remove the now-duplicated rules
+
+PR 4 depends on PRs 1, 2, and 3.
+
+### PR 5 — Migrate DeployedServicesTable to shared infrastructure
+
+Same pattern as PR 4, applied to `DeployedServicesTable.tsx`.
+
+**Key changes (same pattern as PR 4, with DS-specific differences):**
+
+- Replace existing toolbar JSX with `<TableToolbarActions filterSlot={<ServiceFilterRadioGroup />}>`
+- Replace inline delete and export modal JSX with `<DeleteModal>` and `<ExportModal>`
+- Replace inline toast JSX with `<TableToasts>`
+- Replace inline empty state JSX with `<TableEmptyStates entityName="service">`
+- Remove `StatusCell` and `MessageCell` from `DeployedServicesTable/CellRenderers.tsx` — import from shared
+- Remove inline `downloadCSV` function — adopt `useCSVExport`
+- Remove fetch lifecycle `useEffect`s — adopt `useAutoRefresh`
+- Remove export toast auto-dismiss `useEffect` — adopt `useExportToastAutoDismiss`
+- Replace inline search filter logic with `tableUtils.filterRowsBySearch`
+- Replace inline visible-header calculation with `tableUtils.getVisibleHeaders`
+- Replace column reset hardcoded object with `reducerUtils.resetColumnVisibility(DEFAULT_VISIBLE_COLUMNS)`
+- Extend `DeployedServices.module.scss` to compose from `table.shared.module.scss`; remove the now-duplicated rules
+
+PR 5 depends on PRs 1, 2, and 3.
+
+---
+
+
+## File Changes Summary
+
+A complete map of every file created, modified, or deleted across all 6 PRs.
+
+### `src/components/table/` (new)
+
+| Path | Change |
+|---|---|
+| `table/shared/types.ts` | Created (PR 1) |
+| `table/shared/table.shared.module.scss` | Created (PR 1) |
+| `table/shared/utils/reducerUtils.ts` | Created (PR 1) |
+| `table/shared/utils/tableUtils.ts` | Created (PR 1) |
+| `table/shared/hooks/useAutoRefresh.ts` | Created (PR 2) |
+| `table/shared/hooks/useCSVExport.ts` | Created (PR 2) |
+| `table/shared/hooks/useExportToastAutoDismiss.ts` | Created (PR 2) |
+| `table/shared/components/CellRenderers.tsx` | Created (PR 3) |
+| `table/shared/components/DeleteModal.tsx` | Created (PR 3) |
+| `table/shared/components/ExportModal.tsx` | Created (PR 3) |
+| `table/shared/components/TableToasts.tsx` | Created (PR 3) |
+| `table/shared/components/TableEmptyStates.tsx` | Created (PR 3) |
+| `table/shared/components/TableToolbarActions.tsx` | Created (PR 3) |
+
+### `src/components/DeployedServicesTable/`
+
+| Path | Change |
+|---|---|
+| `DeployedServicesTable.tsx` | Modified (PR 5) — adopts all shared hooks and components; ~150 lines removed |
+| `CellRenderers.tsx` | Modified (PR 5) — removes `StatusCell` and `MessageCell`; imports from shared |
+| `types.ts` | Modified (PR 5) — extends `BaseDeploymentRow` and `BaseTableState`; removes shared reducer cases |
+| `DeployedServices.module.scss` | Modified (PR 5) — composes from `table.shared.module.scss`; removes ~125 duplicated lines |
+| `index.ts` | Untouched |
+
+### `src/pages/DigitalAssistants/`
+
+| Path | Change |
+|---|---|
+| `DigitalAssistants.tsx` | Modified (PR 4) — adopts all shared hooks and components|
+| `CellRenderers.tsx` | Modified (PR 4) — removes `StatusCell` and `MessageCell`; imports from shared |
+| `types.ts` | Modified (PR 4) — extends `BaseDeploymentRow` and `BaseTableState`; removes shared reducer cases; renames `isLoadingApplications` → `isLoading` |
+| `DigitalAssistants.module.scss` | Modified (PR 4) — composes from `table.shared.module.scss`|
+| `index.ts` | Untouched |
+| `components/AboutTab.tsx` | Untouched |
+
+## Expected Outcome
+
+| Metric                      | Current State                     | Target State                 |
+| --------------------------- | --------------------------------- | ---------------------------- |
+| RowStatus definitions       | 2 copies                          | 1 shared definition          |
+| Reducer logic               | Duplicated across both tables     | Shared utilities             |
+| Export implementation       | Multiple implementations          | Single shared implementation |
+| Auto-refresh implementation | Multiple implementations          | Single shared implementation |
+| Toast notification JSX      | 2 copies  | 1 shared component           |
+| Empty / error state JSX     | 2 copies | 1 shared component |
+| Shared CSS rules            | Duplicated in 2 SCSS files | 1 shared SCSS module    |
