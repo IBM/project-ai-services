@@ -173,6 +173,8 @@ def limit_concurrency(f):
             concurrency_limiter.release()
     return wrapper
 
+_SPECIAL_TOKENS = frozenset(["[/assistant]", "</s>", "<|endoftext|>", "<|im_end|>"])
+
 def get_stop_words_with_special_tokens(request_stop_words):
     """
     Add common special tokens to stop words to prevent them from appearing in responses.
@@ -184,10 +186,9 @@ def get_stop_words_with_special_tokens(request_stop_words):
         List of stop words including special tokens
     """
     stop_words = list(request_stop_words) if request_stop_words else []
-    # Add common special tokens that should stop generation
-    special_tokens = ["[/assistant]", "</s>", "<|endoftext|>", "<|im_end|>"]
-    for token in special_tokens:
-        if token not in stop_words:
+    existing = set(stop_words)
+    for token in _SPECIAL_TOKENS:
+        if token not in existing:
             stop_words.append(token)
     return stop_words
 
@@ -495,13 +496,9 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         await ensure_vectorstore_initialized()
 
     try:
-        emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_model_len = emb_model_dict['max_model_len']
         llm_model = llm_model_dict['llm_model']
         llm_endpoint = llm_model_dict['llm_endpoint']
-        reranker_model = reranker_model_dict['reranker_model']
-        reranker_endpoint = reranker_model_dict['reranker_endpoint']
 
 
         # Validate query length
@@ -543,12 +540,8 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
             rephrased_query,
-            emb_model, emb_endpoint, emb_max_model_len,
-            reranker_model,
-            reranker_endpoint,
             settings.chatbot.num_chunks_post_search,
             settings.chatbot.num_chunks_post_reranker,
-            vectorstore=vectorstore
         )
 
         if not docs:
