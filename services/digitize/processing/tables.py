@@ -12,7 +12,7 @@ Responsibilities:
 
 import json
 import time
-import difflib
+from rapidfuzz import fuzz
 from pathlib import Path
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
@@ -91,10 +91,10 @@ def headers_match(headers1: list[str], headers2: list[str]) -> bool:
     return normalized1 == normalized2
 
 
-def is_table_continuation(headers1: list[str], headers2: list[str], caption1: str, caption2: str, fuzzy_threshold: float = 0.85) -> bool:
+def is_table_continuation(headers1: list[str], headers2: list[str], caption1: str, caption2: str, fuzzy_threshold: float = 85.0) -> bool:
     """
     Determines if a table is a continuation across pages.
-    Uses structural column matching and fuzzy caption matching to remain language-agnostic.
+    Uses structural column matching and RapidFuzz caption matching.
     """
     # 1. STRUCTURAL CHECK: Column headers MUST match perfectly
     if not headers_match(headers1, headers2):
@@ -123,9 +123,9 @@ def is_table_continuation(headers1: list[str], headers2: list[str], caption1: st
         if cap2.startswith(cap1) or cap1.startswith(cap2):
             return True
 
-        # 4. FUZZY MATCHING (Robust Path)
-        # Handles OCR errors or cases where prefixing is slightly broken
-        similarity = difflib.SequenceMatcher(None, cap1, cap2).ratio()
+        # 4. FUZZY MATCHING (RapidFuzz Path)
+        # fuzz.ratio calculates the normalized Indel distance (0 to 100)
+        similarity = fuzz.ratio(cap1, cap2)
         if similarity >= fuzzy_threshold:
             return True
 
