@@ -19,7 +19,7 @@ from lingua import Language
 from common.misc_utils import set_log_level, get_logger
 from common.lang_utils import detect_language, LanguageCodes, get_max_tokens_map
 
-from chatbot.settings import settings
+from chatbot.settings import settings, get_history_token_budget
 from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
 from chatbot.query_rephrasing import rephrase_query_with_context
 
@@ -523,7 +523,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
-                settings.query_rephrasing.history_token_budget,
+                get_history_token_budget(query_lang, settings.query_rephrasing.history_token_budget),
                 lambda text: tokenize_with_llm(text, llm_endpoint)
             )
 

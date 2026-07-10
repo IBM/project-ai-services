@@ -19,7 +19,7 @@ def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None,
     """
     Apply token buffer to give LLM breathing room to respect prompt word limits.
     
-    The prompt instructs the LLM to limit to max_tokens, but we reduce the API limit
+    The API instructs the LLM to limit to max_tokens, but we reduce the prompt limit
     by token_buffer_ratio to ensure the LLM can naturally complete before hitting the hard limit.
     
     Args:
@@ -191,6 +191,27 @@ def query_vllm_models(llm_endpoint, api_key: str | None = None):
     return resp_json
 
 
+def query_litellm_model_info(endpoint: str, api_key: str | None = None) -> dict:
+    """Query the LiteLLM /model/info endpoint and return the raw response JSON.
+
+    Args:
+        endpoint: Base URL of the LiteLLM proxy (e.g. ``http://localhost:4000``).
+        api_key: Optional bearer token for the proxy.
+
+    Returns:
+        Parsed JSON response dict from /model/info.
+    """
+    if misc_utils.SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    logger.debug("Querying LiteLLM /model/info")
+    response = misc_utils.SESSION.get(
+        f"{endpoint}/model/info"
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def query_vllm_payload(
     question,
     documents,
@@ -207,7 +228,7 @@ def query_vllm_payload(
     token_buffer_ratio: float | None = None,
 ):
     # Lazy import to avoid circular dependencies
-    from chatbot.settings import get_rag_language_config, settings as chatbot_settings
+    from chatbot.settings import get_rag_language_config, get_history_token_budget, settings as chatbot_settings
     from chatbot.conversation_utils import truncate_history_by_tokens
     
     context = "\n\n".join([doc.get("page_content") for doc in documents])
@@ -250,7 +271,10 @@ def query_vllm_payload(
         # Context fits completely, use remaining budget for history
         remaining_budget_for_history = budget_for_context - context_token_count
         # Cap history budget at configured limit or remaining budget, whichever is smaller
-        history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+        history_budget = min(
+            get_history_token_budget(lang, chatbot_settings.chatbot.history_token_budget),
+            remaining_budget_for_history
+        )
         logger.debug(
             f"Context fits completely ({context_token_count} tokens). "
             f"History budget: {history_budget} tokens"

@@ -727,6 +727,30 @@ _RAG_CONFIG_MAP: dict = {
     LanguageCodes.FRENCH: settings.chatbot.french,
 }
 
+_HISTORY_TOKEN_RATIOS: dict[str, float] = {
+    LanguageCodes.ENGLISH:  1.0,
+    LanguageCodes.FRENCH:   1.2305,
+    LanguageCodes.ITALIAN:  1.3066,
+    LanguageCodes.GERMAN:   1.5,
+}
+
+def get_history_token_budget(lang: str, base: int) -> int:
+    """Return a history token budget scaled for the given language.
+
+    Uses the English base value and multiplies by the language-specific ratio,
+    so that non-English languages receive a proportionally larger budget to
+    account for their higher token density.
+
+    Args:
+        lang: Detected language code (e.g. LanguageCodes.FRENCH).
+        base: The English baseline token budget to scale from.
+
+    Returns:
+        Scaled integer token budget for the given language.
+    """
+    ratio = _HISTORY_TOKEN_RATIOS.get(lang, 1.0)
+    return round(base * ratio)
+
 def get_query_rephrasing_language_config(lang: str):
     """Get query rephrasing config for a language, falling back to English."""
     return _QUERY_REPHRASING_CONFIG_MAP.get(lang, _QUERY_REPHRASING_CONFIG_MAP[LanguageCodes.ENGLISH])
