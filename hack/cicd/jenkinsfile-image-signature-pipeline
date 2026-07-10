@@ -11,6 +11,16 @@ pipeline {
             defaultValue: 'icr.io/ai-services-cicd',
             description: 'Registry where images will be pushed'
         )
+        password(
+            name: 'ICR_REGISTRY_PASSWORD',
+            defaultValue: '',
+            description: 'IAM api key to push image to icr registry (overrides icr-iam-creds credential when set)'
+        )
+        string(
+            name: 'SKIP_IMAGE_LIST',
+            defaultValue: ''
+            
+        )
     }
     
     environment {
@@ -35,18 +45,10 @@ pipeline {
     }
     
     stages {
-        stage('Initialize') {
-            steps {
-                script {
-                    validateVersion()
-                    deleteDir()
-                }
-            }
-        }
-        
         stage('Checkout') {
             steps {
                 script {
+                    deleteDir()
                     checkoutRepository()
                 }
             }
@@ -80,14 +82,6 @@ pipeline {
             steps {
                 script {
                     env.ICR_SERVICES_SIMILARITY_IMAGE = buildAndPublishImage('services/similarity/', 'similarity-service')
-                }
-            }
-        }
-
-        stage('Build service-base') {
-            steps {
-                script {
-                    env.ICR_SERVICE_BASE_IMAGE = buildAndPublishImage('images/service-base/', 'service-base')
                 }
             }
         }
@@ -272,25 +266,6 @@ pipeline {
     }
 }
 
-def validateVersion() {
-    if (!params.VERSION) {
-        error('VERSION parameter is required')
-    }
-
-    echo "Validating version: ${params.VERSION}"
-
-    def tags = sh(
-        script: "git ls-remote --tags ${env.AI_SERVICES_REPO_URL} | cut -d/ -f3",
-        returnStdout: true
-    ).trim()
-
-    if (!tags.contains(params.VERSION)) {
-        error "Failed to find tag ${params.VERSION} in repository"
-    }
-
-    echo "✓ Version ${params.VERSION} validated successfully"
-}
-
 
 def checkoutRepository() {
     echo "Checking out repository at version ${params.VERSION}..."
@@ -307,52 +282,67 @@ def checkoutRepository() {
 }
 
 
-def buildAndPublishImage(String imagePath, String imageName) {
-    def icrImage = ''
-    if (imagePath.startsWith('services/')) {
-        def serviceName = imagePath.split('/')[1]
-        dir("${REPO_DIR}/services") {
-            echo "Building and pushing ${imageName} image (service: ${serviceName})..."
-            def tag = sh(script: "make image-tag SERVICE=${serviceName}", returnStdout: true).trim()
-            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
-            withCredentials([usernamePassword(
-                credentialsId: 'icr-iam-creds',
-                usernameVariable: 'ICR_USERNAME',
-                passwordVariable: 'ICR_PASSWORD'
-            )]) {
-                sh """
-                    make build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                    make push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                """
+/**
+ * Resolves the effective ICR password (pipeline input takes precedence over the stored
+ * credential), exposes ICR_USERNAME and ICR_PASSWORD as environment variables for the
+ * given closure, and ensures the password is masked in console logs via withCredentials.
+ *
+ * Usage:
+ *   withIcrCredentials { sh 'docker login icr.io -u $ICR_USERNAME -p $ICR_PASSWORD' }
+ */
+def withIcrCredentials(Closure body) {
+    withCredentials([usernamePassword(
+        credentialsId: 'icr-iam-creds',
+        usernameVariable: 'ICR_USERNAME',
+        passwordVariable: 'ICR_CREDS_PASSWORD'
+    )]) {
+        def inputPassword = params.ICR_REGISTRY_PASSWORD?.toString()?.trim()
+
+        // If a pipeline input password was supplied, use it — Jenkins masks password
+        // parameters automatically in logs. Otherwise fall back to the stored credential
+        // (already masked by the outer withCredentials binding).
+        if (inputPassword) {
+            withEnv(["ICR_PASSWORD=${inputPassword}"]) {
+                println 'Overriding icr creds'
+                body()
             }
-            echo "✓ Successfully built and pushed: ${icrImage}"
-        }
-    } else {
-        dir("${REPO_DIR}/${imagePath}") {
-            echo "Building and pushing ${imageName} image..."
-            def tag = sh(script: "make image-tag", returnStdout: true).trim()
-            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
-            withCredentials([usernamePassword(
-                credentialsId: 'icr-iam-creds',
-                usernameVariable: 'ICR_USERNAME',
-                passwordVariable: 'ICR_PASSWORD'
-            )]) {
-                sh """
-                    make build REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                    make push REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                """
+        } else {
+            withEnv(["ICR_PASSWORD=${env.ICR_CREDS_PASSWORD}"]) {
+                body()
             }
-            echo "✓ Successfully built and pushed: ${icrImage}"
         }
     }
+}
+
+def buildAndPublishImage(String imagePath, String imageName) {
+    def serviceName = ''
+    def makeFilePath = "${REPO_DIR}"
+    if (imagePath.startsWith('services/')) {
+        serviceName = imagePath.split('/')[1]
+        makeFilePath += '/services'
+    } else {
+        makeFilePath += "/${imagePath}"
+    }
+
+    println "Makefile path: ${makeFilePath}"
+
+    def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+    def icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+
+    println "Image path: ${icrImage}"
+
+    withIcrCredentials {
+        sh """
+            make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                REGISTRY_USER=\$ICR_USERNAME \\
+                REGISTRY_PASSWORD=\$ICR_PASSWORD
+            make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                REGISTRY_USER=\$ICR_USERNAME \\
+                REGISTRY_PASSWORD=\$ICR_PASSWORD
+        """
+    }
+
+    echo "✓ Successfully built and pushed: ${icrImage}"
     return icrImage
 }
 
@@ -368,11 +358,7 @@ def buildToolArmImage(String imagePath, String imageName) {
         def tag = "${toolVersion}-arm64"
         icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
 
-        withCredentials([usernamePassword(
-            credentialsId: 'icr-iam-creds',
-            usernameVariable: 'ICR_USERNAME',
-            passwordVariable: 'ICR_PASSWORD'
-        )]) {
+        withIcrCredentials {
             // Setup buildx for multi-arch builds
             sh """
                 docker run --privileged --rm docker.io/tonistiigi/binfmt --install all
@@ -380,15 +366,15 @@ def buildToolArmImage(String imagePath, String imageName) {
                 docker buildx create --name multiarch --driver docker-container --use
                 docker buildx inspect --bootstrap
             """
-            
+
             // Create Docker config for authentication
             sh '''
-                AUTH=\$(printf "%s" "\$ICR_USERNAME:\$ICR_PASSWORD" | base64)
+                AUTH=$(printf "%s" "$ICR_USERNAME:$ICR_PASSWORD" | base64)
                 cat > ${WORKSPACE}/config.json <<EOF
-{"auths":{"icr.io":{"auth":"\$AUTH"}}}
+{"auths":{"icr.io":{"auth":"$AUTH"}}}
 EOF
             '''
-            
+
             // Build and push ARM64 image
             sh """
                 DOCKER_CONFIG=${WORKSPACE} docker buildx build \
@@ -412,11 +398,7 @@ def createToolsManifest() {
     dir("${REPO_DIR}/images/tools/") {
         echo "Creating multi-arch manifest for tools image..."
 
-        withCredentials([usernamePassword(
-            credentialsId: 'icr-iam-creds',
-            usernameVariable: 'ICR_USERNAME',
-            passwordVariable: 'ICR_PASSWORD'
-        )]) {
+        withIcrCredentials {
             sh """
                 make manifest \
                     REGISTRY=${params.ICR_REGISTRY} \
@@ -467,12 +449,11 @@ def generateImageList() {
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
-        env.ICR_SERVICE_BASE_IMAGE,
         env.ICR_CADDY_IMAGE,
         env.ICR_LITELLM_IMAGE,
         env.ICR_POSTGRES_IMAGE,
         env.ICR_TOOL_IMAGE,
-        env.ICR_AI_SERVICES_IMAGE     
+        env.ICR_AI_SERVICES_IMAGE    
     ]
 
     def imageList = images.join('\n') + '\n'
@@ -488,13 +469,9 @@ def generateImageList() {
 
 def cosignLogin() {
     echo 'Logging into ICR for Cosign...'
-    
-    withCredentials([usernamePassword(
-        credentialsId: 'icr-iam-creds',
-        usernameVariable: 'ICR_USERNAME',
-        passwordVariable: 'ICR_PASSWORD'
-    )]) {
-        sh 'cosign login icr.io -u \$ICR_USERNAME -p \$ICR_PASSWORD'
+
+    withIcrCredentials {
+        sh 'cosign login icr.io -u $ICR_USERNAME -p $ICR_PASSWORD'
     }
 
     echo '✓ Cosign login successful'
