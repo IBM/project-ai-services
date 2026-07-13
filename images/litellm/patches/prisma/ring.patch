@@ -1,0 +1,77 @@
+diff --git a/include/GFp/base.h b/include/GFp/base.h
+index e18ee44..ea8286c 100644
+--- a/include/GFp/base.h
++++ b/include/GFp/base.h
+@@ -89,6 +89,8 @@
+ #define OPENSSL_MIPS64
+ #elif defined(__wasm__)
+ #define OPENSSL_32_BIT
++#elif defined(__PPC64__) || defined(__ppc64__) || defined(__powerpc__)
++#define OPENSSL_64_BIT
+ #else
+ // Note BoringSSL only supports standard 32-bit and 64-bit two's-complement,
+ // little-endian architectures. Functions will not produce the correct answer
+diff --git a/build.rs b/build.rs
+index a5a8e19..8564d9d 100644
+--- a/build.rs
++++ b/build.rs
+@@ -355,7 +355,7 @@ fn build_c_code(target: &Target, pregenerated: PathBuf, out_dir: &Path) {
+             let &(entry_arch, entry_os, _) = *entry;
+             entry_arch == target.arch && is_none_or_equals(entry_os, &target.os)
+         })
+-        .unwrap();
++        .unwrap_or(&("ppc64le", None, None));
+ 
+     let use_pregenerated = !target.is_git;
+     let warnings_are_errors = target.is_git;
+diff --git a/src/rand.rs b/src/rand.rs
+index 9d1864f..113c5b7 100644
+--- a/src/rand.rs
++++ b/src/rand.rs
+@@ -217,6 +217,9 @@ mod sysrand_chunk {
+         #[cfg(target_arch = "x86_64")]
+         const SYS_GETRANDOM: c_long = 318;
+ 
++        #[cfg(any(target_arch = "powerpc64le", target_arch = "powerpc", target_arch = "powerpc64"))]
++        const SYS_GETRANDOM: libc::c_long = 359;
++
+         let chunk_len: c::size_t = dest.len();
+         let r = unsafe { libc::syscall(SYS_GETRANDOM, dest.as_mut_ptr(), chunk_len, 0) };
+         if r < 0 {
+diff --git a/crypto/fipsmodule/aes/aes_nohw.c b/crypto/fipsmodule/aes/aes_nohw.c
+index 19b019e7..0cb565d9 100644
+--- a/crypto/fipsmodule/aes/aes_nohw.c
++++ b/crypto/fipsmodule/aes/aes_nohw.c
+@@ -959,3 +959,32 @@ void GFp_aes_nohw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out,
+     ctr += AES_NOHW_BATCH_SIZE;
+   }
+ }
++
++/* PowerPC Linker Stub Fallbacks */
++void GFp_p384_elem_mul_mont(void) {}
++void GFp_x25519_sc_mask(void) {}
++void GFp_x25519_public_from_private_generic_masked(void) {}
++void GFp_x25519_scalar_mult_generic_masked(void) {}
++void GFp_p256_scalar_mul_mont(void) {}
++void GFp_p256_scalar_sqr_mont(void) {}
++void GFp_p256_scalar_sqr_rep_mont(void) {}
++void GFp_nistz256_sqr_mont(void) {}
++void GFp_nistz256_mul_mont(void) {}
++void GFp_nistz256_point_mul(void) {}
++void GFp_p384_scalar_mul_mont(void) {}
++void GFp_nistz384_point_mul(void) {}
++void GFp_ChaCha20_ctr32(void) {}
++void GFp_x25519_ge_frombytes_vartime(void) {}
++void GFp_x25519_fe_neg(void) {}
++void GFp_x25519_ge_double_scalarmult_vartime(void) {}
++void GFp_x25519_sc_reduce(void) {}
++void GFp_x25519_fe_invert(void) {}
++void GFp_x25519_fe_mul_ttt(void) {}
++void GFp_x25519_fe_tobytes(void) {}
++void GFp_x25519_fe_isnegative(void) {}
++void GFp_x25519_ge_scalarmult_base(void) {}
++void GFp_x25519_sc_muladd(void) {}
++void GFp_nistz256_add(void) {}
++void GFp_nistz256_point_add(void) {}
++void GFp_p384_elem_add(void) {}
++void GFp_nistz384_point_add(void) {}
