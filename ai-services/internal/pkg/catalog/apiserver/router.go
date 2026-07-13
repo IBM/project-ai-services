@@ -10,12 +10,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService *repository.ApplicationService) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService *repository.ApplicationService, proxyManager proxy.ProxyManager) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -32,6 +33,35 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	// Expose /health for liveness probes
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	})
+
+	// TLS ask endpoint — called by Caddy's on_demand_tls before issuing a certificate.
+	// Validates the requested domain against registered routes; returns 200 to allow or
+	// 403 to deny. If no proxy manager is configured, fails open (200) to avoid blocking
+	// legitimate cert issuance during startup.
+	router.GET("/tls/ask", func(c *gin.Context) {
+		domain := c.Query("domain")
+		if domain == "" || proxyManager == nil {
+			c.Status(http.StatusOK)
+			return
+		}
+
+		// Route IDs are the subdomain portion (the part before the first dot).
+		// GetRouteByID returns an error if the route is not registered in Caddy.
+		routeID := domain
+		for i, ch := range domain {
+			if ch == '.' {
+				routeID = domain[:i]
+				break
+			}
+		}
+
+		if _, err := proxyManager.GetRouteByID(routeID); err != nil {
+			c.Status(http.StatusForbidden)
+			return
+		}
+
+		c.Status(http.StatusOK)
 	})
 
 	// Swagger documentation endpoint

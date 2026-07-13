@@ -1,13 +1,16 @@
 {
-	admin 0.0.0.0:2019
+    admin 0.0.0.0:2019
 
     servers :443 {
         name {{ .CaddyServerName }}
     }
 
-    # 1. Enable On-Demand TLS globally and point it to your local health check
+    # Enable On-Demand TLS globally.
+    # Before issuing a certificate for any hostname Caddy calls the ask endpoint;
+    # 2xx = allow, non-2xx = deny. /tls/ask validates the requested domain query
+    # parameter against registered routes so certs are only issued for known hosts.
     on_demand_tls {
-        ask http://127.0.0.1:8080/health
+        ask {{ .CatalogBackendURL }}/tls/ask
     }
 }
 
@@ -17,13 +20,13 @@
         respond "OK" 200
     }
 
-    # 2. Tell the internal CA to generate certs when requested
+    # Tell the internal CA to generate certs on demand
     tls internal {
         on_demand
     }
 }
 
-# Internal health check endpoint (Bypasses automatic HTTPS redirection)
+# Internal endpoints (bypass automatic HTTPS redirection)
 :8080 {
     respond /health "OK" 200
 }

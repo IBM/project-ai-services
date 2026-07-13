@@ -107,9 +107,12 @@ func GenerateCaddyfile(baseDir string) error {
 		return fmt.Errorf("failed to parse Caddyfile template: %w", err)
 	}
 
-	// Prepare template data with the server name constant
+	// Prepare template data with the server name constant and catalog backend URL.
+	// The ask endpoint lives in the catalog backend pod, not in the Caddy pod, so
+	// 127.0.0.1 would not reach it — use the pod DNS name instead.
 	templateData := map[string]any{
-		"CaddyServerName": constants.CaddyServerName,
+		"CaddyServerName":    constants.CaddyServerName,
+		"CatalogBackendURL": fmt.Sprintf("http://%s--catalog:8080", catalogconstants.CatalogAppName),
 	}
 
 	// Execute the template

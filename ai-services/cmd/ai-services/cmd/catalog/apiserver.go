@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -119,12 +120,21 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
 
+	// ProxyManager is used by the /tls/ask endpoint to validate domains before cert issuance.
+	// If Caddy is not configured, the endpoint fails open so the server still starts cleanly.
+	proxyManager, err := proxy.GetCaddyProxyManager()
+	if err != nil {
+		logger.DebuglnCtx(ctx, fmt.Sprintf("Caddy proxy manager not available, /tls/ask will fail open: %v", err))
+		proxyManager = nil
+	}
+
 	return apiserver.NewAPIserver(apiserver.APIServerOptions{
 		Port:               port,
 		AuthService:        authSvc,
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: applicationService,
+		ProxyManager:       proxyManager,
 	}).Start()
 }
 
