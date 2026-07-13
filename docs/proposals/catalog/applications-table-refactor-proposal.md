@@ -167,8 +167,7 @@ Same pattern as PR 4, applied to `DeployedServicesTable.tsx`.
 - Replace inline delete and export modal JSX with `<DeleteModal>` and `<ExportModal>`
 - Replace inline toast JSX with `<TableToasts>`
 - Replace inline empty state JSX with `<TableEmptyStates entityName="service">`
-- Remove `StatusCell`, `MessageCell`,`ActionCell` and `NameCell` from `DigitalAssistants/CellRenderers.tsx` — import from shared
-- Remove local `StatusCell` and `MessageCell` — re-export from shared
+- Remove `StatusCell`, `MessageCell`,`ActionCell` and `NameCell` from `DeployedServicesTable/CellRenderers.tsx` — import from shared
 - Remove inline `downloadCSV` function — adopt `useCSVExport`
 - Remove fetch lifecycle `useEffect`s — adopt `useAutoRefresh`
 - Remove export toast auto-dismiss `useEffect` — adopt `useExportToastAutoDismiss`
