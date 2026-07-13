@@ -93,7 +93,7 @@ class DatabaseManager:
                     # Eagerly access all attributes to load them before session closes
                     _ = (job.job_id, job.job_name, job.level, job.status,
                          job.submitted_at, job.completed_at, job.error,
-                         job.metadata, job.updated_at)
+                         job.job_metadata, job.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(job)
                     logger.debug(f"Retrieved job from database: {job_id}")

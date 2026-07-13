@@ -23,20 +23,14 @@ def validate_query_length(query, emb_endpoint):
     return _validate_query_length(query, emb_endpoint, settings.chatbot.max_query_token_length)
 
 
-def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint, top_k, top_r, vectorstore):
+def search_only(question, top_k, top_r):
     """
     Perform document search by calling the similarity service API endpoint.
 
     Args:
         question: Search query
-        emb_model: Embedding model name (unused, similarity service uses its own config)
-        emb_endpoint: Embedding endpoint (unused, similarity service uses its own config)
-        max_tokens: Max tokens (unused, similarity service uses its own config)
-        reranker_model: Reranker model (unused, similarity service uses its own config)
-        reranker_endpoint: Reranker endpoint (unused, similarity service uses its own config)
         top_k: Number of documents to retrieve before reranking
         top_r: Number of documents to keep after reranking
-        vectorstore: Vector store (unused, similarity service uses its own)
 
     Returns:
         tuple: (filtered_docs, perf_stat_dict)
