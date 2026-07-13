@@ -48,7 +48,7 @@ src/components/
   DeployedServicesTable/
     DeployedServicesTable.tsx     ← adopts shared components and hooks
     DeployedServices.module.scss  ← retains only DS-specific rules
-    CellRenderers.tsx             ← retains NameCell
+    CellRenderers.tsx             ← wrappers only: ActionCell (wires dispatch) + NameCell (wires onRowClick)
     types.ts                      ← retains only DS-specific state and actions
     index.ts                      ← unchanged
 
@@ -56,7 +56,7 @@ src/pages/
   DigitalAssistants/
     DigitalAssistants.tsx         ← adopts shared components and hooks
     DigitalAssistants.module.scss ← retains only DA-specific and AboutTab rules
-    CellRenderers.tsx             ← retains NameCell
+    CellRenderers.tsx             ← wrappers only: ActionCell (wires dispatch) + NameCell (wires dispatch)
     types.ts                      ← retains only DA-specific state and actions
     index.ts                      ← unchanged
 ```
@@ -79,7 +79,7 @@ The `shared/` directory contains everything both tables import from:
 
 - **`useExportToastAutoDismiss.ts`** — A hook for the 5-second auto-dismiss of successful export toasts.Currently both files have an identical `useEffect` that sets a `setTimeout` when `exportToastOpen && exportToastKind === "success"`.
 
-- **`CellRenderers.tsx`** — Exports `StatusCell` and `MessageCell`, which are same in both `CellRenderers.tsx` files . Also exports the merged `STATUS_CONFIG` map covering the union of both tables' status  (`Initializing`, `Downloading`, `Deploying`, `Running`, `Deleting`, `Stopped`, `Error`).
+- **`CellRenderers.tsx`** — Exports shared table cell renderers (`StatusCell`, `MessageCell`, `ActionCell`, and `NameCell`) along with a common `STATUS_CONFIG` map covering all statuses used by both tables (`Initializing`, `Downloading`, `Deploying`, `Running`, `Deleting`, `Stopped`, `Error`).
 
 - **`DeleteModal.tsx`** — The Carbon `Modal` for delete confirmation: a warning message, a `Checkbox` requiring the user to confirm, and primary/secondary buttons. Accepts `isOpen`, `itemName`, `onConfirm`, and `onClose` as props.
 
@@ -128,7 +128,7 @@ Create reusable components for common table functionality and interactions. This
 **Implementation:**
 
 * `shared/TableToolbarActions.tsx` — toolbar with search, refresh, export, and column visibility
-* `shared/CellRenderers.tsx` — `StatusCell`, `MessageCell`, and the merged `STATUS_CONFIG` map covering all status values from both tables
+* `shared/CellRenderers.tsx` — `ActionCell`, `NameCell`, `StatusCell`, `MessageCell`, and the merged `STATUS_CONFIG` map covering all status values from both tables
 * `shared/ExportModal.tsx` — CSV filename input modal with text input and inline validation error
 * `shared/DeleteModal.tsx` — delete confirmation modal with warning message and confirmation checkbox
 * `shared/TableToasts.tsx` — renders both the delete-error and export status 
@@ -145,7 +145,7 @@ Replace duplicated implementations in `DigitalAssistants.tsx` and its supporting
 - Replace inline export modal JSX with `<ExportModal>`
 - Replace inline delete-error and export toast JSX with `<TableToasts>`
 - Replace inline empty state JSX with `<TableEmptyStates entityName="digital assistant">` 
-- Remove `StatusCell` and `MessageCell` from `DigitalAssistants/CellRenderers.tsx` — import from shared
+- Remove `StatusCell`, `MessageCell`,`ActionCell` and `NameCell` from `DigitalAssistants/CellRenderers.tsx` — import from shared
 - Remove inline `downloadCSV` function — adopt `useCSVExport`
 - Remove fetch lifecycle `useEffect`s — adopt `useAutoRefresh`
 - Remove export toast auto-dismiss `useEffect` — adopt `useExportToastAutoDismiss`
@@ -167,7 +167,8 @@ Same pattern as PR 4, applied to `DeployedServicesTable.tsx`.
 - Replace inline delete and export modal JSX with `<DeleteModal>` and `<ExportModal>`
 - Replace inline toast JSX with `<TableToasts>`
 - Replace inline empty state JSX with `<TableEmptyStates entityName="service">`
-- Remove `StatusCell` and `MessageCell` from `DeployedServicesTable/CellRenderers.tsx` — import from shared
+- Remove `StatusCell`, `MessageCell`,`ActionCell` and `NameCell` from `DigitalAssistants/CellRenderers.tsx` — import from shared
+- Remove local `StatusCell` and `MessageCell` — re-export from shared
 - Remove inline `downloadCSV` function — adopt `useCSVExport`
 - Remove fetch lifecycle `useEffect`s — adopt `useAutoRefresh`
 - Remove export toast auto-dismiss `useEffect` — adopt `useExportToastAutoDismiss`
@@ -208,7 +209,7 @@ A complete map of every file created, modified, or deleted across all 6 PRs.
 | Path | Change |
 |---|---|
 | `DeployedServicesTable.tsx` | Modified (PR 5) — adopts all shared hooks and components; ~150 lines removed |
-| `CellRenderers.tsx` | Modified (PR 5) — removes `StatusCell` and `MessageCell`; imports from shared |
+| `CellRenderers.tsx` | Modified (PR 5) — all four cells import from shared
 | `types.ts` | Modified (PR 5) — extends `BaseDeploymentRow` and `BaseTableState`; removes shared reducer cases |
 | `DeployedServices.module.scss` | Modified (PR 5) — composes from `table.shared.module.scss`; removes ~125 duplicated lines |
 | `index.ts` | Untouched |
@@ -218,7 +219,7 @@ A complete map of every file created, modified, or deleted across all 6 PRs.
 | Path | Change |
 |---|---|
 | `DigitalAssistants.tsx` | Modified (PR 4) — adopts all shared hooks and components|
-| `CellRenderers.tsx` | Modified (PR 4) — removes `StatusCell` and `MessageCell`; imports from shared |
+| `CellRenderers.tsx` | Modified (PR 4) — all four cells import from shared
 | `types.ts` | Modified (PR 4) — extends `BaseDeploymentRow` and `BaseTableState`; removes shared reducer cases; renames `isLoadingApplications` → `isLoading` |
 | `DigitalAssistants.module.scss` | Modified (PR 4) — composes from `table.shared.module.scss`|
 | `index.ts` | Untouched |
