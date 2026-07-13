@@ -1,8 +1,8 @@
 import { useMemo, useEffect } from "react";
 import { TextInput, Dropdown, Grid, Column } from "@carbon/react";
-import styles from "../DeployFlow.module.scss";
+import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ComponentConfig } from "../types";
-import { useBatchProviderParams } from "@/hooks/useProviderParams";
+import { useBatchProviderParams } from "../hooks/useProviderParams";
 
 export const StepOne: React.FC<StepProps> = ({
   title,

@@ -1,7 +1,7 @@
 import type {
   DeployFormData,
   ComponentConfig,
-} from "@/components/ServicesDeployFlow/types";
+} from "@/components/DeployFlow/Services/types";
 import type { ServiceDeployOptions, ProviderSchema } from "@/types/api.types";
 import { fetchProviderParams } from "@/api/applications.api";
 

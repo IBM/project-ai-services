@@ -8,15 +8,15 @@ import {
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
-import styles from "../DeployFlow.module.scss";
+import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { ServiceConfig } from "../types";
 import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../utils/StepTwo.utils";
-import type { useBatchProviderParams } from "@/hooks/useProviderParams";
+import type { useBatchProviderParams } from "../hooks/useProviderParams";
 import { DynamicSchemaFields } from "./DynamicSchemaFields";
 import type { DeployOptionsComponent as Component } from "@/types/api.types";
 import { parseSchema, validateField } from "@/utils/schemaParser";
-import { useServiceParams } from "@/hooks/useServiceParams";
+import { useServiceParams } from "../hooks/useServiceParams";
 import { shouldShowParam } from "@/utils/paramFilter";
 
 interface ServiceConfigCardProps {

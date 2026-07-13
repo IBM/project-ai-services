@@ -8,7 +8,7 @@ import {
   Accordion,
   AccordionItem,
 } from "@carbon/react";
-import { useProviderSchema } from "@/hooks/useProviderSchema";
+import { useProviderSchema } from "../hooks/useProviderSchema";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit } from "@carbon/icons-react";

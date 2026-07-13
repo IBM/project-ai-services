@@ -11,17 +11,17 @@ import type {
   DeployFormData,
   DeployFlowState,
   DeployFlowAction,
-} from "./types.ts";
-import { ACTION_TYPES } from "./types.ts";
+} from "./types";
+import { ACTION_TYPES } from "./types";
 import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "@/utils/deploymentTransform";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
-import { useDeployOptions } from "@/hooks/useDeployOptions";
+import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
-import { initializeFormData } from "@/utils/formDataInitializer";
+import { initializeFormData } from "./utils/formDataInitializer";
 import { dedupe } from "@/utils/requestManager";
-import styles from "./DeployFlow.module.scss";
+import styles from "./DigitalAssistantDeployFlow.module.scss";
 
 const getInitialState = (formData: DeployFormData): DeployFlowState => ({
   currentStep: 0,

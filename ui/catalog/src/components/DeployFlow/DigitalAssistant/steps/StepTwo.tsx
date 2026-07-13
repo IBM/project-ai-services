@@ -1,5 +1,5 @@
 import { useReducer, useMemo, useEffect, useState } from "react";
-import styles from "../DeployFlow.module.scss";
+import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig, ComponentConfig } from "../types";
 import {
   getAcceleratorLabel,
@@ -12,7 +12,7 @@ import { fetchResources } from "@/api/applications.api";
 import {
   useBatchProviderParams,
   useMultiTypeProviderParams,
-} from "@/hooks/useProviderParams";
+} from "../hooks/useProviderParams";
 import { getResourceSharingKey } from "@/utils/resourceSharing";
 import { useDeployStore } from "@/store/deploy.store";
 import type {

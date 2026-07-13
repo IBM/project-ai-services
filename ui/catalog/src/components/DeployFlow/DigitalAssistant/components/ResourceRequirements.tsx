@@ -8,7 +8,7 @@ import {
   Tooltip,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
-import styles from "../DeployFlow.module.scss";
+import styles from "../DigitalAssistantDeployFlow.module.scss";
 import { getResourceStatus } from "../utils/StepTwo.utils";
 import type { ResourceItem } from "../types/StepTwo.types";
 

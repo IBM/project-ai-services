@@ -17,7 +17,7 @@ import {
   type JSONSchema,
 } from "@/utils/schemaParser";
 import { parseMarkdownLinks } from "@/utils/string";
-import styles from "../DeployFlow.module.scss";
+import styles from "../DigitalAssistantDeployFlow.module.scss";
 
 interface DynamicSchemaFieldsProps {
   componentType: string;

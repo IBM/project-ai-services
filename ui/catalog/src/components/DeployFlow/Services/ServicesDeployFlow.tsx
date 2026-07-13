@@ -12,14 +12,14 @@ import type {
   DeployFlowState,
   DeployFlowAction,
   ComponentConfig,
-} from "./types.ts";
-import { ACTION_TYPES } from "./types.ts";
+} from "./types";
+import { ACTION_TYPES } from "./types";
 import { deployApplication } from "@/api/applications.api";
-import { transformToDeploymentPayload } from "@/utils/serviceDeploymentTransform.ts";
+import { transformToDeploymentPayload } from "@/utils/serviceDeploymentTransform";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { StepZero } from "./steps/StepZero";
-import { useServiceDeployOptions } from "@/hooks/useServiceDeployOptions";
+import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
 import styles from "./ServicesDeployFlow.module.scss";

@@ -2,7 +2,7 @@ import type {
   DeployFormData,
   ComponentConfig,
   ServiceConfig,
-} from "@/components/DeployFlow/types";
+} from "@/components/DeployFlow/DigitalAssistant/types";
 import type {
   DeployOptionsResponse,
   DeployOptionsService as Service,
