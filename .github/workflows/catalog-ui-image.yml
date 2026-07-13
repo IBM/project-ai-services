@@ -3,11 +3,15 @@ on:
   push:
     paths:
       - 'ui/catalog/**'
+      - 'ui/package.json'
+      - 'ui/package-lock.json'
     branches:
       - main
   pull_request:
     paths:
       - 'ui/catalog/**'
+      - 'ui/package.json'
+      - 'ui/package-lock.json'
       - .github/workflows/catalog-ui-image.yml
     branches:
       - main
@@ -34,10 +38,10 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-          cache-dependency-path: ui/catalog/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install dependencies
-        working-directory: ui/catalog
+        working-directory: ui
         run: npm ci
 
       - name: Run Prettier check
@@ -57,10 +61,10 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-          cache-dependency-path: ui/catalog/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install dependencies
-        working-directory: ui/catalog
+        working-directory: ui
         run: npm ci
 
       - name: Run linter
