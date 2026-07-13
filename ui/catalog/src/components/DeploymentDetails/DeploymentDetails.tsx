@@ -27,10 +27,10 @@ import type {
   DeploymentDetails as DeploymentDetailsType,
   DeploymentServiceData,
   DeployIntegrationEndpoints,
-  ResourcesApiResponse,
+  UsedResourcesResponse,
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
-} from "@/types/digitalAssistants";
+} from "@/types/api.types";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import axios from "axios";
@@ -78,7 +78,7 @@ const DeploymentDetails = ({
       setResources([]);
 
       try {
-        const response = await api.get<ResourcesApiResponse>(
+        const response = await api.get<UsedResourcesResponse>(
           APPLICATION_ENDPOINTS.GET_APPLICATION_RESOURCES(deployment.id),
         );
 

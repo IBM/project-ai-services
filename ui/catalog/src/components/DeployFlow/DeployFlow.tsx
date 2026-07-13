@@ -13,7 +13,7 @@ import type {
   DeployFlowAction,
 } from "./types.ts";
 import { ACTION_TYPES } from "./types.ts";
-import { deployApplication, fetchServices } from "@/api/digitalAssistants";
+import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "@/utils/deploymentTransform";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";

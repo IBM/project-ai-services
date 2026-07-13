@@ -14,7 +14,7 @@ import type {
   ComponentConfig,
 } from "./types.ts";
 import { ACTION_TYPES } from "./types.ts";
-import { deployApplication } from "@/services/deployment.api.ts";
+import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "@/utils/serviceDeploymentTransform.ts";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";

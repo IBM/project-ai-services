@@ -8,11 +8,11 @@ import {
   InlineNotification,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
-import {
-  fetchResources,
-  type ResourcesResponse,
-  type ServiceDeployOptions,
-} from "@/services/deployment.api";
+import { fetchResources } from "@/api/applications.api";
+import type {
+  ResourcesResponse,
+  ServiceDeployOptions,
+} from "@/types/api.types";
 import type { ResourceItem } from "../../DeployFlow/types/StepTwo.types";
 import {
   bytesToGB,

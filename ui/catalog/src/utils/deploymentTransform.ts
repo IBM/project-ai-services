@@ -5,10 +5,10 @@ import type {
 } from "@/components/DeployFlow/types";
 import type {
   DeployOptionsResponse,
-  Service,
-  Component,
+  DeployOptionsService as Service,
+  DeployOptionsComponent as Component,
   Provider,
-} from "@/types/digitalAssistants";
+} from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
 

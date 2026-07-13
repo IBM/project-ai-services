@@ -73,30 +73,30 @@ export interface Provider {
   };
 }
 
-export interface Component {
+// Unified: was Component in digitalAssistants.ts and DeployOptionsComponent in deployment.api.ts
+export interface DeployOptionsComponent {
   type: string;
   name: string;
   providers: Provider[];
 }
 
-export interface Service {
+export interface DeployOptionsService {
   id: string;
   name: string;
   version: string;
   schema?: string;
-  components: Component[];
-  resources?: Resources;
+  components: DeployOptionsComponent[];
 }
 
 export interface DeployOptionsResponse {
   id: string;
   name: string;
   version: string;
-  global_components: Component[];
-  services: Service[];
+  global_components: DeployOptionsComponent[];
+  services: DeployOptionsService[];
 }
 
-// Application Types - Used for managing deployed digital assistants
+// Application Types - Used for managing deployed applications
 export interface ServiceComponent {
   id: string;
   type: string;
@@ -166,7 +166,8 @@ export interface DeployApplicationResponse {
   id: string;
 }
 
-// Resources API Types - Used for fetching system resource availability
+// Resources API Types
+// Available resources (how much the system has in total)
 export interface ResourcesResponse {
   cpu: {
     total_cpu: number;
@@ -182,6 +183,19 @@ export interface ResourcesResponse {
       available: number;
     };
   };
+}
+
+// Used resources (how much is currently consumed) — different endpoint, different fields
+export interface UsedResourcesResponse {
+  cpu: {
+    used_cpu: number;
+    total_cpu: number;
+  };
+  memory: {
+    used_bytes: number;
+    total_bytes: number;
+  };
+  accelerators: Record<string, { used: number; total: number }>;
 }
 
 // DeploymentDetails Types - Used for displaying application deployment details
@@ -227,18 +241,6 @@ export interface DeployIntegrationEndpoints {
   interactiveAPIs: string[];
 }
 
-export interface ResourcesApiResponse {
-  cpu: {
-    used_cpu: number;
-    total_cpu: number;
-  };
-  memory: {
-    used_bytes: number;
-    total_bytes: number;
-  };
-  accelerators: Record<string, { used: number; total: number }>;
-}
-
 export interface ApplicationDetailsApiResponse {
   id: string;
   name: string;
@@ -262,4 +264,109 @@ export interface ApplicationDetailsApiResponse {
       url: string;
     }>;
   }>;
+}
+
+// Service Types - Used by the services flow
+export interface Service {
+  id: string;
+  name: string;
+  description: string;
+  certified_by?: string;
+  architectures?: string[];
+  standalone?: boolean;
+  version?: string;
+}
+
+// Deploy component interface
+export interface DeployComponent {
+  type: string;
+  name?: string;
+  description?: string;
+  providers: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    default?: boolean;
+    schema?: string;
+    version?: string;
+    resources?: {
+      cpu?: number;
+      memory?: number;
+      storage?: number;
+      accelerators?: Record<string, number>;
+    };
+    [key: string]: unknown;
+  }>;
+}
+
+export interface DeployOptions {
+  version: string;
+  global_components: DeployComponent[];
+  services: DeployOptionsService[];
+}
+
+export interface ServiceDeployOptions {
+  id: string;
+  name: string;
+  description?: string;
+  version: string;
+  components: DeployComponent[];
+  resources?: {
+    cpu: number;
+    memory: number;
+    storage?: number;
+    accelerators?: Record<string, number>;
+  };
+}
+
+// Provider schema types
+export interface ProviderSchemaProperty {
+  default?: string;
+  description?: string;
+  title?: string;
+  type?: string;
+  format?: string;
+  oneOf?: Array<{
+    const: string;
+    description?: string;
+    title?: string;
+  }>;
+}
+
+export interface ProviderSchema {
+  $schema?: string;
+  properties: {
+    model?: ProviderSchemaProperty;
+    [key: string]: ProviderSchemaProperty | undefined;
+  };
+  required?: string[];
+  type: string;
+}
+
+export interface LLMOption {
+  id: string;
+  text: string;
+  providerId: string;
+  providerName: string;
+}
+
+// Deployment payload
+export interface DeploymentPayload {
+  name: string;
+  catalog_id: string;
+  version: string;
+  deployment_type: "service";
+  services: Array<{
+    catalog_id: string;
+    version: string;
+    components: Array<{
+      component_type: string;
+      provider_id: string;
+      version: string;
+      params?: Record<string, unknown>;
+    }>;
+  }>;
+  global_components?: {
+    [key: string]: string;
+  };
 }
