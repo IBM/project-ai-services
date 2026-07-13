@@ -15,6 +15,7 @@ export const DISPLAY_STATUS = {
   DIGITIZATION_ERROR: 'Digitization error',
   INGESTING: 'Ingesting...',
   DIGITIZING: 'Digitizing...',
+  ALREADY_EXISTS: 'already_exists',
 } as const;
 
 // Job operation types

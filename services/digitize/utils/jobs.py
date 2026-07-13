@@ -13,6 +13,7 @@ from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
     JobStatus,
+    DocStatus,
 )
 from digitize.settings import settings
 from digitize.utils.db import (
@@ -56,7 +57,10 @@ def get_job_document_stats(job_id: str) -> dict:
 
         documents = job_data.get("documents", [])
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
-        completed_docs = [doc for doc in documents if doc.get("status") == DocStatus.COMPLETED.value]
+        completed_docs = [
+            doc for doc in documents
+            if doc.get("status") in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+        ]
 
         return {
             "failed_docs": failed_docs,
@@ -87,7 +91,14 @@ def generate_uuid():
     return str(generated_uuid)
 
 
-def initialize_job_state(job_id: str, operation: str, output_format: OutputFormat, documents_info: list[str], job_name: Optional[str] = None) -> dict[str, str]:
+def initialize_job_state(
+    job_id: str,
+    operation: str,
+    output_format: OutputFormat,
+    documents_info: list[str],
+    job_name: Optional[str] = None,
+    already_exists_files: Optional[list] = None,   # list[AlreadyExistsFile]
+) -> dict[str, str]:
     """
     Initialize job state with both database and file system persistence.
 
@@ -100,6 +111,8 @@ def initialize_job_state(job_id: str, operation: str, output_format: OutputForma
         output_format: Output format for documents
         documents_info: List of filenames to be processed
         job_name: Optional human-readable name for the job
+        already_exists_files: Optional list of AlreadyExistsFile entries that were
+                              stripped from the batch before staging.
 
     Returns:
         dict[str, str]: Mapping of filename -> document_id
@@ -109,12 +122,17 @@ def initialize_job_state(job_id: str, operation: str, output_format: OutputForma
     # Generate document IDs upfront
     doc_id_dict = {doc: generate_uuid() for doc in documents_info}
 
-    # CRITICAL: Create job FIRST before documents (foreign key constraint)
+    # CRITICAL: Create job FIRST before documents (foreign key constraint).
+    # total_documents must cover both novel files AND any already-exists files so
+    # that the initial stats are accurate before the pipeline touches them.
+    all_filenames = list(documents_info) + (
+        [f.filename for f in already_exists_files] if already_exists_files else []
+    )
     create_job(
         job_id=job_id,
         operation=operation,
         submitted_at=submitted_at,
-        documents_info=documents_info,
+        documents_info=all_filenames,
         job_name=job_name
     )
 
@@ -130,6 +148,44 @@ def initialize_job_state(job_id: str, operation: str, output_format: OutputForma
             operation=operation,
             submitted_at=submitted_at
         )
+
+    # Record ALREADY_EXISTS entries for files stripped from the batch.
+    # Created AFTER the job row exists (foreign key constraint).
+    # Written directly as ALREADY_EXISTS in a single DB insert — there is no
+    # "accepted" window and no follow-up update_doc_metadata call needed.
+    if already_exists_files:
+        from digitize.utils.db import get_status_manager
+        from digitize.models import JobStatus as _JobStatus
+        status_mgr = get_status_manager(job_id)
+        for skipped in already_exists_files:
+            skipped_doc_id = generate_uuid()
+            doc_id_dict[skipped.filename] = skipped_doc_id
+            logger.debug(
+                f"Recording already_exists doc {skipped_doc_id} "
+                f"for file '{skipped.filename}'"
+            )
+            create_document(
+                doc_name=skipped.filename,
+                doc_id=skipped_doc_id,
+                job_id=job_id,
+                output_format=output_format,
+                operation=operation,
+                submitted_at=submitted_at,
+                initial_status=DocStatus.ALREADY_EXISTS,
+                completed_at=submitted_at,
+                extra_metadata={
+                    "existing_doc_id": skipped.existing_doc_id,
+                    "existing_doc_name": skipped.existing_doc_name,
+                    "file_hash": skipped.file_hash,
+                },
+            )
+            # Update job stats to include this resolved doc — no doc-level status
+            # write needed because it was already set correctly in create_document.
+            status_mgr.update_job_progress(
+                "",
+                DocStatus.ALREADY_EXISTS,
+                _JobStatus.IN_PROGRESS,
+            )
 
     return doc_id_dict
 

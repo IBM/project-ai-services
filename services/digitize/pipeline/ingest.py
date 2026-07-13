@@ -20,7 +20,12 @@ from common.misc_utils import get_utc_timestamp
 
 logger = get_logger("ingest")
 
-def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseStatusManager], doc_id_dict: Optional[dict]):
+def create_indexing_handler(
+    emb_model_dict: dict,
+    status_mgr: Optional[DatabaseStatusManager],
+    doc_id_dict: Optional[dict],
+    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
 
@@ -28,6 +33,7 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseS
         emb_model_dict: Dictionary containing embedding model configuration
         status_mgr: Status manager for updating document status
         doc_id_dict: Mapping of document names to IDs
+        file_checksum_dict: Optional mapping of filename -> sha256 hash string
 
     Returns:
         Callable that handles indexing of a single document's chunks
@@ -81,13 +87,20 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseS
             # Update status to COMPLETED with indexing timing
             if status_mgr and doc_id_dict:
                 logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
+                file_hash = (
+                    file_checksum_dict.get(Path(path).name)
+                    if file_checksum_dict else None
+                )
+                metadata_update = {
+                    "status": DocStatus.COMPLETED,
+                    "completed_at": get_utc_timestamp(),
+                    "timing_in_secs": {"indexing": round(indexing_time, 2)},
+                }
+                if file_hash:
+                    metadata_update["file_hash"] = file_hash
                 status_mgr.update_doc_metadata(
                     doc_id,
-                    {
-                        "status": DocStatus.COMPLETED,
-                        "completed_at": get_utc_timestamp(),
-                        "timing_in_secs": {"indexing": round(indexing_time, 2)}
-                    }
+                    metadata_update,
                 )
                 status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
 
@@ -122,7 +135,12 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseS
 
     return index_document_chunks
 
-def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
+def ingest(
+    directory_path: Path,
+    job_id: Optional[str] = None,
+    doc_id_dict: Optional[dict] = None,
+    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+):
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
@@ -146,7 +164,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         docx_files = list(directory_path.glob("*.docx"))
         input_file_paths = [str(p) for p in pdf_files + docx_files]
 
-        total_documents = len(input_file_paths)
+        # Total includes already-exists files (doc_id_dict covers all submitted files).
+        total_documents = len(doc_id_dict) if doc_id_dict else len(input_file_paths)
 
         logger.info(f"Processing {total_documents} document(s)")
 
@@ -156,7 +175,9 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         out_path = setup_digitized_doc_dir()
 
         # Create indexing handler for immediate indexing after chunking
-        indexing_handler = create_indexing_handler(emb_model_dict, status_mgr, doc_id_dict)
+        indexing_handler = create_indexing_handler(
+            emb_model_dict, status_mgr, doc_id_dict, file_checksum_dict
+        )
 
         start_time = time.time()
         # Reserve 100 tokens from embedding model's max_model_len to account for metadata
@@ -183,10 +204,11 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
 
+            pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
-                    f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
-                    f"({len(completed_docs) / total_documents * 100:.2f}% of total documents)"
-                )
+                f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
+                f"({pct:.2f}% of total documents)"
+            )
 
             if len(failed_docs) > 0:
                 # At least one document failed

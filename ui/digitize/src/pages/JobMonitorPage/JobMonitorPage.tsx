@@ -294,6 +294,8 @@ const getStatusIcon = (status: string) => {
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
+    case DISPLAY_STATUS.ALREADY_EXISTS:
+      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
       return null;
   }
@@ -408,6 +410,25 @@ const JobMonitorPage = () => {
       }, 3000);
     } catch (error: any) {
       console.error('Error uploading documents:', error);
+
+      // 409 Conflict — ALL files are duplicates, no job was created
+      if (error.response?.status === 409) {
+        const detail = error.response?.data?.detail || 'All submitted files have already been ingested.';
+        dispatch({
+          type: 'SET_UPLOAD_STATUS',
+          payload: {
+            show: true,
+            kind: 'error',
+            title: 'All files are duplicates — no job created',
+            subtitle: detail,
+          },
+        });
+        setTimeout(() => {
+          dispatch({ type: 'HIDE_UPLOAD_STATUS' });
+        }, 8000);
+        // Re-throw so IngestSidePanel shows the inline error
+        throw new Error(detail);
+      }
       
       // Handle FastAPI validation errors (422) which return detail as an array
       let errorMessage = 'An error occurred';
@@ -439,6 +460,8 @@ const JobMonitorPage = () => {
       setTimeout(() => {
         dispatch({ type: 'HIDE_UPLOAD_STATUS' });
       }, 5000);
+
+      throw error;
     }
   };
 
@@ -986,7 +1009,9 @@ const JobMonitorPage = () => {
                           <span className={styles.documentName}>{doc.name}</span>
                           <div className={styles.documentStatus}>
                             {getStatusIcon(doc.status)}
-                            <span className={styles.statusText}>{doc.status}</span>
+                            <span className={styles.statusText}>
+                              {doc.message ?? doc.status}
+                            </span>
                           </div>
                         </div>
                       </div>
