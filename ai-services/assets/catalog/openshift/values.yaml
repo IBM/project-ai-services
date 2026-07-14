@@ -1,0 +1,30 @@
+ui:
+  # @hidden
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.42
+
+backend:
+  # @hidden
+  image: icr.io/ai-services-cicd/ai-services:v0.0.173
+  # @hidden
+  runtime: "openshift"
+  # @description Admin password hash (PBKDF2). Set by the configure command.
+  adminPasswordHash: ""
+
+db:
+  # @hidden
+  image: icr.io/ai-services-cicd/postgres:18-3
+  # @hidden
+  user: "admin"
+  # @hidden
+  database: "ai_services"
+  # @description Password for the catalog PostgreSQL database. Set by the configure command.
+  password: ""
+  # @description Sets the storage size for the catalog PostgreSQL service (Default: 5Gi).
+  storage: 5Gi
+  resources:
+    requests:
+      # @hidden
+      memory: "512Mi"
+    limits:
+      # @hidden
+      memory: "1Gi"

@@ -1,0 +1,40 @@
+---
+# Service for UI container (port 8081)
+apiVersion: v1
+kind: Service
+metadata:
+  name: "catalog-ui"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: catalog
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: catalog
+  ports:
+    - name: ui
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+---
+# Service for backend API container (port 8080)
+apiVersion: v1
+kind: Service
+metadata:
+  name: "catalog-api"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: catalog
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: catalog
+  ports:
+    - name: api
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
