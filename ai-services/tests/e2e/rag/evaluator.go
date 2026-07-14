@@ -315,8 +315,10 @@ func loadFreshBearerToken() string {
 		catalogClient, clientErr := catalogClientNew()
 		if clientErr != nil {
 			logger.Warningf("[RAG] could not refresh catalog token: %v", clientErr)
+
 			return creds.AccessToken
 		}
+
 		return catalogClient.AccessToken()
 	}
 

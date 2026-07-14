@@ -452,6 +452,7 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 			// 404 → job deleted externally; treat as terminal.
 			if errors.Is(err, ErrJobNotFound) {
 				logger.Infof("[DIGITIZE] Job %s not found (404) — treating as complete (already deleted)", jobID)
+
 				return nil, nil
 			}
 			logger.Warningf("[DIGITIZE] Failed to get job status for %s: %v — retrying in %s", jobID, err, pollInterval)

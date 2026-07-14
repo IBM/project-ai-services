@@ -110,8 +110,10 @@ func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime stri
 	if err != nil {
 		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
 			logger.Infof("[CLI] bootstrap configure exited non-zero with known Spyre repair state — treating as non-fatal")
+
 			return output, nil
 		}
+
 		return output, err
 	}
 
@@ -394,6 +396,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 			if backendURL != "" && similarityURL != "" {
 				logger.Infof("[WAIT] application info URLs ready after %d attempt(s) — backend: %s, similarity: %s",
 					attempt, backendURL, similarityURL)
+
 				return infoOutput, nil
 			}
 		} else {
@@ -405,6 +408,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 		time.Sleep(pollInterval)
 	}
 	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
+
 	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
 }
 
@@ -579,8 +583,10 @@ func DeleteAppSkipCleanup(
 		// "not found" means the application was already removed — treat as success.
 		if strings.Contains(err.Error(), "not found") {
 			logger.Infof("[TEST] Application %s no longer exists after delete (not found) — OK", appName)
+
 			return output, nil
 		}
+
 		return output, err
 	}
 	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
