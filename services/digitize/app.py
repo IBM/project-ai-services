@@ -63,17 +63,28 @@ async def lifespan(app: FastAPI):
                     raise RuntimeError("Database engine is not initialized")
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
-            except Exception as schema_error:
-                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
-                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
+            except Exception as schema_err:
+                logger.error(
+                    f"❌ Failed to initialize database schema: {schema_err}",
+                    exc_info=True,
+                )
+                raise RuntimeError(
+                    f"Database schema initialization failed: {schema_err}"
+                )
         else:
-            logger.error("❌ Database connection failed - service requires database to operate")
-            raise RuntimeError("Database connection required but not available. Please check database configuration.")
-    except RuntimeError:
+            logger.error(
+                "❌ Database connection failed — service requires database to operate"
+            )
+            raise RuntimeError(
+                "Database connection required but not available. "
+                "Please check database configuration."
+            )
+    except RuntimeError as exc:
+        logger.error(f"❌ Startup aborted: {exc}", exc_info=True)
         raise
-    except Exception as e:
-        logger.error(f"❌ Database check failed: {e}")
-        raise RuntimeError(f"Database connection required but failed: {e}")
+    except Exception as exc:
+        logger.error(f"❌ Database check failed: {exc}", exc_info=True)
+        raise RuntimeError(f"Database connection required but failed: {exc}")
 
     # Scan for orphan jobs and mark them as failed
     try:
