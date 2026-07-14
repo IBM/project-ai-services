@@ -52,6 +52,7 @@ func LoadFromEnv() *Config {
 			cfg.Retries = n
 		}
 	}
+
 	return cfg
 }
 

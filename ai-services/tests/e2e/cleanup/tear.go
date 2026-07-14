@@ -30,7 +30,7 @@ func CollectArtifacts(tempDir, artifactDir string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil { //nolint:mnd
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 

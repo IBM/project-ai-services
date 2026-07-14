@@ -21,6 +21,13 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
+// ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
+// These are fixed terminal dimensions for interactive CLI prompts — not magic numbers.
+const (
+	ptyWinRows = 24 //nolint:mnd
+	ptyWinCols = 80 //nolint:mnd
+)
+
 type CreateOptions struct {
 	SkipImageDownload bool
 	SkipModelDownload bool
@@ -70,8 +77,10 @@ func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (stri
 		// when Spyre post-repair checks still fail — same acceptable state.
 		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
 			logger.Infof("[CLI] bootstrap exited non-zero with known Spyre repair state — treating as non-fatal")
+
 			return output, nil
 		}
+
 		return output, err
 	}
 
@@ -89,8 +98,10 @@ func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime stri
 	if err != nil {
 		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
 			logger.Infof("[CLI] bootstrap configure exited non-zero with known Spyre repair state — treating as non-fatal")
+
 			return output, nil
 		}
+
 		return output, err
 	}
 
@@ -136,6 +147,26 @@ func CreateApp(
 	return runCLI(ctx, cfg, "application create", args...)
 }
 
+// newRAGHTTPClient returns an HTTP client for RAG health-check probes.
+// TLS verification is skipped for OpenShift (self-signed) and the Podman
+// catalog path (nip.io self-signed via Caddy).
+func newRAGHTTPClient(appRuntime string, isCatalogPath bool, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+
+	if appRuntime == "openshift" || isCatalogPath {
+		reason := "catalog path — nip.io self-signed certificate"
+		if appRuntime == "openshift" {
+			reason = "OpenShift runtime"
+		}
+		logger.Warningf("[WARNING] TLS certificate verification disabled (%s)", reason)
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		}
+	}
+
+	return client
+}
+
 // CreateRAGAppAndValidate creates an application, waits for health checks, and validates RAG endpoints.
 // NOTE: This is intentionally RAG-specific and used only by RAG E2E tests.
 func CreateRAGAppAndValidate(
@@ -151,14 +182,16 @@ func CreateRAGAppAndValidate(
 	appRuntime string,
 ) (string, error) {
 	const (
-		maxRetries            = 10
-		waitTime              = 15 * time.Second
-		defaultCommandTimeout = 10 * time.Second
+		maxRetries            = 10               //nolint:mnd
+		waitTime              = 15 * time.Second //nolint:mnd
+		defaultCommandTimeout = 10 * time.Second //nolint:mnd
 	)
+
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts, appRuntime)
 	if err != nil {
 		return output, err
 	}
+
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
 		return output, err
 	}
@@ -168,37 +201,14 @@ func CreateRAGAppAndValidate(
 		return output, err
 	}
 
-	// Skip TLS verification for:
-	//   - OpenShift (self-signed certificates)
-	//   - Podman catalog path (nip.io self-signed certificates via Caddy)
-	skipTLSVerify := appRuntime == "openshift" || isCatalogPath
-	httpClient := &http.Client{
-		Timeout: defaultCommandTimeout,
-	}
-	if skipTLSVerify {
-		logger.Warningf("[WARNING] TLS certificate verification disabled (%s)", func() string {
-			if appRuntime == "openshift" {
-				return "OpenShift runtime"
-			}
-			return "catalog path — nip.io self-signed certificate"
-		}())
-		httpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}
-	}
-	endpoints := []string{
-		"/health",
-		"/v1/models",
-		"/db-status",
-	}
-	for _, ep := range endpoints {
-		fullURL := backendURL + ep
-		if err := waitForEndpointOK(httpClient, fullURL, maxRetries, waitTime); err != nil {
+	httpClient := newRAGHTTPClient(appRuntime, isCatalogPath, defaultCommandTimeout)
+
+	for _, ep := range []string{"/health", "/v1/models", "/db-status"} {
+		if err := waitForEndpointOK(httpClient, backendURL+ep, maxRetries, waitTime); err != nil {
 			return output, err
 		}
 	}
+
 	logger.Infof("[UI] Chatbot UI available at: %s", chatbotUiURL)
 
 	return output, nil
@@ -428,6 +438,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 		if infoErr != nil {
 			logger.Warningf("[WAIT] application info attempt %d failed: %v — retrying", attempt, infoErr)
 			time.Sleep(pollInterval)
+
 			continue
 		}
 		// For podman, require both chat-bot-backend AND similarity-api URLs to be
@@ -440,6 +451,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 			if backendURL != "" && similarityURL != "" {
 				logger.Infof("[WAIT] application info URLs ready after %d attempt(s) — backend: %s, similarity: %s",
 					attempt, backendURL, similarityURL)
+
 				return infoOutput, nil
 			}
 		} else {
@@ -453,6 +465,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 	// Last attempt — return whatever we have even if URLs are missing so the
 	// caller can surface a more descriptive error.
 	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
+
 	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
 }
 
@@ -632,8 +645,10 @@ func DeleteAppSkipCleanup(
 		// expected state after a successful delete, so treat it as success.
 		if strings.Contains(err.Error(), "not found") {
 			logger.Infof("[TEST] Application %s no longer exists after delete (not found) — OK", appName)
+
 			return output, nil
 		}
+
 		return output, err
 	}
 	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
@@ -696,7 +711,7 @@ func runWithPTY(ctx context.Context, bin string, args []string, input string) (s
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	// Start the command inside a PTY.
-	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: 24, Cols: 80}, nil)
+	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: ptyWinRows, Cols: ptyWinCols}, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to start PTY: %w", err)
 	}

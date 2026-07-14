@@ -19,11 +19,23 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+// RAG transport tuning constants — values are explained in sharedRAGClient below.
+const (
+	similarityHealthTimeout  = 10 * time.Second       //nolint:mnd
+	ragMaxIdleConnsPerHost   = 4                      //nolint:mnd
+	ragMaxConnsPerHost       = 8                      //nolint:mnd
+	ragIdleConnTimeout       = 90 * time.Second       //nolint:mnd
+	ragResponseHeaderTimeout = 90 * time.Second       //nolint:mnd
+	ragDialTimeout           = 15 * time.Second       //nolint:mnd
+	ragDialKeepAlive         = 30 * time.Second       //nolint:mnd
+	ragRetryBackoffBase      = 200 * time.Millisecond //nolint:mnd
+)
+
 // similarityHealthClient skips TLS verification so it works with both plain
 // http:// (legacy podman HOST_IP:PORT) and https:// nip.io self-signed certs
 // (catalog path). Same pattern as PostJSON's transport.
 var similarityHealthClient = &http.Client{
-	Timeout: 10 * time.Second,
+	Timeout: similarityHealthTimeout,
 	Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec
@@ -69,13 +81,13 @@ var sharedRAGClient = &http.Client{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec
 		},
-		MaxIdleConnsPerHost:   4,
-		MaxConnsPerHost:       8,
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 90 * time.Second,
+		MaxIdleConnsPerHost:   ragMaxIdleConnsPerHost,
+		MaxConnsPerHost:       ragMaxConnsPerHost,
+		IdleConnTimeout:       ragIdleConnTimeout,
+		ResponseHeaderTimeout: ragResponseHeaderTimeout,
 		DialContext: (&net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   ragDialTimeout,
+			KeepAlive: ragDialKeepAlive,
 		}).DialContext,
 	},
 }
@@ -276,7 +288,7 @@ func RunWithRetry(
 		// Exponential back-off: 200 ms, 400 ms, 600 ms …
 		// The select ensures we don't block past the parent deadline.
 		if attempt < maxRetries {
-			backoff := time.Duration(attempt+1) * 200 * time.Millisecond
+			backoff := time.Duration(attempt+1) * ragRetryBackoffBase
 			logger.Infof("[RAG][retry] waiting %s before next attempt", backoff)
 			select {
 			case <-ctx.Done():
@@ -352,11 +364,13 @@ func loadFreshBearerToken() string {
 	creds, err := catalogConfig.Load()
 	if err != nil {
 		logger.Warningf("[RAG] could not load catalog credentials: %v", err)
+
 		return ""
 	}
 
 	if creds.AccessToken == "" {
 		logger.Warningf("[RAG] catalog credentials loaded but access token is empty")
+
 		return ""
 	}
 
@@ -373,6 +387,7 @@ func loadFreshBearerToken() string {
 			// Fall through and use whatever token we have.
 			return creds.AccessToken
 		}
+
 		return catalogClient.AccessToken()
 	}
 
@@ -402,34 +417,17 @@ func jwtTokenExpiry(token string) (time.Time, error) {
 	return time.Unix(claims.Exp, 0), nil
 }
 
-// PostJSON sends a POST request with a JSON body and returns the response body
-// as a string. It uses the package-level sharedRAGClient so that TCP
-// connections are kept alive and reused across calls, avoiding the connection-
-// pool exhaustion that occurred when a brand-new *http.Transport was allocated
-// on every call.
-//
-// Debug logging emits request start time, context deadline, HTTP status, and
-// elapsed duration so that slow or hanging requests are visible without waiting
-// for the full suite timeout.
-func PostJSON(
-	ctx context.Context,
-	baseURL string,
-	path string,
-	body map[string]any,
-) (string, error) {
+// buildPostJSONRequest marshals body and constructs the *http.Request, adding
+// Content-Type and the catalog Bearer token when one is available.
+func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[string]any) (*http.Request, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request body: %w", err)
+		return nil, fmt.Errorf("marshal request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		baseURL+path,
-		bytes.NewBuffer(b),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewBuffer(b))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -440,40 +438,16 @@ func PostJSON(
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	// Debug: log start time and remaining budget so slow requests are
-	// immediately visible in the test output.
-	start := time.Now()
-	if deadline, ok := ctx.Deadline(); ok {
-		logger.Infof("[RAG][http] POST %s%s — deadline in %s",
-			baseURL, path, time.Until(deadline).Round(time.Second))
-	} else {
-		logger.Infof("[RAG][http] POST %s%s — no deadline", baseURL, path)
-	}
+	return req, nil
+}
 
-	resp, err := sharedRAGClient.Do(req)
-	elapsed := time.Since(start)
-
-	if err != nil {
-		// Distinguish context cancellation from a transport-level error.
-		// A cancelled context means the per-question budget expired; a
-		// transport error means a network or server-side failure.
-		if ctx.Err() != nil {
-			logger.Errorf("[RAG][http] POST %s%s — cancelled after %s: context=%v",
-				baseURL, path, elapsed.Round(time.Millisecond), ctx.Err())
-			return "", fmt.Errorf("request cancelled: %w", ctx.Err())
-		}
-		logger.Errorf("[RAG][http] POST %s%s — transport error after %s: %v",
-			baseURL, path, elapsed.Round(time.Millisecond), err)
-		return "", fmt.Errorf("http request failed: %w", err)
-	}
-
+// handlePostJSONResponse drains the response body, logs the result, and maps
+// HTTP status codes to the appropriate error types for RunWithRetry.
+func handlePostJSONResponse(ctx context.Context, resp *http.Response, baseURL, path string, elapsed time.Duration) (string, error) {
 	// Always drain and close the body so the underlying TCP connection is
 	// returned to the pool. Closing without a full drain leaves the connection
 	// in a half-read state and permanently removes it from the pool, leaking
 	// file descriptors and starving future requests of reusable sockets.
-	// The defer runs after io.ReadAll below; io.Copy on an already-exhausted
-	// reader is a cheap no-op that guarantees the body is fully consumed even
-	// if io.ReadAll returns early on a partial read.
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
@@ -489,17 +463,65 @@ func PostJSON(
 
 	if resp.StatusCode != http.StatusOK {
 		if isRetriableStatus(resp.StatusCode) {
-			return "", fmt.Errorf(
-				"retriable http status %d: %s",
-				resp.StatusCode,
-				string(responseBody),
-			)
+			return "", fmt.Errorf("retriable http status %d: %s", resp.StatusCode, string(responseBody))
 		}
 
 		return "", fmt.Errorf("%w: http status %d", ErrNonRetriable, resp.StatusCode)
 	}
 
+	_ = ctx // ctx is kept in the signature for future use (e.g. trace propagation)
+
 	return string(responseBody), nil
+}
+
+// PostJSON sends a POST request with a JSON body and returns the response body
+// as a string. It uses the package-level sharedRAGClient so that TCP
+// connections are kept alive and reused across calls, avoiding the connection-
+// pool exhaustion that occurred when a brand-new *http.Transport was allocated
+// on every call.
+//
+// Debug logging emits request start time, context deadline, HTTP status, and
+// elapsed duration so that slow or hanging requests are visible without waiting
+// for the full suite timeout.
+func PostJSON(
+	ctx context.Context,
+	baseURL string,
+	path string,
+	body map[string]any,
+) (string, error) {
+	req, err := buildPostJSONRequest(ctx, baseURL, path, body)
+	if err != nil {
+		return "", err
+	}
+
+	// Log start time and remaining budget so slow requests are immediately
+	// visible in test output.
+	start := time.Now()
+	if deadline, ok := ctx.Deadline(); ok {
+		logger.Infof("[RAG][http] POST %s%s — deadline in %s",
+			baseURL, path, time.Until(deadline).Round(time.Second))
+	} else {
+		logger.Infof("[RAG][http] POST %s%s — no deadline", baseURL, path)
+	}
+
+	resp, err := sharedRAGClient.Do(req)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		// Distinguish context cancellation from a transport-level error.
+		if ctx.Err() != nil {
+			logger.Errorf("[RAG][http] POST %s%s — cancelled after %s: context=%v",
+				baseURL, path, elapsed.Round(time.Millisecond), ctx.Err())
+
+			return "", fmt.Errorf("request cancelled: %w", ctx.Err())
+		}
+		logger.Errorf("[RAG][http] POST %s%s — transport error after %s: %v",
+			baseURL, path, elapsed.Round(time.Millisecond), err)
+
+		return "", fmt.Errorf("http request failed: %w", err)
+	}
+
+	return handlePostJSONResponse(ctx, resp, baseURL, path, elapsed)
 }
 
 // extractAssistantContent extracts assistant text from raw JSON response.

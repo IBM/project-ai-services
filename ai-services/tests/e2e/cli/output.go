@@ -52,6 +52,7 @@ func ValidateBootstrapConfigureOutput(output string, appRuntime string) error {
 			strings.Contains(output, "failed to configure spyre card") {
 			return nil
 		}
+
 		return fmt.Errorf("bootstrap configure validation failed: output did not indicate success or known Spyre repair state.\nOutput: %s", output)
 	case "openshift":
 		required := []string{
@@ -289,7 +290,7 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 		}
 
 		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		if len(parts) < 2 { //nolint:mnd
 			continue
 		}
 		podName := parts[len(parts)-2]
@@ -392,24 +393,6 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 	}
 
 	return nil
-}
-
-func getFirstWord(s string) string {
-	firstSpaceIndex := strings.Index(s, " ")
-	if firstSpaceIndex != -1 {
-		return s[:firstSpaceIndex]
-	}
-	// If no space is found, the string is a single word, so return an empty string
-	return s
-}
-
-func processTemplateOutput(output string) []string {
-	output = strings.ReplaceAll(output, "\nAvailable application templates:\n", "")
-	output = strings.ReplaceAll(output, "\n\n", "\n")
-	arrOutput := strings.Split(output, "- ")
-	arrOutput = arrOutput[1:]
-
-	return arrOutput
 }
 
 // ValidateModelListOutput validates the output of the model list command.

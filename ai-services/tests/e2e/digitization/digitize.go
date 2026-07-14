@@ -31,22 +31,23 @@ var ErrJobNotFound = errors.New("job not found (404)")
 // round-trip: dial + TLS handshake + response headers + body.
 // 30 s is sufficient for nip.io TLS + slow Spyre pods; the previous 10 s
 // caused frequent spurious timeouts.
-var getCallTimeout = 30 * time.Second
+var getCallTimeout = 30 * time.Second //nolint:mnd
 
 // postCallTimeout is the end-to-end deadline for a POST request round-trip.
-var postCallTimeout = 60 * time.Second
+var postCallTimeout = 60 * time.Second //nolint:mnd
 
 // docCallTimeout raised from 30 s to 60 s: document content responses can
 // be large JSON/markdown payloads over nip.io TLS.
-var docCallTimeout = 60 * time.Second
+var docCallTimeout = 60 * time.Second //nolint:mnd
 
-// appRuntime holds the current runtime environment (podman or openshift).
-var appRuntime string
-
-// SetAppRuntime sets the application runtime for the digitize package.
-func SetAppRuntime(runtime string) {
-	appRuntime = runtime
-}
+// Transport tuning constants — each value is explained in the comment block below.
+const (
+	transportMaxIdleConnsPerHost   = 4                //nolint:mnd
+	transportIdleConnTimeout       = 90 * time.Second //nolint:mnd
+	transportResponseHeaderTimeout = 25 * time.Second //nolint:mnd
+	transportDialTimeout           = 15 * time.Second //nolint:mnd
+	transportDialKeepAlive         = 30 * time.Second //nolint:mnd
+)
 
 // sharedDigitizeTransport is reused across all getHTTPClient calls so that
 // TLS connections are pooled rather than opened fresh on every request.
@@ -74,15 +75,15 @@ func SetAppRuntime(runtime string) {
 //     the happy path; ResponseHeaderTimeout handles the stuck-socket case.
 var sharedDigitizeTransport = &http.Transport{
 	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-	MaxIdleConnsPerHost: 4,
-	IdleConnTimeout:     90 * time.Second,
+	MaxIdleConnsPerHost: transportMaxIdleConnsPerHost,
+	IdleConnTimeout:     transportIdleConnTimeout,
 	// ResponseHeaderTimeout fires if the server accepts the connection but
 	// never sends response headers.  This is the guard against dead keep-alive
 	// sockets that http.Client.Timeout alone cannot catch.
-	ResponseHeaderTimeout: 25 * time.Second,
+	ResponseHeaderTimeout: transportResponseHeaderTimeout,
 	DialContext: (&net.Dialer{
-		Timeout:   15 * time.Second,
-		KeepAlive: 30 * time.Second,
+		Timeout:   transportDialTimeout,
+		KeepAlive: transportDialKeepAlive,
 	}).DialContext,
 }
 
@@ -520,6 +521,7 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 			// gone, there is nothing left to wait for.
 			if errors.Is(err, ErrJobNotFound) {
 				logger.Infof("[DIGITIZE] Job %s not found (404) — treating as complete (already deleted)", jobID)
+
 				return nil, nil
 			}
 			logger.Warningf("[DIGITIZE] Failed to get job status for %s: %v — retrying in %s", jobID, err, pollInterval)
