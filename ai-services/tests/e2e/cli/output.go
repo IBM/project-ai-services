@@ -2,15 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
-// checkRequiredStrings returns an error if any of the required strings are absent
-// from output. label is used only in the error message for context.
+// checkRequiredStrings returns an error if any required string is absent from output.
 func checkRequiredStrings(output, label string, required []string) error {
 	for _, r := range required {
 		if !strings.Contains(output, r) {
@@ -21,8 +19,7 @@ func checkRequiredStrings(output, label string, required []string) error {
 	return nil
 }
 
-// checkNotOpenShiftUnsupported returns an error when the openshift not-supported
-// warning is missing from the output. Used by commands that are podman-only.
+// checkNotOpenShiftUnsupported returns an error when the openshift-not-supported warning is missing.
 func checkNotOpenShiftUnsupported(output, label string) error {
 	const marker = "WARNING:  Not supported for openshift runtime"
 	if !strings.Contains(output, marker) {
@@ -32,22 +29,17 @@ func checkNotOpenShiftUnsupported(output, label string) error {
 	return nil
 }
 
+// ValidateBootstrapConfigureOutput validates bootstrap configure output.
+// For podman: accepts full success ("LPAR configured successfully") or known
+// Spyre post-repair failure strings — repairs ran but re-validation failed,
+// which is hardware-specific and does not block application-layer tests.
 func ValidateBootstrapConfigureOutput(output string, appRuntime string) error {
-	// For podman: the configure command runs several steps. If Spyre cards are present
-	// but some post-repair checks still fail, the command exits with an error before
-	// printing "LPAR configured successfully". We accept either:
-	//   (a) Full success: "LPAR configured successfully"
-	//   (b) Spyre-only failure after repair attempt — all other steps passed, so this
-	//       is acceptable in environments with Spyre cards not yet fully configured.
-	// For openshift: always require the cluster configured message.
 	switch appRuntime {
 	case "podman":
-		// Full success path
 		if strings.Contains(output, "LPAR configured successfully") {
 			return nil
 		}
-		// Acceptable partial-success: Spyre repair was attempted but post-repair checks
-		// still failed. The error indicates a Spyre-specific failure, not a general one.
+		// Spyre repair attempted; post-repair re-validation still failed — non-fatal.
 		if strings.Contains(output, "some Spyre configuration checks still failed after repair") ||
 			strings.Contains(output, "failed to configure spyre card") {
 			return nil
@@ -92,13 +84,10 @@ func ValidateBootstrapFullOutput(output string, appRuntime string) error {
 
 // ValidateCreateAppOutput validates the output of the application create command.
 func ValidateCreateAppOutput(output, appName string) error {
-	// "Creating application '<name>'" is printed by both catalog and legacy paths.
 	if !strings.Contains(output, fmt.Sprintf("Creating application '%s'", appName)) {
 		return fmt.Errorf("create-app validation failed: missing 'Creating application '%s''", appName)
 	}
 
-	// Catalog path (podman): prints "Application '<name>' is ready!"
-	// Legacy path (openshift): prints "Application '<name>' deployed successfully"
 	catalogSuccess := fmt.Sprintf("Application '%s' is ready!", appName)
 	legacySuccess := fmt.Sprintf("Application '%s' deployed successfully", appName)
 	if !strings.Contains(output, catalogSuccess) && !strings.Contains(output, legacySuccess) {
@@ -122,40 +111,33 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 		return strings.Join(strings.Fields(s), " ")
 	}
 
-	output = normalize(output)
-
-	type RequiredOutputs struct {
-		application []string
-		bootstrap   []string
-		completion  []string
-		version     []string
-	}
-
-	requiredOutputs := RequiredOutputs{
-		application: []string{
+	requiredOutputs := map[string][]string{
+		"application": {
 			"The application command helps you deploy and monitor the applications",
 			"ai-services application [command]",
 		},
-		bootstrap: []string{
+		"bootstrap": {
 			"The bootstrap command configures and validates the environment needed to run AI Services, ensuring prerequisites are met and initial configuration is completed.",
 			"ai-services bootstrap [flags]",
 		},
-		completion: []string{
+		"completion": {
 			"Generate the autocompletion script for ai-services for the specified shell.",
 			"ai-services completion [command]",
 		},
-		version: []string{
+		"version": {
 			"Prints CLI version with more info",
 			"ai-services version [flags]",
 		},
 	}
 
-	v := reflect.ValueOf(requiredOutputs)
-	required := v.FieldByName(command)
+	required, ok := requiredOutputs[command]
+	if !ok {
+		return fmt.Errorf("help random command validation failed: unknown command %q", command)
+	}
 
-	for i := 0; i < required.Len(); i++ {
-		r := normalize(required.Index(i).String())
-		if !strings.Contains(output, r) {
+	normalizedOutput := normalize(output)
+	for _, r := range required {
+		if !strings.Contains(normalizedOutput, normalize(r)) {
 			return fmt.Errorf("help random command validation failed: missing '%s'", r)
 		}
 	}
@@ -219,8 +201,6 @@ func ValidateImageListOutput(output string, appRuntime string) error {
 		return checkNotOpenShiftUnsupported(output, "image list")
 	}
 
-	// podman runtime: catalog path only.
-	// Expected output: "Container images for template '<name>':"
 	if !strings.Contains(output, "Container images for template '") && !strings.Contains(output, "No images found") {
 		return fmt.Errorf("image list validation failed: output does not match catalog format.\nOutput: %s", output)
 	}
@@ -234,9 +214,6 @@ func ValidatePullImageOutput(output, templateName string, appRuntime string) err
 		return checkNotOpenShiftUnsupported(output, "pull image")
 	}
 
-	// podman runtime: catalog path only.
-	// Expected: "Downloading N images for template '<name>'..."
-	//           "Successfully pulled all images for template '<name>'" OR "No images to pull"
 	catalogMarker := fmt.Sprintf("for template '%s'", templateName)
 	if !strings.Contains(output, catalogMarker) && !strings.Contains(output, "No images to pull") {
 		return fmt.Errorf("pull image validation failed: output does not match catalog format for template '%s'.\nOutput: %s", templateName, output)
@@ -279,6 +256,7 @@ func ValidateStartAppOutputOpenshift(output string) (err error) {
 	return nil
 }
 
+// ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
 func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
@@ -296,8 +274,6 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 		podName := parts[len(parts)-2]
 		status := parts[len(parts)-1]
 
-		// Case-insensitive: catalog path (via getPodStatusFromAPI) emits lowercase
-		// "exited"; legacy podman path emits "Exited". Accept both.
 		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
 			return fmt.Errorf(
 				"main pod %s not in Exited state for app %s (got: %s)",
@@ -313,12 +289,8 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 	return nil
 }
 
-// ValidateDeleteAppOutput validates the output of the application delete command.
-// The only hard requirement is that the command exited without error (checked by
-// the caller) and that no pods remain (checked by ValidateNoPodsAfterDelete).
-// We intentionally do not assert on specific output phrases — the CLI may change
-// its confirmation messages between versions and those changes are irrelevant to
-// whether the delete actually succeeded.
+// ValidateDeleteAppOutput validates the application delete command output.
+// Success is determined by exit code and absence of pods, not specific phrases.
 func ValidateDeleteAppOutput(_, _ string) error {
 	return nil
 }
@@ -341,13 +313,8 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 	return nil
 }
 
+// ValidateApplicationInfo validates the output of the application info command.
 func ValidateApplicationInfo(output, appName, templateName string) error {
-	// Catalog path (podman) prints:
-	//   "Application Name: <name>"
-	//   "Application Template: <template>"
-	//   "Application Version: <version>"
-	//   "Info:"
-	//   "Day N:" (printed by info.go before service loop)
 	required := []string{
 		fmt.Sprintf("Application Name: %s", appName),
 		fmt.Sprintf("Application Template: %s", templateName),
@@ -355,33 +322,12 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 	}
 
 	if templateName == "rag" {
-		// The catalog info.md templates have two branches: running (URL printed) and
-		// unavailable (pod-name hint printed, no URL). We must match strings that appear
-		// in BOTH branches so the validator passes regardless of pod health at call time.
-		//
-		// chat/info.md:
-		//   running  → "… at https://chat-bot-ui-<slug>…"   (contains "chat-bot-ui")
-		//   stopped  → "… make sure 'chat-bot' pod is running." (contains "chat-bot")
-		//   ► match "chat-bot" — present in both branches.
-		//
-		// digitize/info.md:
-		//   running  → "… https://digitize-ui-<slug>…"        (contains "digitize-ui")
-		//   stopped  → "… make sure 'digitize-ui' pod …"      (contains "digitize-ui")
-		//   ► match "digitize-ui" — same string in both.
-		//
-		// digitize API / info.md:
-		//   running  → "… https://digitize-backend-<slug>…"   (contains "digitize-backend")
-		//   stopped  → "… 'digitize-backend-server' pod …"    (contains "digitize-backend")
-		//   ► match "digitize-backend" — present in both.
-		//
-		// similarity/info.md & summarize/info.md:
-		//   running  → URL contains "similarity-api" / "summarize-api"
-		//   stopped  → pod hint contains same string
-		//   ► match as-is.
+		// Each string appears in both the running (URL) and stopped (pod-hint) branches
+		// of info.md, so the check passes regardless of pod health at call time.
 		required = append(required,
-			"chat-bot",         // covers both "chat-bot-ui/backend" URLs and "'chat-bot' pod" hint
-			"digitize-ui",      // same string in running URL and stopped hint
-			"digitize-backend", // same string in running URL and stopped hint
+			"chat-bot",
+			"digitize-ui",
+			"digitize-backend",
 			"summarize-api",
 		)
 	}
@@ -437,9 +383,6 @@ func ValidateModelDownloadOutput(output string, templateName string, appRuntime 
 		return checkNotOpenShiftUnsupported(output, "model download")
 	}
 
-	// podman runtime: catalog path only.
-	// Expected: "Downloading N models for template '<name>'..."
-	//           "Successfully downloaded all models for template '<name>'" OR "No models to download"
 	catalogSuccessStr := fmt.Sprintf("for template '%s'", templateName)
 	if !strings.Contains(output, catalogSuccessStr) && !strings.Contains(output, "No models to download") {
 		return fmt.Errorf("model download validation failed: output does not match catalog format for template '%s'", templateName)
@@ -455,20 +398,16 @@ func ValidateModelDownloadOutput(output string, templateName string, appRuntime 
 	return nil
 }
 
-// ValidateApplicationsTemplateCommandOutput validates the output of the application templates command.
+// ValidateApplicationsTemplateCommandOutput validates the application templates command output.
 func ValidateApplicationsTemplateCommandOutput(output string, appRuntime string) error {
 	if appRuntime == "podman" {
-		// Podman always uses the catalog path.
-		// Expected: "Available Deployment Architectures:" + "Available Services:" + "- rag"
 		return validateCatalogTemplateOutput(output)
 	}
 
-	// OpenShift format
 	return validateOpenShiftTemplateOutput(output)
 }
 
-// validateCatalogTemplateOutput validates the catalog-format output (podman path).
-// Expected output contains architectures like "rag (Digital Assistant)" and services.
+// validateCatalogTemplateOutput validates the catalog-format template output (podman).
 func validateCatalogTemplateOutput(output string) error {
 	return checkRequiredStrings(output, "application template command", []string{
 		"Available Deployment Architectures:",
@@ -478,7 +417,6 @@ func validateCatalogTemplateOutput(output string) error {
 }
 
 // validateOpenShiftTemplateOutput validates the OpenShift-format template output.
-// Expected output contains "Available application templates:" with per-app sections.
 func validateOpenShiftTemplateOutput(output string) error {
 	return checkRequiredStrings(output, "application template command", []string{
 		"Available application templates:",
@@ -523,7 +461,6 @@ func ValidatePodsRunningAfterStart(psOutput, appName, appRuntime string) error {
 		podName := parts[len(parts)-2]
 		status := parts[len(parts)-1]
 
-		// Case-insensitive: catalog path emits "running", legacy path emits "Running".
 		if isMainPod(podName, appRuntime) && !strings.Contains(strings.ToLower(status), "running") {
 			return fmt.Errorf(
 				"main pod %s not running after start for app %s",
@@ -565,7 +502,7 @@ func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
 	return ""
 }
 
-// ValidateOpenShiftRoutes validates the presence of required routes in the OpenShift runtime.
+// ValidateOpenShiftRoutes validates that all required routes are present.
 func ValidateOpenShiftRoutes(output string) error {
 	requiredRoutes := []string{
 		"backend",
@@ -576,11 +513,8 @@ func ValidateOpenShiftRoutes(output string) error {
 	}
 
 	foundRoutes := make(map[string]bool)
-
-	// Parse the output line by line.
 	extractOpenshiftRoutes(output, requiredRoutes, foundRoutes)
 
-	// Verify all required routes were found.
 	missingRoutes := make([]string, 0, len(requiredRoutes))
 	for _, route := range requiredRoutes {
 		if !foundRoutes[route] {
@@ -602,16 +536,13 @@ func extractOpenshiftRoutes(output string, requiredRoutes []string, foundRoutes 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Skip empty lines and header lines
 		if line == "" || strings.HasPrefix(line, "NAME") || strings.HasPrefix(line, "──") {
 			continue
 		}
 
-		// Extract the route name (first field)
 		fields := strings.Fields(line)
 		if len(fields) > 0 {
 			routeName := fields[0]
-			// Check if this route is one of the required ones
 			for _, required := range requiredRoutes {
 				if routeName == required {
 					foundRoutes[required] = true
@@ -624,8 +555,6 @@ func extractOpenshiftRoutes(output string, requiredRoutes []string, foundRoutes 
 }
 
 // ValidateCatalogUninstallOutput validates the output of 'catalog uninstall'.
-// It requires the catalog's confirmation that all pods were deleted and the
-// final success message printed by the CLI.
 func ValidateCatalogUninstallOutput(output string) error {
 	if !strings.Contains(output, "Catalog service removed successfully") {
 		return fmt.Errorf("catalog uninstall validation failed: missing %q\nOutput: %s",

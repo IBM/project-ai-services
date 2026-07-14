@@ -154,7 +154,6 @@ func buildUsingMake(
 		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
-	// Determine OS and architecture using runtime package
 	osArch := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
 	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-"+osArch)
 	if _, err := os.Stat(srcBinPath); err != nil {
@@ -218,8 +217,8 @@ func copyBinaryToTemp(srcBinPath, tempBinDir string) (string, error) {
 		return "", fmt.Errorf("failed to copy binary: %w", err)
 	}
 
-	if err := os.Chmod(destBinPath, dirPerm); err != nil {
-		return "", fmt.Errorf("failed to execute binary: %w", err)
+	if err := os.Chmod(destBinPath, execPerm); err != nil {
+		return "", fmt.Errorf("failed to set executable permission on binary: %w", err)
 	}
 
 	return destBinPath, nil

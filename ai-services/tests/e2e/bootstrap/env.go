@@ -7,8 +7,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// dirPerm defines the default permission for created directories.
-const dirPerm = 0o755 // standard read/write/execute for owner, read/execute for group and others
+const (
+	dirPerm  = 0o755 // rwxr-xr-x — directories
+	execPerm = 0o755 // rwxr-xr-x — executable binaries
+)
 
 // PrepareRuntime creates isolated temp directories for tests.
 func PrepareRuntime(runID string) string {
@@ -33,58 +35,43 @@ func GetRuntimeDir() string {
 	return os.Getenv("AI_SERVICES_HOME")
 }
 
-// GetPodManCreds returns the registry details.
+// GetPodManCreds returns the container registry credentials.
 func GetPodManCreds() (registry string, username string, password string) {
 	return os.Getenv("REGISTRY_URL"), os.Getenv("REGISTRY_USER_NAME"), os.Getenv("REGISTRY_PASSWORD")
 }
 
-// GetRHRegistryCreds returns the RedHat registry details.
+// GetRHRegistryCreds returns Red Hat registry credentials.
 func GetRHRegistryCreds() (registry string, username string, password string) {
 	return os.Getenv("RH_REGISTRY_URL"), os.Getenv("RH_REGISTRY_USER_NAME"), os.Getenv("RH_REGISTRY_PASSWORD")
 }
 
-// GetLLMasJudgeModelDetails returns the registry details.
+// GetLLMasJudgeModelDetails returns the LLM-as-Judge model path and name.
 func GetLLMasJudgeModelDetails() (downloadPath string, modelName string) {
 	return os.Getenv("LLM_JUDGE_MODEL_PATH"), os.Getenv("LLM_JUDGE_MODEL")
 }
 
-// GetLLMasJudgePodDetails returns the registry details.
+// GetLLMasJudgePodDetails returns the LLM-as-Judge container port and image.
 func GetLLMasJudgePodDetails() (portNumber string, llmImage string) {
 	return os.Getenv("LLM_JUDGE_PORT"), os.Getenv("LLM_JUDGE_IMAGE")
 }
 
-// GetCatalogCreds returns the catalog API server credentials from environment variables.
-//
-//	CATALOG_SERVER_URL  – base URL of the catalog API server (e.g. http://localhost:8080)
-//	CATALOG_USERNAME    – username to authenticate with (constant: "admin")
-//	CATALOG_PASSWORD    – password to authenticate with (default: "1234")
+// GetCatalogCreds returns catalog credentials from environment variables.
 func GetCatalogCreds() (serverURL string, username string, password string) {
 	return os.Getenv("CATALOG_SERVER_URL"), catalogAdminUsername, GetCatalogAdminPassword()
 }
 
-// catalogAdminUsername is the fixed admin username — never changes across environments.
+// catalogAdminUsername is the fixed admin username across environments.
 const catalogAdminUsername = "admin"
 
-// GetCatalogAdminPassword returns the catalog admin password.
-// Defaults to "1234" (the known e2e default) so CATALOG_PASSWORD does not need
-// to be exported manually before running tests.
-// Override by setting CATALOG_PASSWORD in the environment.
+// GetCatalogAdminPassword returns CATALOG_PASSWORD; must always be set explicitly.
 func GetCatalogAdminPassword() string {
-	if v := os.Getenv("CATALOG_PASSWORD"); v != "" {
-		return v
-	}
-
-	return "1234"
+	return os.Getenv("CATALOG_PASSWORD")
 }
 
-// GetCatalogInsecure returns true when TLS certificate verification should be skipped for the catalog server.
-// This is the default for e2e environments because the catalog uses nip.io / self-signed certificates.
-// Set CATALOG_INSECURE=false to force strict TLS verification.
+// GetCatalogInsecure returns true unless CATALOG_INSECURE=false is set.
+// Defaults to true because e2e catalog uses self-signed / nip.io certificates.
 func GetCatalogInsecure() bool {
-	v := os.Getenv("CATALOG_INSECURE")
-	// Default is true (skip verification) — e2e catalog always uses self-signed certs.
-	// Only disable when explicitly set to "false".
-	return v != "false"
+	return os.Getenv("CATALOG_INSECURE") != "false"
 }
 
 // GetGoldenDatasetFile returns the name of the golden dataset file.

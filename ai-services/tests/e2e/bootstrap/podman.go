@@ -8,8 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// requirePodman resolves the podman binary path, logs it, and returns an error
-// if podman is not found in PATH. Shared by CheckPodman and PodmanRegistryLogin.
+// requirePodman resolves the podman binary path or returns an error if not in PATH.
 func requirePodman() (string, error) {
 	podmanPath, err := exec.LookPath("podman")
 	if err != nil {
@@ -33,7 +32,6 @@ func CheckPodman() error {
 	}
 	logger.Infof("[BOOTSTRAP] Podman version output: %s", string(output))
 
-	// Check rootless support (optional — does not fail if not rootless).
 	if out, err := exec.Command("podman", "info", "--format", "{{.Host.Security.RootlessMode}}").CombinedOutput(); err == nil {
 		logger.Infof("[BOOTSTRAP] Rootless mode: %s", strings.TrimSpace(string(out)))
 	}

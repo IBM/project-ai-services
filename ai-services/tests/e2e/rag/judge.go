@@ -64,26 +64,10 @@ const judgeSystemPrompt = "YOU ARE AN AUTOMATED ANSWER VERIFIER.\n" +
 	"VERDICT: YES or NO\n" +
 	"REASON: one short sentence stating the missing or incorrect required fact, or confirming full coverage\n"
 
-// judgeFormatRetryTimeout is the budget given to each individual Judge call
-// inside AskJudgeWithFormatRetry.  It is deliberately shorter than the
-// per-question context deadline so that a format-retry attempt always has
-// budget remaining after the first call completes.
+// judgeFormatRetryTimeout is the per-call deadline inside AskJudgeWithFormatRetry; shorter than the parent deadline so retries always have remaining budget.
 const judgeFormatRetryTimeout = 7 * time.Minute
 
-// AskJudgeWithFormatRetry calls the Judge LLM and, if the response cannot be
-// parsed into the expected VERDICT/REASON format, retries once with a fresh
-// context derived from the parent.
-//
-// Key design decisions:
-//  1. Each call to RunWithRetry gets its own child context with a fixed
-//     deadline (judgeFormatRetryTimeout). This prevents the second format-retry
-//     from inheriting a context that may already be at or past its deadline
-//     from the first attempt.
-//  2. The parent context (per-question budget) is checked before each attempt:
-//     if it is already cancelled the function returns immediately so the caller
-//     can record the failure and move on to the next question without blocking.
-//  3. The format-retry is only triggered by ErrInvalidJudgeResponse — infra
-//     failures (timeout, transport error) are surfaced directly.
+// AskJudgeWithFormatRetry calls the Judge LLM and retries once on invalid response format; infrastructure errors are surfaced immediately.
 func AskJudgeWithFormatRetry(
 	ctx context.Context,
 	maxRetries int,
@@ -94,20 +78,11 @@ func AskJudgeWithFormatRetry(
 ) (verdict string, reason string, err error) {
 	var lastErr error
 
-	// Up to 2 parse-format attempts (attempt 0 and attempt 1).
 	for attempt := 0; attempt <= 1; attempt++ {
-		// Bail out early if the per-question parent context is already done.
-		// Without this guard, creating a child context below would immediately
-		// produce a cancelled context, causing client.Do to return
-		// "context canceled" before the request is even sent.
 		if ctx.Err() != nil {
 			return "", "", ctx.Err()
 		}
 
-		// Create a fresh child context for this judge call so that a timeout
-		// on attempt 0 does not poison attempt 1 with an already-cancelled
-		// context.  The parent deadline (per-question budget) still applies
-		// because child contexts cannot outlive their parent.
 		callCtx, callCancel := context.WithTimeout(ctx, judgeFormatRetryTimeout)
 
 		if attempt > 0 {
@@ -120,7 +95,6 @@ func AskJudgeWithFormatRetry(
 		callCancel() // release child context resources immediately
 
 		if runErr != nil {
-			// Infra / timeout / non-retriable error — surface directly.
 			return "", "", runErr
 		}
 
@@ -133,7 +107,6 @@ func AskJudgeWithFormatRetry(
 			return "", "", err
 		}
 
-		// Invalid format → record and retry once.
 		lastErr = err
 	}
 

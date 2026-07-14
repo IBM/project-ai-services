@@ -31,9 +31,7 @@ const (
 	ragRetryBackoffBase      = 200 * time.Millisecond //nolint:mnd
 )
 
-// similarityHealthClient skips TLS verification so it works with both plain
-// http:// (legacy podman HOST_IP:PORT) and https:// nip.io self-signed certs
-// (catalog path). Same pattern as PostJSON's transport.
+// similarityHealthClient skips TLS verification to support both plain http:// (legacy podman) and https:// nip.io self-signed certs (catalog).
 var similarityHealthClient = &http.Client{
 	Timeout: similarityHealthTimeout,
 	Transport: &http.Transport{
@@ -43,38 +41,7 @@ var similarityHealthClient = &http.Client{
 	},
 }
 
-// sharedRAGClient is a single, long-lived HTTP client used for all RAG and
-// Judge PostJSON requests. Reusing one client (and its underlying Transport)
-// allows TCP connections to be kept alive and reused across questions,
-// preventing the connection-pool exhaustion that caused client.Do to hang
-// indefinitely when hundreds of short-lived transports were created — one per
-// call — and hammered the same upstream without ever releasing sockets.
-//
-// Configuration rationale:
-//   - Timeout: 10 min — deliberately LONGER than the per-question context
-//     deadline (perQuestionTimeout in e2e_suite_test.go, currently 8 min) so
-//     the context cancellation always fires first. This makes the error
-//     deterministic ("context deadline exceeded") rather than a silent client
-//     Timeout that obscures the real cause.
-//   - MaxIdleConnsPerHost: 4 — enough to reuse sockets for sequential
-//     RAG + Judge calls without opening a fresh TCP connection every time.
-//   - MaxConnsPerHost: 8 — hard cap so we never saturate a single vLLM or
-//     RAG process with too many parallel connections.
-//   - IdleConnTimeout: 90 s — recycle idle connections quickly so stale ones
-//     are not reused after a long LLM inference pause.
-//   - ResponseHeaderTimeout: 90 s — guards against dead keep-alive sockets
-//     that are silently dropped by Caddy/nip.io after TLS idle expiry.
-//     When the transport reuses a dead socket, the kernel send buffer accepts
-//     the outgoing request bytes without error, then blocks waiting for
-//     response headers that will never arrive.  http.Client.Timeout does NOT
-//     catch this because it only starts ticking after the request body is
-//     sent.  ResponseHeaderTimeout fires if no response header byte is
-//     received within 90 s of the request being written.
-//     NOTE: for vLLM/RAG this is safe — the server sends HTTP 200 headers
-//     immediately before starting token generation; the body (token stream)
-//     is not subject to ResponseHeaderTimeout.
-//   - DialContext timeout: 15 s — bounds TCP connect + TLS handshake so
-//     that a network partition on connect does not hang indefinitely.
+// sharedRAGClient pools TCP connections for all RAG/Judge requests; timeout exceeds per-question deadline so ctx cancellation fires first; ResponseHeaderTimeout guards dead keep-alive sockets.
 var sharedRAGClient = &http.Client{
 	Timeout: httpClientTimeout,
 	Transport: &http.Transport{
@@ -92,10 +59,7 @@ var sharedRAGClient = &http.Client{
 	},
 }
 
-// waitForEndpointReady polls targetURL until it returns HTTP 200 or ctx is done.
-// onReady / onNotReady / onUnreachable format the per-attempt log messages.
-// This eliminates the near-identical loop bodies in WaitForRAGBackendReady and
-// WaitForSimilarityAPIReady.
+// waitForEndpointReady polls targetURL until HTTP 200 or ctx is done, using callbacks to format per-attempt log messages.
 func waitForEndpointReady(
 	ctx context.Context,
 	client *http.Client,
@@ -142,13 +106,7 @@ func waitForEndpointReady(
 	}
 }
 
-// WaitForRAGBackendReady polls ragBaseURL/v1/models until it returns HTTP 200,
-// meaning the chat-bot backend has successfully connected to the LLM (vLLM).
-// The LLM pod (llm-<slug>) is the last and most resource-heavy pod to start —
-// it can take 20-30 minutes on Spyre hardware. This gate ensures we don't start
-// the judge container (SetupLLMAsJudge) while the LLM pod is still consuming
-// resources during initialisation, which would cause all other pods to crash.
-// ragBaseURL is the full base URL, e.g. "https://chat-bot-backend-<slug>.<ip>.nip.io".
+// WaitForRAGBackendReady polls ragBaseURL/v1/models until HTTP 200, ensuring the LLM is fully up before starting the judge container.
 func WaitForRAGBackendReady(ctx context.Context, ragBaseURL string, pollInterval time.Duration) error {
 	modelsURL := ragBaseURL + "/v1/models"
 
@@ -173,10 +131,7 @@ func WaitForRAGBackendReady(ctx context.Context, ragBaseURL string, pollInterval
 	)
 }
 
-// WaitForSimilarityAPIReady polls the similarity-api /health endpoint until it
-// returns HTTP 200 or the context deadline is exceeded.
-// similarityBaseURL is the full base URL extracted from 'application info' output,
-// e.g. "https://similarity-api-<slug>.<ip>.nip.io" (catalog) or "http://<ip>:<port>" (legacy).
+// WaitForSimilarityAPIReady polls similarityBaseURL/health until HTTP 200 or ctx deadline is exceeded.
 func WaitForSimilarityAPIReady(ctx context.Context, similarityBaseURL string, pollInterval time.Duration) error {
 	healthURL := similarityBaseURL + "/health"
 
@@ -197,8 +152,7 @@ func WaitForSimilarityAPIReady(ctx context.Context, similarityBaseURL string, po
 	)
 }
 
-// catalogClientNew is a thin wrapper around catalogClient.New() so it can be
-// referenced as a variable in tests and avoids a direct import cycle.
+// catalogClientNew wraps catalogClient.New() as a variable to allow test overrides and avoid import cycles.
 var catalogClientNew = func() (interface{ AccessToken() string }, error) {
 	return catalogClient.New()
 }
@@ -214,10 +168,7 @@ const (
 		"MODEL ANSWER:\n" +
 		"{model_answer}\n"
 
-	// httpClientTimeout is the http.Client.Timeout on sharedRAGClient.
-	// It is set deliberately LONGER than the per-question context deadline
-	// (perQuestionTimeout in e2e_suite_test.go, currently 8 min) so the
-	// context always fires first and the error is deterministic.
+	// httpClientTimeout: set longer than perQuestionTimeout so context cancellation always fires first.
 	httpClientTimeout = 10 * time.Minute
 )
 
@@ -242,12 +193,7 @@ func isRetriableStatus(code int) bool {
 		(code >= 500 && code <= 599)
 }
 
-// RunWithRetry executes the provided function with retries upon failure.
-// Each attempt receives the same parent context so that the parent deadline
-// governs the total budget. Before each attempt the parent is checked — if it
-// is already cancelled the loop exits immediately, preventing retries on a
-// dead context. Back-off sleeps also respect context cancellation so they
-// don't block past the parent deadline.
+// RunWithRetry executes fn with exponential back-off; stops on context cancellation or ErrNonRetriable.
 func RunWithRetry(
 	ctx context.Context,
 	maxRetries int,
@@ -256,11 +202,6 @@ func RunWithRetry(
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// Guard: do not start a new attempt on an already-cancelled parent.
-		// This is the key fix for the "retries inherit a cancelled context"
-		// bug: when the per-question context (child of specCtx) expires, every
-		// subsequent fn(ctx) call would immediately return context.Canceled.
-		// Exiting here surfaces the real error instead of a misleading retry loop.
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("parent context cancelled before attempt %d: %w", attempt+1, ctx.Err())
 		}
@@ -276,7 +217,6 @@ func RunWithRetry(
 
 		lastErr = err
 
-		// If the parent context expired during the call, stop immediately.
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("context cancelled after attempt %d: %w", attempt+1, ctx.Err())
 		}
@@ -285,8 +225,6 @@ func RunWithRetry(
 			return "", err
 		}
 
-		// Exponential back-off: 200 ms, 400 ms, 600 ms …
-		// The select ensures we don't block past the parent deadline.
 		if attempt < maxRetries {
 			backoff := time.Duration(attempt+1) * ragRetryBackoffBase
 			logger.Infof("[RAG][retry] waiting %s before next attempt", backoff)
@@ -319,7 +257,7 @@ func AskRAG(ctx context.Context, baseURL string, question string) (string, error
 	return extractAssistantContent(raw)
 }
 
-// buildJudgeUserPrompt constructs the user prompt for the judge LLM.
+// buildJudgeUserPrompt builds the user prompt for the judge LLM.
 func buildJudgeUserPrompt(question, goldenAns, ragAns string) string {
 	prompt := judgeUserPromptTemplate
 	prompt = strings.ReplaceAll(prompt, "{question}", question)
@@ -356,10 +294,7 @@ func AskJudge(
 	return extractAssistantContent(raw)
 }
 
-// loadFreshBearerToken returns the current catalog access token, refreshing it
-// via the stored refresh token if the access token is missing or expired.
-// This ensures requests succeed even when the 15-min access TTL has elapsed
-// during long-running setup steps (model download, vLLM startup, etc.).
+// loadFreshBearerToken returns the catalog access token, auto-refreshing if expired.
 func loadFreshBearerToken() string {
 	creds, err := catalogConfig.Load()
 	if err != nil {
@@ -374,20 +309,14 @@ func loadFreshBearerToken() string {
 		return ""
 	}
 
-	// Check if the token has already expired or will expire imminently (within 30s).
-	// If so, use the catalog client which auto-refreshes via the refresh token.
 	const refreshSkew = 30 * time.Second
 	exp, jwtErr := jwtTokenExpiry(creds.AccessToken)
 	if jwtErr != nil || time.Until(exp) < refreshSkew {
-		// Token expired or unparseable — use catalog client to get a fresh token.
-		// catalog/client.New() loads credentials, refreshes if needed, and saves them.
 		catalogClient, clientErr := catalogClientNew()
 		if clientErr != nil {
 			logger.Warningf("[RAG] could not refresh catalog token: %v", clientErr)
-			// Fall through and use whatever token we have.
 			return creds.AccessToken
 		}
-
 		return catalogClient.AccessToken()
 	}
 
@@ -417,8 +346,7 @@ func jwtTokenExpiry(token string) (time.Time, error) {
 	return time.Unix(claims.Exp, 0), nil
 }
 
-// buildPostJSONRequest marshals body and constructs the *http.Request, adding
-// Content-Type and the catalog Bearer token when one is available.
+// buildPostJSONRequest marshals body into an *http.Request with Content-Type and Bearer token.
 func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[string]any) (*http.Request, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -432,8 +360,6 @@ func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[st
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// The chat-bot backend requires a Bearer token (catalog access token).
-	// Use a fresh token — auto-refreshes if the 15-min TTL has elapsed.
 	if token := loadFreshBearerToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -441,13 +367,8 @@ func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[st
 	return req, nil
 }
 
-// handlePostJSONResponse drains the response body, logs the result, and maps
-// HTTP status codes to the appropriate error types for RunWithRetry.
+// handlePostJSONResponse drains and closes the response body, returning it as a string.
 func handlePostJSONResponse(ctx context.Context, resp *http.Response, baseURL, path string, elapsed time.Duration) (string, error) {
-	// Always drain and close the body so the underlying TCP connection is
-	// returned to the pool. Closing without a full drain leaves the connection
-	// in a half-read state and permanently removes it from the pool, leaking
-	// file descriptors and starving future requests of reusable sockets.
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
@@ -474,15 +395,7 @@ func handlePostJSONResponse(ctx context.Context, resp *http.Response, baseURL, p
 	return string(responseBody), nil
 }
 
-// PostJSON sends a POST request with a JSON body and returns the response body
-// as a string. It uses the package-level sharedRAGClient so that TCP
-// connections are kept alive and reused across calls, avoiding the connection-
-// pool exhaustion that occurred when a brand-new *http.Transport was allocated
-// on every call.
-//
-// Debug logging emits request start time, context deadline, HTTP status, and
-// elapsed duration so that slow or hanging requests are visible without waiting
-// for the full suite timeout.
+// PostJSON sends a JSON POST request using the shared HTTP client and returns the response body.
 func PostJSON(
 	ctx context.Context,
 	baseURL string,
@@ -494,8 +407,6 @@ func PostJSON(
 		return "", err
 	}
 
-	// Log start time and remaining budget so slow requests are immediately
-	// visible in test output.
 	start := time.Now()
 	if deadline, ok := ctx.Deadline(); ok {
 		logger.Infof("[RAG][http] POST %s%s — deadline in %s",
@@ -508,7 +419,6 @@ func PostJSON(
 	elapsed := time.Since(start)
 
 	if err != nil {
-		// Distinguish context cancellation from a transport-level error.
 		if ctx.Err() != nil {
 			logger.Errorf("[RAG][http] POST %s%s — cancelled after %s: context=%v",
 				baseURL, path, elapsed.Round(time.Millisecond), ctx.Err())
@@ -524,7 +434,7 @@ func PostJSON(
 	return handlePostJSONResponse(ctx, resp, baseURL, path, elapsed)
 }
 
-// extractAssistantContent extracts assistant text from raw JSON response.
+// extractAssistantContent extracts the assistant message content from a chat completion response.
 func extractAssistantContent(raw string) (string, error) {
 	var resp ChatCompletionResponse
 

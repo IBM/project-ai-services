@@ -21,6 +21,17 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
+// Service name substrings used to identify catalog URLs in 'application info' output.
+// Each constant matches the stable hostname prefix of the corresponding deployed service,
+// e.g. "https://chat-bot-backend-<slug>.<ip>.nip.io". Using constants here means a
+// service rename only requires a single edit.
+const (
+	svcChatBotBackend  = "chat-bot-backend"
+	svcChatBotUI       = "chat-bot-ui"
+	svcDigitizeBackend = "digitize-backend"
+	svcSimilarityAPI   = "similarity-api"
+)
+
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
 // These are fixed terminal dimensions for interactive CLI prompts — not magic numbers.
 const (
@@ -59,11 +70,12 @@ func runCLI(ctx context.Context, cfg *config.Config, errLabel string, args ...st
 }
 
 // isKnownSpyreConfigureFailure reports whether a bootstrap configure/bootstrap
-// output contains the known "Spyre post-repair checks still failing" strings.
-// When this returns true the OS-level exit error can be suppressed — the repairs
-// were applied (VFIO permissions + SELinux policy were fixed) but a reboot is
-// needed for the changes to be fully effective. Application creation and all
-// other tests proceed normally on this hardware state.
+// output contains the known Spyre post-repair strings. When this returns true
+// the OS-level exit error is suppressed. These strings mean that configure
+// attempted automatic repairs (VFIO permissions, SELinux policy via semodule,
+// udev rules) but the post-repair re-validation checks still did not pass.
+// This is a Spyre-hardware-specific failure that does not affect the
+// application-layer tests; all subsequent test steps proceed normally.
 func isKnownSpyreConfigureFailure(output string) bool {
 	return strings.Contains(output, "some Spyre configuration checks still failed after repair") ||
 		strings.Contains(output, "failed to configure spyre card")
@@ -98,10 +110,8 @@ func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime stri
 	if err != nil {
 		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
 			logger.Infof("[CLI] bootstrap configure exited non-zero with known Spyre repair state — treating as non-fatal")
-
 			return output, nil
 		}
-
 		return output, err
 	}
 
@@ -147,9 +157,7 @@ func CreateApp(
 	return runCLI(ctx, cfg, "application create", args...)
 }
 
-// newRAGHTTPClient returns an HTTP client for RAG health-check probes.
-// TLS verification is skipped for OpenShift (self-signed) and the Podman
-// catalog path (nip.io self-signed via Caddy).
+// newRAGHTTPClient returns an HTTP client for RAG health-check probes with TLS skipped when needed.
 func newRAGHTTPClient(appRuntime string, isCatalogPath bool, timeout time.Duration) *http.Client {
 	client := &http.Client{Timeout: timeout}
 
@@ -167,8 +175,7 @@ func newRAGHTTPClient(appRuntime string, isCatalogPath bool, timeout time.Durati
 	return client
 }
 
-// CreateRAGAppAndValidate creates an application, waits for health checks, and validates RAG endpoints.
-// NOTE: This is intentionally RAG-specific and used only by RAG E2E tests.
+// CreateRAGAppAndValidate creates a RAG application, probes health endpoints, and validates output.
 func CreateRAGAppAndValidate(
 	ctx context.Context,
 	cfg *config.Config,
@@ -214,17 +221,8 @@ func CreateRAGAppAndValidate(
 	return output, nil
 }
 
-// getRAGURLs extracts the backend and UI URLs for a deployed RAG application.
-//
-// For podman (catalog path): the 'application create' next.md output only contains digitize URLs.
-// The chat backend and UI URLs are only available in 'application info' (info.md), which prints:
-//
-//	"- chat is available to use at https://chat-bot-ui-<slug>.<domain>"
-//	"- chat API is available to use at https://chat-bot-backend-<slug>.<domain>"
-//
-// So we call 'application info' to get the authoritative URLs.
-//
-// For openshift: extract route URLs directly from the create output.
+// getRAGURLs returns backend and UI URLs for a deployed RAG application.
+// For podman, URLs come from 'application info'; for openshift from the create output.
 func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
 	if appRuntime == "openshift" {
 		urls := ExtractURLsFromOutput(createOutput)
@@ -251,32 +249,14 @@ func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, cr
 	return bURL, uURL, true, nil
 }
 
-// extractCatalogRAGURLs parses the 'application info' output (info.md rendered) for the
-// chat service backend API URL and chat UI URL.
-//
-// The catalog renders human-readable service titles from the template catalog, e.g.:
-//
-//	"- Question and answer is available to use at https://chat-bot-ui-<slug>.<domain>"
-//	"- Question and answer API is available to use at https://chat-bot-backend-<slug>.<domain>"
-//
-// We identify the chat UI line as: contains "is available to use at" AND NOT "API"
-// AND the URL host contains "chat-bot-ui".
-// We identify the chat backend line as: contains "API is available to use at"
-// AND the URL host contains "chat-bot-backend".
-//
-// Using URL-host matching (chat-bot-ui / chat-bot-backend) makes this robust against
-// any future title-text changes in info.md.
-//
-// Returns (backendURL, uiURL) — empty strings if not found.
+// extractCatalogRAGURLs extracts the chat backend and UI URLs from 'application info' output.
+// Matches by URL host substring — robust against info.md title changes.
 func extractCatalogRAGURLs(output string) (string, string) {
-	return extractURLBySubstring(output, "chat-bot-backend"),
-		extractURLBySubstring(output, "chat-bot-ui")
+	return extractURLBySubstring(output, svcChatBotBackend),
+		extractURLBySubstring(output, svcChatBotUI)
 }
 
-// extractHTTPSURL extracts the first https:// URL from a line of text.
-// A URL ends at the first whitespace character — everything after a space is
-// not part of the URL (e.g. ". Use this endpoint..." on the same line).
-// Trailing punctuation (period, comma) immediately before whitespace is also stripped.
+// extractHTTPSURL extracts the first https:// URL from a line, stripping trailing punctuation.
 func extractHTTPSURL(line string) string {
 	const httpsPrefix = "https://"
 	idx := strings.Index(line, httpsPrefix)
@@ -297,9 +277,7 @@ func extractHTTPSURL(line string) string {
 	return rest
 }
 
-// extractURLBySubstring scans output line-by-line and returns the first HTTPS
-// URL whose value contains substr. Returns "" when no matching URL is found.
-// This is the shared building block for all single-URL catalog extraction helpers.
+// extractURLBySubstring returns the first HTTPS URL in output whose value contains substr.
 func extractURLBySubstring(output, substr string) string {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
@@ -345,13 +323,8 @@ func waitForEndpointOK(
 	return fmt.Errorf("endpoint %s failed after retries: %w", endpoint, lastErr)
 }
 
-// GetBaseURL extracts the chat-backend URL from the CLI output (for ragBaseURL).
-// For podman (catalog path) the output contains HTTPS domain URLs from info.md — extracted by host substring.
-// For OpenShift the output contains route URLs — extracted by regex.
-//
-// NOTE: For the LLM-as-Judge URL (judgeBaseURL), the judge is a separate local podman
-// container on localhost:<port> — use GetJudgeBaseURL instead.
-// NOTE: For the digitize backend URL, use ExtractCatalogDigitizeURL instead.
+// GetBaseURL extracts the RAG chat-backend URL from CLI output.
+// For podman uses host-substring matching; for OpenShift uses regex.
 func GetBaseURL(createOutput string, backendPort string) (string, error) {
 	// Catalog path (podman): extract chat-bot-backend HTTPS URL from info output.
 	if backendURL, _ := extractCatalogRAGURLs(createOutput); backendURL != "" {
@@ -368,37 +341,20 @@ func GetBaseURL(createOutput string, backendPort string) (string, error) {
 }
 
 // GetJudgeBaseURL returns the base URL for the local LLM-as-Judge container.
-// The judge is a local podman container bound to localhost:<judgePort>, not a
-// catalog-deployed service, so its URL is always http://localhost:<port>.
 func GetJudgeBaseURL(judgePort string) string {
 	return fmt.Sprintf("http://localhost:%s", judgePort)
 }
 
-// ExtractCatalogDigitizeURL parses the 'application info' output for the
-// digitize-backend service URL.
-//
-// Actual output line:
-//
-//	"- Digitize documents Documents API is available to use at https://digitize-backend-<slug>.<domain>."
-//
-// We match on URL-host substring "digitize-backend" which is stable regardless
-// of human-readable title changes in info.md.
+// ExtractCatalogDigitizeURL extracts the digitize-backend URL from 'application info' output.
 func ExtractCatalogDigitizeURL(infoOutput string) string {
-	return extractURLBySubstring(infoOutput, "digitize-backend")
+	return extractURLBySubstring(infoOutput, svcDigitizeBackend)
 }
 
 // ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
-//
-// Catalog path (podman): URL host contains "similarity-api"
-//
-//	e.g. "https://similarity-api-<slug>.<ip>.nip.io"
-//
-// Legacy podman path: plain http URL with HOST_IP:PORT
-//
-//	e.g. "http://10.48.64.172:9100"  (extracted by ExtractURLsFromOutput fallback)
+// Falls back to legacy plain-HTTP extraction for non-catalog podman environments.
 func ExtractSimilarityAPIURL(infoOutput string) string {
 	// Catalog path: HTTPS nip.io URL with "similarity-api" in the host.
-	if url := extractURLBySubstring(infoOutput, "similarity-api"); url != "" {
+	if url := extractURLBySubstring(infoOutput, svcSimilarityAPI); url != "" {
 		return url
 	}
 
@@ -418,17 +374,8 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 	return ""
 }
 
-// WaitForApplicationInfoURLs polls 'application info' until the catalog backend URL
-// (chat-bot-backend) is present in the output — meaning pods are healthy and the
-// info.md template has rendered the running branch.
-//
-// This is needed because after 'application start' the containers may take some
-// time to become healthy, during which getContainerStatus returns empty strings and
-// info.md renders the "unavailable" branch (no URLs). We must wait for URLs to
-// appear before the RAG/Digitize BeforeAll blocks attempt to use them.
-//
-// maxWait is the total polling duration; pollInterval is the sleep between attempts.
-// Returns the info output once the backend URL is present, or an error on timeout.
+// WaitForApplicationInfoURLs polls 'application info' until service URLs are present.
+// For podman requires both chat-bot-backend and similarity-api; for openshift any URL suffices.
 func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
 	deadline := time.Now().Add(maxWait)
 	attempt := 0
@@ -441,17 +388,12 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 
 			continue
 		}
-		// For podman, require both chat-bot-backend AND similarity-api URLs to be
-		// present — similarity-api is a hard dependency of every RAG query and must
-		// be healthy before evaluation starts.
-		// For openshift, any URL in the output is sufficient.
 		if appRuntime == "podman" {
 			backendURL, _ := extractCatalogRAGURLs(infoOutput)
 			similarityURL := ExtractSimilarityAPIURL(infoOutput)
 			if backendURL != "" && similarityURL != "" {
 				logger.Infof("[WAIT] application info URLs ready after %d attempt(s) — backend: %s, similarity: %s",
 					attempt, backendURL, similarityURL)
-
 				return infoOutput, nil
 			}
 		} else {
@@ -462,10 +404,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 		logger.Infof("[WAIT] application info attempt %d: URLs not yet present (pods may still be starting), retrying in %s", attempt, pollInterval)
 		time.Sleep(pollInterval)
 	}
-	// Last attempt — return whatever we have even if URLs are missing so the
-	// caller can surface a more descriptive error.
 	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
-
 	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
 }
 
@@ -474,7 +413,7 @@ func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string
 	return runCLI(ctx, cfg, "help command run", args...)
 }
 
-// ApplicationPS runs the 'application ps' command to list application pods.
+// ApplicationPS runs the application ps command.
 func ApplicationPS(
 	ctx context.Context,
 	cfg *config.Config,
@@ -494,7 +433,7 @@ func ApplicationPS(
 	return runCLI(ctx, cfg, "application ps", args...)
 }
 
-// ListImage from the given application template.
+// ListImage lists images for the given application template.
 func ListImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
 	output, err := runCLI(ctx, cfg, "list images", "application", "image", "list", "--template", templateName, "--runtime", appRuntime)
 	if err != nil {
@@ -504,15 +443,13 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string, app
 	return ValidateImageListOutput(output, appRuntime)
 }
 
-// PullImage from the given application template.
+// PullImage pulls images for the given application template.
 func PullImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
-	// perform ICR login
 	url, uname, pswd := bootstrap.GetPodManCreds()
 	if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
 		return fmt.Errorf("pull images failed due to podman login err: %w", err)
 	}
 
-	// perform RH registry login
 	url, uname, pswd = bootstrap.GetRHRegistryCreds()
 	if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
 		return fmt.Errorf("pull images failed due to podman login err: %w", err)
@@ -566,7 +503,7 @@ func StopAppWithPods(
 	return output, nil
 }
 
-// StartApplication starts an application's pods and validates the output.
+// StartApplication starts an application and validates the output.
 func StartApplication(
 	ctx context.Context,
 	cfg *config.Config,
@@ -592,7 +529,6 @@ func StartApplication(
 		return output, err
 	}
 
-	// Validate output.
 	if appRuntime == "openshift" {
 		return output, ValidateStartAppOutputOpenshift(output)
 	}
@@ -601,7 +537,6 @@ func StartApplication(
 		return output, err
 	}
 
-	// Verify pods are running again.
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
 		return output, err
@@ -637,18 +572,15 @@ func DeleteAppSkipCleanup(
 		return output, err
 	}
 
-	time.Sleep(common.DeleteSleepInterval) //wait for 10 seconds before checking ps output
+	time.Sleep(common.DeleteSleepInterval)
 
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
-		// "not found" means the application record itself is gone — that is the
-		// expected state after a successful delete, so treat it as success.
+		// "not found" means the application was already removed — treat as success.
 		if strings.Contains(err.Error(), "not found") {
 			logger.Infof("[TEST] Application %s no longer exists after delete (not found) — OK", appName)
-
 			return output, nil
 		}
-
 		return output, err
 	}
 	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
@@ -668,9 +600,7 @@ func ModelList(ctx context.Context, cfg *config.Config, templateName string, app
 	return runCLI(ctx, cfg, "application model list", "application", "model", "list", "--template", templateName, "--runtime", appRuntime)
 }
 
-// ModelDownload downloads a model for a given application template.
-// It ensures the default models directory exists before invoking the CLI so that
-// the podman bind-mount does not fail with "no such file or directory".
+// ModelDownload downloads models for a given application template.
 func ModelDownload(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) (string, error) {
 	if err := common.EnsureDir(utils.GetModelsPath()); err != nil {
 		return "", err
@@ -684,15 +614,14 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 	return runCLI(ctx, cfg, "application templates command run", "application", "templates", "--runtime", appRuntime)
 }
 
-// CatalogConfigure runs 'ai-services catalog configure --runtime <runtime>' to deploy/ensure
-// the catalog service is running. It is idempotent — safe to call even if already deployed.
-//
-// On first run the CLI prompts for an admin password via term.ReadPassword which requires
-// a real TTY. We launch the process inside a pseudo-terminal (PTY) so the prompt succeeds,
-// then write the password twice (password + confirm) through the PTY master.
-// On subsequent runs the catalog-secret already exists and the prompt is skipped entirely.
+// CatalogConfigure deploys or ensures the catalog service is running.
+// Uses a PTY so the password prompt on first run can be satisfied non-interactively.
 func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	password := bootstrap.GetCatalogAdminPassword()
+	if password == "" {
+		return "", fmt.Errorf("CATALOG_PASSWORD environment variable is not set")
+	}
+
 	args := []string{"catalog", "configure", "--runtime", appRuntime}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
@@ -704,20 +633,16 @@ func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string
 	return output, nil
 }
 
-// runWithPTY starts cmd inside a pseudo-terminal, writes input to the PTY master,
-// collects all output, and waits for the process to finish.
-// It respects ctx cancellation — the child process is killed when ctx is done.
+// runWithPTY starts cmd in a PTY, writes input to the master, and returns all output.
 func runWithPTY(ctx context.Context, bin string, args []string, input string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 
-	// Start the command inside a PTY.
 	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: ptyWinRows, Cols: ptyWinCols}, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to start PTY: %w", err)
 	}
 	defer func() { _ = ptmx.Close() }()
 
-	// Kill the child on context cancellation.
 	go func() {
 		<-ctx.Done()
 		if cmd.Process != nil {
@@ -725,18 +650,13 @@ func runWithPTY(ctx context.Context, bin string, args []string, input string) (s
 		}
 	}()
 
-	// Write the password(s) to the PTY master immediately.
-	// The CLI reads them via term.ReadPassword on the PTY slave (its stdin).
 	if _, err := ptmx.Write([]byte(input)); err != nil {
-		// Non-fatal if the process already exited before we write.
 		logger.Warningf("[CLI] PTY write warning: %v", err)
 	}
 
-	// Read all output from the PTY master until it closes (EOF = process exited).
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, ptmx)
 
-	// Wait for the process to exit.
 	if err := cmd.Wait(); err != nil {
 		return buf.String(), err
 	}
@@ -744,10 +664,7 @@ func runWithPTY(ctx context.Context, bin string, args []string, input string) (s
 	return buf.String(), nil
 }
 
-// CatalogUninstall runs 'ai-services catalog uninstall --runtime <runtime> --yes'
-// to remove the catalog service and all associated resources (pods, secrets, db data).
-// --yes suppresses the interactive confirmation prompt.
-// Only supported for podman runtime — openshift returns an error from the CLI.
+// CatalogUninstall removes the catalog service and all associated resources.
 func CatalogUninstall(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	output, err := runCLI(ctx, cfg, "catalog uninstall", "catalog", "uninstall", "--runtime", appRuntime, "--yes")
 	if err != nil {
@@ -762,16 +679,11 @@ func CatalogUninstall(ctx context.Context, cfg *config.Config, appRuntime string
 }
 
 // CatalogInfo runs 'ai-services catalog info' and returns the combined output.
-// The output contains the Catalog Backend API URL printed by the configure command.
 func CatalogInfo(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "catalog info", "catalog", "info", "--runtime", appRuntime)
 }
 
-// ExtractCatalogBackendURL parses the output of 'catalog info' and returns the
-// Catalog Backend API URL (https://...).
-// The info.md template prints a line like:
-//
-//	"- Catalog Backend API is available at https://<domain>[:<port>]"
+// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
 func ExtractCatalogBackendURL(infoOutput string) string {
 	const backendMarker = "Catalog Backend API is available at "
 	for _, line := range strings.Split(infoOutput, "\n") {
@@ -784,11 +696,7 @@ func ExtractCatalogBackendURL(infoOutput string) string {
 	return ""
 }
 
-// ExtractCatalogBackendURLFromConfigureOutput parses the output of 'catalog configure'
-// and returns the Catalog Backend API URL.
-// The next.md template prints a line like:
-//
-//	"- Access the Catalog Backend at https://<domain>[:<port>]"
+// ExtractCatalogBackendURLFromConfigureOutput extracts the Catalog Backend URL from 'catalog configure' output.
 func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string {
 	const backendMarker = "Access the Catalog Backend at "
 	for _, line := range strings.Split(configureOutput, "\n") {
@@ -799,14 +707,10 @@ func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string 
 		}
 	}
 
-	// Fallback: also try info.md marker in case configure output format differs
 	return ExtractCatalogBackendURL(configureOutput)
 }
 
-// CatalogLogin performs a non-interactive catalog login using server URL, username, and password.
-// It runs: ai-services catalog login --server <url> --username <user> --password-stdin [--insecure] --runtime <runtime>
-// with the password piped via stdin so no credentials appear in process arguments.
-// Pass insecure=true when the catalog server uses a self-signed or nip.io certificate (e2e environments).
+// CatalogLogin runs a non-interactive catalog login, piping the password via stdin.
 func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, password, appRuntime string, insecure bool) (string, error) {
 	args := []string{
 		"catalog", "login",
@@ -821,12 +725,11 @@ func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, 
 	logger.Infof("[CLI] Running: %s catalog login --server %s --username %s --password-stdin --runtime %s (insecure=%v)",
 		cfg.AIServiceBin, serverURL, username, appRuntime, insecure)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	// Pipe password via stdin so it never appears in the process argument list.
 	cmd.Stdin = bytes.NewBufferString(password + "\n")
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err != nil {
-		return output, fmt.Errorf("catalog login failed: %w\n%s", err, output)
+		return "", fmt.Errorf("catalog login failed: %w", err)
 	}
 
 	return output, nil
@@ -847,7 +750,7 @@ func GitVersionCommands(ctx context.Context) (string, string, error) {
 	vout, err := vcmd.CombinedOutput()
 	voutput := string(vout)
 	if err != nil {
-		return voutput, "", fmt.Errorf("git version command run failed: %w\n%s", err, voutput)
+		return "", "", fmt.Errorf("git version command run failed: %w", err)
 	}
 
 	logger.Infof("[CLI] Running: git %v", commitArgs)
@@ -855,7 +758,7 @@ func GitVersionCommands(ctx context.Context) (string, string, error) {
 	cout, err := ccmd.CombinedOutput()
 	coutput := string(cout)
 	if err != nil {
-		return voutput, coutput, fmt.Errorf("git commit command run failed: %w\n%s", err, coutput)
+		return voutput, "", fmt.Errorf("git commit command run failed: %w", err)
 	}
 
 	return voutput, coutput, nil
@@ -919,10 +822,9 @@ func ApplicationLogs(
 	}
 }
 
+// ExtractURLsFromOutput returns all http/https URLs found in output.
 func ExtractURLsFromOutput(output string) []string {
-	// Regular expression to match URLs (http and https)
 	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
-
 	matches := urlRegex.FindAllString(output, -1)
 
 	urls := make([]string, 0, len(matches))

@@ -23,9 +23,7 @@ func init() {
 	ModelPath, Model = bootstrap.GetLLMasJudgeModelDetails()
 }
 
-// runPodman runs a podman command with its stdout/stderr connected to the
-// process streams. This is the shared helper for startVLLMContainer and
-// CleanupLLMAsJudge, both of which only need fire-and-forget execution.
+// runPodman runs a podman command with stdout/stderr attached to the process streams.
 func runPodman(args ...string) error {
 	cmd := exec.Command("podman", args...)
 	cmd.Stdout = os.Stdout
@@ -96,8 +94,7 @@ func hasLLMServerStarted(podName string) (isStarted bool) {
 	return output != ""
 }
 
-// judgeModelAlreadyDownloaded returns true when ModelPath/Model exists as a
-// non-empty directory — meaning a previous run already downloaded the weights.
+// judgeModelAlreadyDownloaded returns true when the model directory is non-empty.
 func judgeModelAlreadyDownloaded() bool {
 	modelDir := ModelPath + "/" + Model
 	entries, err := os.ReadDir(modelDir)
@@ -108,13 +105,7 @@ func judgeModelAlreadyDownloaded() bool {
 	return len(entries) > 0
 }
 
-// DownloadJudgeModel performs the registry login and model download steps of
-// judge setup. It does NOT start the vLLM container — that is left to
-// StartJudgeContainer, which should be called only after the main RAG LLM is
-// confirmed ready (to avoid a GPU resource crunch).
-//
-// If the model weights are already present at ModelPath/Model the download is
-// skipped entirely — cutting repeat-run BeforeAll time from ~2h to ~2min.
+// DownloadJudgeModel logs in to the RH registry and downloads the judge model if not already present.
 func DownloadJudgeModel(_ context.Context, _ *config.Config) error {
 	if judgeModelAlreadyDownloaded() {
 		logger.Infof("[JUDGE] Judge model already present at %s/%s — skipping download", ModelPath, Model)
@@ -142,11 +133,7 @@ func DownloadJudgeModel(_ context.Context, _ *config.Config) error {
 	return nil
 }
 
-// StartJudgeContainer starts the vLLM judge container and waits for it to be
-// ready. Call this only after DownloadJudgeModel has succeeded AND the main
-// RAG LLM is confirmed ready via WaitForRAGBackendReady — starting the judge
-// container while the main LLM is still loading causes a resource crunch that
-// crashes OpenSearch and produces 0% accuracy.
+// StartJudgeContainer starts the vLLM judge container and polls until ready; must run after the main LLM is up to avoid GPU contention.
 func StartJudgeContainer(_ context.Context, _ *config.Config, runID string) error {
 	podName := "vllm-judge-" + runID
 	if runErr := startVLLMContainer(podName, ModelPath+"/"+Model); runErr != nil {
@@ -185,9 +172,7 @@ func StartJudgeContainer(_ context.Context, _ *config.Config, runID string) erro
 	return fmt.Errorf("polling attempts exhausted: VLLM Judge server was not started")
 }
 
-// SetupLLMAsJudge is a convenience wrapper that runs DownloadJudgeModel then
-// StartJudgeContainer in sequence. Kept for callers that do not need to
-// overlap the download with other work.
+// SetupLLMAsJudge downloads the judge model then starts its container in sequence.
 func SetupLLMAsJudge(ctx context.Context, cfg *config.Config, runID string) error {
 	if err := DownloadJudgeModel(ctx, cfg); err != nil {
 		return err

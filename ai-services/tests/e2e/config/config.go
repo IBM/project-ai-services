@@ -16,7 +16,6 @@ type Config struct {
 	LogProbeWords []string
 }
 
-// Default values.
 const (
 	defaultServiceURL  = "http://localhost:8080"
 	defaultHealthPath  = "/health"
@@ -24,15 +23,14 @@ const (
 	defaultRetries     = 5
 )
 
-// LoadFromEnv reads configuration from environment variables and returns a Config populated with defaults.
+// LoadFromEnv returns a Config populated from environment variables with defaults.
 func LoadFromEnv() *Config {
 	cfg := &Config{
-		ServiceURL:   defaultServiceURL,
-		HealthPath:   defaultHealthPath,
-		Timeout:      time.Duration(defaultTimeoutSecs) * time.Second,
-		Retries:      defaultRetries,
-		AIServiceBin: os.Getenv("AI_SERVICES_BIN"),
-		// case-insensitive keywords to look for in logs to indicate readiness.
+		ServiceURL:    defaultServiceURL,
+		HealthPath:    defaultHealthPath,
+		Timeout:       time.Duration(defaultTimeoutSecs) * time.Second,
+		Retries:       defaultRetries,
+		AIServiceBin:  os.Getenv("AI_SERVICES_BIN"),
 		LogProbeWords: []string{"ready", "healthy", "started", "serving"},
 	}
 
@@ -56,7 +54,7 @@ func LoadFromEnv() *Config {
 	return cfg
 }
 
-// HealthURL returns the full URL for the health endpoint composed from ServiceURL and HealthPath.
+// HealthURL returns the full URL composed from ServiceURL and HealthPath.
 func (c *Config) HealthURL() string {
 	base := strings.TrimRight(c.ServiceURL, "/")
 	path := strings.TrimLeft(c.HealthPath, "/")

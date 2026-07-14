@@ -17,21 +17,13 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
-// klogPrefixRe matches the klog line prefix added by logger.Infoln in CLI mode:
-//
-//	I0707 06:11:25.123456   12345 logger.go:270] <actual content>
-//	W0707 ...  (warnings)
-//	E0707 ...  (errors)
-//
-// The table rows are logged via logger.Infoln so every line in CombinedOutput
-// is prefixed by klog. We strip the prefix before any regex matching.
+// klogPrefixRe matches the klog timestamp/source prefix added to each log line.
 var klogPrefixRe = regexp.MustCompile(`^[IWEF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]\s`)
 
-// ansiEscapeRe matches ANSI/VT100 escape sequences emitted by lipgloss/charmbracelet.
+// ansiEscapeRe matches ANSI/VT100 escape sequences.
 var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 // stripKlogPrefix removes the klog timestamp/source prefix from a line if present.
-// If the line does not match the prefix pattern it is returned unchanged.
 func stripKlogPrefix(line string) string {
 	if loc := klogPrefixRe.FindStringIndex(line); loc != nil {
 		return line[loc[1]:]
@@ -41,8 +33,6 @@ func stripKlogPrefix(line string) string {
 }
 
 // stripANSI removes ANSI escape sequences from a string.
-// The charmbracelet/lipgloss table renderer emits escape codes for bold/colour
-// that would otherwise break regex matching.
 func stripANSI(s string) string {
 	return ansiEscapeRe.ReplaceAllString(s, "")
 }
@@ -82,14 +72,10 @@ type OpenShiftPod struct {
 
 var (
 	separatorRe = regexp.MustCompile(`^[\s─-]+$`)
-	// headerRe matches both the legacy wide header (with EXPOSED PORTS) and the
-	// catalog wide header (without EXPOSED column).
+	// headerRe matches both the wide header (with EXPOSED PORTS) and catalog header (without).
 	headerRe = regexp.MustCompile(`(?i)^APPLICATION\s+NAME\s+POD\s+ID\s+POD\s+NAME\s+STATUS\s+CREATED(\s+EXPOSED\s+PORTS)?\s+CONTAINERS\s*$`)
 
-	// rowRe matches a pod row from both legacy and catalog ps output.
-	// The EXPOSED column is optional — catalog path omits it.
-	// Status is case-insensitive: legacy path emits "Running (healthy)",
-	// catalog path (via getPodStatusFromAPI) emits "running (healthy)".
+	// rowRe matches a pod row; the EXPOSED column is optional (catalog path omits it).
 	rowRe = regexp.MustCompile(
 		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
 			`[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?\s+` + // POD ID
@@ -113,14 +99,12 @@ type PodInfo struct {
 	Containers []string
 }
 
-// ExtractPodInfo parses the output from `ai-services application ps -o wide` and extracts a map of pod names to PodInfo containing pod ID and containers.
+// ExtractPodInfo parses `application ps -o wide` output into a map of pod name to PodInfo.
 func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	podInfoMap := make(map[string]PodInfo)
 
-	// podRowRe matches both legacy output (with EXPOSED column) and catalog output (without).
-	// Status is case-insensitive: legacy path emits "Running (healthy)",
-	// catalog path emits "running (healthy)".
+	// podRowRe matches pod rows; EXPOSED column is optional.
 	podRowRe := regexp.MustCompile(
 		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
 			`(?P<podid>[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?)\s+` + // POD ID
@@ -137,14 +121,12 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	var currentPodInfo *PodInfo
 
 	for _, raw := range lines {
-		// Strip klog prefix (added by logger.Infoln in CLI mode) and ANSI escapes.
 		line := stripKlogPrefix(strings.TrimRight(raw, " \t"))
 		line = stripANSI(line)
 		if line == "" {
 			continue
 		}
 
-		// Skip header and separator lines
 		if headerRe.MatchString(line) || separatorRe.MatchString(line) {
 			continue
 		}
@@ -153,8 +135,6 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 			podID := m[podRowRe.SubexpIndex("podid")]
 			podName := m[podRowRe.SubexpIndex("podname")]
 			containersStr := strings.TrimSpace(m[podRowRe.SubexpIndex("containers")])
-
-			// Parse containers from the line
 			containers := parseContainers(containersStr)
 
 			currentPodName = podName
@@ -171,10 +151,7 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 		if currentPodInfo != nil {
 			if m := containerLineRe.FindStringSubmatch(line); m != nil {
 				containersStr := strings.TrimSpace(m[containerLineRe.SubexpIndex("containers")])
-				containers := parseContainers(containersStr)
-
-				// Append to current pod's containers
-				currentPodInfo.Containers = append(currentPodInfo.Containers, containers...)
+				currentPodInfo.Containers = append(currentPodInfo.Containers, parseContainers(containersStr)...)
 				podInfoMap[currentPodName] = *currentPodInfo
 			}
 		}
@@ -183,13 +160,12 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	return podInfoMap, nil
 }
 
-// parseContainers extracts container names from a container string.
+// parseContainers extracts container names from a comma-separated string.
 func parseContainers(containersStr string) []string {
 	if containersStr == "" {
 		return []string{}
 	}
 
-	// Split by comma to handle multiple containers.
 	parts := strings.Split(containersStr, ",")
 	containers := make([]string, 0, len(parts))
 
@@ -208,12 +184,11 @@ func parseContainers(containersStr string) []string {
 	return containers
 }
 
-// parsePodRows parses the output lines from `ai-services application ps` into PodRow structs.
+// parsePodRows parses `application ps` output lines into PodRow structs.
 func parsePodRows(lines []string) ([]PodRow, error) {
 	var rows []PodRow
 
 	for _, raw := range lines {
-		// Strip klog prefix (added by logger.Infoln in CLI mode) and ANSI escapes.
 		line := stripKlogPrefix(strings.TrimRight(raw, " \t"))
 		line = stripANSI(line)
 		if line == "" {
@@ -225,7 +200,7 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 
 		m := rowRe.FindStringSubmatch(line)
 		if m == nil {
-			continue // ignore container continuation noise
+			continue
 		}
 
 		rows = append(rows, PodRow{
@@ -238,14 +213,12 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 	return rows, nil
 }
 
-// getRestartCount inspects a pod and its containers and returns the total restart count.
+// getRestartCount returns the total restart count for a pod.
 func getRestartCount(podName string, appRuntime string, appName string) (int, error) {
 	if appRuntime == "openshift" {
-		// OpenShift: use oc get pod with JSON output
 		return getOpenshiftRestartCount(podName, appName)
 	}
 
-	// Podman: use podman pod inspect
 	return getPodmanRestartCount(podName)
 }
 
@@ -303,12 +276,10 @@ func getOpenshiftRestartCount(podName string, appName string) (int, error) {
 		return 0, fmt.Errorf("failed to parse OpenShift pod JSON for %s: %w", podName, err)
 	}
 
-	// Check restart policy
 	if osPod.Spec.RestartPolicy == "Never" {
 		return 0, nil
 	}
 
-	// Sum restart counts from all containers
 	totalRestarts := 0
 	for _, ctr := range osPod.Status.ContainerStatuses {
 		totalRestarts += ctr.RestartCount
@@ -379,16 +350,7 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 	})
 }
 
-// VerifyContainers checks if application pods are healthy and their restart counts are zero.
-//
-// Pod naming conventions differ by runtime and path:
-//
-//	OpenShift:             <suffix>-<replicaset>-<random>   (e.g. backend-58c65dd449-pc6np)
-//	Podman catalog path:   <service-id>-<slug>              (e.g. opensearch-62ef2bd81e, chat-bot-ffa3ca77a6)
-//	Podman legacy path:    <appName>--<suffix>              (e.g. rag-app-123--opensearch)  [removed]
-//
-// For both OpenShift and podman catalog path we do prefix matching:
-// the suffix from ExpectedPodSuffixes is used as a prefix to find the pod.
+// VerifyContainers checks that all expected pods are healthy and have zero restarts; matches pods by prefix for both OpenShift and podman catalog paths.
 func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName string, appRuntime string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
 
@@ -405,8 +367,7 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 	for _, suffix := range common.ExpectedPodSuffixes[appRuntime] {
 		var foundPodName string
 
-		// Both OpenShift and podman catalog path use dynamic pod names that begin
-		// with the service suffix — match by prefix.
+		// Match by prefix: both OpenShift and podman catalog path use dynamic pod names beginning with the service suffix.
 		expectedPrefix := suffix + "-"
 		for podName := range actualPods {
 			if strings.HasPrefix(podName, expectedPrefix) {
@@ -446,8 +407,7 @@ func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Con
 		return nil, fmt.Errorf("failed to parse pod rows: %w", err)
 	}
 	for _, row := range rows {
-		// Status is lowercase "running (healthy)" from catalog path,
-		// uppercase "Running (healthy)" from legacy podman path.
+		// Status may be lowercase (catalog) or uppercase (legacy podman) — normalise before comparison.
 		statusLower := strings.ToLower(row.Status)
 		ok := strings.HasPrefix(statusLower, "running (healthy)") ||
 			strings.HasPrefix(statusLower, "running(healthy)") ||

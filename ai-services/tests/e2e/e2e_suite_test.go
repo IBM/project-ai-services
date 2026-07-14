@@ -54,9 +54,7 @@ var (
 	goldenDatasetFile           string
 	defaultRagAccuracyThreshold = 0.70 //nolint:mnd
 	defaultMaxRetries           = 2    //nolint:mnd
-	// catalogBackendURL is set by the "ensures catalog service is running" test step
-	// after 'catalog configure' runs and the URL is known. Used by Application Creation
-	// to perform a fresh login immediately before 'application create'.
+	// catalogBackendURL is captured by the catalog configure step and used for the pre-create login.
 	catalogBackendURL string
 )
 
@@ -68,19 +66,8 @@ func init() {
 
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	// Override the suite-level timeout by passing a SuiteConfig directly to
-	// RunSpecs. This is the only reliable way to disable the 1-hour default
-	// in Ginkgo v2.28.1 — passing --timeout=0 on the CLI does NOT work
-	// because zero is treated as "unset" and falls back to the compiled-in
-	// default of time.Hour (see types/config.go NewDefaultSuiteConfig).
-	//
-	// We set Timeout to 24h — large enough that it never fires in practice
-	// while still providing a hard backstop against a completely hung suite.
-	// All meaningful time bounds are already enforced by per-spec decorators
-	// and per-call context.WithTimeout:
-	//   BeforeAll  NodeTimeout(3h)   — model download + ingestion + judge
-	//   It (eval)  SpecTimeout(3h)   — 50-question evaluation loop
-	//   Digitize   context.WithTimeout per spec (12–30 min each)
+	// Set suite timeout to 24h to prevent Ginkgo's 1-hour default from firing.
+	// Individual spec budgets are enforced via NodeTimeout/SpecTimeout/context.WithTimeout.
 	suiteConfig, _ := ginkgo.GinkgoConfiguration()
 	suiteConfig.Timeout = 24 * time.Hour //nolint:mnd
 	ginkgo.RunSpecs(t, "AI Services E2E Suite",
@@ -97,9 +84,7 @@ func getEnvWithDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// testFilePath resolves a path relative to the directory of this test file.
-// It replaces the repeated runtime.Caller + filepath.Dir + filepath.Join pattern
-// that appeared in every test spec that needed a fixture file path.
+// testFilePath resolves a path relative to this test file's directory.
 func testFilePath(rel string) string {
 	_, filename, _, ok := runtime.Caller(1)
 	if !ok {
@@ -109,30 +94,23 @@ func testFilePath(rel string) string {
 	return filepath.Join(filepath.Dir(filename), rel)
 }
 
-// withTimeout creates a context with a timeout rooted at context.Background
-// and returns it along with its cancel function. This eliminates the repeated
-// two-line context.WithTimeout(context.Background(), d) + defer cancel() in
-// every It block.
+// withTimeout returns a context.Background-rooted context with the given timeout.
 func withTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
 }
 
-// expectErrResp asserts that no request-level error occurred and that the
-// error response from the API is non-nil. This eliminates the identical
-// two-assertion pattern that appeared before every errorResp.Error.* check.
+// expectErrResp asserts no transport error and a non-nil error response body.
 func expectErrResp(err error, errorResp any) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(errorResp).NotTo(gomega.BeNil())
 }
 
-// invalidID constants for error-path tests.
 const (
 	invalidJobID = "invalid-job-id-123"
 	invalidDocID = "invalid-doc-id-123"
 )
 
-// jobStartDelay is a brief pause after job creation so the service has time
-// to begin processing before we assert on its in-progress state.
+// jobStartDelay lets the service begin processing before asserting in-progress state.
 const jobStartDelay = 2 * time.Second
 
 var _ = ginkgo.BeforeSuite(func() {
@@ -202,17 +180,10 @@ var _ = ginkgo.BeforeSuite(func() {
 	logger.Infof("[SETUP] ai-services version: %s", binVersion)
 
 	ginkgo.By("Logging in to catalog API server (if already running)")
-	// admin username is constant — no need to export CATALOG_USERNAME.
-	// admin password defaults to "1234" — no need to export CATALOG_PASSWORD unless overriding.
-	// insecure=true by default — e2e catalog uses nip.io / self-signed TLS certs.
 	catalogServerURL, catalogUsername, catalogPassword := bootstrap.GetCatalogCreds()
 	catalogInsecure := bootstrap.GetCatalogInsecure()
 
-	// Auto-discover the catalog backend URL from 'catalog info' if not explicitly set.
-	// NOTE: At this point the catalog may not yet be running — it is started in the
-	// "ensures catalog service is running" test step via 'catalog configure'.
-	// If discovery fails here that is fine — a fresh login is performed right before
-	// 'application create' using the URL captured from 'catalog configure' output.
+	// Auto-discover the catalog URL if not set; non-fatal if catalog isn't running yet.
 	if catalogServerURL == "" && appRuntime == "podman" {
 		infoOutput, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
 		if infoErr == nil {
@@ -227,12 +198,10 @@ var _ = ginkgo.BeforeSuite(func() {
 		}
 	}
 
-	// Perform login now only if the catalog URL is already known (catalog already running).
-	// Skip silently if URL is empty — fresh login happens before 'application create'.
+	// Login only if URL is known; a fresh login happens before 'application create'.
 	if catalogServerURL != "" {
 		_, loginErr := cli.CatalogLogin(ctx, cfg, catalogServerURL, catalogUsername, catalogPassword, appRuntime, catalogInsecure)
 		if loginErr != nil {
-			// Non-fatal — catalog configure + fresh login still to come.
 			logger.Warningf("[SETUP] [WARNING] BeforeSuite catalog login failed (non-fatal): %v", loginErr)
 		} else {
 			logger.Infof("[SETUP] Catalog login successful (server: %s, user: %s, insecure: %v)",
@@ -252,18 +221,13 @@ var _ = ginkgo.BeforeSuite(func() {
 
 	ginkgo.By("Checking if existing app needs to be deleted")
 	if deleteExistingApp {
-		// fetch existing application details
-		// ApplicationPS may fail if the catalog is not yet running (e.g. first
-		// boot before 'catalog configure').  Treat as non-fatal: if there is no
-		// catalog, there is also no app to delete, so we can proceed safely.
+		// Non-fatal if ApplicationPS fails — catalog may not be running yet.
 		psOutput, psErr := cli.ApplicationPS(ctx, cfg, "", appRuntime)
 		if psErr != nil {
 			logger.Warningf("[SETUP] [WARNING] --delete-app: ApplicationPS failed (non-fatal, catalog may not be running yet): %v", psErr)
 		} else {
-			// fetch application to be deleted
 			deleteAppName := cli.GetApplicationNameFromPSOutput(psOutput)
 			if deleteAppName != "" {
-				// delete existing application
 				_, err := cli.DeleteAppSkipCleanup(ctx, cfg, deleteAppName, appRuntime)
 				if err != nil {
 					logger.Errorf("Error deleting existing app: %s", deleteAppName)
@@ -286,7 +250,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	logger.Infoln("[SETUP] ================================================")
 })
 
-// Teardown after all tests have run.
 var _ = ginkgo.AfterSuite(func() {
 	logger.Infoln("[TEARDOWN] AI Services E2E teardown")
 	ginkgo.By("Cleaning up E2E environment")
@@ -361,19 +324,13 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
-			// catalog configure is idempotent — safe to call even if already deployed.
-			// This guarantees the catalog pod (Caddy + backend + DB) is up before
-			// 'application create' tries to reach it.
 			configureOutput, err := cli.CatalogConfigure(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// Extract and store the backend URL from configure output so Application
-			// Creation can use it for a fresh login without needing another round-trip.
 			catalogBackendURL = cli.ExtractCatalogBackendURLFromConfigureOutput(configureOutput)
 			if catalogBackendURL != "" {
 				logger.Infof("[TEST] Catalog service is running. Backend URL: %s", catalogBackendURL)
 			} else {
-				// Fallback: ask catalog info directly
 				infoOut, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
 				if infoErr == nil {
 					catalogBackendURL = cli.ExtractCatalogBackendURL(infoOut)
@@ -405,16 +362,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := withTimeout(45 * time.Minute)
 			defer cancel()
 
-			// Perform a fresh catalog login immediately before application create (podman only).
-			// The access token TTL is 15 min; bootstrap steps can take longer, so the
-			// BeforeSuite login may be expired by the time we reach this point.
-			// catalogBackendURL was captured by the "ensures catalog service is running" step.
+			// Refresh the catalog token before create — the 15-min TTL may have elapsed.
 			if appRuntime == "podman" {
 				_, loginUsername, loginPassword := bootstrap.GetCatalogCreds()
 				loginInsecure := bootstrap.GetCatalogInsecure()
 
-				// Use URL captured from catalog configure output.
-				// Fall back to env var, then catalog info if not yet set.
 				loginServerURL := catalogBackendURL
 				if loginServerURL == "" {
 					loginServerURL = os.Getenv("CATALOG_SERVER_URL")
@@ -437,9 +389,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 			}
 
-			// Podman uses the catalog path: ports are managed by Caddy routing.
-			// OpenShift uses its own native path. No --legacy flag in either case.
-			// Do NOT pass port params — catalog service schemas have additionalProperties:false.
 			pods := []string{"backend", "ui", "db"}
 			params := ""
 			cliOptions := cli.CreateOptions{
@@ -461,16 +410,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// For podman catalog path: create output only has digitize URLs (from next.md).
-			// Chat backend/UI URLs are only in 'application info' output (from info.md).
-			// For openshift: create output has route URLs — GetBaseURL works directly.
+			// Podman: chat-backend URL is only in 'application info', not create output.
 			if appRuntime == "podman" {
 				infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
 				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
 				ragBaseURL, err = cli.GetBaseURL(infoOut, backendPort)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// The LLM-as-Judge is a local podman container on localhost:<judgePort>,
-				// not a catalog-deployed service — build its URL directly.
 				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
 			} else {
 				ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
@@ -530,9 +475,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(cli.ValidateOpenShiftRoutes(output)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
 			} else {
-				// Podman catalog path: routing is handled by Caddy via domain names (nip.io).
-				// Ports are not exposed as numbered ports on pods — skip port number verification.
-				// URL reachability is already validated during application create health checks.
+				// Podman: Caddy routes by domain — no numbered ports to verify.
 				logger.Infof("[TEST] Podman catalog path: skipping numeric port check (Caddy routes by domain)")
 			}
 			logger.Infof("[TEST] Exposed ports/routes verified")
@@ -550,7 +493,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(pods).NotTo(gomega.BeEmpty(), "No pods found for application %s", appName)
 
 			for podName, pod := range pods {
-				// ---- Pod logs by NAME
 				{
 					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, podName, "", appRuntime)
@@ -561,7 +503,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					gomega.Expect(cli.ValidateApplicationLogs(logs, podName, "")).To(gomega.Succeed())
 				}
 
-				// ---- Pod logs by ID
 				if appRuntime == "podman" {
 					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, "", appRuntime)
@@ -592,13 +533,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			var pods []string
 
 			if appRuntime == "podman" {
-				// Catalog path: pod names are dynamic (<service-id>-<slug>).
-				// Discover actual pod names from 'application ps -o wide' rather than
-				// constructing them from the legacy appName--suffix format.
-				// MUST use -o wide: ExtractPodInfo's podRowRe requires the POD ID,
-				// CREATED, and CONTAINERS columns that only appear in wide output.
-				// Without -o wide the narrow format (APPLICATION NAME | POD NAME | STATUS)
-				// does not match podRowRe and returns an empty map.
+				// Discover pod names via -o wide; narrow format omits required columns.
 				psOutput, psErr := cli.ApplicationPS(ctx, cfg, appName, appRuntime, "-o", "wide")
 				gomega.Expect(psErr).NotTo(gomega.HaveOccurred())
 
@@ -610,8 +545,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					pods = append(pods, podName)
 				}
 			} else {
-				// OpenShift path: pod names are still <suffix>-<hash> but stop
-				// accepts the suffix-based names via --pod.
 				suffixes, ok := common.ExpectedPodSuffixes[appRuntime]
 				gomega.Expect(ok).To(gomega.BeTrue(), "unknown appRuntime %s", appRuntime)
 
@@ -647,13 +580,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 	})
 	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
-		// NodeTimeout(3h) covers the first run where the judge model must be
-		// downloaded (~2h). On subsequent runs the model is cached and BeforeAll
-		// completes in ~20min (LLM warm-up + ingestion + judge container start).
 		ginkgo.BeforeAll(ginkgo.NodeTimeout(3*time.Hour), func(ctx context.Context) {
-			// SKIP_RAG_VALIDATION=true bypasses the entire RAG Golden Dataset
-			// Validation context (BeforeAll + It + AfterAll) and jumps straight
-			// to Digitization Tests. Unset or set to any other value to re-enable.
 			if os.Getenv("SKIP_RAG_VALIDATION") == "true" {
 				ginkgo.Skip("Skipping RAG Golden Dataset Validation — SKIP_RAG_VALIDATION=true")
 			}
@@ -665,13 +592,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				ginkgo.Fail("Application name is not set")
 			}
 
-			// Skip the entire RAG Golden Dataset Validation context when the LLM-as-Judge
-			// infrastructure is not configured in this environment.
-			// Required env vars:
-			//   LLM_JUDGE_IMAGE      – container image for the vLLM judge container
-			//   LLM_JUDGE_MODEL_PATH – local path where the judge model weights are stored
-			//   LLM_JUDGE_MODEL      – model name served by vLLM
-			// These are intentionally optional — not every e2e run has a judge GPU/model.
+			// Skip if LLM-as-Judge env vars are not set — judge is optional.
 			llmJudgeImage := os.Getenv("LLM_JUDGE_IMAGE")
 			llmJudgeModelPath := os.Getenv("LLM_JUDGE_MODEL_PATH")
 			llmJudgeModel := os.Getenv("LLM_JUDGE_MODEL")
@@ -705,12 +626,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			)
 			logger.Infof("[RAG] Golden dataset file: %s", goldenPath)
 
-			logger.Infof("[RAG] Fetching application info to derive RAG and Judge URLs (waiting for pods to be healthy)")
 			infoCtx, infoCancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer infoCancel()
-			// Poll application info until chat-bot-backend AND similarity-api URLs appear.
-			// After 'application start', containers may take time to become healthy;
-			// until they are, info.md renders the "unavailable" branch (no URL).
 			infoOutput, err := cli.WaitForApplicationInfoURLs(infoCtx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -721,8 +638,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// The LLM-as-Judge is a local podman container on localhost:<judgePort>,
-			// not a catalog-deployed service — build its URL directly for podman.
 			if appRuntime == "podman" {
 				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
 			} else {
@@ -733,7 +648,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[RAG] RAG Base URL: %s", ragBaseURL)
 			logger.Infof("[RAG] Judge Base URL: %s", judgeBaseURL)
 
-			// Wait for similarity-api /health before starting evaluation.
 			similarityBaseURL := cli.ExtractSimilarityAPIURL(infoOutput)
 			if similarityBaseURL == "" {
 				ginkgo.Fail("[RAG] similarity-api URL not found in application info — cannot run golden dataset validation")
@@ -745,20 +659,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				ginkgo.Fail(fmt.Sprintf("[RAG] similarity-api is not healthy — cannot run golden dataset validation: %v", err))
 			}
 
-			// Phase 1 — download judge model (registry login + file copy).
-			// This does NOT start the container so it is safe to run before the
-			// main LLM is ready: no GPU contention, no resource crunch.
-			// The ~2h download overlaps with WaitForRAGBackendReady, eliminating
-			// sequential blocking that was causing the suite timeout.
+			// Phase 1: download judge model — safe before LLM is ready (no GPU contention).
 			logger.Infof("[RAG] Phase 1 — downloading LLM-as-Judge model")
 			if err := rag.DownloadJudgeModel(ctx, cfg); err != nil {
 				ginkgo.Fail(fmt.Sprintf("[RAG] judge model download failed: %v", err))
 			}
 			logger.Infof("[RAG] Judge model download completed")
 
-			// Phase 2 — wait for the main RAG LLM to be serving.
-			// The judge container is NOT started yet — starting it while the main
-			// LLM is still loading causes a resource crunch that crashes OpenSearch.
+			// Phase 2: wait for main LLM — judge container must not start until LLM is ready.
 			logger.Infof("[RAG] Phase 2 — waiting for LLM to be ready via %s/v1/models", ragBaseURL)
 			llmCtx, llmCancel := context.WithTimeout(ctx, 40*time.Minute)
 			defer llmCancel()
@@ -766,9 +674,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				ginkgo.Fail(fmt.Sprintf("[RAG] LLM is not ready — cannot run golden dataset validation: %v", err))
 			}
 
-			// Ingest test_doc.pdf via the digitize microservice (operation=ingestion).
-			// Fetch a fresh info snapshot — infoOutput may be stale after the
-			// ~2h model download above.
+			// Refresh application info — infoOutput may be stale after the model download.
 			logger.Infof("[RAG] Fetching fresh application info to resolve digitize-backend URL")
 			freshInfoCtx, freshInfoCancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer freshInfoCancel()
@@ -797,9 +703,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			logger.Infof("[RAG] Document ingestion completed successfully")
 
-			// Phase 3 — start the judge container.
-			// Main LLM is confirmed ready (Phase 2 passed) so there is no resource
-			// crunch risk. The model weights are already on disk (Phase 1).
+			// Phase 3: start judge container — LLM is ready and weights are on disk.
 			logger.Infof("[RAG] Phase 3 — starting LLM-as-Judge container")
 			judgeCtx, judgeCancel := context.WithTimeout(ctx, 30*time.Minute)
 			defer judgeCancel()
@@ -827,80 +731,27 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(cases).NotTo(gomega.BeEmpty())
 
-				// MOCK_RAG_VALIDATION=true skips all LLM calls and marks every
-				// question as passed. Use this when iterating on non-RAG test steps
-				// and you want the suite to proceed past this context immediately.
-				// Never set this in nightly / CI runs.
-				if os.Getenv("MOCK_RAG_VALIDATION") == "true" {
-					mockResults := make([]rag.EvalResult, 0, len(cases))
-					for _, tc := range cases {
-						mockResults = append(mockResults, rag.EvalResult{
-							Question: tc.Question,
-							Passed:   true,
-							Details:  "mocked — MOCK_RAG_VALIDATION=true",
-						})
-					}
-					rag.PrintValidationSummary(mockResults, 1.0)
-					logger.Infof("[RAG] Golden dataset validation mocked — skipping LLM calls")
-
-					return
-				}
-
 				total := len(cases)
 				results := make([]rag.EvalResult, 0, total)
 				passed := 0
 
-				// Log the spec-level budget so it is immediately visible in output.
 				if specDeadline, ok := specCtx.Deadline(); ok {
 					logger.Infof("[RAG] Spec budget remaining: %s (deadline: %s)",
 						time.Until(specDeadline).Round(time.Second), specDeadline.Format(time.RFC3339))
 				}
 
-				// perQuestionTimeout is the maximum wall-clock budget for a single
-				// question evaluation (RAG call + Judge call + retries).
-				//
-				// ROOT-CAUSE FIX — why specCtx must NOT be used as the parent:
-				//
-				// Using specCtx as the parent of per-question contexts means every
-				// question context is a *descendant* of specCtx. When specCtx is
-				// cancelled (SpecTimeout fires, or ginkgo cancels the spec for any
-				// reason), ALL in-flight and future per-question contexts are
-				// immediately cancelled. The client.Do call inside PostJSON then
-				// returns "context canceled" for every remaining question without
-				// even sending the HTTP request, which looked like a mass timeout
-				// but was actually a cascade from a single cancellation event.
-				//
-				// Fix: per-question contexts are rooted at context.Background() so
-				// they are completely independent of each other and of specCtx.
-				// A slow or failed question does not affect any subsequent question.
-				//
-				// The SpecTimeout still enforces the overall 3-hour cap: when it
-				// fires, ginkgo marks the spec as failed and the AfterAll cleanup
-				// runs normally — no change in observable behaviour other than
-				// "context canceled" no longer cascades to all remaining questions.
-				//
-				// The per-question timeout (8 min) is intentionally shorter than
-				// the http.Client.Timeout on sharedRAGClient (10 min) so that the
-				// context deadline fires first and the error is deterministic.
+				// Per-question contexts are rooted at Background, not specCtx.
+				// This prevents one cancellation from cascading to all remaining questions.
 				const perQuestionTimeout = 8 * time.Minute
 
 				for i, tc := range cases {
-					// Guard: if the spec-level timeout has fired, stop starting new
-					// questions.  Without this check the loop would keep creating
-					// new qCtx timers (rooted at Background) and the questions would
-					// run past the ginkgo SpecTimeout — only to be killed mid-flight
-					// when ginkgo forcibly cancels the spec goroutine.
+					// Stop if the spec-level timeout has fired.
 					if specCtx.Err() != nil {
 						logger.Warningf("[RAG] specCtx cancelled (%v) after %d/%d questions — stopping evaluation loop",
 							specCtx.Err(), i, total)
 						break
 					}
 
-					// Each question gets its own independent context rooted at
-					// context.Background(). This is the primary fix: isolating
-					// per-question contexts from each other and from specCtx
-					// ensures that one slow LLM response or one timeout cannot
-					// cascade and cancel all subsequent questions.
 					qCtx, qCancel := context.WithTimeout(context.Background(), perQuestionTimeout)
 
 					result := rag.EvalResult{
@@ -910,7 +761,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 					logger.Infof("[RAG] Evaluating question %d/%d: %s", i+1, total, tc.Question)
 
-					// 1. Ask RAG
 					ragAns, ragErr := rag.RunWithRetry(qCtx, defaultMaxRetries, func(c context.Context) (string, error) {
 						return rag.AskRAG(c, ragBaseURL, tc.Question)
 					})
@@ -924,7 +774,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						continue
 					}
 
-					// 2. Ask Judge with format retry
 					verdict, reason, judgeErr := rag.AskJudgeWithFormatRetry(
 						qCtx,
 						defaultMaxRetries,
@@ -980,17 +829,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[DIGITIZE] Setting up digitization tests")
 
-			// Get the digitize base URL — wait for pods to be healthy first.
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			// WaitForApplicationInfoURLs waits only for chat-bot-backend and
-			// similarity-api URLs — those are the RAG dependencies. The
-			// digitize-backend pod may still be starting at that point because
-			// pods reach healthy state independently and info.md renders each
-			// service URL only when its own pod is healthy.
-			// We therefore run a dedicated retry loop for the digitize URL
-			// after the general wait returns.
+			// digitize-backend may still be starting after chat-bot-backend and
+			// similarity-api are healthy — poll separately for its URL below.
 			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -999,9 +842,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			if appRuntime == "podman" {
-				// Catalog path: extract digitize-backend HTTPS URL from info output.
-				// Poll until the URL appears — the digitize-backend pod may still be
-				// starting even after chat-bot-backend and similarity-api are healthy.
 				const digitizePollInterval = 15 * time.Second
 				for {
 					digitizeBaseURL = cli.ExtractCatalogDigitizeURL(infoOutput)
@@ -1031,18 +871,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 			}
 
-			// err is only used in the openshift branch; no check needed for podman.
 			_ = err
 
 			logger.Infof("[DIGITIZE] Digitize Base URL: %s", digitizeBaseURL)
 		})
 
 		ginkgo.AfterEach(func() {
-			// Cleanup: delete created jobs and documents.
-			// Each WaitForJobCompletion gets its own bounded context so a hung
-			// job cannot block AfterEach forever against context.Background().
-			// The 5-minute per-job cap is conservative — jobs typically complete
-			// in < 3 min; this just prevents an infinite stall on a stuck job.
 			for _, jobID := range createdJobIDs {
 				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				_, _ = digitization.WaitForJobCompletion(cleanCtx, digitizeBaseURL, jobID, 5*time.Minute)
@@ -1143,7 +977,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(content.Result).NotTo(gomega.BeNil())
 			gomega.Expect(content.OutputFormat).To(gomega.Equal("json"))
-			// For JSON format, Result should be a map
 			resultMap, ok := content.Result.(map[string]interface{})
 			gomega.Expect(ok).To(gomega.BeTrue(), "Result should be a map for JSON format")
 			gomega.Expect(resultMap).NotTo(gomega.BeEmpty())
@@ -1207,13 +1040,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			pdfPath := digitization.GetTestPDFPath()
 			formats := []string{"json", "md", "txt"}
 
-			// Process formats sequentially to avoid exceeding concurrent limit
 			for _, format := range formats {
 				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", format, fmt.Sprintf("e2e-format-%s", format))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				createdJobIDs = append(createdJobIDs, jobResp.JobID)
 
-				// Wait for each job to complete before starting the next
 				finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 8*time.Minute)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
@@ -1263,7 +1094,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			logger.Infof("[TEST] ✓ Job deletion verified (404 returned)")
 
-			// Remove from cleanup list since we already deleted it
 			createdJobIDs = createdJobIDs[:len(createdJobIDs)-1]
 
 			logger.Infof("[TEST] ✓ Job lifecycle test completed successfully")
@@ -1287,13 +1117,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Step 2: Testing in-progress document deletion protection")
 			time.Sleep(jobStartDelay) // Wait for job to start and document to be created.
 
-			// Get job status to retrieve document ID
 			jobStatus, err := digitization.GetJobStatus(ctx, digitizeBaseURL, jobResp.JobID)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(jobStatus.Documents).NotTo(gomega.BeEmpty())
 			docID := jobStatus.Documents[0].ID
 
-			// Try to delete the in-progress document
 			err = digitization.DeleteDocument(ctx, digitizeBaseURL, docID)
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(digitization.IsResourceLockedError(err)).To(gomega.BeTrue(),
@@ -1327,7 +1155,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := withTimeout(20 * time.Minute)
 			defer cancel()
 
-			// Create and complete jobs sequentially to avoid exceeding concurrent limit
 			pdfPath := digitization.GetTestPDFPath()
 			var ownDocIDs []string
 			for i := 0; i < 2; i++ {
@@ -1335,13 +1162,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				createdJobIDs = append(createdJobIDs, jobResp.JobID)
 
-				// Wait for each job to complete before starting the next
 				finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 8*time.Minute)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Track the document IDs created by this spec so we can verify
-				// they are removed — avoids a fragile global-empty assertion that
-				// could fail if a concurrent/previous op left unrelated documents.
 				if finalStatus != nil {
 					for _, doc := range finalStatus.Documents {
 						ownDocIDs = append(ownDocIDs, doc.ID)
@@ -1349,14 +1172,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 			}
 
-			// Delete all documents
 			err := digitization.DeleteAllDocuments(ctx, digitizeBaseURL)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// Verify that every document created by this spec is now gone.
-			// We check each ID individually rather than asserting the global list
-			// is empty — other specs/jobs may have left unrelated documents that
-			// a parallel or nightly run is still processing.
+			// Verify each doc created by this spec is gone — not a global empty check.
 			for _, docID := range ownDocIDs {
 				docsList, listErr := digitization.ListDocuments(ctx, digitizeBaseURL, 100, 0, "", "")
 				gomega.Expect(listErr).NotTo(gomega.HaveOccurred())
@@ -1372,7 +1191,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			logger.Infof("[TEST] All %d documents created by this spec were deleted successfully", len(ownDocIDs))
-			createdDocIDs = nil // Clear since all are deleted
+			createdDocIDs = nil
 		})
 
 		ginkgo.It("should reject multiple files for digitization operation", func() {
@@ -1386,7 +1205,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			errorResp, err := digitization.CreateJobWithMultipleFiles(ctx, digitizeBaseURL, filePaths, "digitization", "json", "e2e-multiple-files-test")
 			expectErrResp(err, errorResp)
 
-			// Validate the error response structure
 			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("INVALID_REQUEST"))
 			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("Request validation failed: Only 1 file allowed for digitization."))
 			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(400))

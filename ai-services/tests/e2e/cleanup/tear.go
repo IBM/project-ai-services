@@ -7,6 +7,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+const dirPerm os.FileMode = 0o755
+
 // CleanupTemp removes temporary directories created during test runs.
 func CleanupTemp(tempDir string) error {
 	if tempDir == "" {
@@ -24,17 +26,16 @@ func CleanupTemp(tempDir string) error {
 	return nil
 }
 
-// CollectArtifacts collects test artifacts (logs, configs, etc.) from the temp directory.
+// CollectArtifacts collects test artifacts from tempDir into artifactDir.
 func CollectArtifacts(tempDir, artifactDir string) error {
 	if tempDir == "" || artifactDir == "" {
 		return nil
 	}
 
-	if err := os.MkdirAll(artifactDir, 0o755); err != nil { //nolint:mnd
+	if err := os.MkdirAll(artifactDir, dirPerm); err != nil {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
-	// Copy relevant files from tempDir to artifactDir.
 	logger.Infof("[CLEANUP] Artifacts collected to: %s", artifactDir)
 
 	return nil

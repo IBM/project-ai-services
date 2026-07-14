@@ -20,27 +20,19 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// ErrJobNotFound is returned by GetJobStatus when the server responds with
-// HTTP 404.  WaitForJobCompletion treats this as a terminal condition — the
-// job has been deleted (or never existed) — and returns immediately instead
-// of retrying forever.  This prevents the AfterEach cleanup loop from polling
-// indefinitely after DeleteAllDocuments has already removed the job.
+// ErrJobNotFound is returned by GetJobStatus on HTTP 404; WaitForJobCompletion treats it as terminal to avoid infinite polling after cleanup.
 var ErrJobNotFound = errors.New("job not found (404)")
 
-// getCallTimeout is the end-to-end deadline for a single status-poll HTTP
-// round-trip: dial + TLS handshake + response headers + body.
-// 30 s is sufficient for nip.io TLS + slow Spyre pods; the previous 10 s
-// caused frequent spurious timeouts.
+// getCallTimeout is the end-to-end deadline for a status-poll round-trip (dial + TLS + headers + body); 30 s covers nip.io TLS and slow Spyre pods.
 var getCallTimeout = 30 * time.Second //nolint:mnd
 
 // postCallTimeout is the end-to-end deadline for a POST request round-trip.
 var postCallTimeout = 60 * time.Second //nolint:mnd
 
-// docCallTimeout raised from 30 s to 60 s: document content responses can
-// be large JSON/markdown payloads over nip.io TLS.
+// docCallTimeout is 60 s to accommodate large JSON/markdown content responses over nip.io TLS.
 var docCallTimeout = 60 * time.Second //nolint:mnd
 
-// Transport tuning constants — each value is explained in the comment block below.
+// Transport tuning constants for sharedDigitizeTransport.
 const (
 	transportMaxIdleConnsPerHost   = 4                //nolint:mnd
 	transportIdleConnTimeout       = 90 * time.Second //nolint:mnd
@@ -49,37 +41,12 @@ const (
 	transportDialKeepAlive         = 30 * time.Second //nolint:mnd
 )
 
-// sharedDigitizeTransport is reused across all getHTTPClient calls so that
-// TLS connections are pooled rather than opened fresh on every request.
-//
-// Root cause of the persistent hang in WaitForJobCompletion:
-//
-//	http.Client.Timeout is implemented as a context deadline around the
-//	entire round-trip.  When a keep-alive connection in the pool has been
-//	silently dropped by the server (common with Caddy/nip.io after TLS
-//	idle expiry), the transport reuses that dead socket.  The kernel send
-//	buffer accepts the written request bytes without error, then blocks
-//	waiting for response headers.  Because no bytes ever arrive, the
-//	connection is stuck at the TCP layer — BELOW the point where
-//	http.Client.Timeout kicks in — and the goroutine hangs indefinitely,
-//	causing the suite timeout to fire and kill the entire run.
-//
-// Fix: set ResponseHeaderTimeout and DialContext deadlines on the transport
-// itself.  These operate at the transport level, independent of
-// http.Client.Timeout, and guarantee that every single request is unblocked
-// within a bounded time even if the server never sends headers.
-//   - DialContext timeout: 15 s — bounds TCP connect + TLS handshake.
-//   - ResponseHeaderTimeout: 25 s — time from request-sent to first
-//     response header byte; fires even on reused connections with dead sockets.
-//   - DisableKeepAlives: false — we still want connection reuse for
-//     the happy path; ResponseHeaderTimeout handles the stuck-socket case.
+// sharedDigitizeTransport pools TLS connections; ResponseHeaderTimeout and DialContext deadlines prevent hangs on dead keep-alive sockets that http.Client.Timeout alone cannot catch.
 var sharedDigitizeTransport = &http.Transport{
 	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
 	MaxIdleConnsPerHost: transportMaxIdleConnsPerHost,
 	IdleConnTimeout:     transportIdleConnTimeout,
-	// ResponseHeaderTimeout fires if the server accepts the connection but
-	// never sends response headers.  This is the guard against dead keep-alive
-	// sockets that http.Client.Timeout alone cannot catch.
+	// ResponseHeaderTimeout guards against dead keep-alive sockets that never send response headers.
 	ResponseHeaderTimeout: transportResponseHeaderTimeout,
 	DialContext: (&net.Dialer{
 		Timeout:   transportDialTimeout,
@@ -87,8 +54,7 @@ var sharedDigitizeTransport = &http.Transport{
 	}).DialContext,
 }
 
-// getHTTPClient returns an HTTP client with the given timeout that reuses
-// the shared transport so TLS connections are pooled across calls.
+// getHTTPClient returns an HTTP client with the given timeout using the shared pooled transport.
 func getHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
@@ -96,15 +62,12 @@ func getHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// drainAndClose fully drains the body before closing it so the underlying TCP
-// connection is returned to the pool rather than discarded.
+// drainAndClose drains and closes the body so the underlying TCP connection is returned to the pool.
 func drainAndClose(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, body)
 	_ = body.Close()
 }
 
-// doGet sends a GET request to url, reads the body, and returns (body, statusCode, error).
-// The caller is responsible for checking the status code.
 func doGet(ctx context.Context, url string, timeout time.Duration) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -143,9 +106,7 @@ func doDelete(ctx context.Context, url string, timeout time.Duration) ([]byte, i
 	return body, resp.StatusCode, nil
 }
 
-// unmarshalOK reads body+status from doGet/doDelete, asserts expectedStatus,
-// and unmarshals into v. Shared by every public GET/DELETE that expects a
-// successful response.
+// unmarshalOK asserts expectedStatus and unmarshals body into v; shared by all GET/DELETE success paths.
 func unmarshalOK(body []byte, statusCode, expectedStatus int, v any) error {
 	if statusCode != expectedStatus {
 		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
@@ -162,9 +123,7 @@ func unmarshalOK(body []byte, statusCode, expectedStatus int, v any) error {
 	return nil
 }
 
-// expectError executes a GET/DELETE and returns the error body when the
-// response is NOT the given successStatus. If the server unexpectedly returns
-// successStatus, an error is returned to the caller.
+// expectError returns the parsed error body when status != successStatus, or an error if the call unexpectedly succeeded.
 func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
 	if statusCode != successStatus {
 		return parseErrorResponse(body, statusCode)
@@ -175,13 +134,11 @@ func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, er
 
 // GetTestPDFPath returns the path to a test PDF file.
 func GetTestPDFPath() string {
-	// Get the path to the test PDF from the ingestion test docs
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		return ""
 	}
 
-	// Navigate to ingestion/docs/test_doc.pdf
 	testDir := filepath.Dir(filename)
 	testPDFPath := filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
 
@@ -234,8 +191,7 @@ type PaginationInfo struct {
 	Offset int `json:"offset"`
 }
 
-// DocumentDetailResponse represents a document returned by both the list and detail endpoints.
-// The two endpoints return the same JSON shape, so a single type covers both.
+// DocumentDetailResponse represents a document returned by both the list and detail endpoints (same JSON shape).
 type DocumentDetailResponse struct {
 	ID           string         `json:"id"`
 	JobID        string         `json:"job_id"`
@@ -249,8 +205,7 @@ type DocumentDetailResponse struct {
 	Metadata     map[string]any `json:"metadata"`
 }
 
-// DocumentListItem is an alias for DocumentDetailResponse.
-// The list and detail document endpoints return the same JSON shape.
+// DocumentListItem is an alias for DocumentDetailResponse; list and detail endpoints share the same JSON shape.
 type DocumentListItem = DocumentDetailResponse
 
 // DocumentsListResponse represents the response when listing documents.
@@ -280,11 +235,7 @@ type ErrorResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// IsResourceLockedError checks if an error is a resource locked error (409).
-// The digitize API returns HTTP 409 with code RESOURCE_LOCKED when a job or
-// document is still active. A bare 409 (proxy HTML, no body keywords) is also
-// treated as locked — the only way the digitize API returns 409 is for
-// resource-locked situations.
+// IsResourceLockedError reports whether err is an HTTP 409 resource-lock error; bare 409s are also treated as locked since the digitize API only returns 409 for that reason.
 func IsResourceLockedError(err error) bool {
 	if err == nil {
 		return false
@@ -446,8 +397,7 @@ func GetJobStatus(ctx context.Context, baseURL, jobID string) (*JobStatusRespons
 		return nil, err
 	}
 
-	// 404 means the job has been deleted or never existed. Return the sentinel
-	// ErrJobNotFound so callers can distinguish "gone" from transient errors.
+	// 404 → job deleted or never existed; return ErrJobNotFound so callers can distinguish "gone" from transient errors.
 	if statusCode == http.StatusNotFound {
 		return nil, ErrJobNotFound
 	}
@@ -475,31 +425,14 @@ func handleJobStatus(status *JobStatusResponse, jobID string) (*JobStatusRespons
 
 		return status, fmt.Errorf("job failed: %s", errMsg), true
 	case "accepted", "pending", "in_progress":
-		// accepted  — job queued, not yet picked up by a worker
-		// pending   — job acknowledged, waiting to start
-		// in_progress — job actively running
-		// All three are transient: keep polling.
+		// Transient states (accepted/pending/in_progress): keep polling.
 		return nil, nil, false
 	default:
 		return status, fmt.Errorf("unknown job status: %s", status.Status), true
 	}
 }
 
-// WaitForJobCompletion polls job status until the job reaches a terminal state
-// (completed or failed) or the timeout is exceeded.
-//
-// It checks immediately on entry, then every 15 seconds — halved from the
-// original 30 s so that jobs completing quickly are not held waiting a full
-// tick. The first poll is immediate so an already-completed job returns
-// without any sleep.
-//
-// Root-cause fix — 404 / ErrJobNotFound is treated as terminal (job gone).
-// Previously GetJobStatus returned a generic error for 404 which was logged
-// as a warning and retried indefinitely.  This caused AfterEach to hang
-// forever after DeleteAllDocuments had already removed the jobs: every poll
-// returned 404, every 404 was retried, and the suite eventually timed out.
-// Now ErrJobNotFound is detected immediately and the function returns nil
-// (success — the job is gone, cleanup is complete).
+// WaitForJobCompletion polls job status every 15 s until completed, failed, timeout, or ErrJobNotFound (404 treated as terminal).
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobStatusResponse, error) {
 	const pollInterval = 15 * time.Second
 
@@ -516,12 +449,9 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 
 		status, err := GetJobStatus(ctx, baseURL, jobID)
 		if err != nil {
-			// 404 → job was deleted externally (e.g. DeleteAllDocuments in a
-			// prior spec, or manual cleanup).  Treat as terminal: the job is
-			// gone, there is nothing left to wait for.
+			// 404 → job deleted externally; treat as terminal.
 			if errors.Is(err, ErrJobNotFound) {
 				logger.Infof("[DIGITIZE] Job %s not found (404) — treating as complete (already deleted)", jobID)
-
 				return nil, nil
 			}
 			logger.Warningf("[DIGITIZE] Failed to get job status for %s: %v — retrying in %s", jobID, err, pollInterval)
@@ -579,8 +509,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 	return nil
 }
 
-// ListDocuments retrieves a list of documents with optional status and name filters.
-// Pass empty strings for status and name to list all documents without filters.
+// ListDocuments retrieves documents with optional status/name filters; pass empty strings to list all.
 func ListDocuments(ctx context.Context, baseURL string, limit, offset int, status, name string) (*DocumentsListResponse, error) {
 	url := fmt.Sprintf("%s/v1/documents?limit=%d&offset=%d", baseURL, limit, offset)
 	if status != "" {
@@ -665,17 +594,14 @@ func DeleteAllDocuments(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// parseErrorResponse parses the response body as an ErrorResponse.
-// If the body is not valid JSON (e.g. a proxy returned HTML) or the parsed
-// object is empty, a plain error with the HTTP status and raw body is returned
-// so callers always get useful diagnostic information.
+// parseErrorResponse parses body as ErrorResponse; returns a plain HTTP-status error on invalid JSON or empty payload.
 func parseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error) {
 	var errorResp ErrorResponse
 	if err := json.Unmarshal(respBody, &errorResp); err != nil {
 		return nil, fmt.Errorf("HTTP %d: %s", statusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	// Guard against `{}` or `{"error":{}}` responses.
+	// Guard against empty `{}` or `{"error":{}}` responses.
 	if errorResp.Error.Code == "" && errorResp.Error.Message == "" {
 		return nil, fmt.Errorf("HTTP %d: empty error body: %s", statusCode, string(respBody))
 	}
@@ -697,7 +623,6 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, operation, 
 		return nil, err
 	}
 
-	// If not accepted, parse as error response
 	if statusCode != http.StatusAccepted {
 		return parseErrorResponse(respBody, statusCode)
 	}
@@ -735,8 +660,7 @@ func GetDocumentContentExpectingError(ctx context.Context, baseURL, docID string
 	return expectError(body, statusCode, http.StatusOK)
 }
 
-// DeleteJobExpectingError deletes a job and returns error response if status is not 200/204.
-// Note: 200 and 204 are both considered "success" for deletes; either triggers the unexpected-success error.
+// DeleteJobExpectingError deletes a job and returns the error response for any non-200/204 status code.
 func DeleteJobExpectingError(ctx context.Context, baseURL, jobID string) (*ErrorResponse, error) {
 	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID), getCallTimeout)
 	if err != nil {
@@ -769,7 +693,6 @@ func createMultipartBodyWithMultipleFiles(filePaths []string) (*bytes.Buffer, *m
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add multiple files
 	for _, filePath := range filePaths {
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -808,7 +731,6 @@ func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths [
 		return nil, err
 	}
 
-	// Any non-202 response is an error — accept 400, 415, 429, 422, etc.
 	if statusCode != http.StatusAccepted {
 		return parseErrorResponse(respBody, statusCode)
 	}
@@ -816,16 +738,7 @@ func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths [
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(respBody))
 }
 
-// IngestTestDocumentViaDigitizeAPI ingests the standard test_doc.pdf fixture
-// through the digitize microservice (operation=ingestion).
-//
-// This is the replacement for the legacy CLI-based ingestion path
-// (hostpath copy + `application start --pod ingest-docs/clean-docs`).
-// The document is embedded and indexed into OpenSearch so it becomes
-// queryable by the RAG chat-bot backend before golden dataset evaluation runs.
-//
-// digitizeBaseURL — base URL of the running digitize microservice.
-// jobName         — name to tag the submitted job with (e.g. "rag-golden-ingest").
+// IngestTestDocumentViaDigitizeAPI ingests test_doc.pdf via the digitize microservice (operation=ingestion) so it is indexed in OpenSearch before RAG evaluation.
 func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobName string) error {
 	pdfPath := GetTestPDFPath()
 	if pdfPath == "" {
@@ -841,8 +754,7 @@ func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobN
 
 	logger.Infof("[INGEST] Job submitted (job_id=%s) — waiting for completion", jobResp.JobID)
 
-	// Ingestion involves OCR + embedding + OpenSearch indexing; allow 20 minutes.
-	const ingestTimeout = 20 * time.Minute
+	const ingestTimeout = 20 * time.Minute // OCR + embedding + OpenSearch indexing can take up to 20 min.
 
 	finalStatus, err := WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, ingestTimeout)
 	if err != nil {
