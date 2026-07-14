@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -21,11 +20,9 @@ var ErrRouteNotFound = errors.New("route not found")
 
 // caddyManager implements ProxyManager interface for Caddy.
 type caddyManager struct {
-	httpClient      *resty.Client
-	adminURL        string
-	serverName      string
-	subrouteOnce    sync.Once
-	subrouteOnceErr error
+	httpClient *resty.Client
+	adminURL   string
+	serverName string
 }
 
 const (
@@ -79,19 +76,11 @@ func (c *caddyManager) HealthCheck() error {
 	return nil
 }
 
-// RegisterRoute registers a route with Caddy. It ensures the subroute container exists
-// before attempting to create the route — so this method is safe to call directly without
-// going through RegisterRoutesForAppAndReturn.
+// RegisterRoute registers a route with Caddy.
+// EnsureSubroute must have been called once at startup before invoking this method.
 func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	if route.ID == "" {
 		return fmt.Errorf("cannot register route: route ID is empty")
-	}
-
-	// Ensure the subroute container exists before the first route is added.
-	// sync.Once guarantees exactly one attempt regardless of concurrent callers;
-	// the outcome (including any error) is cached for all subsequent calls.
-	if err := c.ensureSubroute(); err != nil {
-		return fmt.Errorf("failed to ensure subroute container: %w", err)
 	}
 
 	routeConfig := map[string]any{
@@ -126,24 +115,11 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	return c.createRoute(routeConfig)
 }
 
-// ensureSubroute guarantees the persistent subroute container exists in Caddy's live config.
-// sync.Once ensures seedSubroute runs at most once per caddyManager instance, eliminating
-// the race condition when multiple goroutines register routes concurrently. The outcome
-// (success or error) is cached so all subsequent calls are pure no-ops.
-func (c *caddyManager) ensureSubroute() error {
-	c.subrouteOnce.Do(func() {
-		c.subrouteOnceErr = c.seedSubroute()
-	})
-
-	return c.subrouteOnceErr
-}
-
-// seedSubroute performs the actual one-time check-and-create of the subroute container.
-// It checks via GET /id/app-routes-handler; if absent it seeds the outer catch-all route
-// containing the subroute handler via a single top-level POST (one reload, first-use only).
-// On every subsequent call the GET returns 200 and the function is a no-op.
-// Called exactly once by ensureSubroute via sync.Once.
-func (c *caddyManager) seedSubroute() error {
+// EnsureSubroute checks whether the persistent subroute container already exists in
+// Caddy's live config and creates it if absent. It must be called once at startup
+// (after HealthCheck) before any RegisterRoute calls; doing it here instead of lazily
+// inside RegisterRoute removes the need for sync.Once and surfaces errors early.
+func (c *caddyManager) EnsureSubroute(_ context.Context) error {
 	checkURL, err := url.JoinPath(c.adminURL, "id", constants.CaddySubrouteHandlerID)
 	if err != nil {
 		return err
@@ -307,7 +283,6 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 // RegisterRoutesForAppAndReturn registers routes for an application with Caddy proxy and returns the built routes.
 //
 // Parameters:
-//   - rt: Runtime interface for interacting with pods
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
 //   - proxyManager: ProxyManager instance for route operations (reuse to avoid creating multiple instances)
 //   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
@@ -340,7 +315,7 @@ func RegisterRoutesForAppAndReturn(
 	}
 
 	// Step 3: Register each route with Caddy.
-	// ensureSubroute is called inside RegisterRoute on the first invocation.
+	// EnsureSubroute must have been called once at startup before reaching this point.
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(ctx, route); err != nil {

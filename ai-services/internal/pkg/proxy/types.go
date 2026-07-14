@@ -4,6 +4,10 @@ import "context"
 
 // ProxyManager defines the interface for managing reverse proxy routes.
 type ProxyManager interface {
+	// EnsureSubroute creates the subroute container in Caddy's live config if it does
+	// not already exist. Must be called once at startup before any RegisterRoute calls.
+	EnsureSubroute(ctx context.Context) error
+
 	// RegisterRoute registers a new route with the proxy
 	RegisterRoute(ctx context.Context, route Route) error
 

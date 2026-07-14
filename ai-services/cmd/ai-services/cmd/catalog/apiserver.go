@@ -126,6 +126,8 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	if err != nil {
 		logger.DebuglnCtx(ctx, fmt.Sprintf("Caddy proxy manager not available, /tls/ask will fail open: %v", err))
 		proxyManager = nil
+	} else if err := proxyManager.EnsureSubroute(ctx); err != nil {
+		return fmt.Errorf("failed to seed caddy subroute container: %w", err)
 	}
 
 	return apiserver.NewAPIserver(apiserver.APIServerOptions{
