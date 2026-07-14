@@ -14,10 +14,11 @@ The service follows the architectural patterns already established:
 
 Two execution paths are provided:
 
-| Path                    | Endpoint                | Use case                                                                                                                                            |
-|:------------------------|:------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Synchronous**         | `POST /v1/extract`      | Raw text submitted inline. Blocking call, immediate JSON result.                                                                                    |
-| **Asynchronous (jobs)** | `POST /v1/extract/jobs` | File uploads (`.pdf`, `.txt`). PDFs are digitized internally via the Digitize Documents REST API before extraction. Returns a `job_id` for polling. |
+| Path                    | Endpoint                | Use case                                                                                                                                                                   |
+|:------------------------|:------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Synchronous**         | `POST /v1/extract`      | Raw text submitted inline. Blocking call, immediate JSON result.                                                                                                           |
+| **Asynchronous (jobs)** | `POST /v1/extract/jobs` | File uploads (`.pdf`, `.txt`, `.doc`). PDF and .docx files are digitized internally via the Digitize Documents REST API before extraction. Returns a `job_id` for polling. |
+>Note: In case the digitize service is not present, the service will only entertain jobs with .txt files. Pdf and .docx files will be denied with a bad request.
 
 A central component of the design is the **Schema Registry**: a PostgreSQL-backed store of immutable extraction schemas. Users register a JSON schema (optionally with few-shot examples and a custom prompt) once, receive a `schema_id`, and reference it in every extraction request. This decouples schema management from extraction execution and lets the same schema be reused across sync and async paths.
 
@@ -73,6 +74,7 @@ graph LR
     API -->|"extraction JSON / job_id"| U
     API <--> PG
     API --> W
+    W <--> PG
     W <--> DIG
     W <--> VLLM
     API <--> VLLM
@@ -91,20 +93,20 @@ graph LR
 
 ## 4. Endpoints
 
-| Method | Endpoint                           | Description                                                           |
-|:---|:-----------------------------------|:----------------------------------------------------------------------|
-| **POST** | `/v1/schemas`                      | Register a new immutable extraction schema. Returns `schema_id`.      |
-| **GET** | `/v1/schemas`                      | List registered schemas with pagination and name filter.              |
-| **GET** | `/v1/schemas/{schema_id}`          | Retrieve a specific schema definition and its examples.               |
-| **DELETE** | `/v1/schemas/{schema_id}`          | Delete a schema. Rejected if any job references it.                   |
-| **DELETE** | `/v1/schemas`                      | Bulk delete all schemas. Requires `confirm=true`.                     |
-| **POST** | `/v1/extract`                      | Synchronous extraction on inline text against a registered schema.    |
-| **POST** | `/v1/extract/jobs`                 | Submit a file (`.txt`/`.pdf`) for async extraction. Returns `job_id`. |
-| **GET** | `/v1/extract/jobs`                 | List extraction jobs with pagination and filters.                     |
-| **GET** | `/v1/extract/jobs/{job_id}`        | Get detailed status of a specific job.                                |
-| **GET** | `/v1/extract/jobs/{job_id}/result` | Retrieve the extraction result as a sub-resource of the job.          |
-| **DELETE** | `/v1/extract/jobs/{job_id}`        | Delete a job record and its result file.                              |
-| **DELETE** | `/v1/extract/jobs`                 | Bulk delete all jobs and results. Requires `confirm=true`.            |
+| Method | Endpoint                           | Description                                                                   |
+|:---|:-----------------------------------|:------------------------------------------------------------------------------|
+| **POST** | `/v1/schemas`                      | Register a new immutable extraction schema. Returns `schema_id`.              |
+| **GET** | `/v1/schemas`                      | List registered schemas with pagination and name filter.                      |
+| **GET** | `/v1/schemas/{schema_id}`          | Retrieve a specific schema definition and its examples.                       |
+| **DELETE** | `/v1/schemas/{schema_id}`          | Delete a schema. Rejected if any job references it.                           |
+| **DELETE** | `/v1/schemas`                      | Bulk delete all schemas. Requires `confirm=true`.                             |
+| **POST** | `/v1/extract`                      | Synchronous extraction on inline text against a registered schema.            |
+| **POST** | `/v1/extract/jobs`                 | Submit a file (`.txt`/`.pdf`/`.docx`) for async extraction. Returns `job_id`. |
+| **GET** | `/v1/extract/jobs`                 | List extraction jobs with pagination and filters.                             |
+| **GET** | `/v1/extract/jobs/{job_id}`        | Get detailed status of a specific job.                                        |
+| **GET** | `/v1/extract/jobs/{job_id}/result` | Retrieve the extraction result as a sub-resource of the job.                  |
+| **DELETE** | `/v1/extract/jobs/{job_id}`        | Delete a job record and its result file.                                      |
+| **DELETE** | `/v1/extract/jobs`                 | Bulk delete all jobs and results. Requires `confirm=true`.                    |
 
 
 ---
@@ -209,14 +211,21 @@ REGISTRATION_BUDGET_FRACTION is the maximum share of the model's context window 
 The reasoning: every extraction prompt is composed of two parts — a fixed part that's identical for every request against that schema (schema JSON + examples + system prompt + reserved output tokens) and a variable part (the user's input text). The fraction draws the line between them. With REGISTRATION_BUDGET_FRACTION = 0.5 and MAX_MODEL_LEN = 32768:
 
 ```commandline
-schema_tokens + examples_tokens + PROMPT_OVERHEAD_TOKENS + MIN_OUTPUT_TOKENS
+schema_tokens + examples_tokens + PROMPT_OVERHEAD_TOKENS + custom_prompt_tokens
     <= REGISTRATION_BUDGET_FRACTION × MAX_MODEL_LEN     (e.g. 0.5)
+    
+schema_tokens × OUTPUT_TOKEN_FACTOR ≤ MAX_OUTPUT_TOKENS 
+// OUTPUT_TOKEN_FACTOR and MAX_OUTPUT_TOKENS described in 6.1
 ```
 Fixed overhead may use at most 0.5 × 32768 = 16,384 tokens. A registration exceeding this is rejected with a 400 and a token breakdown.
 Which guarantees every accepted schema leaves at least 16,384 tokens (~12k English words) for input text on every future extraction.
 
 Tuning it is a trade-off in one direction or the other. Raise it toward 0.8, and you allow very elaborate schemas with many long examples, but every extraction against them can only handle short inputs (~6.5k tokens at 0.8). Lower it toward 0.3 and you force lean schemas but guarantee room for long documents. 0.5 is just a sensible default that says neither side may starve the other; an operator deploying a larger-context model (say 128k) or a schema-heavy workload would adjust it without code changes.
 > Note: it's an admission check, not a replacement for the per-request context guard in Section 6. The Section 6 guard still runs on every extraction, because input text length is only known at request time. The fraction just ensures the guard can never be pre-doomed by the schema alone.
+
+#### 5.1.3 Custom prompt validation
+Custom prompt in the schema entry needs to be validated for lack of maliciousness as we do for chatbot prompt.
+
 
 ### 5.2 GET /v1/schemas — List Schemas
 
@@ -503,14 +512,15 @@ curl -X POST http://localhost:7000/v1/extract \
 
 **Response codes:**
 
-| Status | Description |
-|:---|:---|
-| 202 Accepted | Job created. |
-| 400 Bad Request | Missing file, multiple files, or missing `schema_id`. |
-| 404 Not Found | Unknown `schema_id`. |
-| 415 Unsupported Media Type | Not a valid `.txt` or `.pdf`. |
-| 429 Too Many Requests | Job concurrency at capacity. |
-| 500 Internal Server Error | Unexpected failure. |
+| Status                     | Description                                                                                                                                              |
+|:---------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 202 Accepted               | Job created.                                                                                                                                             |
+| 400 Bad Request            | Missing file, multiple files, or missing `schema_id`, sending .docx or.pdf file when digitize service is not present                                     |
+| 404 Not Found              | Unknown `schema_id`.                                                                                                                                     |
+| 415 Unsupported Media Type | Not a valid `.txt` or `.pdf`.                                                                                                                            |
+| 422 Unprocessable Entity   | Validation failed, Model output failed schema validation after retry. Error includes missing required properties and the raw model output for debugging. |
+| 429 Too Many Requests      | Job concurrency at capacity.                                                                                                                             |
+| 500 Internal Server Error  | Unexpected failure.                                                                                                                                      |
 
 **Sample request:**
 
@@ -604,11 +614,11 @@ curl -X POST http://localhost:7000/v1/extract/jobs \
 |:---|:---|
 | 200 OK | Extraction result. |
 | 202 Accepted | Job still in progress. |
-| 404 Not Found | No job with this ID, or job failed (error details live on the job resource). |
+| 404 Not Found | No job with this ID |
 | 500 Internal Server Error | Failure reading result file. |
 
 **Sample response (200):**
-
+SUCCESSFUL JOB RESULT:
 ```json
 {
     "data": {
@@ -627,6 +637,42 @@ curl -X POST http://localhost:7000/v1/extract/jobs \
             "input_tokens": 8850
         }
     },
+   "status": "completed",
+    "meta": {
+        "model": "ibm-granite/granite-3.3-8b-instruct",
+        "processing_time_ms": 262400,
+        "validation_attempts": 1,
+        "timing_in_secs": {
+            "digitizing": 245.0,
+            "extracting": 14.2,
+            "validating": 0.2
+        }
+    },
+    "usage": {
+        "input_tokens": 11284,
+        "output_tokens": 132,
+        "total_tokens": 11416
+    }
+}
+```
+
+
+FAILED JOB RESULT:
+```json
+    {
+    "data": {
+        "extraction": {
+        },
+        "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
+        "source": {
+            "input_type": "file",
+            "document_name": "contract_2026.pdf",
+            "digitize_doc_id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+            "input_words": 6412,
+            "input_tokens": 8850
+        }
+    },
+    "status": "failed",
     "meta": {
         "model": "ibm-granite/granite-3.3-8b-instruct",
         "processing_time_ms": 262400,
@@ -685,30 +731,33 @@ Extraction is a single-pass operation in v1 (no chunk-and-merge — see Non-Goal
 input_tokens          = /tokenize(input_text)                  # exact
 schema_tokens         = /tokenize(json.dumps(normalized_schema))   # computed once at schema registration, cached in DB
 examples_tokens       = /tokenize(rendered few-shot block)         # cached at registration
+custom_prompt_tokens  = /tokenize(custom_prompt)         # cached at registration
 prompt_overhead       = PROMPT_OVERHEAD_TOKENS 
 reserved_output       = clamp(schema_tokens * OUTPUT_TOKEN_FACTOR,
                               MIN_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
 
-total = input_tokens + schema_tokens + examples_tokens
+total = input_tokens + schema_tokens + examples_tokens + custom_prompt_tokens
         + prompt_overhead + reserved_output
 
 require: total <= MAX_MODEL_LEN     # else 413 CONTEXT_LIMIT_EXCEEDED
 max_tokens (LLM call) = reserved_output
 ```
 
-**Output reservation rationale:** unlike summarization (output proportional to input), extraction output size is bounded by the **schema**, not the input — a 30-page contract still yields one JSON object shaped by the schema. `OUTPUT_TOKEN_FACTOR` defaults to `2.0` (the populated JSON is roughly the schema's keys plus values), clamped between `MIN_OUTPUT_TOKENS=512` and `MAX_OUTPUT_TOKENS=4096`. Schemas with unbounded arrays (e.g., `line_items`) are the reason for the generous factor and the 4,096 ceiling; all three knobs are env-configurable.
+**Output reservation rationale:** unlike summarization (output proportional to input), extraction output size is bounded by the **schema**, not the input — a 30-page contract still yields one JSON object shaped by the schema. `OUTPUT_TOKEN_FACTOR` for e.g is `2.0` (the populated JSON is roughly the schema's keys plus values), clamped between `MIN_OUTPUT_TOKENS=512` and `MAX_OUTPUT_TOKENS=4096`. Schemas with unbounded arrays (e.g., `line_items`) are the reason for the generous factor and the 4,096 ceiling; all three knobs are env-configurable.
 
 Rationale for choosing values in above formula:
-1. OUTPUT_TOKEN_FACTOR: refer table below to figure out what number supports what kind of output. 5 is what is recommended to cover unbounded attributes in schemas. We could also obtain it from the user while creating schema in future enhancements.
+1. OUTPUT_TOKEN_FACTOR: refer table below to figure out what number supports what kind of output. 5 is what is recommended to cover maximum unbounded attributes in schemas. We could also obtain it from the user while creating schema in future enhancements.
 2. MAX_OUTPUT_TOKENS = 4096 = 12.5% of 32768. 12.5% feels like the right ceiling because the service's stated purpose — invoices, emails, contracts — is input-heavy and output-light: you feed pages of text and get back a compact JSON record.
-3. MIN_OUTPUT_TOKENS = the floor's job is to catch the pathological small-schema case, not to be a general subsidy. THis floor exists because arrays make small schemas the linear model's blind spot → 512 covers 2–4× full population of any schema in the floor's jurisdiction → costs 1.6% of window → prevents the worst first-user failure mode.
-**Caching:** `schema_tokens` and `examples_tokens` are computed once at `POST /v1/schemas` time (schemas are immutable, so the counts never go stale) and stored on the schema row. At request time only the input text is tokenized — one `/tokenize` call per extraction.
+3. MIN_OUTPUT_TOKENS = the floor's job is to catch the pathological small-schema case, not to be a general subsidy. This floor exists because arrays make small schemas the linear model's blind spot → 512 covers 2–4× full population of any schema in the floor's jurisdiction → costs 1.6% of window → prevents the worst first-user failure mode.
+**Caching:** `schema_tokens`, `custom_prompt_tokens`, and `examples_tokens` are computed once at `POST /v1/schemas` time (schemas are immutable, so the counts never go stale) and stored on the schema row. At request time only the input text is tokenized — one `/tokenize` call per extraction.
 
 | Schema shape                                              | Realistic output/schema token factor | Why                                                                                     |
 |:----------------------------------------------------------|:-------------------------------------|:----------------------------------------------------------------------------------------|
 | Flat, all scalars (PII fields, header data)               | 0.5–1.0                              | Output repeats key names + short values; drops all scaffolding (type, format, required) |
 | Mixed scalars + a bounded array or two                    | 1.0–2.5                              | Each array item re-instantiates the item-schema's keys                                  |
 | Array-heavy (line items, transaction lists, entity lists) | 2.0–5.0+                             | Ratio scales with item count, which the schema doesn't know                             |
+
+> Note: All the above chosen values are hypothetical right now and will be finalized after experimentation.
 
 ### 6.2 Diagnostics
 
@@ -804,6 +853,7 @@ extra_body = {"guided_json": normalized_schema}   # vLLM guided decoding
 ```
 
 Because guided-decoding support on the Spyre/ppc64le vLLM build must be verified per release, this is controlled by `GUIDED_DECODING_ENABLED` (default `true`, flip to `false` if the deployed vLLM version rejects the parameter). With guided decoding active, server-side validation (9.3) becomes a cheap safety net; without it, validation is the enforcement mechanism.
+>Note: Needs to be verified with WatsonX backend also.
 
 ### 8.3 Server-side validation and bounded retry
 
@@ -1041,15 +1091,16 @@ Identical pattern to the digitize service: an init container (`extract-db-init`)
 -- Extract Information service — idempotent schema initialization
 
 CREATE TABLE IF NOT EXISTS schemas (
-    schema_id       VARCHAR(255) PRIMARY KEY,
-    name            VARCHAR(200) NOT NULL UNIQUE,
-    description     TEXT,
-    json_schema     JSONB NOT NULL,
-    examples        JSONB,
-    custom_prompt   TEXT,
-    schema_tokens   INTEGER NOT NULL,
-    examples_tokens INTEGER NOT NULL DEFAULT 0,
-    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    schema_id             VARCHAR(255) PRIMARY KEY,
+    name                  VARCHAR(200) NOT NULL UNIQUE,
+    description           TEXT,
+    json_schema           JSONB NOT NULL,
+    examples              JSONB,
+    custom_prompt         TEXT,
+    schema_tokens         INTEGER NOT NULL,
+    examples_tokens       INTEGER NOT NULL DEFAULT 0,
+    custom_prompt_tokens  INTEGER NOT NULL DEFAULT 0
+    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS extract_jobs (
@@ -1119,12 +1170,11 @@ The accompanying `init_db.sh` follows the digitize script verbatim (wait for Pos
 |:---|:---------------------------------------------------------|:---|
 | `OPENAI_BASE_URL` | OpenAI-compatible vLLM endpoint                          | — |
 | `MODEL_NAME` | Default extraction model                                 | `ibm-granite/granite-3.3-8b-instruct` |
-| `SUPPORTED_MODELS` | Allow-list for per-schema `llm_model` overrides          | `granite-3.3-8b-instruct,mistral-small-3.1-24b` |
 | `MAX_MODEL_LEN` | Model context window (tokens) for each model             | `32768` |
 | `GUIDED_DECODING_ENABLED` | Send `guided_json` to vLLM                               | `true` |
 | `OUTPUT_TOKEN_FACTOR` | Reserved output = schema_tokens × factor                 | `2.0` |
 | `MIN_OUTPUT_TOKENS` / `MAX_OUTPUT_TOKENS` | Clamp for reserved output                                | `512` / `4096` |
-| `PROMPT_OVERHEAD_TOKENS` | System prompt + template overhead                        | `150` |
+| `PROMPT_OVERHEAD_TOKENS` | System prompt                                            | `150` |
 | `MAX_CONCURRENT_REQUESTS` | Global vLLM semaphore                                    | `32` |
 | `MAX_CONCURRENT_JOBS` | Async job semaphore                                      | `4` |
 | `DIGITIZE_BASE_URL` | Digitize service endpoint                                | `http://digitize:4000` |
@@ -1133,8 +1183,6 @@ The accompanying `init_db.sh` follows the digitize script verbatim (wait for Pos
 | `DIGITIZE_SUBMIT_TIMEOUT_SECS` | Max backoff budget on digitize 429s                      | `900` |
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (`extract_metadata`, `extract_user`) | — |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy pool                                          | `5` / `5` |
-
-Connection pool sizing follows the digitize analysis: database writes are low-frequency status updates serialized per job, so a small pool (5 + 5 overflow) is sufficient even at full job concurrency.
 
 ---
 
@@ -1160,7 +1208,6 @@ Adapted from the digitize/summarize pattern for PostgreSQL:
 | Invalid JSON schema | Root `type: array` | 400 `INVALID_SCHEMA` |
 | Example fails own schema | `output` missing required prop | 400 identifying example index |
 | Oversized schema | > 64 KB serialized | 400 `SCHEMA_TOO_LARGE` |
-| Disallowed model override | `llm_model` not in allow-list | 400 `UNSUPPORTED_MODEL` |
 | Get schema | Valid `schema_id` | 200 with normalized schema + examples |
 | Delete unreferenced schema | No jobs reference it | 204 |
 | Delete referenced schema | Jobs exist (any status) | 409 listing referencing job IDs |
