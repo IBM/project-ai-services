@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services/catalog-ui:v0.0.42
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.42
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.173
+  image: icr.io/ai-services-cicd/ai-services:v0.0.174
   runtime: ""
   adminPasswordHash: ""
   podman:
@@ -13,7 +13,7 @@ backend:
 
 db:
   port: ""
-  image: icr.io/ai-services/postgres:18-3
+  image: icr.io/ai-services-cicd/postgres:18-3
   user: "admin"
   database: "ai_services"
   password: ""
@@ -24,7 +24,7 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services/caddy:v2.11.4-0
+  image: icr.io/ai-services-cicd/caddy:v2.11.4-0
   adminPort: ""
   # @description HTTPS port for caddy. Set by configure command via --https-port flag.
   httpsPort: ""
