@@ -104,7 +104,7 @@ flowchart TD
            POST /api/v1/components/:type                     deploy platform model
            GET  /api/v1/components/:type                     list platform models
            POST /api/v1/components/:type/connectors          create connector
-           GET  /api/v1/components/:type/connectors          list connectors
+           GET  /api/v1/components/connectors                list connectors (all types)
            GET  /api/v1/components/:id                       get any component
            PUT  /api/v1/components/:type/connectors/:id      update connector
            DELETE /api/v1/components/:id                     undeploy any component
@@ -131,13 +131,18 @@ flowchart TD
     C -->|connector| G["Runtime Executor
                         Register LiteLLM route — no pod"]
 
-    E --> H["LiteLLM Gateway
+    E --> H["LiteLLM Gateway :4000
              POST /model/new — register route
              DELETE /model/delete — deregister route"]
     G --> H
 
-    H --> I[("PostgreSQL
-              components table")]
+    H --> I[("LiteLLM PostgreSQL :5433
+              route table · credentials
+              spend logs")]
+
+    B --> J[("Catalog PostgreSQL :5432
+              components table
+              no secrets stored")]
 ```
 
 **Model traffic flow (runtime):**
@@ -174,7 +179,7 @@ flowchart LR
 
 | Tier | When | `source` | Example |
 |---|---|---|---|
-| Catalog configure | `catalog configure` | `platform` (pipeline-created) | PostgreSQL, Caddy, **LiteLLM Gateway** |
+| Catalog configure | `catalog configure` | `platform` (pipeline-created) | Catalog PostgreSQL `:5432`, LiteLLM PostgreSQL `:5433`, LiteLLM Gateway, Caddy |
 | Platform model | `POST /api/v1/components/:type` | `platform` (user-created) | vLLM-CPU, vLLM-Spyre |
 | Connector | `POST /api/v1/components/:type/connectors` | `connector` (user-created) | WatsonX, OpenAI-compatible |
 
@@ -189,6 +194,29 @@ The LiteLLM Gateway is promoted from a static WatsonX-only component to the **un
 The gateway lives inside the Catalog asset (`assets/catalog/podman/templates/`) alongside the existing Catalog templates. Two new files are added: `litellm-master-key-secret.yaml.tmpl` (generates the `LITELLM_MASTER_KEY` Podman secret) and `litellm.yaml.tmpl` (starts the gateway pod). These are rendered as part of the existing `podTemplateExecutions` sequence in [`assets/catalog/podman/metadata.yaml`](ai-services/assets/catalog/podman/metadata.yaml).
 
 All applications share the single LiteLLM gateway instance. Consumer services point to it at creation time and never need reconfiguring when the backing model provider changes — only the gateway route table changes.
+
+### LiteLLM PostgreSQL Instance
+
+LiteLLM is configured with its **own dedicated PostgreSQL instance**, separate from the Catalog API database. This is deployed as part of `catalog configure` alongside the gateway pod itself.
+
+**Why a separate Postgres instance for LiteLLM:**
+
+| Reason | Detail |
+|---|---|
+| **Credential persistence** | LiteLLM stores the full `litellm_params` for every registered route — including secret fields (`api_key`, `token`, etc.) that the Catalog DB deliberately never holds. Without a DB these secrets are lost on gateway restart, breaking all connector routes. |
+| **Route table durability** | On gateway restart, LiteLLM rehydrates its in-memory route table from the DB. Without it, every registered model (platform and connector alike) would need to be re-registered by the Catalog API, introducing a complex reconciliation loop at startup. |
+| **Separation of concerns** | Connector credentials must never enter the Catalog DB (design decision §11.2). Routing them through a LiteLLM-owned DB keeps the secret boundary clean — LiteLLM owns and manages what it stores; the Catalog API never reads it back. |
+| **Spend / audit tracking** | LiteLLM uses its DB to persist request logs and spend data per virtual key. This enables per-model usage reporting without coupling it to the Catalog schema. |
+
+**Configuration:**
+
+```
+DATABASE_URL=postgresql://litellm:<password>@localhost:5433/litellm
+```
+
+The LiteLLM DB runs on port **5433** to avoid conflict with the Catalog API's PostgreSQL instance on port **5432**. Both are started by `catalog configure`; both are backed by Podman secrets for their passwords.
+
+`litellm.yaml.tmpl` passes `DATABASE_URL` as an environment variable to the LiteLLM pod. LiteLLM runs its own schema migrations on first start (`litellm --run_gunicorn` applies them automatically).
 
 ### Route Registration
 
