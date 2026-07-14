@@ -44,14 +44,8 @@ class TestSearchOnly:
 
         backend_utils.search_only(
             question="q",
-            emb_model="m",
-            emb_endpoint="http://emb",
-            max_tokens=512,
-            reranker_model="r",
-            reranker_endpoint="http://rerank",
             top_k=10,
             top_r=5,
-            vectorstore=Mock(),
         )
 
         # Verify the API was called with correct parameters
@@ -82,9 +76,7 @@ class TestSearchOnly:
         self._mock_session(monkeypatch, mock_response)
 
         _, perf_stat_dict = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=5, vectorstore=Mock(),
+            question="q", top_k=10, top_r=5,
         )
 
         # Verify timing metrics from headers are included
@@ -108,9 +100,7 @@ class TestSearchOnly:
         self._mock_session(monkeypatch, mock_response)
 
         filtered_docs, _ = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=3, vectorstore=Mock(),
+            question="q", top_k=10, top_r=3,
         )
 
         assert len(filtered_docs) == 3
@@ -133,9 +123,7 @@ class TestSearchOnly:
         self._mock_session(monkeypatch, mock_response)
 
         filtered_docs, _ = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=10, vectorstore=Mock(),
+            question="q", top_k=10, top_r=10,
         )
 
         assert len(filtered_docs) == 1
