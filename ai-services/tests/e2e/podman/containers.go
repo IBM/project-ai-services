@@ -189,9 +189,9 @@ func parseContainers(containersStr string) []string {
 		return []string{}
 	}
 
-	var containers []string
-	// Split by comma to handle multiple containers
+	// Split by comma to handle multiple containers.
 	parts := strings.Split(containersStr, ",")
+	containers := make([]string, 0, len(parts))
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
@@ -210,7 +210,7 @@ func parseContainers(containersStr string) []string {
 
 // parsePodRows parses the output lines from `ai-services application ps` into PodRow structs.
 func parsePodRows(lines []string) ([]PodRow, error) {
-	rows := []PodRow{}
+	var rows []PodRow
 
 	for _, raw := range lines {
 		// Strip klog prefix (added by logger.Infoln in CLI mode) and ANSI escapes.
@@ -466,6 +466,7 @@ func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Con
 	return actualPods, nil
 }
 
+// VerifyExposedPorts checks that the application exposes the expected port numbers.
 func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime string, widePsOutput string) error {
 	if strings.TrimSpace(widePsOutput) == "" {
 		return nil
@@ -496,6 +497,7 @@ func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime strin
 	return nil
 }
 
+// GetOpenshiftRoutes retrieves the OpenShift routes for the given application namespace.
 func GetOpenshiftRoutes(appName string) (string, error) {
 	response, err := common.RunCommand("oc", "get", "routes", "-n", appName)
 	if err != nil {

@@ -52,11 +52,6 @@ func LoadFromEnv() *Config {
 			cfg.Retries = n
 		}
 	}
-	// Ensure there is a bin set (empty means rely on PATH).
-	if cfg.AIServiceBin == "" {
-		cfg.AIServiceBin = os.Getenv("AI_SERVICES_BIN") // keep empty if not set
-	}
-
 	return cfg
 }
 

@@ -13,8 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-const execPerm = 0o755
-
 var testBinDir string
 
 // SetTestBinDir sets the temporary directory for test binaries.
@@ -172,7 +170,7 @@ func buildUsingGo(
 	moduleRoot string,
 	tempBinDir string,
 ) (string, error) {
-	if err := os.MkdirAll(tempBinDir, execPerm); err != nil {
+	if err := os.MkdirAll(tempBinDir, dirPerm); err != nil {
 		return "", fmt.Errorf("failed to create temp bin directory: %w", err)
 	}
 
@@ -198,7 +196,7 @@ func buildUsingGo(
 
 // copyBinaryToTemp copies binary to temp directory.
 func copyBinaryToTemp(srcBinPath, tempBinDir string) (string, error) {
-	if err := os.MkdirAll(tempBinDir, execPerm); err != nil {
+	if err := os.MkdirAll(tempBinDir, dirPerm); err != nil {
 		return "", fmt.Errorf("failed to create temp bin directory: %w", err)
 	}
 
@@ -220,7 +218,7 @@ func copyBinaryToTemp(srcBinPath, tempBinDir string) (string, error) {
 		return "", fmt.Errorf("failed to copy binary: %w", err)
 	}
 
-	if err := os.Chmod(destBinPath, execPerm); err != nil {
+	if err := os.Chmod(destBinPath, dirPerm); err != nil {
 		return "", fmt.Errorf("failed to execute binary: %w", err)
 	}
 

@@ -7,9 +7,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// dirPerm defines default directory permissions.
-const dirPerm = 0o755 // read/write/execute for owner, read/execute for group and others
-
 // CleanupTemp removes temporary directories created during test runs.
 func CleanupTemp(tempDir string) error {
 	if tempDir == "" {
@@ -33,7 +30,7 @@ func CollectArtifacts(tempDir, artifactDir string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(artifactDir, dirPerm); err != nil {
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
