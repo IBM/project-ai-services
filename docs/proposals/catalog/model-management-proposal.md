@@ -45,6 +45,10 @@
 12. [Common Queries](#12-common-queries)
 13. [Error Handling](#13-error-handling)
 14. [Future Considerations](#14-future-considerations)
+15. [CLI Commands](#15-cli-commands)
+    - [15.1 Platform Model Commands](#151-platform-model-commands)
+    - [15.2 Connector Commands](#152-connector-commands)
+    - [15.3 Command Summary](#153-command-summary)
 
 ---
 
@@ -52,7 +56,7 @@
 
 This proposal extends the existing Catalog Service with two new capabilities:
 
-1. **Model Management** — dynamic deploy, undeploy, list, and status of model inference backends (`llm`, `embedding`, `reranker` roles) across all supported runtimes (Podman, OpenShift, Docker Compose). Models are no longer bundled statically inside application pods; they are standalone deployable components managed independently and exposed to consumer services through a **LiteLLM Gateway** — a universal model proxy that sits between applications and any backend provider.
+1. **Model Management** — dynamic deploy, undeploy, list, and status of model inference backends (`llm`, `embedding`, `reranker`) across all supported runtimes (Podman, OpenShift, Docker Compose). Models are no longer bundled statically inside application pods; they are standalone deployable components managed independently and exposed to consumer services through a **LiteLLM Gateway** — a universal model proxy that sits between applications and any backend provider.
 
 2. **Connectors** — a way to register external model endpoints (WatsonX, OpenAI-compatible, HuggingFace) without deploying any local pod. Credentials are passed directly to the **LiteLLM Gateway** at route-registration time and stored there — they never enter the Catalog database or a Podman secret.
 
@@ -308,7 +312,6 @@ A **Connector** is a `components` row with `source = 'connector'`. It has no pod
 | `llm` | `huggingface` | HuggingFace Hub token (weight pull) | `token` |
 | `embedding` | `openai-compatible` | Any OpenAI-compatible embedding endpoint | `api_key` (optional) |
 | `reranker` | `openai-compatible` | Any OpenAI-compatible reranker endpoint | `api_key` (optional) |
-
 ---
 
 ## 6. Database Schema
@@ -1728,3 +1731,222 @@ Pre-flight failures extend this with a `violations` array (see §8):
 6. **Audit Logging** — Add `updated_by` to `connectors` and populate it on credential update or status change.
 7. **OpenShift Accelerator Pre-flight** — Extend `GetSystemInfo` on the OpenShift runtime to surface node-level allocatable GPU/accelerator counts from the Kubernetes node API, replacing the VFIO-based Spyre enumeration used on Podman.
 8. **Deployment History** — Consider adding an audit/history table to record past component deployments if operators need a record after row deletion.
+
+---
+
+## 15. CLI Commands
+
+All model management and connector commands live under `ai-services component`. They map 1-to-1 to the API endpoints in §8 and follow the same flag style as `ai-services application`.
+
+---
+
+### 15.1 Platform Model Commands
+
+#### Deploy a platform model
+
+```
+ai-services component deploy [name] --type <type> --provider <provider> --runtime podman
+```
+
+| Flag | Short | Required | Description |
+|---|---|---|---|
+| `--type` | `-t` | Yes | Component type: `llm`, `embedding`, `reranker` |
+| `--provider` | `-p` | Yes | Backend provider: `vllm-cpu`, `vllm-spyre` |
+| `--params` | | No | Inline metadata key=value pairs (e.g. `model_name=ibm-granite/granite-3.3-8b-instruct`) |
+
+```bash
+# Deploy a vLLM-Spyre LLM model
+ai-services component deploy granite-llm \
+  --type llm \
+  --provider vllm-spyre \
+  --params model_name=ibm-granite/granite-3.3-8b-instruct \
+  --runtime podman
+
+# Deploy a vLLM-CPU embedding model
+ai-services component deploy granite-embed \
+  --type embedding \
+  --provider vllm-cpu \
+  --params model_name=ibm-granite/granite-embedding-125m-english \
+  --runtime podman
+```
+
+---
+
+#### List platform models
+
+```
+ai-services component list --runtime podman
+```
+
+| Flag | Short | Required | Description |
+|---|---|---|---|
+| `--source` | | No | Filter by `platform` or `connector` |
+| `--type` | `-t` | No | Filter by component type: `llm`, `embedding`, `reranker` |
+| `--provider` | `-p` | No | Filter by provider |
+
+```bash
+# List all components
+ai-services component list --runtime podman
+
+# List only platform models
+ai-services component list --source platform --runtime podman
+
+# List only LLM components
+ai-services component list --type llm --runtime podman
+```
+
+---
+
+#### Get component details
+
+```
+ai-services component info [name] --runtime podman
+```
+
+```bash
+ai-services component info granite-llm --runtime podman
+```
+
+---
+
+#### Undeploy a platform model
+
+```
+ai-services component delete [name] --runtime podman
+```
+
+| Flag | Short | Required | Description |
+|---|---|---|---|
+| `-y` | | No | Skip confirmation prompt |
+
+```bash
+ai-services component delete granite-llm --runtime podman
+
+# Skip confirmation
+ai-services component delete granite-llm -y --runtime podman
+```
+
+---
+
+### 15.2 Connector Commands
+
+#### Create a connector
+
+```
+ai-services component connector create [name] --type <type> --provider <provider> --runtime podman
+```
+
+| Flag | Short | Required | Description |
+|---|---|---|---|
+| `--type` | `-t` | Yes | Component type: `llm`, `embedding`, `reranker` |
+| `--provider` | `-p` | Yes | Connector provider: `watsonx`, `openai-compatible` |
+| `--auth-type` | | Yes | Auth scheme: `api-key`, `bearer-token`, `basic`, `none` |
+| `--api-key` | | Conditional | API key (required when `--auth-type api-key`). Written to Podman secret — never stored in DB |
+| `--params` | | No | Inline metadata key=value pairs (e.g. `endpoint_url=...`, `project_id=...`, `model_name=...`) |
+
+```bash
+# Create a WatsonX LLM connector
+ai-services component connector create prod-watsonx \
+  --type llm \
+  --provider watsonx \
+  --auth-type api-key \
+  --api-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --params endpoint_url=https://us-south.ml.cloud.ibm.com,model_name=ibm/granite-3-8b-instruct,project_id=my-project-id \
+  --runtime podman
+
+# Create an OpenAI-compatible connector
+ai-services component connector create openai-llm \
+  --type llm \
+  --provider openai-compatible \
+  --auth-type api-key \
+  --api-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --params endpoint_url=https://api.openai.com,model_name=gpt-4o \
+  --runtime podman
+```
+
+---
+
+#### List connectors
+
+```
+ai-services component list --source connector --runtime podman
+```
+
+```bash
+# List all connectors
+ai-services component list --source connector --runtime podman
+
+# List only LLM connectors
+ai-services component list --source connector --type llm --runtime podman
+```
+
+---
+
+#### Validate a connector
+
+Probes the connector's endpoint and updates its status (`Running`, `Invalid`, or `Unreachable`).
+
+```
+ai-services component connector validate [name] --runtime podman
+```
+
+```bash
+ai-services component connector validate prod-watsonx --runtime podman
+```
+
+---
+
+#### Update a connector
+
+Updates credentials or metadata keys. Supplying new credentials rewrites the Podman secret and resets status to `Unverified`.
+
+```
+ai-services component connector update [name] --runtime podman
+```
+
+| Flag | Short | Required | Description |
+|---|---|---|---|
+| `--api-key` | | No | New API key — overwrites Podman secret, resets status to `Unverified` |
+| `--params` | | No | Metadata key=value pairs to update (e.g. `endpoint_url=...`, `project_id=...`) |
+
+```bash
+# Rotate the API key
+ai-services component connector update prod-watsonx \
+  --api-key sk-new-key-here \
+  --runtime podman
+
+# Update endpoint only
+ai-services component connector update prod-watsonx \
+  --params endpoint_url=https://eu-de.ml.cloud.ibm.com \
+  --runtime podman
+```
+
+---
+
+#### Delete a connector
+
+```
+ai-services component connector delete [name] --runtime podman
+```
+
+```bash
+ai-services component connector delete prod-watsonx --runtime podman
+
+# Skip confirmation
+ai-services component connector delete prod-watsonx -y --runtime podman
+```
+
+---
+
+### 15.3 Command Summary
+
+| Command | Description |
+|---|---|
+| `ai-services component deploy [name]` | Deploy a platform model (`source=platform`) |
+| `ai-services component list` | List all components; filter with `--source`, `--type`, `--provider` |
+| `ai-services component info [name]` | Get full details for a component |
+| `ai-services component delete [name]` | Undeploy a platform model and delete its row |
+| `ai-services component connector create [name]` | Register a connector (`source=connector`) |
+| `ai-services component connector validate [name]` | Probe connector endpoint and update status |
+| `ai-services component connector update [name]` | Update connector credentials or metadata |
+| `ai-services component connector delete [name]` | Delete a connector and wipe its Podman secret |
