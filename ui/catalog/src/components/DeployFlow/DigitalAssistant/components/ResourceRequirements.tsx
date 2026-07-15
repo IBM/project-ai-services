@@ -10,7 +10,7 @@ import {
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import { getResourceStatus } from "../utils/StepTwo.utils";
-import type { ResourceItem } from "../types/StepTwo.types";
+import type { ResourceItem } from "../../shared/types";
 
 interface ResourceRequirementsProps {
   resourceRequirements: ResourceItem[];

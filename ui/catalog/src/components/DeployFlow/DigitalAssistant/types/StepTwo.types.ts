@@ -1,15 +1,5 @@
 import type { ServiceConfig } from "../types";
 
-// Resource item for display
-export interface ResourceItem {
-  label: string;
-  required: string;
-  available: string;
-  unit: string;
-  type: "cpu" | "memory" | "accelerator" | "storage";
-  acceleratorType?: string;
-}
-
 // State interface for StepTwo useReducer
 export interface StepTwoState {
   editingService: string | null;

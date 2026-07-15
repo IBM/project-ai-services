@@ -19,11 +19,8 @@ import type {
   ResourcesResponse,
   DeployOptionsComponent as Component,
 } from "@/types/api.types";
-import type {
-  ResourceItem,
-  StepTwoState,
-  StepTwoAction,
-} from "../types/StepTwo.types";
+import type { ResourceItem } from "../../shared/types";
+import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
 // Initial state
 const INITIAL_STATE: StepTwoState = {

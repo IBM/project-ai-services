@@ -1,4 +1,15 @@
 import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
+import type { DeployFormData } from "../shared/types";
+
+// Re-export shared types so existing consumers of this file keep working.
+export type {
+  ComponentConfig,
+  ServiceConfig,
+  DeployFormData,
+  BaseStepProps,
+  ResourceItem,
+  SharedDeployFlowAction,
+} from "../shared/types";
 
 export interface ServicesDeployFlowProps {
   open: boolean;
@@ -52,37 +63,6 @@ export type DeployFlowAction =
       payload: boolean;
     };
 
-/**
- * Component configuration for a provider
- * Contains provider ID and dynamic parameters from schema
- */
-export interface ComponentConfig {
-  providerId: string;
-  params: Record<string, unknown>;
-}
-
-/**
- * Service configuration
- * Dynamic structure based on API response
- */
-export interface ServiceConfig {
-  enabled: boolean;
-  version: string;
-  components: Record<string, ComponentConfig>; // e.g., { llm: {...}, embedding: {...} }
-  params: Record<string, unknown>; // Service-level params from schema
-}
-
-/**
- * Deploy form data
- * Completely dynamic structure driven by API
- */
-export interface DeployFormData {
-  name: string;
-  version: string;
-  globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
-  services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, summarize: {...} }
-}
-
 export interface StepProps {
   title: string;
   formData: DeployFormData;
@@ -96,5 +76,3 @@ export interface StepProps {
   isLoadingLlmModels?: boolean;
   showNameError?: boolean;
 }
-
-// Made with Bob

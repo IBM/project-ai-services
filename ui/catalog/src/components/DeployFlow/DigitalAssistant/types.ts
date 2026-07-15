@@ -1,4 +1,22 @@
 import type { DeployOptionsResponse } from "@/types/api.types";
+import type {
+  DeployFormData,
+  ServiceConfig as BaseServiceConfig,
+} from "../shared/types";
+
+// Re-export shared types so existing consumers of this file keep working.
+export type {
+  ComponentConfig,
+  DeployFormData,
+  BaseStepProps,
+  ResourceItem,
+  SharedDeployFlowAction,
+} from "../shared/types";
+
+// UI-only field for tracking the selected LLM provider ID. Removed in PR 9.
+export interface ServiceConfig extends BaseServiceConfig {
+  inferenceBackend?: string;
+}
 
 export interface DeployFlowProps {
   open: boolean;
@@ -58,38 +76,6 @@ export type DeployFlowAction =
       payload: boolean;
     }
   | { type: typeof ACTION_TYPES.RESET_STATE };
-
-/**
- * Component configuration for a provider
- * Contains provider ID and dynamic parameters from schema
- */
-export interface ComponentConfig {
-  providerId: string;
-  params: Record<string, unknown>;
-}
-
-/**
- * Service configuration
- * Dynamic structure based on API response
- */
-export interface ServiceConfig {
-  enabled: boolean;
-  version: string;
-  components: Record<string, ComponentConfig>; // e.g., { llm: {...}, embedding: {...} }
-  params: Record<string, unknown>; // Service-level params from schema
-  inferenceBackend?: string; // Selected LLM provider ID for services with LLM component
-}
-
-/**
- * Deploy form data
- * Completely dynamic structure driven by API
- */
-export interface DeployFormData {
-  name: string;
-  version: string;
-  globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
-  services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, chat: {...} }
-}
 
 export interface StepProps {
   title: string;
