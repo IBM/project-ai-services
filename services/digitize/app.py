@@ -73,7 +73,10 @@ async def lifespan(app: FastAPI):
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
             except Exception as schema_err:
-                logger.error(f"❌ Failed to initialize database schema: {schema_err}")
+                logger.error(
+                    f"❌ Failed to initialize database schema: {schema_err}",
+                    exc_info=True,
+                )
                 raise RuntimeError(
                     f"Database schema initialization failed: {schema_err}"
                 )
@@ -85,10 +88,11 @@ async def lifespan(app: FastAPI):
                 "Database connection required but not available. "
                 "Please check database configuration."
             )
-    except RuntimeError:
+    except RuntimeError as exc:
+        logger.error(f"❌ Startup aborted: {exc}", exc_info=True)
         raise
     except Exception as exc:
-        logger.error(f"❌ Database check failed: {exc}")
+        logger.error(f"❌ Database check failed: {exc}", exc_info=True)
         raise RuntimeError(f"Database connection required but failed: {exc}")
 
     # Orphan / zombie job recovery on startup.
