@@ -207,12 +207,12 @@ This keeps the user-facing convention from the concept while ensuring the stored
 
 #### 5.1.2 Schema size validation:
 
-REGISTRATION_BUDGET_FRACTION is the maximum share of the model's context window (MAX_MODEL_LEN) that a schema's fixed prompt overhead — the schema itself, its few-shot examples, and the prompt template — is allowed to consume. It's checked once, at POST /v1/schemas time.
-The reasoning: every extraction prompt is composed of two parts — a fixed part that's identical for every request against that schema (schema JSON + examples + system prompt + reserved output tokens) and a variable part (the user's input text). The fraction draws the line between them. With REGISTRATION_BUDGET_FRACTION = 0.5 and MAX_MODEL_LEN = 32768:
+CONTEXT_SCHEMA_SHARE is the maximum share of the model's context window (MAX_MODEL_LEN) that a schema's fixed prompt overhead — the schema itself, its few-shot examples, and the prompt template — is allowed to consume. It's checked once, at POST /v1/schemas time.
+The reasoning: every extraction prompt is composed of two parts — a fixed part that's identical for every request against that schema (schema JSON + examples + system prompt + reserved output tokens) and a variable part (the user's input text). The fraction draws the line between them. With CONTEXT_SCHEMA_SHARE = 0.5 and MAX_MODEL_LEN = 32768:
 
 ```commandline
 schema_tokens + examples_tokens + PROMPT_OVERHEAD_TOKENS + custom_prompt_tokens
-    <= REGISTRATION_BUDGET_FRACTION × MAX_MODEL_LEN     (e.g. 0.5)
+    <= CONTEXT_SCHEMA_SHARE × MAX_MODEL_LEN     (e.g. 0.5)
     
 schema_tokens × OUTPUT_TOKEN_FACTOR ≤ MAX_OUTPUT_TOKENS 
 // OUTPUT_TOKEN_FACTOR and MAX_OUTPUT_TOKENS described in 6.1
@@ -383,8 +383,9 @@ Deletes the schema. Since jobs hold a foreign key to schemas (`ON DELETE RESTRIC
 4. Apply the **hard context-window guard** (Section 6). If it fails, return `413` with per-input token diagnostics.
 5. Build the extraction prompt (Section 8): system prompt + custom prompt + schema + few-shot examples + input text.
 6. Call vLLM `/v1/chat/completions` with **guided JSON decoding** against the schema where supported, `temperature=0.0`.
-7. Validate the model output against the normalized schema with `jsonschema`. On failure, perform **one bounded retry** with the validation errors appended to the prompt (Section 8.3). If the retry also fails, return `422`.
-8. Return the extraction with metadata and token usage.
+7. If vLLM response fails due to reason `length`, we'll increase max_tokens based on the remaining budget in 6.1 and retry above step.
+8. Validate the model output against the normalized schema with `jsonschema`. On failure, perform **one bounded retry** with the validation errors appended to the prompt (Section 8.3). If the retry also fails, return `422`.
+9. Return the extraction with metadata and token usage.
 
 **Response codes:**
 
@@ -501,12 +502,13 @@ curl -X POST http://localhost:7000/v1/extract \
 1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (PDF) or `'extracting'` (TXT).
 2. **PDF path:** submit to digitize — `POST http://digitize-url/v1/documents?operation=digitization&output_format=md` (markdown preserves table structure, which matters for invoices/contracts). Store `digitize_job_id`. Poll `GET /v1/documents/jobs/{digitize_job_id}` every `DIGITIZE_POLL_INTERVAL_SECS` (default 10) until `completed`/`failed` or `DIGITIZE_JOB_TIMEOUT_SECS` (default 3600). Fetch text via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id`.
    **TXT path:** read the staged file (UTF-8 decode).
-3. Tokenize; run the hard context-window guard. On breach → `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`.
+3. Tokenize; run the hard context-window guard. On breach → `status='failed'`, `error='CONTEXT_SCHEMA_SHARE'`, diagnostics in `metadata`.
 4. `metadata.phase='extracting'`: build prompt, acquire `concurrency_limiter`, call vLLM.
-5. `metadata.phase='validating'`: validate; one bounded retry on failure (Section 9.3).
-6. Write `/var/cache/extract/results/{job_id}_result.json`.
-7. Update row → `status='completed'`, `completed_at=now()` (or `failed` + `error`).
-8. Delete `/var/cache/extract/staging/{job_id}/`; release `job_limiter`.
+5. If vLLM response fails due to reason `length`, we'll increase max_tokens based on the remaining budget in 6.1 and retry above step.
+6. `metadata.phase='validating'`: validate; one bounded retry on failure (Section 9.3).
+7. Write `/var/cache/extract/results/{job_id}_result.json`.
+8. Update row → `status='completed'`, `completed_at=now()` (or `failed` + `error`).
+9. Delete `/var/cache/extract/staging/{job_id}/`; release `job_limiter`.
 
 > **Digitize cache note:** the digitized document remains in the digitize service's cache and registry after extraction, keyed by `digitize_doc_id`. Users manage its lifecycle through the digitize service's own `DELETE /v1/documents/{id}`.
 
