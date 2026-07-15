@@ -28,7 +28,6 @@ spec:
           args:
             - |
               set -e
-              export DB_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
 
               max_retries=5
               retry_delay=5
@@ -57,6 +56,12 @@ spec:
                   exit 1
                 fi
               done
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
           resources:
             requests:
               memory: "512Mi"
@@ -64,10 +69,6 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "{{ .Values.backend.resources.limits.cpu }}"
-          volumeMounts:
-            - name: catalog-db-secret
-              mountPath: /etc/secret/catalog-db-secret
-              readOnly: true
       containers:
         - name: ui
           image: "{{ .Values.ui.image }}"
@@ -104,13 +105,25 @@ spec:
             failureThreshold: 3
         - name: backend
           image: "{{ .Values.backend.image }}"
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              export ADMIN_PASSWORD=$(cat /etc/secret/catalog-secret/admin-password)
-              export DB_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
-              exec /usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}
+          command:
+            - /usr/bin/ai-services
+            - catalog
+            - apiserver
+            - --port=8080
+            - --admin-username=admin
+            - --admin-password-hash=$(ADMIN_PASSWORD)
+            - --runtime={{ .Values.backend.runtime }}
           env:
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-secret
+                  key: admin-password
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
             - name: GIN_MODE
               value: "release"
             - name: AI_SERVICES_LOG_LEVEL
@@ -142,13 +155,6 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
-          volumeMounts:
-            - name: catalog-secret
-              mountPath: /etc/secret/catalog-secret
-              readOnly: true
-            - name: catalog-db-secret
-              mountPath: /etc/secret/catalog-db-secret
-              readOnly: true
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"
@@ -156,10 +162,3 @@ spec:
             limits:
               memory: "{{ .Values.backend.resources.limits.memory }}"
               cpu: "{{ .Values.backend.resources.limits.cpu }}"
-      volumes:
-        - name: catalog-secret
-          secret:
-            secretName: catalog-secret
-        - name: catalog-db-secret
-          secret:
-            secretName: catalog-db-secret

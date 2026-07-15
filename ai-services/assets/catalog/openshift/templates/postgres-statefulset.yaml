@@ -31,10 +31,7 @@ spec:
           command:
             - "/bin/sh"
             - "-c"
-          args:
-            - |
-              export POSTGRES_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
-              exec docker-entrypoint.sh postgres
+            - "exec docker-entrypoint.sh postgres"
           env:
             - name: POSTGRES_USER
               value: "{{ .Values.db.user }}"
@@ -42,15 +39,17 @@ spec:
               value: "{{ .Values.db.database }}"
             - name: PGDATA
               value: "/var/lib/pgsql/data"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
           ports:
             - name: postgres-port
               containerPort: 5432
           volumeMounts:
             - mountPath: /var/lib/pgsql
               name: data
-            - name: catalog-db-secret
-              mountPath: /etc/secret/catalog-db-secret
-              readOnly: true
           startupProbe:
             exec:
               command:
@@ -94,10 +93,6 @@ spec:
             limits:
               memory: "{{ .Values.db.resources.limits.memory }}"
               cpu: "{{ .Values.db.resources.limits.cpu }}"
-      volumes:
-        - name: catalog-db-secret
-          secret:
-            secretName: catalog-db-secret
   volumeClaimTemplates:
     - metadata:
         name: data
