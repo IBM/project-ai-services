@@ -17,6 +17,26 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
+// klogPrefixRe matches the klog timestamp/source prefix added to each log line.
+var klogPrefixRe = regexp.MustCompile(`^[IWEF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]\s`)
+
+// ansiEscapeRe matches ANSI/VT100 escape sequences.
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripKlogPrefix removes the klog timestamp/source prefix from a line if present.
+func stripKlogPrefix(line string) string {
+	if loc := klogPrefixRe.FindStringIndex(line); loc != nil {
+		return line[loc[1]:]
+	}
+
+	return line
+}
+
+// stripANSI removes ANSI escape sequences from a string.
+func stripANSI(s string) string {
+	return ansiEscapeRe.ReplaceAllString(s, "")
+}
+
 func TestPodman(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	ginkgo.RunSpecs(t, "Pod Status Suite")
@@ -52,15 +72,17 @@ type OpenShiftPod struct {
 
 var (
 	separatorRe = regexp.MustCompile(`^[\s─-]+$`)
-	headerRe    = regexp.MustCompile(`^APPLICATION\s+NAME\s+POD\s+ID\s+POD\s+NAME\s+STATUS\s+CREATED\s+EXPOSED\s+PORTS\s$`)
+	// headerRe matches both the wide header (with EXPOSED PORTS) and catalog header (without).
+	headerRe = regexp.MustCompile(`(?i)^APPLICATION\s+NAME\s+POD\s+ID\s+POD\s+NAME\s+STATUS\s+CREATED(\s+EXPOSED\s+PORTS)?\s+CONTAINERS\s*$`)
 
+	// rowRe matches a pod row; the EXPOSED column is optional (catalog path omits it).
 	rowRe = regexp.MustCompile(
 		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
-			`[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?\s+` + // POD ID (supports both formats: 12 hex chars or 8-12 hex + hyphen + 3-4 hex)
+			`[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?\s+` + // POD ID
 			`(?P<pod>\S+)\s{2,}` + // POD NAME
-			`(?P<status>Running\s+\((?:healthy|unhealthy)\)|Created)\s{2,}` +
+			`(?P<status>(?i:Running|running|Created|created|Exited|exited)\s*(?:\((?:healthy|unhealthy)\))?)\s{2,}` +
 			`(?P<created>\d+\s+\w+\s+ago)\s{2,}` +
-			`(?P<exposed>none|\d+(?:,\s*\d+)*)\s+`,
+			`(?P<exposed>(?:none|\d+(?:,\s*\d+)*)\s{2,})?`, // EXPOSED (optional)
 	)
 )
 
@@ -77,18 +99,19 @@ type PodInfo struct {
 	Containers []string
 }
 
-// ExtractPodInfo parses the output from `ai-services application ps -o wide` and extracts a map of pod names to PodInfo containing pod ID and containers.
+// ExtractPodInfo parses `application ps -o wide` output into a map of pod name to PodInfo.
 func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	podInfoMap := make(map[string]PodInfo)
 
+	// podRowRe matches pod rows; EXPOSED column is optional.
 	podRowRe := regexp.MustCompile(
 		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
-			`(?P<podid>[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?)\s+` + // POD ID (both formats)
+			`(?P<podid>[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?)\s+` + // POD ID
 			`(?P<podname>\S+)\s{2,}` + // POD NAME
-			`(?P<status>Running\s+\((?:healthy|unhealthy)\)|Created)\s{2,}` +
+			`(?P<status>(?i:Running|running|Created|created|Exited|exited)\s*(?:\((?:healthy|unhealthy)\))?)\s{2,}` +
 			`(?P<created>\d+\s+\w+\s+ago)\s{2,}` +
-			`(?P<exposed>none|\d+(?:,\s*\d+)*)\s+` + // EXPOSED (supports multiple ports)
+			`(?:(?:none|\d+(?:,\s*\d+)*)\s{2,})?` + // EXPOSED (optional — catalog path omits it)
 			`(?P<containers>.+)$`, // CONTAINERS
 	)
 
@@ -98,12 +121,12 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	var currentPodInfo *PodInfo
 
 	for _, raw := range lines {
-		line := strings.TrimRight(raw, " \t")
+		line := stripKlogPrefix(strings.TrimRight(raw, " \t"))
+		line = stripANSI(line)
 		if line == "" {
 			continue
 		}
 
-		// Skip header and separator lines
 		if headerRe.MatchString(line) || separatorRe.MatchString(line) {
 			continue
 		}
@@ -112,8 +135,6 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 			podID := m[podRowRe.SubexpIndex("podid")]
 			podName := m[podRowRe.SubexpIndex("podname")]
 			containersStr := strings.TrimSpace(m[podRowRe.SubexpIndex("containers")])
-
-			// Parse containers from the line
 			containers := parseContainers(containersStr)
 
 			currentPodName = podName
@@ -130,10 +151,7 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 		if currentPodInfo != nil {
 			if m := containerLineRe.FindStringSubmatch(line); m != nil {
 				containersStr := strings.TrimSpace(m[containerLineRe.SubexpIndex("containers")])
-				containers := parseContainers(containersStr)
-
-				// Append to current pod's containers
-				currentPodInfo.Containers = append(currentPodInfo.Containers, containers...)
+				currentPodInfo.Containers = append(currentPodInfo.Containers, parseContainers(containersStr)...)
 				podInfoMap[currentPodName] = *currentPodInfo
 			}
 		}
@@ -142,15 +160,14 @@ func ExtractPodInfo(output string) (map[string]PodInfo, error) {
 	return podInfoMap, nil
 }
 
-// parseContainers extracts container names from a container string.
+// parseContainers extracts container names from a comma-separated string.
 func parseContainers(containersStr string) []string {
 	if containersStr == "" {
 		return []string{}
 	}
 
-	var containers []string
-	// Split by comma to handle multiple containers
 	parts := strings.Split(containersStr, ",")
+	containers := make([]string, 0, len(parts))
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
@@ -167,12 +184,13 @@ func parseContainers(containersStr string) []string {
 	return containers
 }
 
-// parsePodRows parses the output lines from `ai-services application ps` into PodRow structs.
+// parsePodRows parses `application ps` output lines into PodRow structs.
 func parsePodRows(lines []string) ([]PodRow, error) {
-	rows := []PodRow{}
+	var rows []PodRow
 
 	for _, raw := range lines {
-		line := strings.TrimRight(raw, " \t")
+		line := stripKlogPrefix(strings.TrimRight(raw, " \t"))
+		line = stripANSI(line)
 		if line == "" {
 			continue
 		}
@@ -182,7 +200,7 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 
 		m := rowRe.FindStringSubmatch(line)
 		if m == nil {
-			continue // ignore container continuation noise
+			continue
 		}
 
 		rows = append(rows, PodRow{
@@ -195,14 +213,12 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 	return rows, nil
 }
 
-// getRestartCount inspects a pod and its containers and returns the total restart count.
+// getRestartCount returns the total restart count for a pod.
 func getRestartCount(podName string, appRuntime string, appName string) (int, error) {
 	if appRuntime == "openshift" {
-		// OpenShift: use oc get pod with JSON output
 		return getOpenshiftRestartCount(podName, appName)
 	}
 
-	// Podman: use podman pod inspect
 	return getPodmanRestartCount(podName)
 }
 
@@ -260,12 +276,10 @@ func getOpenshiftRestartCount(podName string, appName string) (int, error) {
 		return 0, fmt.Errorf("failed to parse OpenShift pod JSON for %s: %w", podName, err)
 	}
 
-	// Check restart policy
 	if osPod.Spec.RestartPolicy == "Never" {
 		return 0, nil
 	}
 
-	// Sum restart counts from all containers
 	totalRestarts := 0
 	for _, ctr := range osPod.Status.ContainerStatuses {
 		totalRestarts += ctr.RestartCount
@@ -314,8 +328,10 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 			if row.PodName != podName {
 				continue
 			}
-			healthy := strings.HasPrefix(row.Status, "Running (healthy)") ||
-				row.Status == "Created"
+			// Case-insensitive: catalog path emits "running (healthy)", legacy emits "Running (healthy)".
+			statusLower := strings.ToLower(row.Status)
+			healthy := strings.HasPrefix(statusLower, "running (healthy)") ||
+				statusLower == "created"
 			if !healthy {
 				return false, nil
 			}
@@ -334,7 +350,7 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 	})
 }
 
-// VerifyContainers checks if application pods are healthy and their restart counts are zero.
+// VerifyContainers checks that all expected pods are healthy and have zero restarts; matches pods by prefix for both OpenShift and podman catalog paths.
 func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName string, appRuntime string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
 
@@ -347,42 +363,41 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 	if err != nil {
 		return err
 	}
+
 	for _, suffix := range common.ExpectedPodSuffixes[appRuntime] {
-		var expectedPodName string
-		var found bool
+		var foundPodName string
 
-		if appRuntime == "openshift" {
-			// For OpenShift, pod names have dynamic suffixes (e.g., backend-58c65dd449-pc6np)
-			// Check if any actual pod starts with the expected prefix
-			podName := ""
-			expectedPrefix := suffix + "-"
-			for podName = range actualPods {
-				if strings.HasPrefix(podName, expectedPrefix) {
-					expectedPodName = podName
-					found = true
+		// Match by prefix: both OpenShift and podman catalog path use dynamic pod names beginning with the service suffix.
+		expectedPrefix := suffix + "-"
+		for podName := range actualPods {
+			if strings.HasPrefix(podName, expectedPrefix) {
+				foundPodName = podName
 
-					break
-				}
+				break
 			}
-			gomega.Expect(found).To(gomega.BeTrue(), "expected pod with prefix %s to exist", expectedPrefix)
-			restartCount, err := getRestartCount(podName, appRuntime, appName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
-			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
-				fmt.Sprintf("pod %s restarted %d times", expectedPodName, restartCount))
-		} else {
-			// For podman, use exact pod name matching
-			expectedPodName = appName + "--" + suffix
-			gomega.Expect(actualPods).To(gomega.HaveKey(expectedPodName), "expected pod %s to exist", expectedPodName)
-			restartCount, err := getRestartCount(expectedPodName, appRuntime, appName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
-			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
-				fmt.Sprintf("pod %s restarted %d times", expectedPodName, restartCount))
 		}
+
+		gomega.Expect(foundPodName).NotTo(gomega.BeEmpty(),
+			"expected a pod with prefix %q to exist (available: %v)", expectedPrefix, podKeys(actualPods))
+
+		restartCount, err := getRestartCount(foundPodName, appRuntime, appName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", foundPodName, restartCount)
+		gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
+			fmt.Sprintf("pod %s restarted %d times", foundPodName, restartCount))
 	}
 
 	return nil
+}
+
+// podKeys returns the keys of a map[string]bool as a slice — used in error messages.
+func podKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+
+	return keys
 }
 
 func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Config, appName string, appRuntime string) (map[string]bool, error) {
@@ -392,7 +407,11 @@ func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Con
 		return nil, fmt.Errorf("failed to parse pod rows: %w", err)
 	}
 	for _, row := range rows {
-		ok := strings.HasPrefix(row.Status, "Running (healthy)") || row.Status == "Created"
+		// Status may be lowercase (catalog) or uppercase (legacy podman) — normalise before comparison.
+		statusLower := strings.ToLower(row.Status)
+		ok := strings.HasPrefix(statusLower, "running (healthy)") ||
+			strings.HasPrefix(statusLower, "running(healthy)") ||
+			statusLower == "created"
 		if !ok {
 			if err := waitForPodRunningNoCrash(ctx, cfg, appName, row.PodName, appRuntime); err != nil {
 				return nil, fmt.Errorf("pod %s is not healthy (status=%s)", row.PodName, row.Status)
@@ -407,6 +426,7 @@ func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Con
 	return actualPods, nil
 }
 
+// VerifyExposedPorts checks that the application exposes the expected port numbers.
 func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime string, widePsOutput string) error {
 	if strings.TrimSpace(widePsOutput) == "" {
 		return nil
@@ -437,6 +457,7 @@ func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime strin
 	return nil
 }
 
+// GetOpenshiftRoutes retrieves the OpenShift routes for the given application namespace.
 func GetOpenshiftRoutes(appName string) (string, error) {
 	response, err := common.RunCommand("oc", "get", "routes", "-n", appName)
 	if err != nil {
