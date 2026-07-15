@@ -5,12 +5,11 @@ on:
       - 'ui/catalog/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/catalog/**'
       - .github/workflows/catalog-ui-image.yml
-    branches:
-      - main
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -83,7 +82,7 @@ jobs:
 
       - name: Publish catalog-ui image
         working-directory: ui/catalog
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \

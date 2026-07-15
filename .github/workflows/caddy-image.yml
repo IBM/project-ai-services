@@ -5,12 +5,11 @@ on:
       - 'images/caddy/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/caddy/**'
       - '.github/workflows/caddy-image.yml'
-    branches:
-      - main
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -36,7 +35,7 @@ jobs:
 
       - name: Publish caddy image
         working-directory: images/caddy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 

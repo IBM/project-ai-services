@@ -4,8 +4,9 @@ on:
   workflow_call:
     inputs:
       service:
-       required: true
+       required: false
        type: string
+       default: ''
       working-directory:
        required: true
        type: string
@@ -32,7 +33,7 @@ jobs:
       
       - name: Publish image
         working-directory: ${{ inputs.working-directory }}
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             SERVICE=${{ inputs.service }} \
