@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document proposes the design and implementation of the **Translation** microservice for the AI-Services platform. The service converts text and documents between human languages, enabling multilingual operations, global user experiences, and compliance with local language standards.
+This document proposes the design and implementation of the **Translation** microservice for the AI-Services platform. The service converts text and documents between languages, enabling multilingual operations, and global user experiences.
 
 At its core, the service accepts text or a document and a target language, and returns the fully translated content. The source language is **optional** — when omitted (or explicitly set to `"auto"`), the LLM detects the language automatically. For plain text, the call is synchronous and returns immediately. For files — including `.txt`, `.md`, `.pdf`, and `.docx` — the service operates asynchronously: the file is staged, PDF and DOCX inputs are forwarded to the existing **Digitize Documents** service to produce a clean markdown representation, and the resulting text is passed to the LLM for translation. The translated output for document inputs is returned as a markdown string, preserving all headings, lists, and tables from the original.
 
@@ -76,35 +76,31 @@ A 25k-token input document at a 1:1 translation ratio consumes ~50k tokens per j
 - **No context ceiling.** Documents of any length can be translated — the chunker sizes each piece to fit within the available window with room for both prompt overhead and the translated output.
 - **Contained failure surface.** If one chunk fails, only that chunk is retried. Completed chunks are preserved, making partial recovery straightforward.
 - **Predictable quality per chunk.** Each LLM call operates on a small, focused segment. The model's attention is not diluted across 30 pages — it processes at most a few paragraphs at a time, which is where LLM translation quality is highest.
-- **Natural parallelism.** Chunks can be processed concurrently (up to the LLM semaphore limit), reducing total wall-clock time for long documents compared to a single sequential call at max context.
-- **Alignment with the summarize service pattern.** The chunking infrastructure — paragraph-boundary splitting, sentence-level overlap, token-aware chunk sizing — already exists in the codebase in `services/summarize/chunk_utils.py` and can be reused directly.
+- **Natural parallelism.** Chunks can be scheduled concurrently (up to the shared LLM semaphore), reducing total wall-clock time for long documents.
 
 ### 2.3 Chunking Strategy
 
-Chunks are sized using the same paragraph-boundary greedy packing approach used by the summarize service:
+Chunks are formed by a greedy paragraph-boundary algorithm:
 
-1. Split the markdown on double-newline paragraph boundaries.
-2. Greedily pack paragraphs into a chunk until adding the next paragraph would exceed `MAX_CHUNK_INPUT_TOKENS`.
-3. If a single paragraph exceeds the limit, fall back to sentence-boundary splitting.
-4. Add a 1–2 sentence overlap from the tail of the previous chunk to the head of the next, to maintain translation continuity across boundaries.
+1. **Split on paragraph boundaries.** The digitized markdown is split on double-newline (`\n\n`) boundaries first. Each resulting block is a candidate unit (heading, paragraph, table, list block).
+2. **Greedy packing.** Starting from an empty chunk, blocks are appended one at a time. When appending the next block would exceed the configured chunk token budget, the current chunk is closed and a new one is started.
+3. **Sentence-level fallback.** If a single block is larger than the entire chunk budget (e.g., an unusually long paragraph), it is split further at sentence boundaries (`. `, `! `, `? `) to produce sub-blocks that fit.
 
-**Chunk token budget:**
-```
-MAX_CHUNK_INPUT_TOKENS = MAX_MODEL_LEN - PROMPT_OVERHEAD_TOKENS - TRANSLATION_OUTPUT_BUFFER
-
-where:
-  TRANSLATION_OUTPUT_BUFFER = MAX_CHUNK_INPUT_TOKENS  # 1:1 ratio assumed for translation
-  → MAX_CHUNK_INPUT_TOKENS ≈ (MAX_MODEL_LEN - PROMPT_OVERHEAD) / 2
-  → For 32k model: (32768 - 150) / 2 ≈ 16,309 tokens per chunk
-```
+> **Implementation note:** The exact chunk token budget will be determined empirically during development, informed by testing with real documents and observing LLM translation quality and latency. This value should be configurable via an environment variable so it can be tuned without code changes.
 
 ### 2.4 Concatenation and Coherence
 
-After all chunks are translated, the results are concatenated in order. Markdown structural elements (headings, list markers, table syntax) are preserved within each chunk, so the concatenated output is valid markdown. Sentence-level overlap at chunk boundaries ensures that translations do not begin or end mid-thought.
+After all chunk translations are returned, they are concatenated in the original chunk order. No additional LLM call is made for coherence stitching:
+
+- **Order preservation.** Chunks are created and tracked with an index; results are concatenated in index order regardless of the order in which concurrent LLM calls complete.
+- **Markdown structure preserved.** Because chunks are formed on paragraph boundaries, each chunk starts and ends at a clean markdown boundary. Concatenating the results produces valid, well-structured markdown.
 
 ### 2.5 Handling Tables at Chunk Boundaries
 
-Tables present in the digitized markdown are treated as atomic units — a table is never split across two chunks. If a table would push a chunk over the token limit, the table is placed at the start of the next chunk. This ensures that every translated table is complete and structurally valid.
+Markdown tables from the digitize service are emitted as contiguous `| pipe |` blocks. Tables must be treated as **atomic units** — a table is never split across two chunks:
+
+- During greedy packing, if a table block would overflow the current chunk budget, the current chunk is closed first, and the table starts a new chunk on its own.
+- If a table is larger than the entire chunk budget on its own, it occupies a chunk by itself and the budget is allowed to be exceeded for that chunk only — the alternative (splitting a table mid-row) would produce malformed markdown and an untranslatable fragment.
 
 ---
 
@@ -200,7 +196,7 @@ These limitations are known and accepted for v1. They do not prevent the output 
 graph LR
     U((User))
 
-    subgraph P1 ["Translation Service (port 6000)"]
+    subgraph P1 ["Translation Service (port 9000)"]
         API["/v1/translate<br/>/v1/translate/jobs"]
         W["Background Worker"]
     end
@@ -230,7 +226,7 @@ graph LR
 - The **sync path** never touches the digitize service or the jobs table. It validates languages, tokenizes, guards the context window, calls vLLM at `temperature=0.0`, and returns the translated text immediately.
 - The **async worker** orchestrates: stage file → (pdf/docx only) digitize via REST → fetch `.md` content → context-window guard → translate → persist result → update DB.
 - Both paths share the global vLLM connection semaphore (Section 10).
-- The service is exposed externally on **port 6000** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
+- The service is exposed externally on **port 9000** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
 
 ---
 
@@ -293,7 +289,7 @@ Supported language values for `source_language` and `target_language` (case-inse
 
 ```bash
 # With explicit source language
-curl -X POST http://localhost:6000/v1/translate \
+curl -X POST http://localhost:9000/v1/translate \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Der Vertrag tritt am 1. Januar 2025 in Kraft.",
@@ -302,7 +298,7 @@ curl -X POST http://localhost:6000/v1/translate \
   }'
 
 # Without source language — auto-detection (default)
-curl -X POST http://localhost:6000/v1/translate \
+curl -X POST http://localhost:9000/v1/translate \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Der Vertrag tritt am 1. Januar 2025 in Kraft.",
@@ -438,14 +434,14 @@ curl -X POST http://localhost:6000/v1/translate \
 
 ```bash
 # With explicit source language
-curl -X POST http://localhost:6000/v1/translate/jobs \
+curl -X POST http://localhost:9000/v1/translate/jobs \
   -F "file=@bericht_q3.pdf" \
   -F "source_language=German" \
   -F "target_language=English" \
   -F "job_name=Q3 Quarterly Report"
 
 # Without source language — auto-detection (default)
-curl -X POST http://localhost:6000/v1/translate/jobs \
+curl -X POST http://localhost:9000/v1/translate/jobs \
   -F "file=@bericht_q3.pdf" \
   -F "target_language=English" \
   -F "job_name=Q3 Quarterly Report"
@@ -843,7 +839,7 @@ The system prompt above is approximately 90 tokens. The user prompt template (ex
 sequenceDiagram
     autonumber
     actor User
-    participant API as Translate API (FastAPI :6000)
+    participant API as Translate API (FastAPI :9000)
     participant PG as PostgreSQL (translate_metadata)
     participant FS as /var/cache/translate
     participant Worker as Background Worker
