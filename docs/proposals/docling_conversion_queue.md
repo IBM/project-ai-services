@@ -90,9 +90,11 @@ CREATE TABLE conversion_tasks (
     job_id          VARCHAR(255)  REFERENCES jobs(job_id) ON DELETE SET NULL,
     doc_id          VARCHAR(255),                  -- digitize document id; informational
     caller_service  VARCHAR(100)  NOT NULL,        -- 'digitize' | 'connector' | 'extract-tag'
+    operation       VARCHAR(50)   NOT NULL         -- 'ingestion' | 'digitization'
+                    CHECK (operation IN ('ingestion','digitization')),
     -- input
     cached_file     TEXT          NOT NULL,        -- absolute path written at enqueue time
-    output_format   VARCHAR(10)   NOT NULL         -- 'json' | 'md' | 'txt'
+    output_format   VARCHAR(10)   NOT NULL
                     CHECK (output_format IN ('json','md','txt')),
     page_count      INTEGER,                       -- filled in during enqueue
     is_large        BOOLEAN       NOT NULL DEFAULT FALSE,
@@ -107,53 +109,59 @@ CREATE TABLE conversion_tasks (
     updated_at      TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_ct_status_queued ON conversion_tasks (status, queued_at);
-CREATE INDEX idx_ct_job_id        ON conversion_tasks (job_id);
-CREATE INDEX idx_ct_doc_id        ON conversion_tasks (doc_id);
+CREATE INDEX idx_ct_status_op_queued ON conversion_tasks (status, operation, queued_at);
+CREATE INDEX idx_ct_job_id           ON conversion_tasks (job_id);
+CREATE INDEX idx_ct_doc_id           ON conversion_tasks (doc_id);
 ```
 
 `is_large` is derived from `page_count >= heavy_doc_page_threshold` at enqueue time and
 stored so the dispatcher can make a semaphore-weight decision from a single DB read.
 
-#### Two-layer admission check
+`operation` is stored directly so the dispatcher can query by operation type without
+joining to the `jobs` table on every poll cycle.
 
-Job admission uses two separate checks, evaluated in order:
+#### Admission check
 
-**1 — Semaphore headroom check (primary gate)**
-
-Before a new ingestion or digitization job is accepted, compute the weight the new job needs
-to start converting right now. That weight is the sum of weights of all files in the
-submitted batch, capped at the semaphore capacity (4). Check whether that weight fits within
-the currently **free** semaphore capacity (capacity minus weight of currently *running* tasks).
+A new job is accepted if the semaphore has at least one free weight unit — i.e. at least
+one file from the new batch can start immediately. All N task rows are inserted as `queued`
+regardless of how many can run right now; the dispatcher drains them in round-robin order.
 
 ```python
-# Computed at admission time, before any DB insert
+# Computed at admission time, inside a SELECT … FOR UPDATE transaction
 running_weight = SUM(weight FOR task IN conversion_tasks WHERE status = 'running')
 new_job_weight = SUM(2 if is_large(f) else 1 FOR f in submitted_files)
-free_weight    = SEMAPHORE_CAPACITY - running_weight   # e.g. 4 - running_weight
+free_weight    = SEMAPHORE_CAPACITY - running_weight   # 4 - currently running weight
 
 if new_job_weight > free_weight:
     raise HTTP 429  # not enough active slots for this job right now
 ```
 
-This check uses the *running* weight only — not the queued weight — because queued tasks
-are not consuming CPU. This is what makes it possible for a large ingestion job to enqueue
-its overflow files without blocking new jobs from starting if there is headroom.
+This uses *running* weight only. Queued tasks are not consuming CPU; they are just waiting
+in line. A 30-file ingestion whose first-batch weight fits is accepted, and all 30 rows
+are inserted as `queued`. The dispatcher will interleave them fairly with digitization tasks.
 
-**2 — Queue overflow safety check (backstop)**
+**Per-operation queue quota (backstop)**
 
-After passing the semaphore check, verify the total number of queued (not yet running) tasks
-across all jobs would not exceed `QUEUE_MAX` (default 10). This prevents a pathological case
-where a single enormous job pre-fills the queue buffer indefinitely.
+To prevent a single enormous job from permanently monopolising the queue buffer and starving
+the other operation type, each operation type has an independent quota of `QUEUE_MAX / 2`
+queued slots (default `QUEUE_MAX = 20`, so **10 queued slots per operation**).
 
-```sql
--- count only queued (not running) tasks
-SELECT COUNT(*) FROM conversion_tasks WHERE status = 'queued'
+```python
+# After the semaphore headroom check passes:
+ing_queued  = COUNT WHERE status='queued' AND operation='ingestion'
+dig_queued  = COUNT WHERE status='queued' AND operation='digitization'
+op_quota    = QUEUE_MAX // 2   # default 10
+
+if operation == 'ingestion'    and ing_queued + N > op_quota:
+    raise HTTP 429  # ingestion queue quota full
+if operation == 'digitization' and dig_queued + 1 > op_quota:
+    raise HTTP 429  # digitization queue quota full
 ```
 
-If `queued_count + len(new_files) > QUEUE_MAX` → HTTP 429. This is a backstop, not the
-primary gate. A job with many files that passes the semaphore check will almost never hit
-this — it only fires when the queue buffer is already saturated by another job's overflow.
+A 30-file ingestion hits this backstop only if 10 ingestion tasks are already queued
+(i.e. a previous large ingestion is still draining). In practice — since the round-robin
+dispatcher keeps clearing ingestion slots — a new ingestion will nearly always have room
+within its 10-slot quota. The digitization quota is never affected by ingestion volume.
 
 Both checks happen inside a single DB transaction (`SELECT … FOR UPDATE`) to prevent races.
 
@@ -273,19 +281,25 @@ all execution.
 
 #### Admission decision table
 
-| Scenario | Running weight | Free weight | New job weight | Decision |
-|---|---|---|---|---|
-| Ing A: 1 normal running. New ing: 1 large + 1 normal | 1 | 3 | 2+1=3 | ✅ Accept |
-| Ing A: 1 large running. New ing: 2 normal | 2 | 2 | 1+1=2 | ✅ Accept |
-| Ing A: 2 normal running. New ing: 1 large + 1 normal | 2 | 2 | 2+1=3 | ❌ Reject |
-| Ing A: 5 files (4 running, 1 queued). New ing: 1 large | 4 | 0 | 2 | ❌ Reject |
-| Ing A: 5 files → 4 done, 1 running (weight 1). New ing: 1 large | 1 | 3 | 2 | ✅ Accept |
-| Ing A: 11 files (4 running, 7 queued). New ing: 1 file | 4 | 0 | 1 | ❌ Reject (semaphore) |
-| Queue has 0 queued, 4 running. New ing: 1 normal | 4 | 0 | 1 | ❌ Reject (semaphore) |
+`free_weight = 4 − running_weight`. `op_quota = QUEUE_MAX / 2 = 10`.
 
-A job with 11 files is **always accepted at submission time** as long as `free_weight >= 1`
-(i.e. at least one semaphore slot is free). Its first batch of up to 4 weight-units of files
-start immediately; the remaining files queue up and process as slots free.
+| Scenario | Running weight | Free | New job | Ing queued | Dig queued | Decision |
+|---|---|---|---|---|---|---|
+| Ing A: 1 normal running. New dig: 1 normal | 1 | 3 | 1 | — | 0 | ✅ Accept |
+| Ing A: 1 normal running. New ing: 1L+1N | 1 | 3 | 3 | 0 | — | ✅ Accept |
+| Ing A: 1 large running. New ing: 2N | 2 | 2 | 2 | 0 | — | ✅ Accept |
+| Ing A: 2 normal running. New ing: 1L+1N | 2 | 2 | 3 | 0 | — | ❌ Reject (semaphore) |
+| Ing A: 30 files (4 running, 26 queued). New dig: 1 normal | 4 | 0 | 1 | — | 0 | ❌ Reject (semaphore) |
+| Ing A: 30 files (3 running, 27 queued). New dig: 1 normal | 3 | 1 | 1 | — | 0 | ✅ Accept (dig quota intact) |
+| Ing A: 30 files (3 running, 27 queued). New ing: 1 normal | 3 | 1 | 1 | 10 | — | ❌ Reject (ing quota full) |
+| Ing A: 30 files (3 running, 7 queued). New ing B: 1 normal | 3 | 1 | 1 | 7 | — | ✅ Accept (ing quota has room) |
+| Ing A: 5 files → 4 done, 1 running. New ing: 1 large | 1 | 3 | 2 | 0 | — | ✅ Accept |
+| All 4 semaphore units running. New job: any | 4 | 0 | any | — | — | ❌ Reject (semaphore) |
+
+Key: the digitization quota is **never affected by ingestion volume**. A 30-file ingestion
+fills the ingestion quota (`ing_queued = 10`) but leaves the digitization quota
+(`dig_queued = 0`) completely free. Digitization jobs are only blocked when the semaphore
+itself is full (0 free weight units), not when ingestion has many tasks queued.
 
 #### `GET /v1/jobs/{job_id}` — unchanged
 
@@ -300,28 +314,49 @@ the existing endpoint with no change to the caller.
 
 A long-running `asyncio` task started in `app.py`'s `lifespan`.
 
+#### Round-robin pick strategy
+
+On each poll tick the dispatcher alternates between operation types — it claims one
+ingestion task and one digitization task per iteration (subject to semaphore capacity),
+then loops. This ensures that a large ingestion job with 30 queued files never starves a
+waiting digitization task, because every other slot is reserved for the other type.
+
+If only one operation type has queued tasks, the dispatcher claims tasks from that type
+alone — the round-robin degrades gracefully to single-type FIFO when the other side is
+empty.
+
 ```python
 # workers/conversion_dispatcher.py
+
+_rr_turn: str = "ingestion"  # module-level state; alternates each tick
 
 async def dispatch_loop() -> None:
     """
     Poll the DB every POLL_INTERVAL seconds.
-    For each queued task whose weight fits available semaphore capacity,
-    atomically claim it and spawn run_conversion().
+    Each tick claims at most one task per operation type in round-robin order,
+    constrained by available semaphore capacity.
     """
+    global _rr_turn
     while True:
-        await _dispatch_one_batch()
+        available = conversion_semaphore.available
+        if available > 0:
+            # Attempt to claim one task of the current turn's operation type,
+            # then one of the other — both constrained by remaining capacity.
+            first, second = _rr_turn, _other(_rr_turn)
+            claimed = []
+            claimed += _try_claim(first,  available)
+            available -= sum(2 if t.is_large else 1 for t in claimed)
+            claimed += _try_claim(second, available)
+            for task in claimed:
+                weight = 2 if task.is_large else 1
+                await conversion_semaphore.acquire(weight)
+                asyncio.create_task(_run_conversion(task, weight))
+            # Advance turn for next tick
+            _rr_turn = second
         await asyncio.sleep(settings.digitize.conversion_poll_interval)
 
-
-async def _dispatch_one_batch() -> None:
-    tasks = db_manager.claim_queued_tasks(
-        semaphore_available=conversion_semaphore.available
-    )
-    for task in tasks:
-        weight = 2 if task.is_large else 1
-        await conversion_semaphore.acquire(weight)
-        asyncio.create_task(_run_conversion(task, weight))
+def _other(op: str) -> str:
+    return "digitization" if op == "ingestion" else "ingestion"
 
 
 async def _run_conversion(task: ConversionTask, weight: int) -> None:
@@ -353,25 +388,32 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         await conversion_semaphore.release(weight)
 ```
 
-#### Atomic DB claim
+#### Atomic DB claim — per operation type
 
-`claim_queued_tasks` uses `SELECT … FOR UPDATE SKIP LOCKED` so multiple dispatcher
-iterations (or future replicas) never double-claim:
+`_try_claim(operation, available_weight)` uses `SELECT … FOR UPDATE SKIP LOCKED` scoped
+to one operation type. Multiple dispatcher iterations (or future replicas) never
+double-claim the same task:
 
 ```sql
+-- _try_claim('ingestion', :available)
 UPDATE conversion_tasks
 SET    status = 'running', started_at = now()
-WHERE  task_id IN (
+WHERE  task_id = (
     SELECT task_id
     FROM   conversion_tasks
-    WHERE  status = 'queued'
-      AND  (is_large = FALSE OR :semaphore_available >= 2)
+    WHERE  status    = 'queued'
+      AND  operation = :operation          -- 'ingestion' or 'digitization'
+      AND  (is_large = FALSE OR :available >= 2)
     ORDER BY queued_at
-    LIMIT  :batch_size
+    LIMIT  1
     FOR UPDATE SKIP LOCKED
 )
 RETURNING *;
 ```
+
+Each call claims at most one task. The dispatcher calls it twice per tick — once for each
+operation type — so at most two tasks are promoted to `running` per poll interval, capped
+by the semaphore.
 
 ---
 
@@ -520,12 +562,13 @@ Added to `DigitizeConfig` in `settings.py`:
 
 | Field | Env var | Default | Purpose |
 |---|---|---|---|
-| `conversion_queue_max` | `DIGITIZE_CONVERSION_QUEUE_MAX` | `10` | Max `queued + running` tasks |
+| `conversion_queue_max` | `DIGITIZE_CONVERSION_QUEUE_MAX` | `20` | Total queue size; each operation gets half (10 slots) |
 | `conversion_poll_interval` | `DIGITIZE_CONVERSION_POLL_INTERVAL` | `2` | Dispatcher poll interval (s) |
 | `conversion_result_ttl` | `DIGITIZE_CONVERSION_RESULT_TTL` | `3600` | Output file TTL (s) |
 
 `doc_worker_size` (default 4) continues to serve as the semaphore capacity.
 `heavy_doc_page_threshold` (default 500) is reused as the large-file boundary.
+Per-operation quota is `conversion_queue_max // 2` (default 10 slots each).
 
 ---
 
@@ -533,18 +576,18 @@ Added to `DigitizeConfig` in `settings.py`:
 
 | File | Change |
 |---|---|
-| `db/models.py` | Add `ConversionTask` ORM model |
-| `db/manager.py` | Add `ConversionTask` CRUD + `claim_queued_tasks()` |
+| `db/models.py` | Add `ConversionTask` ORM model with `operation` column |
+| `db/manager.py` | Add `ConversionTask` CRUD + `_try_claim(operation, available)` + `get_running_weight()` + `get_queued_count_by_op()` |
 | `settings.py` | Add `conversion_queue_max`, `conversion_poll_interval`, `conversion_result_ttl` to `DigitizeConfig` |
 | `workers/conversion_semaphore.py` | **New** — `WeightedSemaphore` |
-| `workers/conversion_dispatcher.py` | **New** — dispatcher loop + `_run_conversion` |
+| `workers/conversion_dispatcher.py` | **New** — round-robin dispatcher loop + `_run_conversion` |
 | `utils/recovery.py` | Add `recover_conversion_tasks()` |
-| `api/v1/jobs.py` | Replace `add_task(_run_digitize)` + semaphore acquire with `conversion_tasks` INSERT + depth check for digitization path |
+| `api/v1/jobs.py` | Replace `ConcurrencyManager` semaphore + background task dispatch with semaphore headroom check + per-op quota check + `conversion_tasks` INSERT per file. Remove `has_active_jobs()` call. |
 | `app.py` | Start dispatcher task in `lifespan`; call `recover_conversion_tasks()` on startup |
-| `pipeline/digitize.py` | Replace `ProcessPoolExecutor` block with direct `convert_doc()` call (dispatcher already holds semaphore) |
+| `pipeline/digitize.py` | Remove `ProcessPoolExecutor` wrapper; call `convert_doc()` directly (dispatcher holds semaphore) |
 | `processing/orchestrator.py` | Replace `converter_executor.submit(convert_document, …)` with queue enqueue calls |
 | `parsing/converter.py` | No changes to `convert_doc()` itself |
-| `workers/concurrency.py` | Remove digitization `BoundedSemaphore`; ingestion semaphore + active-job check unchanged |
+| `workers/concurrency.py` | Remove entirely — superseded by `WeightedSemaphore` + per-op quotas |
 
 ---
 
@@ -552,27 +595,27 @@ Added to `DigitizeConfig` in `settings.py`:
 
 ```
 POST /v1/jobs (any operation, N files)
-  └─ semaphore headroom check: SUM(file_weights) <= (4 - running_weight)
+  └─ semaphore headroom check: new_job_weight <= (4 - running_weight)
        else → HTTP 429
-  └─ queue overflow check: queued_count + N <= QUEUE_MAX
+  └─ per-op quota check: op_queued_count + N <= QUEUE_MAX / 2
        else → HTTP 429
-  └─ INSERT N conversion_tasks rows (status=queued)
+  └─ INSERT N conversion_tasks rows (operation=X, status=queued)
   └─ return { "job_id": "..." }
 
 dispatcher loop (every POLL_INTERVAL seconds)
-  └─ claim queued tasks where weight fits remaining free capacity
-       └─ acquires WeightedSemaphore (weight 1 or 2 per task)
-            └─ convert_doc() runs in thread
-                 └─ on completion: post-conversion pipeline continues
-                      (process → chunk → index for ingestion;
-                       export output file for digitization)
+  turn = ingestion
+  └─ _try_claim('ingestion',  available)  → claim oldest queued ingestion task if fits
+  └─ _try_claim('digitization', remaining) → claim oldest queued digitization task if fits
+  └─ each claimed task: acquire semaphore → convert_doc() → release → continue pipeline
+  turn flips to digitization on next tick
 ```
 
 **Key properties:**
-- All `convert_doc()` calls across all jobs and all entry points share one `WeightedSemaphore` — total Docling process concurrency is always capped at 4 units.
-- A job with more files than can run concurrently is always accepted if at least 1 weight unit is free. Its overflow files queue up and drain as slots free.
-- Two concurrent ingestion jobs are allowed as long as their combined first-batch weight fits in the available capacity.
-- The `ConcurrencyManager` and `has_active_jobs()` are both fully retired.
+- All `convert_doc()` calls share one `WeightedSemaphore` — total concurrency capped at 4 units.
+- Per-operation quota of 10 queued slots means a 30-file ingestion never fills the digitization queue.
+- Round-robin dispatch guarantees that if both types have queued tasks, they alternate slots — no starvation.
+- When only one type has queued tasks the dispatcher claims from that type alone — no idle capacity wasted.
+- `ConcurrencyManager`, `has_active_jobs()`, and the old global queue depth check are all fully retired.
 
 ---
 
@@ -582,38 +625,42 @@ dispatcher loop (every POLL_INTERVAL seconds)
 
 ```mermaid
 flowchart TD
-    A([POST /v1/jobs]) --> B[Stage files\nCreate job + doc DB rows]
-    B --> C[Compute new_job_weight\nnormal file = 1  large file = 2]
-    C --> D{free_weight = 4 minus running_weight}
+    A([POST /v1/jobs]) --> B[Stage files\nCreate job + doc DB rows\nCompute new_job_weight]
+    B --> D{new_job_weight lte free_weight?\nfree = 4 minus running_weight}
 
-    D -->|new_job_weight gt free_weight| R1[HTTP 429\nNot enough active slots]
+    D -->|No| R1[HTTP 429\nNot enough semaphore capacity]
 
-    D -->|new_job_weight lte free_weight| E{queued_count + N lte QUEUE_MAX?}
+    D -->|Yes| E{op_queued_count + N\nlte QUEUE_MAX div 2 ?}
 
-    E -->|No| R2[HTTP 429\nQueue overflow]
+    E -->|No| R2[HTTP 429\nPer-operation quota full]
 
-    E -->|Yes| F[INSERT N conversion_tasks rows\nstatus = queued]
+    E -->|Yes| F[INSERT N conversion_tasks\noperation=X  status=queued]
     F --> G([Return 202 job_id])
 
-    G --> H[[Dispatcher picks up tasks\nas semaphore frees]]
-    H --> I{Task is_large?}
-    I -->|Yes weight=2| J[acquire 2 units]
-    I -->|No weight=1| K[acquire 1 unit]
-    J --> L[convert_doc in thread]
-    K --> L
+    G -.->|async| H[[Dispatcher round-robin tick]]
+    H --> IA{ingestion turn:\nclaim 1 queued ING task\nif weight fits}
+    IA -->|claimed| JA[acquire semaphore\nconvert_doc ING file\nrelease on done]
+    IA -->|none queued| KB
 
-    L -->|success| M{Operation?}
-    L -->|failure| N[task=failed\nrelease weight\njob/doc=failed]
+    JA --> KB{digitization turn:\nclaim 1 queued DIG task\nif weight fits}
+    KB -->|claimed| LB[acquire semaphore\nconvert_doc DIG file\nrelease on done]
+    KB -->|none queued| MC
 
-    M -->|digitization| O[export output file\ntask=completed\nrelease weight\njob/doc=completed]
-    M -->|ingestion| P[task=completed\nrelease weight\ndoc=digitized\ncontinue: process-chunk-index]
+    LB --> MC[flip turn for next tick]
+    MC --> H
+
+    JA -->|success| OI[task=completed\ndoc=digitized\ncontinue: process-chunk-index]
+    JA -->|failure| NI[task=failed\njob/doc=failed]
+    LB -->|success| OD[export output file\ntask=completed\njob/doc=completed]
+    LB -->|failure| ND[task=failed\njob/doc=failed]
 
     style R1 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
     style R2 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
     style G fill:#dcfce7,stroke:#166534,color:#1f2328
-    style O fill:#dcfce7,stroke:#166534,color:#1f2328
-    style P fill:#dcfce7,stroke:#166534,color:#1f2328
-    style N fill:#fee2e2,stroke:#b91c1c,color:#1f2328
+    style OI fill:#dcfce7,stroke:#166534,color:#1f2328
+    style OD fill:#dcfce7,stroke:#166534,color:#1f2328
+    style NI fill:#fee2e2,stroke:#b91c1c,color:#1f2328
+    style ND fill:#fee2e2,stroke:#b91c1c,color:#1f2328
 ```
 
 ---
@@ -632,19 +679,21 @@ sequenceDiagram
     C->>API: POST /v1/jobs?operation=digitization
     API->>API: Stage file to staging_dir/job_id/
     API->>DB: INSERT jobs + documents (status=accepted)
-    API->>DB: CHECK running_weight, queued_count
-    alt new_job_weight gt free_weight OR queue full
-        API-->>C: 429 Too Many Requests
+    API->>DB: CHECK running_weight, dig_queued_count
+    alt new_job_weight gt free_weight
+        API-->>C: 429 Not enough semaphore capacity
+    else dig_queued_count + 1 gt QUEUE_MAX/2
+        API-->>C: 429 Digitization quota full
     else admitted
-        API->>DB: INSERT conversion_tasks (status=queued, is_large=T/F)
+        API->>DB: INSERT conversion_tasks (operation=digitization, status=queued)
         API-->>C: 202 Accepted {job_id}
     end
 
     C->>API: GET /v1/jobs/{job_id}
     API-->>C: status=accepted
 
-    Note over D: poll every 2s
-    D->>DB: claim queued task FOR UPDATE SKIP LOCKED
+    Note over D: Round-robin tick — digitization turn
+    D->>DB: _try_claim(digitization, available) FOR UPDATE SKIP LOCKED
     D->>S: acquire weight 1 or 2
     D->>DB: UPDATE task=running
     D->>DB: UPDATE job/doc=in_progress
@@ -673,118 +722,124 @@ sequenceDiagram
 
 ---
 
-#### 11c. Full lifecycle — ingestion (N files, with overflow)
+#### 11c. Full lifecycle — ingestion (N files) with concurrent digitization
 
 ```mermaid
 sequenceDiagram
-    actor C as Caller
+    actor CI as Ing Caller
+    actor CD as Dig Caller
     participant API as POST /v1/jobs
     participant DB as Postgres
     participant D as Dispatcher
-    participant W as convert_doc
     participant S as WeightedSemaphore
     participant P as process-chunk-index
 
-    C->>API: POST /v1/jobs?operation=ingestion (N files)
-    API->>API: Stage N files
-    API->>DB: INSERT jobs + N documents (status=accepted)
-    API->>DB: CHECK running_weight, queued_count
-    alt new_job_weight gt free_weight OR queue full
-        API-->>C: 429 Too Many Requests
-    else admitted
-        API->>DB: INSERT N conversion_tasks (status=queued)
-        API-->>C: 202 Accepted {job_id}
-    end
+    CI->>API: POST /v1/jobs?operation=ingestion (30 files)
+    API->>DB: CHECK running_weight=0 free=4  ing_queued=0
+    API->>DB: INSERT 30 conversion_tasks (operation=ingestion)
+    API-->>CI: 202 Accepted {ing_job_id}
 
-    Note over D: Dispatcher drains FIFO queue as slots free
-    loop for each file i of N
-        D->>DB: claim next queued task
-        D->>S: acquire weight
-        D->>DB: UPDATE task=running, doc=in_progress
-        D->>W: convert_doc(file_i)
-        W-->>D: result or error
-        D->>DB: UPDATE task=completed/failed
-        D->>S: release weight
-        Note over D: overflow files claimed on next poll cycle
-    end
+    CD->>API: POST /v1/jobs?operation=digitization (1 file)
+    API->>DB: CHECK running_weight=3 free=1  dig_queued=0
+    Note over API: semaphore check: 1 lte 1 PASS\ndig quota: 0+1 lte 10 PASS
+    API->>DB: INSERT 1 conversion_tasks (operation=digitization)
+    API-->>CD: 202 Accepted {dig_job_id}
 
-    Note over P: After ALL N tasks for this job_id reach terminal state
-    P->>DB: process text and tables for each completed doc
-    P->>DB: chunk text and tables
-    P->>DB: index chunks into vector DB
-    P->>DB: UPDATE each doc=completed/failed
-    P->>DB: UPDATE job=completed/failed based on doc outcomes
+    Note over D: Tick 1 — turn=ingestion
+    D->>DB: _try_claim(ingestion, 4) → ING file 1
+    D->>DB: _try_claim(digitization, 3) → DIG file 1
+    D->>S: acquire 1 for ING-1, acquire 1 for DIG-1
+    Note over D: semaphore now 2/4 used
 
-    C->>API: GET /v1/jobs/{job_id}
-    API-->>C: status=completed/failed with stats
+    Note over D: Tick 2 — turn=digitization
+    D->>DB: _try_claim(digitization, 2) → none left
+    D->>DB: _try_claim(ingestion, 2) → ING file 2
+    D->>S: acquire 1 for ING-2
+    Note over D: semaphore now 3/4 used
+
+    Note over D: ING file 1 completes, weight released
+    D->>S: release 1
+    D->>DB: UPDATE ing_task_1=completed
+
+    Note over D: Tick 3 — turn=ingestion
+    D->>DB: _try_claim(ingestion, 2) → ING file 3
+    D->>S: acquire 1 for ING-3
+    Note over D: ...continues draining remaining ingestion files
+
+    Note over P: After all 30 ING tasks terminal
+    P->>DB: process text and tables
+    P->>DB: chunk and index into vector DB
+    P->>DB: UPDATE ing job=completed
+
+    CD->>API: GET /v1/jobs/{dig_job_id}
+    API-->>CD: status=completed
+    CI->>API: GET /v1/jobs/{ing_job_id}
+    API-->>CI: status=completed
 ```
 
 ---
 
-#### 11d. Concurrent capacity scenarios (capacity = 4 units)
+#### 11d. Per-operation quota scenarios (QUEUE_MAX=20, quota=10 per op)
 
 ```mermaid
 flowchart LR
-    subgraph s1["4 normal running — FULL (4/4)"]
+    subgraph quota["Queue quota state — ING quota  DIG quota  (each max 10 queued)"]
         direction LR
-        n1a["N·1"] --- n1b["N·1"] --- n1c["N·1"] --- n1d["N·1"]
+        subgraph q1["Ing 30-file job running\n ING queued=10  DIG queued=0\nNew dig: 1 file  ✅ DIG quota free"]
+            direction LR
+            iq1["ING: ██████████ 10/10"] --- dq1["DIG: ░░░░░░░░░░ 0/10"]
+        end
+        subgraph q2["Ing 30-file job running\n ING queued=10  DIG queued=0\nNew ing: 1 file  ❌ ING quota full"]
+            direction LR
+            iq2["ING: ██████████ 10/10"] --- dq2["DIG: ░░░░░░░░░░ 0/10"]
+        end
+        subgraph q3["Ing A draining  ING queued=7\nNew ing B: 1 file  ✅ ING quota has room"]
+            direction LR
+            iq3["ING: ███████░░░ 7/10"] --- dq3["DIG: ░░░░░░░░░░ 0/10"]
+        end
+        subgraph q4["Both types queued\n ING=6  DIG=4  both within quota"]
+            direction LR
+            iq4["ING: ██████░░░░ 6/10"] --- dq4["DIG: ████░░░░░░ 4/10"]
+        end
     end
 
-    subgraph s2["2 large running — FULL (4/4)"]
-        direction LR
-        l2a["L·2"] --- l2b["L·2"]
-    end
-
-    subgraph s3["1 large + 2 normal running — FULL (4/4)"]
-        direction LR
-        l3a["L·2"] --- n3a["N·1"] --- n3b["N·1"]
-    end
-
-    subgraph s4["1 normal running (1/4) — New ing 1L+1N weight=3 — FREE=3 ✅"]
-        direction LR
-        rn4["N·1 running"] --- q4a["L·2 queued"] --- q4b["N·1 queued"]
-    end
-
-    subgraph s5["1 large running (2/4) — New ing 2N weight=2 — FREE=2 ✅"]
-        direction LR
-        rl5["L·2 running"] --- q5a["N·1 queued"] --- q5b["N·1 queued"]
-    end
-
-    subgraph s6["2 normal running (2/4) — New ing 1L+1N weight=3 — FREE=2 ❌"]
-        direction LR
-        rn6a["N·1 running"] --- rn6b["N·1 running"] --- x6["needs 3 free=2 REJECT"]
-    end
-
-    subgraph s7["4 units running (4/4) — Any new job — FREE=0 ❌"]
-        direction LR
-        f7a["N·1"] --- f7b["N·1"] --- f7c["N·1"] --- f7d["N·1"]
-    end
-
-    subgraph s8["5-file job: 4 running 1 queued — New 1L weight=2 — FREE=0 ❌"]
-        direction LR
-        r8a["N·1"] --- r8b["N·1"] --- r8c["N·1"] --- r8d["N·1"] --- q8["N·1 queued"]
-    end
-
-    subgraph s9["5-file job: 4 done 1 running — New 1L weight=2 — FREE=3 ✅"]
-        direction LR
-        r9["N·1 running"] --- q9["L·2 new queued"]
-    end
-
-    style s1 fill:#f0fdf4,stroke:#166534,color:#1f2328
-    style s2 fill:#f0fdf4,stroke:#166534,color:#1f2328
-    style s3 fill:#f0fdf4,stroke:#166534,color:#1f2328
-    style s4 fill:#dbeafe,stroke:#1d4ed8,color:#1f2328
-    style s5 fill:#dbeafe,stroke:#1d4ed8,color:#1f2328
-    style s6 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
-    style s7 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
-    style s8 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
-    style s9 fill:#dbeafe,stroke:#1d4ed8,color:#1f2328
-    style x6 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
+    style q1 fill:#dbeafe,stroke:#1d4ed8,color:#1f2328
+    style q2 fill:#fee2e2,stroke:#b91c1c,color:#1f2328
+    style q3 fill:#dbeafe,stroke:#1d4ed8,color:#1f2328
+    style q4 fill:#dcfce7,stroke:#166534,color:#1f2328
 ```
 
 ---
 
-#### 11e. Conversion task state machine (including restart recovery)
+#### 11e. Round-robin dispatcher pick order
+
+```mermaid
+flowchart TD
+    Start([Dispatcher tick]) --> Av{available weight gt 0?}
+    Av -->|No| Sleep[sleep POLL_INTERVAL]
+    Sleep --> Start
+
+    Av -->|Yes| F1[_try_claim first_op\noldest queued task of first_op\nthat fits available weight]
+    F1 -->|got task| AcqF[acquire semaphore weight\nspawn _run_conversion]
+    F1 -->|none| S2
+
+    AcqF --> RemW[remaining = available minus weight_claimed]
+    RemW --> S2[_try_claim second_op\noldest queued task of second_op\nthat fits remaining weight]
+    S2 -->|got task| AcqS[acquire semaphore weight\nspawn _run_conversion]
+    S2 -->|none| Flip
+
+    AcqS --> Flip[flip turn:\nfirst_op becomes second_op]
+    Flip --> Sleep
+
+    style Start fill:#f7f8fa,stroke:#e5e7eb,color:#1f2328
+    style Sleep fill:#f7f8fa,stroke:#e5e7eb,color:#1f2328
+    style AcqF fill:#dcfce7,stroke:#166534,color:#1f2328
+    style AcqS fill:#dcfce7,stroke:#166534,color:#1f2328
+```
+
+---
+
+#### 11f. Conversion task state machine (including restart recovery)
 
 ```mermaid
 stateDiagram-v2
