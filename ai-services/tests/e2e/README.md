@@ -97,6 +97,10 @@ export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 
 # Expected Golden Dataset accuracy
 export RAG_ACCURACY_THRESHOLD=0.70
+
+# Catalog setup
+export CATALOG_PASSWORD=<your-catalog-admin-password>
+export CATALOG_INSECURE=true           # set false only if using valid TLS certs
 ```
 
 ## Running Golden Dataset Validation Independently
