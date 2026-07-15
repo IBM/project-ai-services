@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
@@ -15,6 +16,9 @@ import (
 // Caddy health is verified internally when connecting to the Admin API.
 func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	logger.DebuglnCtx(context.Background(), "Resetting catalog SSL certificates...")
+
+	// Sanitize paths to prevent path-traversal attacks.
+	sslCertPath, sslKeyPath = sanitizeSSLPaths(sslCertPath, sslKeyPath)
 
 	// Create deployment context to get runtime
 	deployCtx, err := deploy.NewDeployContext()
@@ -84,6 +88,20 @@ func loadCertificatesToCaddy(caddyCtx *caddy.Context, baseDir, sslCertPath, sslK
 	}
 
 	return nil
+}
+
+// sanitizeSSLPaths cleans SSL cert/key paths to prevent path-traversal attacks.
+// Returns empty strings unchanged (filepath.Clean("") returns ".").
+func sanitizeSSLPaths(certPath, keyPath string) (string, string) {
+	cleanCert, cleanKey := "", ""
+	if certPath != "" {
+		cleanCert = filepath.Clean(certPath)
+	}
+	if keyPath != "" {
+		cleanKey = filepath.Clean(keyPath)
+	}
+
+	return cleanCert, cleanKey
 }
 
 // Made with Bob

@@ -5,32 +5,29 @@ import (
 	"fmt"
 
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
-	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
+// ConfigureOptions contains the configuration for the catalog configure command.
+type ConfigureOptions struct {
+	Runtime types.RuntimeType
+	Podman  catalogPodman.PodmanConfigureOptions
+}
+
 // Run executes the configure process for the catalog service.
 // It creates runtime-specific options and calls the appropriate runtime implementation.
-func Run(runtime types.RuntimeType, baseDir, domainName, sslCertPath, sslKeyPath string, httpsPort int) error {
+func Run(opts ConfigureOptions) error {
 	ctx := context.Background()
 	// Deploy catalog service based on runtime
-	switch runtime {
+	switch opts.Runtime {
 	case types.RuntimeTypePodman:
-		opts := catalogUtils.PodmanConfigureOptions{
-			BaseDir:     baseDir,
-			DomainName:  domainName,
-			SSLCertPath: sslCertPath,
-			SSLKeyPath:  sslKeyPath,
-			HttpsPort:   httpsPort,
-		}
-
-		return catalogPodman.DeployCatalog(ctx, opts)
+		return catalogPodman.DeployCatalog(ctx, opts.Podman)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")
 
 	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtime)
+		return fmt.Errorf("unsupported runtime type: %s", opts.Runtime)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
@@ -12,6 +13,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -21,8 +23,58 @@ const (
 	defaultPasswordIterations = 100000
 )
 
+type PodmanConfigureOptions struct {
+	BaseDir     string
+	DomainName  string
+	SSLCertPath string
+	SSLKeyPath  string
+	HttpsPort   int
+}
+
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
+func DeployCatalog(ctx context.Context, input PodmanConfigureOptions) error {
+	// Resolve base directory: fall back to default when not provided.
+	aiServicesDir, err := resolveBaseDir(input.BaseDir)
+	if err != nil {
+		return err
+	}
+
+	// Create the models directory under the base dir.
+	modelPath := filepath.Join(aiServicesDir, "models")
+	if err := utils.CreateDir(modelPath); err != nil {
+		return fmt.Errorf("failed to create model directory: %w", err)
+	}
+
+	// Sanitize SSL paths to prevent path-traversal attacks.
+	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(input.SSLCertPath, input.SSLKeyPath)
+
+	opts := catalogUtils.PodmanConfigureOptions{
+		BaseDir:     aiServicesDir,
+		DomainName:  input.DomainName,
+		SSLCertPath: cleanCertPath,
+		SSLKeyPath:  cleanKeyPath,
+		HttpsPort:   input.HttpsPort,
+	}
+
+	return deployCatalogWithOpts(ctx, opts)
+}
+
+// resolveBaseDir returns the validated base directory, falling back to the default.
+func resolveBaseDir(baseDir string) (string, error) {
+	if baseDir == "" {
+		return constants.DefaultBaseDir, nil
+	}
+
+	resolved, err := utils.ValidateBaseDir(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+	}
+
+	return resolved, nil
+}
+
+// deployCatalogWithOpts is the internal entry point once all options are resolved.
+func deployCatalogWithOpts(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
