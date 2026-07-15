@@ -5,7 +5,7 @@ on:
       - 'images/caddy/**'
     branches:
       - main
-      - 'release/**'
+      - 'release-*'
   pull_request:
     paths:
       - 'images/caddy/**'
