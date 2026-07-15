@@ -565,3 +565,259 @@ func ValidateCatalogUninstallOutput(output string) error {
 
 	return nil
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bootstrap failure validators
+//
+// These functions are used exclusively by bootstrap_failure_test.go.  Each one
+// accepts the combined stdout+stderr output captured from a CLI invocation that
+// is expected to have failed, and returns an error if the output does not
+// contain at least one of the known failure-indicator strings.
+//
+// Matching is intentionally broad (substring, case-insensitive) so that minor
+// phrasing changes in upstream error messages do not break the tests.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ValidateRegistryLoginFailureOutput verifies that the output from a failed
+// `podman login` attempt contains a recognisable authentication-error string.
+//
+// Known strings emitted by Podman / Skopeo on credential rejection:
+//   - "invalid username/password"
+//   - "unauthorized"
+//   - "authentication required"
+//   - "login attempt to" … "failed with status"
+//   - "Error logging in to"
+func ValidateRegistryLoginFailureOutput(output string) error {
+	knownPatterns := []string{
+		"invalid username/password",
+		"unauthorized",
+		"authentication required",
+		"failed with status",
+		"Error logging in to",
+		"error logging in",
+		"401",
+		// ICR (IBM Container Registry) returns 400 Bad Request for invalid credentials
+		// rather than the more common 401 Unauthorized.
+		"400",
+		"bad request",
+		// Generic Podman/Skopeo auth failure prefix
+		"authenticating creds",
+		"requesting bearer token",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range knownPatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"registry login failure output did not contain any expected authentication-error pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		knownPatterns,
+		output,
+	)
+}
+
+// ValidateCatalogLoginFailureOutput verifies that the output from a failed
+// `catalog login` attempt (wrong credentials) contains a recognisable error.
+//
+// Known strings emitted by the catalog backend on credential rejection:
+//   - "catalog login failed"
+//   - "invalid credentials"
+//   - "unauthorized"
+//   - "authentication failed"
+//   - "401"
+func ValidateCatalogLoginFailureOutput(output string) error {
+	knownPatterns := []string{
+		"catalog login failed",
+		"invalid credentials",
+		"unauthorized",
+		"authentication failed",
+		"401",
+		"incorrect password",
+		"invalid username or password",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range knownPatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"catalog login failure output did not contain any expected authentication-error pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		knownPatterns,
+		output,
+	)
+}
+
+// ValidateCatalogUnreachableOutput verifies that the output from a failed
+// `catalog login` attempt against an unreachable server contains a recognisable
+// connectivity-error string.
+//
+// Known strings emitted when the server cannot be reached:
+//   - "connection refused"
+//   - "no such host"
+//   - "timeout"
+//   - "context deadline exceeded"
+//   - "catalog login failed"
+//   - "dial tcp"
+func ValidateCatalogUnreachableOutput(output string) error {
+	knownPatterns := []string{
+		"connection refused",
+		"no such host",
+		"timeout",
+		"context deadline exceeded",
+		"catalog login failed",
+		"dial tcp",
+		"EOF",
+		"network",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range knownPatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"catalog unreachable-server output did not contain any expected connectivity-error pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		knownPatterns,
+		output,
+	)
+}
+
+// ValidateBootstrapValidateFailureOutput verifies that the output from a failed
+// `bootstrap validate` run contains a recognisable validation-error string.
+//
+// Known strings emitted when prerequisites are missing:
+//   - "validation failed"
+//   - "not found"
+//   - "podman"          (the missing component should be named in the error)
+//   - "prerequisite"
+//   - "failed"
+//   - "error"
+func ValidateBootstrapValidateFailureOutput(output string) error {
+	knownPatterns := []string{
+		"validation failed",
+		"not found",
+		"podman",
+		"prerequisite",
+		"failed",
+		"error",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range knownPatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"bootstrap validate failure output did not contain any expected validation-error pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		knownPatterns,
+		output,
+	)
+}
+
+// ValidateInvalidRuntimeOutput verifies that the output from a
+// `bootstrap validate --runtime <invalid>` invocation contains the expected
+// rejection message emitted by bootstrapPersistentPreRunE in bootstrap.go:55:
+//
+//	"invalid runtime type: <value> (must be 'podman' or 'openshift').
+//	 Please specify runtime using --runtime flag"
+//
+// This is a pure CLI flag-validation failure — no system checks are run.
+func ValidateInvalidRuntimeOutput(output string) error {
+	knownPatterns := []string{
+		"invalid runtime type",
+		"must be 'podman' or 'openshift'",
+		"--runtime",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range knownPatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"invalid runtime output did not contain any expected rejection pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		knownPatterns,
+		output,
+	)
+}
+
+// OutputIndicatesSpyreAbsence returns true when the bootstrap validate output
+// contains the specific error string emitted by SpyreRule.Verify() when no
+// Spyre PCI devices are found on the LPAR.
+//
+// This is used by the Spyre failure test as a pre-check to distinguish between
+// a Spyre-specific failure and any other kind of validate failure, so the test
+// only asserts the Spyre message when the output is actually Spyre-related.
+//
+// Source: internal/pkg/validators/podman/spyre/spyre.go — Verify() line 32.
+func OutputIndicatesSpyreAbsence(output string) bool {
+	spyreAbsencePatterns := []string{
+		"IBM Spyre Accelerator is not attached to the LPAR",
+		"spyre accelerator is not attached",
+		"no spyre",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range spyreAbsencePatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ValidateSpyreAbsenceOutput verifies that the output from a failed
+// `bootstrap validate` run on a Spyre-less LPAR contains the expected
+// hardware-absence error emitted by SpyreRule.Verify().
+//
+// The exact message from the validator (spyre/spyre.go:32) is:
+//
+//	"IBM Spyre Accelerator is not attached to the LPAR"
+//
+// The hint from the validator (spyre/spyre.go:68) is:
+//
+//	"Run 'ai-services bootstrap configure' to fix configuration issues."
+//
+// Both are checked here so the test validates that the operator receives
+// not only the error but also guidance on how to resolve it.
+func ValidateSpyreAbsenceOutput(output string) error {
+	// Primary error — must always be present.
+	if !strings.Contains(output, "IBM Spyre Accelerator is not attached to the LPAR") {
+		return fmt.Errorf(
+			"Spyre absence output missing expected error message.\n"+
+				"Expected: %q\nActual output:\n%s",
+			"IBM Spyre Accelerator is not attached to the LPAR",
+			output,
+		)
+	}
+
+	// Remediation hint — validates the operator gets actionable guidance.
+	// Uses a substring match so minor phrasing changes don't break the test.
+	if !strings.Contains(strings.ToLower(output), "bootstrap configure") {
+		return fmt.Errorf(
+			"Spyre absence output missing remediation hint (expected mention of 'bootstrap configure').\n"+
+				"Actual output:\n%s",
+			output,
+		)
+	}
+
+	return nil
+}
