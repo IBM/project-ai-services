@@ -7,7 +7,7 @@ digitizeUi:
   image: icr.io/ai-services/digitize-ui:v0.0.26
 
 postgres:
-  image: icr.io/ai-services/postgres:18-3
+  image: icr.io/ai-services/postgres:18-3-1
   username: "postgres"
   # @generate:password
   password: ""

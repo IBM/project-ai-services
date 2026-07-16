@@ -10,8 +10,6 @@ on:
       - .github/workflows/check-image-names.yml
       - .github/workflows/bump-makefile-version.yml
       - .github/scripts/check_image_names.py
-    branches:
-      - main
 
 jobs:
   check:

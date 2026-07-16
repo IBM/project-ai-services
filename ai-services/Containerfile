@@ -4,7 +4,7 @@ ARG CMD_VERSION
 ARG GITCOMMIT
 ARG BUILDDATE
 ARG BUILDTAGS
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.5
 
 WORKDIR /go/src/github.com/project-ai-services/ai-services
 

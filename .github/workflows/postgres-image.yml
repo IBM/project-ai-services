@@ -5,12 +5,11 @@ on:
       - 'images/postgres/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/postgres/**'
       - .github/workflows/postgres-image.yml
-    branches:
-      - main
 
 env:
   ICR_REGISTRY: icr.io

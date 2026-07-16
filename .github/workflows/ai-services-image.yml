@@ -5,12 +5,11 @@ on:
       - 'ai-services/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ai-services/**'
       - .github/workflows/ai-services-image.yml
-    branches:
-      - main
 
 env:
   ICR_REGISTRY: icr.io
@@ -32,7 +31,7 @@ jobs:
 
       - name: Publish ai-services image
         working-directory: ai-services
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \

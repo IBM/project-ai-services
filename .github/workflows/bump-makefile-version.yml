@@ -13,8 +13,6 @@ on:
       - 'ai-services/**'
       - '.github/workflows/bump-makefile-version.yml'
       - '.github/scripts/check_make_version_tag.py'
-    branches:
-      - main
 
 jobs:
   check-version-bump:
