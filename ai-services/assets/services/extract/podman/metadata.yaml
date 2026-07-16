@@ -1,0 +1,14 @@
+name: summarize
+version: "1.0.0"
+podTemplateExecutions:
+  - [postgres-secret.yaml.tmpl]
+  - [postgres.yaml.tmpl]
+  - [summarize-api.yaml.tmpl]
+
+# Resource requirements
+resources:
+  cpu: 1 # 500m rounded up
+  memory: 1073741824 # 1Gi in bytes
+  storage: 10737418240 # 10Gi for PostgreSQL database storage in bytes
+
+# Made with Bob

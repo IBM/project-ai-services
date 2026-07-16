@@ -1,0 +1,16 @@
+pods:
+  - name: "{{ .AppName }}--summarize-api"
+    format: "index .Ports \"6000/tcp\" 0"
+    default: ""
+    alias: SUMMARIZE_API_PORT
+
+containers:
+  - name: "{{ .AppName }}--summarize-api-summarize-api"
+    format: ".Status"
+    alias: SUMMARIZE_API_STATUS
+
+hosts:
+  - fetch: HOST_IP
+    type: ip
+
+# Made with Bob
