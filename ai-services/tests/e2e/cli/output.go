@@ -802,7 +802,7 @@ func ValidateSpyreAbsenceOutput(output string) error {
 	// Primary error — must always be present.
 	if !strings.Contains(output, "IBM Spyre Accelerator is not attached to the LPAR") {
 		return fmt.Errorf(
-			"Spyre absence output missing expected error message.\n"+
+			"spyre absence output missing expected error message.\n"+
 				"Expected: %q\nActual output:\n%s",
 			"IBM Spyre Accelerator is not attached to the LPAR",
 			output,
@@ -813,7 +813,7 @@ func ValidateSpyreAbsenceOutput(output string) error {
 	// Uses a substring match so minor phrasing changes don't break the test.
 	if !strings.Contains(strings.ToLower(output), "bootstrap configure") {
 		return fmt.Errorf(
-			"Spyre absence output missing remediation hint (expected mention of 'bootstrap configure').\n"+
+			"spyre absence output missing remediation hint (expected mention of 'bootstrap configure').\n"+
 				"Actual output:\n%s",
 			output,
 		)
