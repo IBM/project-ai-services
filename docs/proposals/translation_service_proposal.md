@@ -30,7 +30,7 @@ Two execution paths are provided:
 | Concept diagram element                                           | Design realization                                                                                                                                                        |
 |:------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Input: text to be translated                                      | Sync `text` field; async worker reads staged file (txt/md) or fetches digitized markdown from the digitize service (pdf/docx)                                             |
-| Input: source language (e.g., "German")                          | `source_language` parameter — optional; defaults to `"auto"` (LLM-side language detection); when provided, validated against a fixed allowlist                           |
+| Input: source language (e.g., "German")                          | `source_language` parameter — optional; defaults to `"auto"`. When `"auto"`, the service runs `detect_language()` from `common/lang_utils.py` (lingua) before the LLM call to resolve the actual language; falls back to LLM auto-detect if confidence is below threshold. When provided explicitly, validated against a fixed allowlist. |
 | Input: target language (e.g., "English")                         | `target_language` parameter — validated against a fixed allowlist; `"auto"` is not permitted                                                                              |
 | Config: Version (e.g., 1.0.0)                                    | Not managed by the service — API versioned via `/v1/` path prefix                                                                                                         |
 | Config: LLM (granite-3.3-8b-instruct, mistral-small-3.1-24b, …) | `MODEL_NAME` env var (service default)                                                                                                                                    |
@@ -187,6 +187,7 @@ These limitations are known and accepted for v1. They do not prevent the output 
 - **Pixel-perfect PDF reconstruction:** The PDF reconstruction design (Section 3) targets usable best-effort output, not layout-identical reproduction of the original PDF. Preserving original fonts, images, watermarks, or precise column widths is out of scope.
 - **Document conversion / OCR:** The service does not implement PDF or DOCX parsing. All non-plaintext formats are delegated to the Digitize Documents service over its REST API.
 - **Sync auditing:** Synchronous translation requests are stateless — no job record is created and no result is persisted. Auditability of sync calls is a Future Enhancement.
+- **Embedding model:** No embedding model is used in this service. Translation is a direct LLM inference task — there is no semantic search, retrieval, or vector storage involved. An embedding model would only be relevant for translation quality checking (e.g., measuring semantic similarity between source and translated text), which is out of scope for v1.
 
 ---
 
@@ -227,19 +228,21 @@ graph LR
 - The **async worker** orchestrates: stage file → (pdf/docx only) digitize via REST → fetch `.md` content → context-window guard → translate → persist result → update DB.
 - Both paths share the global vLLM connection semaphore (Section 10).
 - The service is exposed externally on **port 9000** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
+- **Standalone mode (no Digitize service):** The translation service is designed to run independently of the Digitize service. When the Digitize service is not deployed, the sync path (`POST /v1/translate`) remains fully functional. The async job path (`POST /v1/translate/jobs`) is available for `.txt` and `.md` file uploads, which do not require digitization. Jobs submitted with `.pdf` or `.docx` files will fail at the digitize step with a clear error (`DIGITIZE_UNAVAILABLE`) — no other functionality is affected. The presence or absence of the Digitize service is detected at job execution time, not at startup.
 
 ---
 
 ## 6. Endpoints
 
-| Method     | Endpoint                                | Description                                                                        |
-|:-----------|:----------------------------------------|:-----------------------------------------------------------------------------------|
-| **POST**   | `/v1/translate`                         | Synchronous translation of inline plain text. Immediate result.                    |
-| **POST**   | `/v1/translate/jobs`                    | Submit a file (`.txt`/`.md`/`.pdf`/`.docx`) for async translation. Returns `job_id`. |
-| **GET**    | `/v1/translate/jobs`                    | List translation jobs with pagination and status filter.                            |
-| **GET**    | `/v1/translate/jobs/{job_id}`           | Get detailed status and metadata of a specific job.                                |
-| **GET**    | `/v1/translate/jobs/{job_id}/result`    | Retrieve the translation result as a sub-resource of the job.                      |
-| **GET**    | `/health`                               | Service health check.                                                              |
+| Method     | Endpoint                                     | Description                                                                        |
+|:-----------|:---------------------------------------------|:-----------------------------------------------------------------------------------|
+| **POST**   | `/v1/translate`                              | Synchronous translation of inline plain text. Immediate result.                    |
+| **POST**   | `/v1/translate/jobs`                         | Submit a file (`.txt`/`.md`/`.pdf`/`.docx`) for async translation. Returns `job_id`. |
+| **GET**    | `/v1/translate/jobs`                         | List translation jobs with pagination and status filter.                            |
+| **GET**    | `/v1/translate/jobs/{job_id}`                | Get detailed status and metadata of a specific job.                                |
+| **GET**    | `/v1/translate/jobs/{job_id}/result`         | Retrieve the translation result (JSON) as a sub-resource of the job.              |
+| **GET**    | `/v1/translate/jobs/{job_id}/result/pdf`     | Download the reconstructed PDF. Only available when `pdf_available == true`.      |
+| **GET**    | `/health`                                    | Service health check.                                                              |
 
 ---
 
@@ -587,7 +590,7 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
         "document_name": "bericht_q3.pdf",
         "digitize_doc_id": "dd33ee44-ff55-0011-2233-445566778899",
         "pdf_available": true,
-        "reconstructed_pdf_b64": "<base64-encoded PDF bytes>"
+        "pdf_download_url": "/v1/translate/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/result/pdf"
     },
     "meta": {
         "model": "ibm-granite/granite-3.3-8b-instruct",
@@ -621,7 +624,7 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
         "document_name": "bericht_q3.pdf",
         "digitize_doc_id": "dd33ee44-ff55-0011-2233-445566778899",
         "pdf_available": false,
-        "reconstructed_pdf_b64": null
+        "pdf_download_url": null
     },
     "meta": {
         "model": "ibm-granite/granite-3.3-8b-instruct",
@@ -665,7 +668,35 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
 
 ---
 
-### 7.6 GET /health — Health Check
+### 7.6 GET /v1/translate/jobs/{job_id}/result/pdf — Download Reconstructed PDF
+
+Only available when `pdf_available == true` on the job result. Returns the reconstructed PDF as a binary file download.
+
+| Status | Description |
+|:---|:---|
+| 200 OK | PDF file returned as `application/pdf`. |
+| 404 Not Found | No job with this ID, or job is not yet complete. |
+| 409 Conflict | Job is still `accepted` or `in_progress`. |
+| 410 Gone | Job failed, or `pdf_available == false` (reconstruction was skipped or errored). |
+
+**Response headers (200):**
+
+```
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="translated_bericht_q3.pdf"
+```
+
+The response body is the raw PDF bytes. The filename in `Content-Disposition` is derived from the original uploaded filename prefixed with `translated_`.
+
+**Sample request:**
+
+```bash
+curl -O -J http://localhost:9000/v1/translate/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/result/pdf
+```
+
+---
+
+### 7.7 GET /health — Health Check
 
 | Status | Description |
 |:---|:---|
@@ -797,7 +828,7 @@ Rules:
 - Output ONLY the translated text, nothing else
 ```
 
-**User prompt (explicit source language):**
+**User prompt (explicit source language — used when `source_language` is known, either provided by the caller or resolved via lingua detection):**
 
 ```
 Translate the following text from {source_language} to {target_language}.
@@ -808,7 +839,7 @@ Text:
 Translation:
 ```
 
-**User prompt (auto-detect variant — used when `source_language == "auto"`):**
+**User prompt (LLM auto-detect fallback — used only when lingua confidence falls below threshold):**
 
 ```
 Detect the language of the following text and translate it to {target_language}.
@@ -819,15 +850,28 @@ Text:
 Translation:
 ```
 
-### 10.2 Notes on Prompt Design
+### 10.2 Language Detection Strategy
+
+Before constructing the prompt, the service resolves `source_language` using the following two-step strategy on **both the sync and async paths**:
+
+1. **Run `detect_language(text)` from `common/lang_utils.py`** (lingua library, offline, deterministic). If the returned confidence meets the configured threshold (`LANGUAGE_DETECTION_MIN_CONFIDENCE`, default `0.5`), the detected ISO code is mapped to a language name (e.g., `"DE"` → `"German"`) and the explicit-source prompt template is used.
+2. **Fall back to LLM auto-detect** (the second prompt template above) if lingua's confidence is below threshold or the detected language is outside the supported set.
+
+The resolved `source_language` is stored in the job result (async) or response body (sync) so the caller always knows what language was detected, rather than receiving `"auto"` as the recorded value.
+
+> **Note on sync path reliability:** On the sync path, input text may be very short (a single sentence or phrase). Lingua's detection accuracy decreases with shorter inputs — confidence threshold acts as a safety net here, and LLM auto-detect is the more likely fallback for short texts.
+
+**Supported lingua languages (v1):** English (`EN`), German (`DE`), Italian (`IT`), French (`FR`) — matching `LanguageCodes` in `common/lang_utils.py`. The detector is initialized at startup via `setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])`.
+
+### 10.3 Notes on Prompt Design
 
 - `temperature = 0.0` — translation is deterministic; unlike summarization (0.3), there is no benefit to variance in translation.
 - No target word count is given — translation output length is determined by the content, not a compression goal.
 - The "Output ONLY the translated text" instruction is critical — without it, LLMs prepend preambles like "Here is the translation:".
-- Two templates are stored in settings (`translate_user_prompt` and `translate_user_prompt_auto`) and are individually overridable via environment variables.
+- One prompt template is stored in settings (`translate_user_prompt`) for the explicit-source case; a second (`translate_user_prompt_auto`) is the LLM auto-detect fallback. Both are individually overridable via environment variables.
 - Tables from `.md` input (produced by the digitize service's `table.export_to_markdown()`) are GFM-standard `| col | col |` format, which LLMs understand natively. The prompt preserves table syntax automatically.
 
-### 10.3 Prompt Token Overhead
+### 10.4 Prompt Token Overhead
 
 The system prompt above is approximately 90 tokens. The user prompt template (excluding the text) adds ~15 tokens. `PROMPT_OVERHEAD_TOKENS` defaults to `150` — a generous buffer that covers both templates with room to spare, avoiding the need to tokenize the template on every call.
 
