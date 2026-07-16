@@ -36,8 +36,6 @@ const (
 	PodmanAuthSecret = "podman-auth-secret"
 	// CatalogSecretName represents the catalog secret name.
 	CatalogSecretName = "catalog-secret"
-	// CatalogSecretKey is the data key inside catalog-secret that holds the bcrypt admin-password hash.
-	CatalogSecretKey = "admin-password"
 	// CatalogDBSecretName represents the catalog database secret name.
 	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogDBSecretKey is the data key inside catalog-db-secret that holds the database password.
