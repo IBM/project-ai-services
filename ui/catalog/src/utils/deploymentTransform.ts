@@ -8,6 +8,9 @@ import type {
   DeployOptionsService as Service,
   DeployOptionsComponent as Component,
   Provider,
+  ArchitectureDeploymentPayload,
+  DeploymentComponent,
+  DeploymentService,
 } from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
@@ -34,29 +37,6 @@ function getInferenceComponentType(
   }
 
   return componentType;
-}
-
-interface DeploymentComponent {
-  component_type: string;
-  provider_id: string;
-  version: string;
-  params?: Record<string, unknown>;
-}
-
-interface DeploymentService {
-  catalog_id: string;
-  version: string;
-  components: DeploymentComponent[];
-  params?: {
-    backend?: Record<string, unknown>;
-  };
-}
-
-export interface DeploymentPayload {
-  name: string;
-  catalog_id: string;
-  version: string;
-  services: DeploymentService[];
 }
 
 /**
@@ -262,7 +242,7 @@ export function transformToDeploymentPayload(
   deployOptions: DeployOptionsResponse,
   providerParamsCache: Record<string, Record<string, unknown>>,
   serviceParamsCache: Record<string, Record<string, unknown>>,
-): DeploymentPayload {
+): ArchitectureDeploymentPayload {
   const services: DeploymentService[] = [];
 
   // Process each enabled service
