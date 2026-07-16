@@ -225,11 +225,11 @@ def _fmt_dt(dt) -> Optional[str]:
     tags=["schemas"],
 )
 async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
-    # --- JSON Schema structural validation ---
-    validate_json_schema_structure(body.json_schema)
-
-    # --- Normalize per-property "required": true convention ---
+    # --- Normalize per-property "required": true convention FIRST ---
     normalized = normalize_schema(body.json_schema)
+
+    # --- JSON Schema structural validation (against the normalized form) ---
+    validate_json_schema_structure(normalized)
 
     # --- Validate example outputs against normalized schema ---
     examples_raw = [ex.model_dump() for ex in body.examples] if body.examples else None
