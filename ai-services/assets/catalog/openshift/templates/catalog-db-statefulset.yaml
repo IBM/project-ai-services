@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "catalog-db"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: database
+spec:
+  serviceName: "catalog-db-headless"
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Delete
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: database
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: "{{ .Values.db.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - "exec docker-entrypoint.sh postgres"
+          env:
+            - name: POSTGRES_USER
+              value: "{{ .Values.db.user }}"
+            - name: POSTGRES_DB
+              value: "{{ .Values.db.database }}"
+            - name: PGDATA
+              value: "/var/lib/pgsql/data"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
+          ports:
+            - name: postgres-port
+              containerPort: 5432
+          volumeMounts:
+            - mountPath: /var/lib/pgsql
+              name: data
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "{{ .Values.db.user }}"
+                - -d
+                - "{{ .Values.db.database }}"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "{{ .Values.db.user }}"
+                - -d
+                - "{{ .Values.db.database }}"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "{{ .Values.db.user }}"
+                - -d
+                - "{{ .Values.db.database }}"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "{{ .Values.db.resources.requests.memory }}"
+              cpu: "{{ .Values.db.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.db.resources.limits.memory }}"
+              cpu: "{{ .Values.db.resources.limits.cpu }}"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          ai-services.io/application: {{ .Release.Name }}
+          ai-services.io/template: {{ .Chart.Name }}
+          ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+          ai-services.io/component: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: "{{ .Values.db.storage }}"

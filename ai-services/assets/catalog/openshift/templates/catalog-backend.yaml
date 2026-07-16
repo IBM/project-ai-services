@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "catalog-backend"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: catalog-backend
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: catalog-backend
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: db-migration
+          image: "{{ .Values.backend.image }}"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+
+              max_retries=5
+              retry_delay=5
+
+              echo "Running database migrations with retry logic..."
+              for attempt in $(seq 1 $max_retries); do
+                echo "Migration attempt $attempt of $max_retries..."
+
+                if /usr/bin/ai-services catalog dbmigrate init \
+                  --runtime={{ .Values.backend.runtime }} \
+                  --db-host=catalog-db \
+                  --db-port=5432 \
+                  --db-user={{ .Values.db.user }} \
+                  --db-password="${DB_PASSWORD}" \
+                  --db-name={{ .Values.db.database }} \
+                  --db-sslmode=disable; then
+                  echo "Migrations completed successfully"
+                  exit 0
+                fi
+
+                if [ $attempt -lt $max_retries ]; then
+                  echo "Migration failed, retrying in ${retry_delay} seconds..."
+                  sleep $retry_delay
+                else
+                  echo "ERROR: Migration failed after $max_retries attempts"
+                  exit 1
+                fi
+              done
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "{{ .Values.backend.resources.requests.cpu }}"
+            limits:
+              memory: "512Mi"
+              cpu: "{{ .Values.backend.resources.limits.cpu }}"
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image }}"
+          command:
+            - /usr/bin/ai-services
+            - catalog
+            - apiserver
+            - --port=8080
+            - --admin-username=admin
+            - --admin-password-hash=$(ADMIN_PASSWORD)
+            - --runtime={{ .Values.backend.runtime }}
+          env:
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-secret
+                  key: admin-password
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-db-secret
+                  key: db-password
+            - name: GIN_MODE
+              value: "release"
+            - name: AI_SERVICES_LOG_LEVEL
+              value: "info"
+            - name: AI_SERVICES_LOG_FORMAT
+              value: "service"
+            - name: DB_HOST
+              value: "catalog-db"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: "{{ .Values.db.user }}"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "{{ .Values.backend.resources.requests.memory }}"
+              cpu: "{{ .Values.backend.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.backend.resources.limits.memory }}"
+              cpu: "{{ .Values.backend.resources.limits.cpu }}"
