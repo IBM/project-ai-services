@@ -112,7 +112,7 @@ flowchart TD
            DELETE /api/v1/models/:id                         undeploy any model
            ── /connectors ─────────────────────────────────────────────
            POST   /api/v1/connectors/models                  create connector       (type in body)
-           GET    /api/v1/connectors/models                  list connectors        (?type=)
+           GET    /api/v1/connectors/models                  list all models        (?type=)
            GET    /api/v1/connectors/models/:id              get connector details
            PUT    /api/v1/connectors/models/:id              update connector
            DELETE /api/v1/connectors/models/:id              delete connector"]
@@ -557,7 +557,7 @@ erDiagram
 
 All endpoints require `Authorization: Bearer <access_token>`. `type` is supplied in the request body for writes and as a query parameter for reads — it is never a path segment, keeping the URL surface flat and extensible.
 
-> **Routing note:** The static-segment routes `GET /api/v1/models/providers/...` and `GET /api/v1/connectors/models` must be registered **before** the `:id` UUID catch-all so the router resolves them correctly.
+> **Routing note:** The static-segment route `GET /api/v1/connectors/models` must be registered **before** the `GET /api/v1/connectors/models/:id` UUID catch-all so the router resolves it correctly.
 
 ### 7.1 Model Endpoints
 
@@ -577,7 +577,7 @@ All `/api/v1/connectors/models` endpoints. Connectors (`source=remote`) register
 | Method | Path | Description | Response |
 |---|---|---|---|
 | `POST` | `/api/v1/connectors/models` | Register a connector (`type` in request body) | `201 Created` |
-| `GET` | `/api/v1/connectors/models` | List all models (local and remote); filter with `?type=`, `?provider=`, `?status=`, `?source=` | `200 OK` |
+| `GET` | `/api/v1/connectors/models` | List all models (local and remote); filter with `?type=` | `200 OK` |
 | `GET` | `/api/v1/connectors/models/:id` | Get full details of a connector | `200 OK` |
 | `PUT` | `/api/v1/connectors/models/:id` | Update a connector's params or credentials | `200 OK` |
 | `DELETE` | `/api/v1/connectors/models/:id` | Delete a connector and deregister its LiteLLM route | `202 Accepted` |
@@ -659,15 +659,13 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
 
 **Endpoint:** `GET /api/v1/models`
 
-**Description:** Lists all deployed local models. Optionally filter by type, provider, or status.
+**Description:** Lists all deployed local models. Optionally filter by type.
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `type` | string | No | — | Filter by component type: `llm`, `embedding`, `reranker`. Omit for all types |
-| `provider` | string | No | — | Filter by provider: `vllm-spyre`, `vllm-cpu` |
-| `status` | string | No | — | Filter by status: `Running`, `Deploying`, `Error` |
 | `page` | integer | No | 1 | Page number (1-indexed) |
 | `page_size` | integer | No | 20 | Items per page (max 100) |
 
@@ -912,16 +910,13 @@ Content-Type: application/json
 
 **Endpoint:** `GET /api/v1/connectors/models`
 
-**Description:** Lists registered connectors. Optionally filter by type, provider, or status via query parameters. Pass `?include_local=true` to include local models in the same response — `source` discriminates the two.
+**Description:** Lists registered connectors. Optionally filter by type.
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `type` | string (CSV) | No | — | Filter to one or more types: `llm`, `embedding`, `reranker`. Omit for all types. |
-| `provider` | string | No | — | Filter by provider: `watsonx`, `openai-compatible`, etc. |
-| `include_local` | boolean | No | `false` | When `true`, local models are included alongside remote connectors — `source` field discriminates |
-| `status` | string | No | — | Filter by status: `Running`, `Syncing`, `Error` |
 | `page` | integer | No | 1 | Page number (1-indexed) |
 | `page_size` | integer | No | 20 | Items per page (max 100) |
 
@@ -937,12 +932,6 @@ GET /api/v1/connectors/models
 
 # LLM and embedding connectors only
 GET /api/v1/connectors/models?type=llm,embedding
-
-# All connectors + local models (unified view)
-GET /api/v1/connectors/models?include_local=true
-
-# Only WatsonX connectors
-GET /api/v1/connectors/models?provider=watsonx
 ```
 
 **Response (200 OK):**
@@ -993,8 +982,6 @@ GET /api/v1/connectors/models?provider=watsonx
 }
 ```
 
-> When `?include_local=true`, local model items appear with `"source": "local"` and no `params` field — `source` is the discriminator. Items are ordered by `type` then `created_at` descending.
-
 **Backing SQL:**
 
 ```sql
@@ -1002,13 +989,9 @@ SELECT *
 FROM components
 WHERE source = 'remote'
   AND (ARRAY[:types] IS NULL OR type = ANY(ARRAY[:types]))
-  AND (:provider IS NULL OR metadata->>'provider' = :provider)
-  AND (:status  IS NULL OR status = :status)
 ORDER BY type, created_at DESC
 LIMIT :page_size OFFSET (:page - 1) * :page_size;
 ```
-
-With `include_local=true` the `source = 'remote'` predicate is removed (or changed to `source IN ('remote', 'local')`).
 
 **Error Responses:**
 
@@ -1152,6 +1135,8 @@ With `include_local=true` the `source = 'remote'` predicate is removed (or chang
 | `403 Forbidden` | Authenticated user is not `created_by` |
 | `404 Not Found` | Connector not found or not a `source=remote` component |
 | `409 Conflict` | Connector is in use by one or more active services |
+
+---
 
 ## 9. Pre-flight Resource Check
 
