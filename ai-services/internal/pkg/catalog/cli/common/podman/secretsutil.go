@@ -2,10 +2,7 @@ package podman
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/containers/podman/v5/pkg/bindings/secrets"
 )
@@ -29,29 +26,6 @@ func ReadSecretFromPodman(ctx context.Context, secretName, key string) (string, 
 	value, err := ExtractKeyFromSecretData(info.SecretData, key)
 	if err != nil {
 		return "", fmt.Errorf("secret %s: %w", secretName, err)
-	}
-
-	return value, nil
-}
-
-// ReadSecretValueFromFile reads a JSON secret backup file (written by backupSingleSecret)
-// and returns the value for the given key.  The returned value is never logged.
-func ReadSecretValueFromFile(secretsDir, secretName, secretKey string) (string, error) {
-	secretPath := filepath.Join(secretsDir, secretName+".json")
-
-	data, err := os.ReadFile(secretPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read secret backup for %s: %w", secretName, err)
-	}
-
-	var secretMap map[string]string
-	if err := json.Unmarshal(data, &secretMap); err != nil {
-		return "", fmt.Errorf("failed to parse secret backup for %s: %w", secretName, err)
-	}
-
-	value, ok := secretMap[secretKey]
-	if !ok || value == "" {
-		return "", fmt.Errorf("key %q not found in secret backup for %s", secretKey, secretName)
 	}
 
 	return value, nil

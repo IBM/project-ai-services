@@ -17,9 +17,8 @@ const (
 
 // Archive top-level directory names — identical in backup and restore archives.
 const (
-	DirDB      = "db"
-	DirSecrets = "secrets"
-	DirCaddy   = "caddy"
+	DirDB    = "db"
+	DirCaddy = "caddy"
 )
 
 // Caddy path constants — relative paths inside BaseDir and inside the archive.

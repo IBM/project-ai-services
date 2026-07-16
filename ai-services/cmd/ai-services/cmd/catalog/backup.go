@@ -27,7 +27,6 @@ func NewBackupCmd() *cobra.Command {
 
 The following data is included in the backup archive:
   - PostgreSQL database dump
-  - Catalog admin-password secret
   - Caddy config related data - certificates, routes, config etc.
 
 The catalog service must be running when this command is executed.`,

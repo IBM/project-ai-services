@@ -1,13 +1,9 @@
 // Package podman implements the catalog backup operation for the Podman runtime.
 // It backs up:
 //  1. PostgreSQL database (pg_dump via exec into the running postgres container)
-//  2. Podman secret: catalog-secret     (admin password hash)
-//  3. Caddy autosave.json               (<BaseDir>/common/caddy-config/caddy/autosave.json)
-//  4. User-supplied TLS certs           (<BaseDir>/common/caddy/certs/tls-*.crt/.key)
+//  2. Caddy autosave.json               (<BaseDir>/common/caddy-config/caddy/autosave.json)
+//  3. User-supplied TLS certs           (<BaseDir>/common/caddy/certs/tls-*.crt/.key)
 //     OR Caddy self-signed PKI          (<BaseDir>/common/caddy/pki/ + certificates/)
-//
-// catalog-db-secret is intentionally excluded: the postgres user password lives in
-// the database data-volume and must stay in sync with it across restore operations.
 package podman
 
 import (
@@ -59,7 +55,7 @@ func BackupCatalog(backupFile string) error {
 
 	// Pack everything into the final archive.
 	entries := []string{
-		catalogpodman.DirDB, catalogpodman.DirSecrets, catalogpodman.DirCaddy,
+		catalogpodman.DirDB, catalogpodman.DirCaddy,
 	}
 	if err := commonBackup.CreateTarGzArchive(tempDir, backupFile, entries); err != nil {
 		return fmt.Errorf("failed to create backup archive: %w", err)
@@ -79,7 +75,6 @@ func runBackupSteps(ctx context.Context, pc *podman.PodmanClient, baseDir, tempD
 		fn   func() error
 	}{
 		{"postgres", func() error { return backupPostgres(ctx, tempDir) }},
-		{"secrets", func() error { return backupSecrets(ctx, tempDir) }},
 		{"caddy", func() error { return backupCaddyFiles(ctx, baseDir, tempDir) }},
 	}
 
