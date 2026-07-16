@@ -14,6 +14,7 @@
 4. [LiteLLM Gateway Integration](#4-litellm-gateway-integration)
    - [LiteLLM as a Catalog Asset](#litellm-as-a-catalog-asset)
    - [Route Registration](#route-registration)
+   - [Virtual Key Provisioning](#virtual-key-provisioning)
    - [WatsonX via Connector](#watsonx-via-connector)
 5. [New Concepts](#5-new-concepts)
    - [5.1 Models](#51-models)
@@ -48,7 +49,8 @@
 15. [CLI Commands](#15-cli-commands)
     - [15.1 Platform Model Commands](#151-platform-model-commands)
     - [15.2 Connector Commands](#152-connector-commands)
-    - [15.3 Command Summary](#153-command-summary)
+    - [15.3 LiteLLM Gateway Commands](#153-litellm-gateway-commands)
+    - [15.4 Command Summary](#154-command-summary)
 
 ---
 
@@ -251,6 +253,61 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
 ```
 
 **Route ID convention:** The route ID registered in LiteLLM is `{model_name}-{provider}` — e.g. `granite-3.3-8b-instruct-vllm-spyre`. This is unique per deployed model and allows multiple models to coexist in the gateway simultaneously. Consumer services reference models by this ID.
+
+### Virtual Key Provisioning
+
+Each time a new model route is registered in LiteLLM (on every successful deploy or connector creation), the platform generates a **per-model virtual key** scoped exclusively to that route. Virtual keys are bearer tokens that consumer services and external callers use to authenticate model inference requests. They are distinct from the `LITELLM_MASTER_KEY` — an internal admin credential that is never exposed outside the platform.
+
+**Generate virtual key (after route registration, per model):**
+```
+POST http://litellm:4000/key/generate
+Authorization: Bearer <LITELLM_MASTER_KEY>
+
+{
+  "key_name": "granite-3.3-8b-instruct-vllm-spyre",
+  "models": ["granite-3.3-8b-instruct-vllm-spyre"],
+  "duration": null
+}
+```
+
+`"key_name"` matches the route ID (`{model_name}-{provider}`). `"models"` scopes the key to that single route — attempts to call any other route with this key return `401`. `"duration": null` makes the key non-expiring. LiteLLM returns a `key` value of the form `sk-...`.
+
+**Storage — one Podman secret per model:**
+
+The generated virtual key is stored as a **Podman secret** named after the model immediately after creation. It is never written to the Catalog DB.
+
+```
+# Secret name pattern: litellm-vkey-{model_name}
+# Example for granite-3.3-8b-instruct-vllm-spyre:
+CreateSecret(name="litellm-vkey-granite-3.3-8b-instruct-vllm-spyre", data={"key": "sk-..."})
+```
+
+**Consumers of the virtual key:**
+
+| Consumer | How it receives the key |
+|---|---|
+| **Internal consumer services** (chatbot, digitize, similarity, summarize) | Pod definition mounts the per-model Podman secret (e.g. `litellm-vkey-granite-3.3-8b-instruct-vllm-spyre`) and sets it as `OPENAI_API_KEY` / `LITELLM_API_KEY` env var — injected at service creation time |
+| **External callers** (developers, CI pipelines) | Retrieved via `ai-services component litellm key [model-name] --runtime podman` CLI command (see §15) — never printed to logs |
+
+**Key revocation at undeploy:**
+
+When a model is undeployed, `modelmanager` calls `DELETE /key/delete` on the LiteLLM Admin API (passing the key value) and then calls `DeleteSecret` to remove the Podman secret. This ensures the key cannot be used after the route is gone.
+
+**Usage by consumer services:**
+
+Consumer services call the LiteLLM gateway with the per-model virtual key as a standard bearer token:
+
+```
+POST http://litellm:4000/chat/completions
+Authorization: Bearer <virtual-key>
+
+{
+  "model": "granite-3.3-8b-instruct-vllm-spyre",
+  "messages": [{ "role": "user", "content": "Hello" }]
+}
+```
+
+Each consumer service mounts only the secret(s) for the model(s) it uses. A service using granite does not hold the key for an embedding model — principle of least privilege. The virtual key is the **only credential** needed for model access, regardless of whether the backing provider is a local vLLM pod or an external WatsonX connector.
 
 ### WatsonX via Connector
 
@@ -1518,13 +1575,15 @@ catalog configure  (same command that starts postgres, caddy, catalog API)
 
   New steps added to the sequence:
     4. [NEW] Generate LITELLM_MASTER_KEY (UUID)
-    5. [NEW] Render litellm-master-key-secret.yaml.tmpl → CreateSecret
+    5. [NEW] Render litellm-master-key-secret.yaml.tmpl → CreateSecret (LITELLM_MASTER_KEY)
     6. [NEW] Render litellm.yaml.tmpl → CreatePod (LiteLLM Gateway)
     7. [NEW] Poll InspectPod until liveness probe passes
     8. [NEW] INSERT components (type='llm', provider='litellm', source='platform',
                                 status='Running', created_by=NULL,
                                 metadata={model_name: "litellm"})
 
+  No gateway-wide virtual key is generated at configure time.
+  Per-model virtual keys are created on each individual model deploy (see flows below).
   All applications share this single gateway instance.
 ```
 
@@ -1545,6 +1604,12 @@ POST /api/v1/components/llm
   5. Return 202 {source: "platform", id: components.id, status: "Deploying", ...}
   6. [async] Poll InspectPod until liveness probe passes
   7. [async] UPDATE components SET status='Running'
+  8. [async] POST /model/new to LiteLLM (model_name="granite-3.3-8b-instruct-vllm-spyre",
+                                        custom_llm_provider="hosted_vllm")
+             route_id = "{sanitised model_name}-{provider}"  (e.g. granite-3.3-8b-instruct-vllm-spyre)
+  9. [async] POST /key/generate → LiteLLM Admin API
+             body: { "key_name": "<route_id>", "models": ["<route_id>"], "duration": null }
+ 10. [async] CreateSecret(name="litellm-vkey-<route_id>", data={"key": "<sk-...>"})
 ```
 
 ### Flow: Deploy WatsonX — `source=connector` (no pod)
@@ -1561,6 +1626,7 @@ POST /api/v1/components/llm/connectors
   1. Validate request fields
   2. No pod, no pre-flight resource check
   3. POST /model/new to LiteLLM Gateway (passing params.auth secret fields directly — never stored in Catalog DB)
+             route_id = "{sanitised model_name}-{provider}"  (e.g. ibm-granite-3-8b-instruct-watsonx)
   4. INSERT into components (type=llm, provider=watsonx, source='connector',
                              status='Syncing', tags={"name":<name>}, created_by=<user>,
                              endpoints=[{type:"api", url: params.endpoint_url}],
@@ -1571,6 +1637,9 @@ POST /api/v1/components/llm/connectors
   5. Return 201 {source: "connector", id: components.id, status: "Syncing", ...}
   6. [async] modelmanager probes endpoint via LiteLLM GET /model/info to validate credentials
   7. [async] UPDATE components SET status='Running' or status='Error'
+  8. [async] (on Running) POST /key/generate → LiteLLM Admin API
+             body: { "key_name": "<route_id>", "models": ["<route_id>"], "duration": null }
+  9. [async] (on Running) CreateSecret(name="litellm-vkey-<route_id>", data={"key": "<sk-...>"})
 ```
 
 ### Flow: Undeploy `source=platform` model
@@ -1579,11 +1648,15 @@ POST /api/v1/components/llm/connectors
 DELETE /api/v1/components/:id
 
   Server resolves source='platform' from DB row
+  route_id = "{sanitised model_name}-{provider}"  (derived from components row)
 
   1. Verify created_by=user
   2. Return 202
-  3. [async] StopPod → DeletePod
-  4. [async] DELETE components row
+  3. [async] DELETE /model/delete from LiteLLM Gateway (deregisters the route)
+  4. [async] DELETE /key/delete from LiteLLM Admin API (revokes the per-model virtual key)
+  5. [async] DeleteSecret(name="litellm-vkey-<route_id>")
+  6. [async] StopPod → DeletePod
+  7. [async] DELETE components row
 ```
 
 ### Flow: Undeploy `source=connector`
@@ -1592,11 +1665,14 @@ DELETE /api/v1/components/:id
 DELETE /api/v1/components/:id
 
   Server resolves source='connector' from DB row
+  route_id = "{sanitised model_name}-{provider}"  (derived from components row)
 
   1. Verify created_by=user
   2. Return 202
-  3. [async] DELETE /model/delete from LiteLLM Gateway (removes credentials from LiteLLM)
-  4. [async] DELETE components row
+  3. [async] DELETE /model/delete from LiteLLM Gateway (removes route + credentials from LiteLLM)
+  4. [async] DELETE /key/delete from LiteLLM Admin API (revokes the per-model virtual key)
+  5. [async] DeleteSecret(name="litellm-vkey-<route_id>")
+  6. [async] DELETE components row
 ```
 
 ---
@@ -1938,15 +2014,44 @@ ai-services component connector delete prod-watsonx -y --runtime podman
 
 ---
 
-### 15.3 Command Summary
+### 15.3 LiteLLM Gateway Commands
+
+#### Retrieve the virtual key for a model
+
+Prints the per-model LiteLLM virtual key stored in the Podman secret `litellm-vkey-<model-name>`. Use this to authenticate calls to `POST /chat/completions`, `POST /embeddings`, and other inference endpoints from external clients or scripts. The model name argument must match the deployed model name (as shown by `ai-services component list`).
+
+```
+ai-services component litellm key [model-name] --runtime podman
+```
+
+```bash
+# Print the virtual key for granite to stdout
+ai-services component litellm key granite-3.3-8b-instruct-vllm-spyre --runtime podman
+
+# Example: use directly in a curl call
+curl -s http://litellm:4000/chat/completions \
+  -H "Authorization: Bearer $(ai-services component litellm key granite-3.3-8b-instruct-vllm-spyre --runtime podman)" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"granite-3.3-8b-instruct-vllm-spyre","messages":[{"role":"user","content":"Hello"}]}'
+
+# Retrieve key for a WatsonX connector model
+ai-services component litellm key ibm-granite-3-8b-instruct-watsonx --runtime podman
+```
+
+> The virtual key is read from the `litellm-vkey-<model-name>` Podman secret. It is **never logged** by the CLI. Each model has its own secret; the key is scoped to that model only.
+
+---
+
+### 15.4 Command Summary
 
 | Command | Description |
 |---|---|
 | `ai-services component deploy [name]` | Deploy a platform model (`source=platform`) |
 | `ai-services component list` | List all components; filter with `--source`, `--type`, `--provider` |
 | `ai-services component info [name]` | Get full details for a component |
-| `ai-services component delete [name]` | Undeploy a platform model and delete its row |
+| `ai-services component delete [name]` | Undeploy a platform model, revoke its key, delete its secret and DB row |
 | `ai-services component connector create [name]` | Register a connector (`source=connector`) |
 | `ai-services component connector validate [name]` | Probe connector endpoint and update status |
 | `ai-services component connector update [name]` | Update connector credentials or metadata |
-| `ai-services component connector delete [name]` | Delete a connector and wipe its Podman secret |
+| `ai-services component connector delete [name]` | Delete a connector, revoke its key, delete its secret and DB row |
+| `ai-services component litellm key [model-name]` | Print the per-model LiteLLM virtual key for external model access |
