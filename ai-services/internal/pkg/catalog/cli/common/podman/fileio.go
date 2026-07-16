@@ -23,11 +23,11 @@ const (
 
 // Caddy path constants — relative paths inside BaseDir and inside the archive.
 const (
-	CaddyDataSubDir   = "common/caddy"
-	CaddyConfigSubDir = "common/caddy-config/caddy"
-	AutosaveFileName  = "autosave.json"
-	CaddyCertsSubDir  = "certs"
-	CaddyPKISubDir    = "pki"
+	CaddyDataSubDir      = "common/caddy"
+	CaddyConfigSubDir    = "common/caddy-config/caddy"
+	AutosaveFileName     = "autosave.json"
+	CaddyCertsSubDir     = "certs"
+	CaddyPKISubDir       = "pki"
 	CaddyLeafCertsSubDir = "certificates"
 )
 
