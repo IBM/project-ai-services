@@ -128,11 +128,8 @@ flowchart LR
         connect using endpoint_url from components.params
         + credentials from mounted Podman secret"]
 
-    CS -->|"OpenSearch HTTP"| RO["OpenSearch Service
-                                   (managed cluster)"]
-
-    CS -->|"PostgreSQL wire protocol"| RP["pg_vector
-                                           (external)"]
+    CS -->|"endpoint_url"| VS["Vector Store
+                                opensearch / pg_vector"]
 ```
 
 ---
