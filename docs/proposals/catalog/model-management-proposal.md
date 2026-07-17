@@ -131,11 +131,11 @@ flowchart TD
     C -->|local| D["Pre-flight Check
                        CPU · Memory · Spyre cards"]
     D -->|pass| E["Runtime Executor
-                   CreatePod"]
+                    CreatePod"]
     D -->|fail 422| F["Return violations to caller"]
 
     C -->|connector| G["Runtime Executor
-                        Register LiteLLM route — no pod"]
+                         Register LiteLLM route — no pod"]
 
     E --> H["LiteLLM Gateway :4000
              POST /model/new — register route
@@ -145,6 +145,14 @@ flowchart TD
     H --> I[("LiteLLM PostgreSQL :5433
               route table · credentials
               spend logs")]
+
+    H -->|"async — after route registered"| P["Probe Check
+                                               GET /health?model=route-id
+                                               Authorization: Bearer master-key"]
+
+    P -->|"healthy_count > 0"| Q["Set status = Running"]
+    P -->|"unhealthy_count > 0"| R["Set status = Error
+                                    store error message"]
 
     B --> J[("Catalog PostgreSQL :5432
               components table
@@ -291,7 +299,25 @@ CreateSecret(name="litellm-vkey-granite-3.3-8b-instruct-vllm-spyre", data={"key"
 
 **Key revocation at undeploy:**
 
-When a model is undeployed, `modelmanager` calls `DELETE /key/delete` on the LiteLLM Admin API (passing the key value) and then calls `DeleteSecret` to remove the Podman secret. This ensures the key cannot be used after the route is gone.
+When a model or connector is deleted, `modelmanager` revokes the virtual key via the LiteLLM Admin API before removing the Podman secret. This ensures the key cannot be used after the route is gone.
+
+```
+POST http://litellm:4000/key/delete
+Authorization: Bearer <LITELLM_MASTER_KEY>
+Content-Type: application/json
+
+{
+  "keys": ["sk-WJIFUdKHNK8Jv9Iqa8Bn9w"]
+}
+```
+
+**Response:**
+
+```json
+{ "deleted_keys": ["sk-WJIFUdKHNK8Jv9Iqa8Bn9w"] }
+```
+
+The `keys` array is the list of virtual key values (not key names) to revoke. On success LiteLLM echoes them back in `deleted_keys`. After this call the key is immediately invalid — any in-flight requests using it will receive `401`.
 
 **Usage by consumer services:**
 
@@ -308,6 +334,70 @@ Authorization: Bearer <virtual-key>
 ```
 
 Each consumer service mounts only the secret(s) for the model(s) it uses. A service using granite does not hold the key for an embedding model — principle of least privilege. The virtual key is the **only credential** needed for model access, regardless of whether the backing provider is a local vLLM pod or an external WatsonX connector.
+
+### Probe Check
+
+After every route registration (both `local` and `connector`), `modelmanager` fires an async health probe against the LiteLLM gateway to confirm the backend is reachable and responding. The result drives the final `status` value written to the `components` table.
+
+**Probe request:**
+
+```
+GET http://litellm:4000/health?model=<route-id>
+Authorization: Bearer <LITELLM_MASTER_KEY>
+```
+
+The `model` query parameter is the route ID registered in the previous step (e.g. `granite-3.3-8b-instruct--vllm-spyre`).
+
+**Healthy response — set `status = Running`:**
+
+```json
+{
+  "healthy_endpoints": [
+    {
+      "api_base": "http://llm-d295596cd0:8000/v1",
+      "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+      "max_tokens": 5,
+      "model_id": "d3d7aa41-67b1-4785-a7ae-d0a7ee1e6211"
+    }
+  ],
+  "unhealthy_endpoints": [],
+  "healthy_count": 1,
+  "unhealthy_count": 0
+}
+```
+
+`healthy_count > 0` → `components.status = 'Running'`.
+
+**Unhealthy response — set `status = Error`:**
+
+```json
+{
+  "healthy_endpoints": [],
+  "unhealthy_endpoints": [
+    {
+      "api_base": "http://llm-d295596cd0:8000/v1",
+      "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+      "error": "litellm.InternalServerError: InternalServerError: Hosted_vllmException - Cannot connect to host llm-d295596cd0:8000 ssl:... [Name or service not known]",
+      "model_id": "d3d7aa41-67b1-4785-a7ae-d0a7ee1e6211",
+      "exception_status": 500
+    }
+  ],
+  "healthy_count": 0,
+  "unhealthy_count": 1
+}
+```
+
+`unhealthy_count > 0` → `components.status = 'Error'`, and the `error` string from the first unhealthy endpoint is written to `components.message` for display in the API response and UI.
+
+**Probe logic summary:**
+
+| `healthy_count` | `unhealthy_count` | Action |
+|---|---|---|
+| `> 0` | `0` | Set `status = Running`, clear `message` |
+| `0` | `> 0` | Set `status = Error`, store `unhealthy_endpoints[0].error` in `message` |
+| `0` | `0` | Set `status = Error`, store `"No endpoints returned by health check"` in `message` |
+
+> The probe is fire-and-forget from the caller's perspective. The `POST /api/v1/models` and `POST /api/v1/connectors/models` endpoints return immediately (`202` / `201`) while the probe runs in the background. Callers poll `GET /api/v1/models/:id` or `GET /api/v1/connectors/models/:id` to observe the status transition from `Deploying` / `Syncing` → `Running` or `Error`.
 
 ### WatsonX via Connector
 
@@ -792,8 +882,18 @@ WHERE sd.dependency_id = :id
 
 | `source` | Server action | Response |
 |---|---|---|
-| `local` | Stop + delete pod → delete row | `202 Accepted` (async) |
-| `remote` | Deregister LiteLLM route (removes credentials from LiteLLM) → delete row | `202 Accepted` |
+| `local` | Deregister LiteLLM route → revoke virtual key → delete Podman secret → stop + delete pod → delete row | `202 Accepted` (async) |
+| `remote` | Deregister LiteLLM route → revoke virtual key → delete Podman secret → delete row | `202 Accepted` |
+
+**Teardown steps (async, in order):**
+
+| Step | Call | Detail |
+|---|---|---|
+| 1 | `DELETE /model/delete` on LiteLLM | Removes route and credentials from gateway |
+| 2 | `POST /key/delete` on LiteLLM | Body: `{ "keys": ["<virtual-key>"] }` — revokes the per-model key; response: `{ "deleted_keys": ["<virtual-key>"] }` |
+| 3 | `DeleteSecret` | Removes Podman secret `litellm-vkey-<route_id>` |
+| 4 | `StopPod` / `DeletePod` | `local` only — no-op for `remote` |
+| 5 | Delete `components` row | Final cleanup |
 
 **Query Parameters:**
 
@@ -1114,12 +1214,12 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 **Description:** Deletes a connector. Deregisters the LiteLLM route (removing credentials from the gateway), revokes the per-model virtual key, deletes the Podman secret, and removes the `components` row.
 
-| Step | Action |
-|---|---|
-| 1 | Deregister LiteLLM route (`DELETE /model/delete`) — credentials removed from gateway |
-| 2 | Revoke virtual key (`DELETE /key/delete` on LiteLLM Admin API) |
-| 3 | Delete Podman secret `litellm-vkey-<route_id>` |
-| 4 | Delete `components` row |
+| Step | Call | Detail |
+|---|---|---|
+| 1 | `DELETE /model/delete` on LiteLLM | Removes route and credentials from gateway |
+| 2 | `POST /key/delete` on LiteLLM | Body: `{ "keys": ["<virtual-key>"] }` — revokes the per-model key; response: `{ "deleted_keys": ["<virtual-key>"] }` |
+| 3 | `DeleteSecret` | Removes Podman secret `litellm-vkey-<route_id>` |
+| 4 | Delete `components` row | Final cleanup |
 
 **Response (`202 Accepted`):**
 
