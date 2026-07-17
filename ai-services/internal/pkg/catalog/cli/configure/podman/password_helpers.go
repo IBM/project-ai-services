@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"syscall"
 
-	"golang.org/x/term"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"golang.org/x/term"
 )
 
 // collectAndHashPassword collects the password from user and returns the hashed password.
