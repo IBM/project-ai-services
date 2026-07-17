@@ -37,6 +37,14 @@ class DocumentInfo(BaseModel):
     name: str
     status: str
 
+class JobMetadata(BaseModel):
+    """Metadata for chunked summarization in a job."""
+    model_config = ConfigDict(use_enum_values=True)
+
+    total_chunks: int = Field(default=0, ge=0, description="Total number of chunks")
+    completed_chunks: int = Field(default=0, ge=0, description="Number of completed summarized chunks")
+    phase: str = Field(default="", description="Phase: summarizing or merging")
+
 
 class JobDetailResponse(BaseModel):
     """Response model for single job detail."""
@@ -47,7 +55,20 @@ class JobDetailResponse(BaseModel):
     completed_at: Optional[str] = None
     document: DocumentInfo
     error: Optional[str] = None
-    metadata: Optional[dict] = None
+    metadata: JobMetadata = Field(default_factory=JobMetadata)
+
+    @field_validator('metadata', mode='before')
+    @classmethod
+    def validate_stats(cls, v):
+        """Ensure stats is valid, return default if not."""
+        if isinstance(v, JobMetadata):
+            return v
+        if isinstance(v, dict):
+            try:
+                return JobMetadata(**v)
+            except Exception:
+                return JobMetadata()
+        return JobMetadata()
 
 
 class JobResultResponse(BaseModel):
@@ -55,16 +76,6 @@ class JobResultResponse(BaseModel):
     data: dict  # {"summary": str, "original_length": int, "summary_length": int}
     meta: dict  # {"model": str, "processing_time_ms": int, "input_type": str, "strategy": str}
     usage: dict  # {"input_tokens": int, "output_tokens": int, "total_tokens": int}
-
-
-class JobMetadata(BaseModel):
-    """Metadata for chunked summarization in a job."""
-    model_config = ConfigDict(use_enum_values=True)
-
-    total_chunks: int = Field(default=0, ge=0, description="Total number of chunks")
-    completed_chunks: int = Field(default=0, ge=0, description="Number of completed summarized chunks")
-    failed_chunks: int = Field(default=0, ge=0, description="Number of failed summarized chunks")
-    phase: str = Field(default="", description="Phase: summarizing or merging")
 
 
 class JobState(BaseModel):
@@ -83,7 +94,6 @@ class JobState(BaseModel):
     document_word_count: Optional[int] = 0
     level: Optional[str] = None
     job_type: Optional[str] = None
-    metadata: JobMetadata = Field(default_factory=JobMetadata)
     error: Optional[str] = None
 
     @field_validator('status', mode='before')
@@ -97,18 +107,6 @@ class JobState(BaseModel):
         except (ValueError, TypeError):
             return JobStatus.ACCEPTED
 
-    @field_validator('metadata', mode='before')
-    @classmethod
-    def validate_stats(cls, v):
-        """Ensure stats is valid, return default if not."""
-        if isinstance(v, JobMetadata):
-            return v
-        if isinstance(v, dict):
-            try:
-                return JobMetadata(**v)
-            except Exception:
-                return JobMetadata()
-        return JobMetadata()
 
     def to_dict(self) -> dict:
         """

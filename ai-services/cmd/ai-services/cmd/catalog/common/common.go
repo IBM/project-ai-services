@@ -38,10 +38,8 @@ func ConfigureRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 
 func validateRuntimeType(runtimeType types.RuntimeType) error {
 	switch runtimeType {
-	case types.RuntimeTypePodman:
+	case types.RuntimeTypePodman, types.RuntimeTypeOpenShift:
 		return nil
-	case types.RuntimeTypeOpenShift:
-		return fmt.Errorf("catalog cmd is not yet supported for OpenShift runtime")
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}

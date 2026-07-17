@@ -11,6 +11,28 @@ pipeline {
             defaultValue: 'icr.io/ai-services-cicd',
             description: 'Registry where images will be pushed'
         )
+        password(
+            name: 'ICR_REGISTRY_PASSWORD',
+            defaultValue: '',
+            description: 'IAM api key to push image to icr registry (overrides icr-iam-creds credential when set)'
+        )
+        text(
+            name: 'SKIP_IMAGE_LIST',
+            defaultValue: '',
+            description: '''List of images to skip building (one per line). Available image names:
+  chatbot-service
+  digitize-service
+  summarize-service
+  similarity-service
+  caddy
+  litellm
+  postgres
+  tools
+  ai-services
+  catalog-ui
+  digitize-ui
+  chatbot-ui'''
+        )
     }
     
     environment {
@@ -35,24 +57,17 @@ pipeline {
     }
     
     stages {
-        stage('Initialize') {
-            steps {
-                script {
-                    validateVersion()
-                    deleteDir()
-                }
-            }
-        }
-        
         stage('Checkout') {
             steps {
                 script {
+                    deleteDir()
                     checkoutRepository()
                 }
             }
         }
 
         stage('Build chatbot service') {
+            when { expression { !isImageSkipped('chatbot-service') } }
             steps {
                 script {
                     env.ICR_SERVICES_CHATBOT_IMAGE = buildAndPublishImage('services/chatbot/', 'chatbot-service')
@@ -61,6 +76,7 @@ pipeline {
         }
 
         stage('Build digitize service') {
+            when { expression { !isImageSkipped('digitize-service') } }
             steps {
                 script {
                     env.ICR_SERVICES_DIGITIZE_IMAGE = buildAndPublishImage('services/digitize/', 'digitize-service')
@@ -69,6 +85,7 @@ pipeline {
         }
 
         stage('Build summarize service') {
+            when { expression { !isImageSkipped('summarize-service') } }
             steps {
                 script {
                     env.ICR_SERVICES_SUMMARIZE_IMAGE = buildAndPublishImage('services/summarize/', 'summarize-service')
@@ -77,6 +94,7 @@ pipeline {
         }
 
         stage('Build similarity service') {
+            when { expression { !isImageSkipped('similarity-service') } }
             steps {
                 script {
                     env.ICR_SERVICES_SIMILARITY_IMAGE = buildAndPublishImage('services/similarity/', 'similarity-service')
@@ -84,15 +102,8 @@ pipeline {
             }
         }
 
-        stage('Build service-base') {
-            steps {
-                script {
-                    env.ICR_SERVICE_BASE_IMAGE = buildAndPublishImage('images/service-base/', 'service-base')
-                }
-            }
-        }
-
         stage('Build Caddy') {
+            when { expression { !isImageSkipped('caddy') } }
             steps {
                 script {
                     env.ICR_CADDY_IMAGE = buildAndPublishImage('images/caddy/', 'caddy')
@@ -101,6 +112,7 @@ pipeline {
         }
 
         stage('Build litellm') {
+            when { expression { !isImageSkipped('litellm') } }
             steps {
                 script {
                     env.ICR_LITELLM_IMAGE = buildAndPublishImage('images/litellm/', 'litellm')
@@ -109,6 +121,7 @@ pipeline {
         }
 
         stage('Build postgres') {
+            when { expression { !isImageSkipped('postgres') } }
             steps {
                 script {
                     env.ICR_POSTGRES_IMAGE = buildAndPublishImage('images/postgres/', 'postgres')
@@ -117,6 +130,7 @@ pipeline {
         }
 
         stage('Build Tools AMD64') {
+            when { expression { !isImageSkipped('tools') } }
             agent { label 'shared-x86-centos9' }
             steps {
                 script {
@@ -128,6 +142,7 @@ pipeline {
         }
 
         stage('Build Tools ARM64') {
+            when { expression { !isImageSkipped('tools') } }
             agent { label 'shared-x86-centos9' }
             steps {
                 script {
@@ -137,6 +152,7 @@ pipeline {
         }
 
         stage('Build Tools PPC64LE') {
+            when { expression { !isImageSkipped('tools') } }
             steps {
                 script {
                     env.ICR_TOOL_IMAGE_PPC64LE = buildAndPublishImage('images/tools/', 'tools')
@@ -145,6 +161,7 @@ pipeline {
         }
 
         stage('Create Tools Manifest') {
+            when { expression { !isImageSkipped('tools') } }
             agent { label 'shared-x86-centos9' }
             steps {
                 script {
@@ -154,6 +171,7 @@ pipeline {
         }
 
         stage('Build AI Services') {
+            when { expression { !isImageSkipped('ai-services') } }
             steps {
                 script {
                     env.ICR_AI_SERVICES_IMAGE = buildAndPublishImage('ai-services', 'ai-services')
@@ -162,6 +180,7 @@ pipeline {
         }
 
         stage('Build UI Catalog') {
+            when { expression { !isImageSkipped('catalog-ui') } }
             steps {
                 script {
                     env.ICR_UI_CATALOG_IMAGE = buildAndPublishImage('ui/catalog', 'catalog-ui')
@@ -170,6 +189,7 @@ pipeline {
         }
 
         stage('Build UI Digitize') {
+            when { expression { !isImageSkipped('digitize-ui') } }
             steps {
                 script {
                     env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'digitize-ui')
@@ -177,6 +197,7 @@ pipeline {
             }
         }
         stage('Build UI Chatbot') {
+            when { expression { !isImageSkipped('chatbot-ui') } }
             steps {
                 script {
                     env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
@@ -272,25 +293,17 @@ pipeline {
     }
 }
 
-def validateVersion() {
-    if (!params.VERSION) {
-        error('VERSION parameter is required')
-    }
 
-    echo "Validating version: ${params.VERSION}"
-
-    def tags = sh(
-        script: "git ls-remote --tags ${env.AI_SERVICES_REPO_URL} | cut -d/ -f3",
-        returnStdout: true
-    ).trim()
-
-    if (!tags.contains(params.VERSION)) {
-        error "Failed to find tag ${params.VERSION} in repository"
-    }
-
-    echo "✓ Version ${params.VERSION} validated successfully"
+/**
+ * Returns true if the given imageName is present in the SKIP_IMAGE_LIST parameter.
+ * SKIP_IMAGE_LIST is a newline-separated list of image names to skip.
+ */
+def isImageSkipped(String imageName) {
+    return params.SKIP_IMAGE_LIST
+        .tokenize('\n')
+        .collect { it.trim() }
+        .contains(imageName)
 }
-
 
 def checkoutRepository() {
     echo "Checking out repository at version ${params.VERSION}..."
@@ -307,52 +320,67 @@ def checkoutRepository() {
 }
 
 
-def buildAndPublishImage(String imagePath, String imageName) {
-    def icrImage = ''
-    if (imagePath.startsWith('services/')) {
-        def serviceName = imagePath.split('/')[1]
-        dir("${REPO_DIR}/services") {
-            echo "Building and pushing ${imageName} image (service: ${serviceName})..."
-            def tag = sh(script: "make image-tag SERVICE=${serviceName}", returnStdout: true).trim()
-            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
-            withCredentials([usernamePassword(
-                credentialsId: 'icr-iam-creds',
-                usernameVariable: 'ICR_USERNAME',
-                passwordVariable: 'ICR_PASSWORD'
-            )]) {
-                sh """
-                    make build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                    make push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                """
+/**
+ * Resolves the effective ICR password (pipeline input takes precedence over the stored
+ * credential), exposes ICR_USERNAME and ICR_PASSWORD as environment variables for the
+ * given closure, and ensures the password is masked in console logs via withCredentials.
+ *
+ * Usage:
+ *   withIcrCredentials { sh 'docker login icr.io -u $ICR_USERNAME -p $ICR_PASSWORD' }
+ */
+def withIcrCredentials(Closure body) {
+    withCredentials([usernamePassword(
+        credentialsId: 'icr-iam-creds',
+        usernameVariable: 'ICR_USERNAME',
+        passwordVariable: 'ICR_CREDS_PASSWORD'
+    )]) {
+        def inputPassword = params.ICR_REGISTRY_PASSWORD?.toString()?.trim()
+
+        // If a pipeline input password was supplied, use it — Jenkins masks password
+        // parameters automatically in logs. Otherwise fall back to the stored credential
+        // (already masked by the outer withCredentials binding).
+        if (inputPassword) {
+            withEnv(["ICR_PASSWORD=${inputPassword}"]) {
+                println 'Overriding icr creds'
+                body()
             }
-            echo "✓ Successfully built and pushed: ${icrImage}"
-        }
-    } else {
-        dir("${REPO_DIR}/${imagePath}") {
-            echo "Building and pushing ${imageName} image..."
-            def tag = sh(script: "make image-tag", returnStdout: true).trim()
-            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
-            withCredentials([usernamePassword(
-                credentialsId: 'icr-iam-creds',
-                usernameVariable: 'ICR_USERNAME',
-                passwordVariable: 'ICR_PASSWORD'
-            )]) {
-                sh """
-                    make build REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                    make push REGISTRY=${params.ICR_REGISTRY} \\
-                        REGISTRY_USER=\$ICR_USERNAME \\
-                        REGISTRY_PASSWORD=\$ICR_PASSWORD
-                """
+        } else {
+            withEnv(["ICR_PASSWORD=${env.ICR_CREDS_PASSWORD}"]) {
+                body()
             }
-            echo "✓ Successfully built and pushed: ${icrImage}"
         }
     }
+}
+
+def buildAndPublishImage(String imagePath, String imageName) {
+    def serviceName = ''
+    def makeFilePath = "${REPO_DIR}"
+    if (imagePath.startsWith('services/')) {
+        serviceName = imagePath.split('/')[1]
+        makeFilePath += '/services'
+    } else {
+        makeFilePath += "/${imagePath}"
+    }
+
+    println "Makefile path: ${makeFilePath}"
+
+    def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+    def icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+
+    println "Image path: ${icrImage}"
+
+    withIcrCredentials {
+        sh """
+            make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                REGISTRY_USER=\$ICR_USERNAME \\
+                REGISTRY_PASSWORD=\$ICR_PASSWORD
+            make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                REGISTRY_USER=\$ICR_USERNAME \\
+                REGISTRY_PASSWORD=\$ICR_PASSWORD
+        """
+    }
+
+    echo "✓ Successfully built and pushed: ${icrImage}"
     return icrImage
 }
 
@@ -368,11 +396,7 @@ def buildToolArmImage(String imagePath, String imageName) {
         def tag = "${toolVersion}-arm64"
         icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
 
-        withCredentials([usernamePassword(
-            credentialsId: 'icr-iam-creds',
-            usernameVariable: 'ICR_USERNAME',
-            passwordVariable: 'ICR_PASSWORD'
-        )]) {
+        withIcrCredentials {
             // Setup buildx for multi-arch builds
             sh """
                 docker run --privileged --rm docker.io/tonistiigi/binfmt --install all
@@ -380,15 +404,15 @@ def buildToolArmImage(String imagePath, String imageName) {
                 docker buildx create --name multiarch --driver docker-container --use
                 docker buildx inspect --bootstrap
             """
-            
+
             // Create Docker config for authentication
             sh '''
-                AUTH=\$(printf "%s" "\$ICR_USERNAME:\$ICR_PASSWORD" | base64)
+                AUTH=$(printf "%s" "$ICR_USERNAME:$ICR_PASSWORD" | base64)
                 cat > ${WORKSPACE}/config.json <<EOF
-{"auths":{"icr.io":{"auth":"\$AUTH"}}}
+{"auths":{"icr.io":{"auth":"$AUTH"}}}
 EOF
             '''
-            
+
             // Build and push ARM64 image
             sh """
                 DOCKER_CONFIG=${WORKSPACE} docker buildx build \
@@ -412,11 +436,7 @@ def createToolsManifest() {
     dir("${REPO_DIR}/images/tools/") {
         echo "Creating multi-arch manifest for tools image..."
 
-        withCredentials([usernamePassword(
-            credentialsId: 'icr-iam-creds',
-            usernameVariable: 'ICR_USERNAME',
-            passwordVariable: 'ICR_PASSWORD'
-        )]) {
+        withIcrCredentials {
             sh """
                 make manifest \
                     REGISTRY=${params.ICR_REGISTRY} \
@@ -467,13 +487,12 @@ def generateImageList() {
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
-        env.ICR_SERVICE_BASE_IMAGE,
         env.ICR_CADDY_IMAGE,
         env.ICR_LITELLM_IMAGE,
         env.ICR_POSTGRES_IMAGE,
         env.ICR_TOOL_IMAGE,
-        env.ICR_AI_SERVICES_IMAGE     
-    ]
+        env.ICR_AI_SERVICES_IMAGE
+    ].findAll { it != null }
 
     def imageList = images.join('\n') + '\n'
 
@@ -488,13 +507,9 @@ def generateImageList() {
 
 def cosignLogin() {
     echo 'Logging into ICR for Cosign...'
-    
-    withCredentials([usernamePassword(
-        credentialsId: 'icr-iam-creds',
-        usernameVariable: 'ICR_USERNAME',
-        passwordVariable: 'ICR_PASSWORD'
-    )]) {
-        sh 'cosign login icr.io -u \$ICR_USERNAME -p \$ICR_PASSWORD'
+
+    withIcrCredentials {
+        sh 'cosign login icr.io -u $ICR_USERNAME -p $ICR_PASSWORD'
     }
 
     echo '✓ Cosign login successful'

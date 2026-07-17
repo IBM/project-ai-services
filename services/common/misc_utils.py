@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+import sys
 import shutil
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def get_logger(name):
         # Add the filter to inject request_id
         logger.addFilter(RequestIDFilter())
 
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(LOG_LEVEL)
 
         # Use custom formatter that conditionally includes request_id
@@ -186,13 +187,37 @@ _model_max_len_cache: dict[tuple[str, str], int] = {}
 
 
 def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len: int, api_key: str | None = None) -> int:
-    """Resolve model max length from /v1/models using exact model-name matching."""
-    from common.llm_utils import query_vllm_models
-    
+    """Resolve model max length, trying three sources in priority order:
+
+    1. ``/model/info`` (LiteLLM proxy) — reads ``model_info.max_tokens`` for the
+       entry whose ``model_name`` matches *model_name*.
+    2. ``/v1/models`` (vLLM / OpenAI-compatible) — reads ``max_model_len`` for the
+       entry whose ``id`` matches *model_name*.
+    3. *fallback_max_model_len* — the caller-supplied default.
+
+    Results are cached per ``(endpoint, model_name)`` pair so that subsequent
+    calls within the same process incur no network round-trips.
+    """
+    from common.llm_utils import query_litellm_model_info, query_vllm_models
+
     cache_key = (endpoint, model_name)
     if cache_key in _model_max_len_cache:
         return _model_max_len_cache[cache_key]
 
+    # --- 1. Try /model/info (LiteLLM) ---
+    try:
+        resp_json = query_litellm_model_info(endpoint, api_key)
+        for entry in resp_json.get("data", []):
+            if entry.get("model_name") == model_name:
+                max_tokens = entry.get("model_info", {}).get("max_tokens")
+                if isinstance(max_tokens, int) and max_tokens > 0:
+                    _model_max_len_cache[cache_key] = max_tokens
+                    return max_tokens
+                break
+    except Exception:
+        pass
+
+    # --- 2. Try /v1/models (vLLM / OpenAI-compatible) ---
     try:
         resp_json = query_vllm_models(endpoint, api_key)
         for model_info in resp_json.get("data", []):
@@ -205,6 +230,7 @@ def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len
     except Exception:
         pass
 
+    # --- 3. Fallback ---
     _model_max_len_cache[cache_key] = fallback_max_model_len
     return fallback_max_model_len
 

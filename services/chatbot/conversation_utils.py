@@ -29,9 +29,8 @@ def get_conversation_context(messages: Sequence[Any]) -> tuple[str, list[dict[st
     if not messages:
         return "", []
 
-    normalized_messages = [_message_to_dict(message) for message in messages]
-    current_query = normalized_messages[-1].get("content", "")
-    previous_messages = normalized_messages[:-1]
+    current_query = _message_to_dict(messages[-1]).get("content", "")
+    previous_messages = [_message_to_dict(m) for m in messages[:-1]]
 
     return current_query, previous_messages
 

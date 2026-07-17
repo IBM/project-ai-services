@@ -726,40 +726,65 @@ async def process_summarization_job(job_id: str, level):
                         True
                     )
                     
-                    async with concurrency_limiter:  # Global vLLM limit
-                        chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
-                            query_vllm_summarize,
-                            llm_endpoint=llm_endpoint,
-                            messages=chunk_messages,
-                            model=llm_model,
-                            max_tokens=chunk_info['max_tokens'],
-                            temperature=settings.summarize.summarization_temperature,
-                        )
-                    
-                    if isinstance(chunk_result, dict) and "error" in chunk_result:
-                        raise Exception(f"LLM error on chunk {chunk_index}: {chunk_result.get('error')}")
-                    
-                    chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
-                    
-                    # Update progress with lock
-                    async with metadata_lock:
-                        total_input_tokens += chunk_in_tokens
-                        total_output_tokens += chunk_out_tokens
+                    try:
+                        async with concurrency_limiter:  # Global vLLM limit
+                            chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
+                                query_vllm_summarize,
+                                llm_endpoint=llm_endpoint,
+                                messages=chunk_messages,
+                                model=llm_model,
+                                max_tokens=chunk_info['max_tokens'],
+                                temperature=settings.summarize.summarization_temperature,
+                            )
                         
-                        # Update database progress
-                        job_record = db_repo.get_job_by_id(job_id)
-                        if job_record:
-                            current_metadata = job_record.job_metadata or {}
-                            current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
-                            db_repo.update_job(job_id, metadata=current_metadata)
-                    
-                    logger.debug(f"Completed chunk {chunk_index + 1}/{num_chunks}")
-                    logger.debug(f"Chunk summary: {chunk_summary}")
-                    return chunk_summary
-            
-            # Process all chunks in parallel
-            tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-            chunk_summaries = await asyncio.gather(*tasks)
+                        if isinstance(chunk_result, dict) and "error" in chunk_result:
+                            raise Exception(f"LLM error on chunk {chunk_index + 1}: {chunk_result.get('error')}")
+                        
+                        chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
+                        
+                        # Update progress with lock
+                        async with metadata_lock:
+                            total_input_tokens += chunk_in_tokens
+                            total_output_tokens += chunk_out_tokens
+                            
+                            # Update database progress
+                            job_record = db_repo.get_job_by_id(job_id)
+                            if job_record:
+                                current_metadata = job_record.job_metadata or {}
+                                current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
+                                db_repo.update_job(job_id, metadata=current_metadata)
+                        
+                        logger.debug(f"Completed chunk {chunk_index + 1}/{num_chunks}")
+                        logger.debug(f"Chunk summary: {chunk_summary}")
+                        return chunk_summary
+
+                    except asyncio.CancelledError:
+                        # Sibling cancellation — propagate silently so the task ends cleanly
+                        logger.error(f"Chunk {chunk_index + 1} cancelled due to sibling failure")
+                        raise
+
+                    except Exception as chunk_exc:
+                        logger.error(
+                            f"Chunk {chunk_index + 1}/{num_chunks} failed for job {job_id}: {chunk_exc}",
+                            exc_info=True
+                        )
+                        raise
+
+            # Process all chunks in parallel.
+            # Use explicit tasks so that when one chunk fails we can cancel the siblings
+            # immediately rather than waiting for them to finish naturally.
+            tasks = [asyncio.create_task(process_chunk(chunk, i), name=f"chunk-{i}")
+                     for i, chunk in enumerate(chunks)]
+            try:
+                chunk_summaries = await asyncio.gather(*tasks)
+            except Exception:
+                # Cancel every task that is still running
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                # Wait for all cancellations to settle so semaphore slots are freed
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
             
             # Merge step
             logger.info(f"Merging {len(chunk_summaries)} chunk summaries")

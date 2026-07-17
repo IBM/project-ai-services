@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "catalog-ui"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-for: "true"
+spec:
+  port:
+    targetPort: 8081
+  to:
+    kind: Service
+    name: "catalog-ui"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
