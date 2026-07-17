@@ -79,8 +79,8 @@ func extractConfigFromEnv(podEnv map[string]string, config *PodmanConfigureOptio
 	}
 }
 
-// SanitizePaths cleans paths to prevent path-traversal attacks.
-func SanitizePaths(path string) string {
+// SanitizeFilePath cleans path to prevent path-traversal attacks.
+func SanitizeFilePath(path string) string {
 	cleanPath := ""
 	if path != "" {
 		cleanPath = filepath.Clean(path)

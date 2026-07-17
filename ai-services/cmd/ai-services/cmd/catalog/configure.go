@@ -131,8 +131,8 @@ func runConfigure() error {
 		opts := catalogUtils.PodmanConfigureOptions{
 			BaseDir:     baseDir,
 			DomainName:  domainName,
-			SSLCertPath: catalogUtils.SanitizePaths(sslCertPath),
-			SSLKeyPath:  catalogUtils.SanitizePaths(sslKeyPath),
+			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
 			HttpsPort:   httpsPort,
 		}
 
@@ -278,7 +278,7 @@ func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 
 func runResetCertificate() error {
 	// Call ResetCatalogCertificate with certificate paths
-	return catalogPodman.ResetCatalogCertificate(catalogUtils.SanitizePaths(sslCertPath), catalogUtils.SanitizePaths(sslKeyPath))
+	return catalogPodman.ResetCatalogCertificate(catalogUtils.SanitizeFilePath(sslCertPath), catalogUtils.SanitizeFilePath(sslKeyPath))
 }
 
 func initConfigureCommonFlags() {
