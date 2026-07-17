@@ -413,9 +413,10 @@ func runResetPassword() error {
 
 	case types.RuntimeTypeOpenShift:
 		return catalogOpenShift.ResetCatalogPassword()
-	}
 
-	return nil
+	default:
+		return fmt.Errorf("unsupported runtime: %s", rt)
+	}
 }
 
 func runResetPodmanAuth() error {

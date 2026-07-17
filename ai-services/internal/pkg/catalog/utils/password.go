@@ -47,16 +47,12 @@ func CollectAndHashPassword(rt runtime.Runtime) (string, error) {
 		return "", nil
 	}
 
-	return promptAndHashPassword()
+	return PromptAndHashPassword()
 }
 
 // PromptAndHashPassword prompts for a new password and returns its hash.
 // Used for resets where the secret already exists.
 func PromptAndHashPassword() (string, error) {
-	return promptAndHashPassword()
-}
-
-func promptAndHashPassword() (string, error) {
 	adminPassword, err := promptForPassword()
 	if err != nil {
 		return "", fmt.Errorf("failed to read admin password: %w", err)

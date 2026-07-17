@@ -19,6 +19,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+const (
+	catalogDBSecretName = "catalog-db-secret"
+)
+
 // DeployCatalog deploys the catalog service to OpenShift using the Helm chart.
 func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOptions) error {
 	logger.Infof("Deploying catalog service to OpenShift in namespace '%s'\n", opts.Namespace)
@@ -75,21 +79,15 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 }
 
 func getOperationTimeout(ctx context.Context, tp templates.Template, timeout time.Duration) (time.Duration, error) {
-	s := spinner.New("Setting the operation timeout...")
-
-	s.Start(ctx)
 	// populate the operation timeout if it's either not set or set negatively
 	if timeout <= 0 {
 		var appMetadata templates.AppMetadata
 		if err := tp.LoadMetadata(catalogconstants.CatalogAppTemplate, false, &appMetadata); err != nil {
-			s.Fail("failed to read the catalog metadata")
-
 			return 0, fmt.Errorf("failed to read the catalog metadata: %w", err)
 		}
 
 		timeout = appMetadata.Openshift.Timeout
 	}
-	s.Stop("Successfully set the operation timeout: " + timeout.String())
 
 	return timeout, nil
 }
@@ -129,7 +127,7 @@ func generateArgParams(rt *runtimeOpenshift.OpenshiftClient, passwordHash string
 	argParams := make(map[string]string)
 	argParams["backend.adminPasswordHash"] = passwordHash
 
-	dbSecretExists, err := rt.SecretExists("catalog-db-secret")
+	dbSecretExists, err := rt.SecretExists(catalogDBSecretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check db secret existence: %w", err)
 	}
