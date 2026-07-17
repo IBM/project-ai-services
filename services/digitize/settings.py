@@ -195,25 +195,26 @@ class TableSummaryConfig(BaseSettings):
         )
         
         prompt: str = Field(
-        default="""Sie sind ein hochpräziser Datenextraktor. Ihre Aufgabe ist es, die folgende Markdown-Tabelle zu lesen und ihren Inhalt exakt und unverändert als saubere Markdown-Tabelle wiederzugeben.
+        default="""Sie sind ein intelligenter Assistent, der Tabellen aus Dokumenten analysiert.
 
                 Ihre Aufgaben:
 
-                1. Exakte Rekonstruktion (Summary-Feld):
-                - Geben Sie die Tabelle EXAKT im Markdown-Format zurück.
-                - Behalten Sie JEDE Zeile und JEDE Spalte der ursprünglichen Tabelle bei. Lasse keine Informationen weg.
-                - Erfinde KEINE Daten, Ports, IP-Adressen oder Beschreibungen hinzu (absolutes Halluzinationsverbot). Verwende AUSSCHLIESSLICH den Text aus der Vorlage.
-                - Schreiben Sie KEINEN Fließtext, keine Aufzählungslisten und keine Absätze. Die "Summary" darf NUR die formatierte Markdown-Tabelle enthalten.
+                1. Extrahieren und dokumentieren Sie JEDE Information aus der Tabelle in umfassenden Details:
+                - Listen Sie ALLE Abschnitte, Unterabschnitte und deren Referenznummern auf, falls vorhanden
+                - Fügen Sie JEDE Spezifikation, Funktion, Nummer, Code, Bedingung und Anforderung hinzu
+                - Erwähnen Sie ALLE Elemente, auch wenn sie nebensächlich erscheinen - nichts sollte ausgelassen werden
+                - Verwenden Sie ein strukturiertes Format mit klarer Organisation (nummerierte Listen, Aufzählungspunkte oder detaillierte Absätze)
+                - Seien Sie äußerst gründlich und umfassend - streben Sie maximale Detailtiefe an
+                - Wenn die Tabelle mehrere Zeilen/Spalten hat, beschreiben Sie jede einzelne
+                - Bewahren Sie alle Fachbegriffe, Versionsnummern und spezifischen Details genau wie angegeben
 
-                2. Relevanzprüfung (Decision-Feld):
-                - Entscheiden Sie, ob die Tabelle für eine Wissensdatenbank relevant ist.
-                - Relevant: enthält sachliche, instruktive, technische oder erklärende Informationen, die zur Beantwortung von Fragen nützlich sind.
-                - Irrelevant: persönliche Informationen, Inhaltsverzeichnisse, Haftungsausschlüsse, administrative Hinweise (z. B. Dokumentenversionen).
+                2. Entscheiden Sie, ob die Tabelle für eine Wissensdatenbank relevant ist:
+                - Relevant: enthält sachliche, instruktive oder erklärende Informationen, die zur Beantwortung von Fragen nützlich sind.
+                - Irrelevant: persönliche Informationen, Haftungsausschlüsse, administrative Hinweise oder unzusammenhängende Kommentare.
 
                 3. Ausgabe im exakten Format unten:
 
-                Summary:
-                <Ihre exakte Markdown-Tabelle hier - OHNE Einleitungs- oder Schlusssätze>
+                Summary: <Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>
                 Decision: <yes oder no>
 
                 Geben Sie KEIN JSON, zusätzliche Kommentare oder anderen Text aus.
@@ -227,28 +228,23 @@ class TableSummaryConfig(BaseSettings):
                 | Power10   | 16    | 8 TB     |
 
                 Ausgabe:
-                Summary:
-                | Prozessor | Kerne | Speicher |
-                |-----------|-------|----------|
-                | Power10   | 16    | 8 TB     |
+                Summary: Die Tabelle präsentiert technische Spezifikationen für den Power10-Prozessor. Die Prozessorkonfiguration umfasst 16 Kerne für parallele Verarbeitungsfähigkeiten. Die Speicherkapazität unterstützt bis zu 8 TB (Terabyte) RAM und bietet erhebliche Speicherressourcen für Unternehmensworkloads und datenintensive Anwendungen.
                 Decision: yes
 
                 Negatives Beispiel (irrelevant):
                 Tabelle:
-                | Erstellt von: | John Smith | Datum: | 01.01.2024 |
-                |---------------|------------|--------|------------|
+                | Erstellt von: | John Smith |
+                |---------------|------------|
 
                 Ausgabe:
-                Summary:
-                | Erstellt von: | John Smith | Datum: | 01.01.2024 |
-                |---------------|------------|--------|------------|
+                Summary: Dokument-Metadaten, die angeben, dass es von John Smith erstellt wurde.
                 Decision: no
 
                 Analysieren Sie nun die folgende Tabelle:
 
                 Tabelle:
                 {content}""",
-                description="Prompt für Tabellenzusammenfassung (Deutsch)",
+            description="Prompt für Tabellenzusammenfassung (Deutsch)",
         )
     
     class ItalianConfig(BaseSettings):
