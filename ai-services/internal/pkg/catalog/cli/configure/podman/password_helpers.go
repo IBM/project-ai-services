@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/charmbracelet/x/term"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"golang.org/x/term"
 )
 
 // collectAndHashPassword collects the password from user and returns the hashed password.
@@ -68,7 +68,7 @@ func promptForPassword() (string, error) {
 // readPasswordFromTerminal reads a password from the terminal without echoing.
 func readPasswordFromTerminal(prompt string) (string, error) {
 	fmt.Print(prompt)
-	passwordBytes, err := term.ReadPassword(uintptr(syscall.Stdin))
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println() // Print newline after password input
 	if err != nil {
 		return "", err
