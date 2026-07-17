@@ -1,0 +1,78 @@
+# Service identification
+id: extract
+name: "Entity Extraction"
+description: "The service takes relevant data from unstructured text and populates a user-supplied JSON schema, enabling robust information retrieval from documents such as emails, invoices, and contracts"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# Dependencies on other components
+dependencies:
+  - id: llm
+
+standalone: true
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Large language model (LLM)"
+        value: "granite-3.3-8b-instruct"
+      - title: "Inference backend"
+        values:
+          - "RedHat AI Inference with Spyre"
+          - "AI Inference on CPU"
+          - "IBM watsonx.ai on IBM Cloud"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "JSON schema"
+          - "examples"
+          - "custom prompt"
+          - "text to be extracted"
+      - title: "Outputs"
+        values:
+          - "JSON entity extracted from inout text with token stats"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for LLM-based extraction capabilities)"
+
+  - title: "Content and format support"
+    sections:
+      - title: "Languages"
+        values:
+          - "English"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per 5 concurrent users"
+        values:
+          - title: "Compute"
+            value: "7 CPU cores"
+          - title: "Memory"
+            value: "101.00 GB"
+          - title: "Storage"
+            value: "60.00 GB"
+          - title: "Spyre acceleration cards"
+            value: 4
+
+  - title: "Assets"
+    sections:
+      - title: "Architectures"
+        values:
+          - "Digital assistant"
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
