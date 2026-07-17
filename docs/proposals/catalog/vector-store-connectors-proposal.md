@@ -132,7 +132,7 @@ flowchart LR
                                    (managed cluster)"]
 
     CS -->|"PostgreSQL wire protocol"| RP["pg_vector
-                                           (external Postgres)"]
+                                           (external)"]
 ```
 
 ---
@@ -525,9 +525,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
   "in_use_by": [
     {
       "application_id": "a1b2c3d4-1234-5678-abcd-ef0123456789",
-      "app_name": "my-rag-app",
-      "service_id": "svc-uuid-here",
-      "service_role": "vector_store"
+      "app_name": "my-rag-app"
     }
   ],
   "created_by": "user@example.com",
@@ -539,8 +537,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 **`in_use_by` SQL (server-side):**
 
 ```sql
-SELECT sd.service_id, s.app_id AS application_id, a.name AS app_name,
-       sd.dependency_type AS service_role
+SELECT DISTINCT s.app_id AS application_id, a.name AS app_name
 FROM service_dependencies sd
 JOIN services s ON s.id = sd.service_id
 JOIN applications a ON a.id = s.app_id
@@ -637,28 +634,13 @@ WHERE sd.dependency_id = :id
 
 ## 8. Connection Probe
 
-After every connector creation or credential update, `vectorstoremanager` fires an async connection probe against the external endpoint to confirm it is reachable and the credentials are accepted. The result drives the final `status` value written to the `components` table.
-
-**Probe logic — OpenSearch:**
-
-```
-GET <params.endpoint_url>
-Authorization: Basic <base64(username:password)> (credentials from Podman secret)
-```
-
-**Probe logic — pg_vector:**
-
-```
-Open TCP connection to <params.endpoint_url>
-Authenticate with credentials from Podman secret
-SELECT 1
-```
+After every connector creation or credential update, `vectorstoremanager` fires an async connection probe against the external endpoint using the credentials from the Podman secret to verify the connection is working. The result drives the final `status` value written to the `components` table.
 
 **Probe outcome:**
 
 | Result | `components.status` | `components.message` |
 |---|---|---|
-| Connection succeeded, index / table accessible | `Running` | `"Endpoint reachable and credentials accepted"` |
+| Connection succeeded | `Running` | `"Endpoint reachable and credentials accepted"` |
 | Connection failed or credentials rejected | `Error` | Error detail from the probe attempt |
 | No response within timeout | `Error` | `"Connection timed out"` |
 
