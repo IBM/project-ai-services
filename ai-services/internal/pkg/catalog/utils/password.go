@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/charmbracelet/x/term"
+	"golang.org/x/term"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -96,7 +96,7 @@ func promptForPassword() (string, error) {
 // readPasswordFromTerminal reads a password from the terminal without echoing.
 func readPasswordFromTerminal(prompt string) (string, error) {
 	fmt.Print(prompt)
-	passwordBytes, err := term.ReadPassword(uintptr(syscall.Stdin))
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 	if err != nil {
 		return "", err
