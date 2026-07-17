@@ -11,6 +11,7 @@ import type {
   ArchitectureDeploymentPayload,
   DeploymentComponent,
   DeploymentService,
+  ProviderSchema,
 } from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
@@ -175,7 +176,7 @@ function buildDeploymentComponent(
  */
 function separateParams(
   allParams: Record<string, unknown>,
-  providerSchemaData: Record<string, unknown> | null,
+  providerSchemaData: ProviderSchema | null,
   serviceSchemaData: Record<string, unknown> | null,
 ): {
   inferenceBackendParams: Record<string, unknown>;
@@ -186,9 +187,8 @@ function separateParams(
   }
 
   // Get provider schema properties with defaults
-  const providerProperties =
-    (providerSchemaData?.properties as Record<string, { default?: unknown }>) ||
-    {};
+  const providerProperties: Record<string, { default?: unknown } | undefined> =
+    providerSchemaData?.properties ?? {};
 
   // Get service schema properties with defaults (under backend.properties)
   const serviceProperties: Record<string, { default?: unknown }> = {};
@@ -240,7 +240,7 @@ function separateParams(
 export function transformToDeploymentPayload(
   formData: DeployFormData,
   deployOptions: DeployOptionsResponse,
-  providerParamsCache: Record<string, Record<string, unknown>>,
+  providerParamsCache: Record<string, ProviderSchema>,
   serviceParamsCache: Record<string, Record<string, unknown>>,
 ): ArchitectureDeploymentPayload {
   const services: DeploymentService[] = [];
@@ -268,8 +268,7 @@ export function transformToDeploymentPayload(
 
     // Get cached schemas from store
     const providerKey = `${componentType}:${serviceConfig.inferenceBackend}`;
-    const providerSchemaData =
-      (providerParamsCache[providerKey] as Record<string, unknown>) || null;
+    const providerSchemaData = providerParamsCache[providerKey] ?? null;
     const serviceSchemaData =
       (serviceParamsCache[serviceId] as Record<string, unknown>) || null;
 
