@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	catalogOpenshift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
@@ -25,7 +26,7 @@ func Uninstall(opts UninstallOptions) error {
 		return catalogPodman.UninstallCatalog(ctx, opts.AutoYes, opts.SkipCleanup)
 
 	case types.RuntimeTypeOpenShift:
-		return fmt.Errorf("openshift runtime is not yet supported for catalog uninstall")
+		return catalogOpenshift.UninstallCatalog(ctx, opts.AutoYes, opts.SkipCleanup)
 
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", opts.Runtime)
