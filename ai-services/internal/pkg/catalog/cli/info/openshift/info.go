@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	oc "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // DisplayCatalogInfo displays detailed information about the catalog service on OpenShift.
@@ -19,7 +20,7 @@ func DisplayCatalogInfo() error {
 		return fmt.Errorf("failed to initialize openshift client: %w", err)
 	}
 
-	// Check if any catalog pods exist in the namespace
+	// Step 1: Check if catalog pods exist in the namespace
 	listFilters := map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", constants.CatalogAppName)},
 	}
@@ -38,9 +39,17 @@ func DisplayCatalogInfo() error {
 
 	logger.Infoln("Catalog Service Name: " + constants.CatalogAppName)
 
+	// Step 2: Fetch and print the template and version label values
+	catalogTemplate := pods[0].Labels[string(vars.TemplateLabel)]
+	logger.Infoln("Catalog Template: " + catalogTemplate)
+
+	version := pods[0].Labels[string(vars.VersionLabel)]
+	logger.Infoln("Version: " + version)
+
+	// Step 3: Read and print the info.md file
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
-	if err := helpers.PrintInfo(tp, runtime, constants.CatalogAppName, constants.CatalogAppTemplate); err != nil {
+	if err := helpers.PrintInfo(tp, runtime, constants.CatalogAppName, catalogTemplate); err != nil {
 		// not failing overall info command if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 	}
