@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -76,6 +77,16 @@ func extractConfigFromEnv(podEnv map[string]string, config *PodmanConfigureOptio
 	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
 		config.HttpsPort, _ = strconv.Atoi(value)
 	}
+}
+
+// SanitizeFilePath cleans path to prevent path-traversal attacks.
+func SanitizeFilePath(path string) string {
+	cleanPath := ""
+	if path != "" {
+		cleanPath = filepath.Clean(path)
+	}
+
+	return cleanPath
 }
 
 // Made with Bob

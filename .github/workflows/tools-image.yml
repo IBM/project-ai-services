@@ -5,24 +5,25 @@ on:
       - 'images/tools/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/tools/**'
       - .github/workflows/tools-image.yml
     branches:
       - main
-
-concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-publish-image:
-    name: Build Arch Specific Image
     strategy:
       matrix:
         include:
@@ -32,34 +33,27 @@ jobs:
             arch: amd64
           - os: ubuntu-24.04-arm
             arch: arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+    name: Build and Publish Image (${{ matrix.arch }})
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'images/tools'
+      runner: ${{ matrix.os }}
+    secrets: inherit
 
-      - name: Build tools image
-        working-directory: images/tools
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-
-      - name: Publish tools image
-        working-directory: images/tools
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
   create-manifest:
     name: Create Multi-Arch Manifest
     needs: build-publish-image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Create and Push Manifest
         working-directory: images/tools
         run: |
           make manifest REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
