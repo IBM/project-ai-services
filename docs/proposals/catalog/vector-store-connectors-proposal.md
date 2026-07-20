@@ -313,7 +313,7 @@ All `/api/v1/connectors/vector-stores` endpoints. All vector store components ar
 | Existing Endpoint | Change |
 |---|---|
 | `GET /api/v1/applications/:id` | Response includes `components` array alongside `services` — `type=vector_store` components appear alongside `llm`, `embedding`, `reranker` |
-| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `vector_store` includes `opensearch` and `pg_vector` as `remote` connector options |
+| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `vector_store` includes `opensearch` and `pg_vector`; registered connectors for each provider appear under `instances` for reuse selection |
 
 ---
 

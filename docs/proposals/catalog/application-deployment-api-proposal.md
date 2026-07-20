@@ -1599,7 +1599,7 @@ This section describes the endpoints for retrieving deployment options, componen
 
 **Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
 
-**Description:** Retrieves available providers and their named instances for all services and their components within an architecture. Local entries represent a new pod to be deployed — identified by `provider_id` alone. Remote entries represent existing registered connectors — each carries an `instance_name` that matches `components.instance_name` in the DB and must be submitted verbatim in the Create Application request to reuse that connector.
+**Description:** Retrieves available providers and their named instances for all components within an architecture. Each provider appears exactly once per `id`. If existing registered connectors are available for that provider they are listed under `instances`; the UI presents them as reuse options. The provider's top-level `schema` and `resources` fields describe the configuration form for a new local deployment.
 
 **Request Headers:**
 
@@ -1629,24 +1629,20 @@ Authorization: Bearer <access_token>
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "source": "local",
           "description": "OpenSearch vector store",
           "default": true,
-          "schema": "/api/v1/components/vector_store/providers/opensearch/params"
-        },
-        {
-          "id": "opensearch",
-          "name": "OpenSearch",
-          "instance_name": "prod-opensearch",
-          "source": "remote",
-          "description": "Registered OpenSearch connector — reuse existing"
+          "schema": "/api/v1/components/vector_store/providers/opensearch/params",
+          "instances": [
+            { "id": "e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0", "name": "prod-opensearch" }
+          ]
         },
         {
           "id": "pg_vector",
           "name": "PG Vector",
-          "instance_name": "prod-pgvector",
-          "source": "remote",
-          "description": "Registered pgvector connector — reuse existing"
+          "description": "External PostgreSQL with pgvector",
+          "instances": [
+            { "id": "f7a8b9c0-d1e2-f3a4-b5c6-d7e8f9a0b1c2", "name": "prod-pgvector" }
+          ]
         }
       ]
     }
@@ -1665,14 +1661,12 @@ Authorization: Bearer <access_token>
             {
               "id": "vllm",
               "name": "vLLM Instruct",
-              "source": "local",
               "description": "Deploy new instruct model on vLLM",
               "schema": "/api/v1/components/llm/providers/vllm/params"
             },
             {
               "id": "watsonx",
               "name": "IBM watsonx.ai Instruct",
-              "source": "local",
               "description": "Configure watsonx.ai for instruct models",
               "schema": "/api/v1/components/llm/providers/watsonx/params"
             }
@@ -1705,16 +1699,21 @@ Authorization: Bearer <access_token>
 **Provider Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Provider type identifier (e.g., `"opensearch"`, `"pg_vector"`, `"vllm"`) |
-| name | string | Human-readable display label for the UI — always the provider display name (e.g., `"OpenSearch"`, `"PG Vector"`, `"vLLM Instruct"`). Never used as a resolution key |
-| instance_name | string | **Remote only** (`source = "remote"`). The `components.instance_name` value of the registered connector — submit this verbatim as `instance_name` in the Create Application request body to reuse this connector. Absent for `source = "local"` entries |
-| source | string | `"local"` — new pod to be deployed; `"remote"` — existing connector to be reused. UI shows a creation form only for `"local"` entries |
-| description | string | Provider or instance description |
-| default | boolean | Whether this is the default selection |
-| schema | string | URL to fetch configuration parameters; present only when `source = "local"` — omitted for `source = "remote"` |
-| resources | object | Optional resource requirements; present only when `source = "local"` |
+| id | string | Provider type identifier (e.g., `"opensearch"`, `"pg_vector"`, `"vllm"`). Unique within the `providers` array |
+| name | string | Human-readable display label for the UI (e.g., `"OpenSearch"`, `"PG Vector"`, `"vLLM Instruct"`) |
+| description | string | Short description of the provider |
+| default | boolean | Whether this provider is the default selection. Omitted when `false` |
+| schema | string | URL to the provider's configuration parameter schema — used to render the new-deployment form. Present for all providers that support local deployment |
+| resources | object | Optional resource requirements for a new local deployment |
+| instances | array | **Optional.** Registered connectors available for reuse. Present only when existing connectors exist for this provider. Each entry is an **Instance Object** |
 
-> **Server resolution logic:** Local entries are resolved by `provider_id` alone — the server deploys a new pod. Remote entries are resolved by `instance_name` — the server matches it against `components.instance_name` and reuses the existing connector. The two paths never overlap.
+**Instance Object (in `instances` array):**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | UUID (`components.id`) — the database identity of the registered connector |
+| name | string | The `components.instance_name` of the registered connector — submit this verbatim as `instance_name` in the Create Application request body to reuse it |
+
+> **Server resolution logic:** Submitting `provider_id` only (no `instance_name`) → server deploys a new local pod. Submitting `provider_id` + `instance_name` → server matches `instance_name` against `components.instance_name` and reuses the existing connector. The two paths never overlap.
 
 **Service Object (in services array):**
 | Field | Type | Description |
@@ -1744,7 +1743,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `GET /api/v1/services/{id}/deploy-options`
 
-**Description:** Retrieves available providers and their named instances for a specific service. Local entries represent a new pod to be deployed — identified by `provider_id` alone. Remote entries represent existing registered connectors — each carries an `instance_name` matching `components.instance_name` in the DB that must be submitted verbatim in the Create Application request to reuse that connector.
+**Description:** Retrieves available providers and their named instances for all components within a specific service. Each provider appears exactly once per `id`. Registered connectors available for reuse are listed under `instances`. The provider's top-level `schema` and `resources` fields describe the configuration form for a new local deployment.
 
 **Request Headers:**
 
@@ -1775,24 +1774,20 @@ Authorization: Bearer <access_token>
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "source": "local",
           "description": "OpenSearch vector store",
           "default": true,
-          "schema": "/api/v1/components/vector_store/providers/opensearch/params"
-        },
-        {
-          "id": "opensearch",
-          "name": "OpenSearch",
-          "instance_name": "prod-opensearch",
-          "source": "remote",
-          "description": "Registered OpenSearch connector — reuse existing"
+          "schema": "/api/v1/components/vector_store/providers/opensearch/params",
+          "instances": [
+            { "id": "e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0", "name": "prod-opensearch" }
+          ]
         },
         {
           "id": "pg_vector",
           "name": "PG Vector",
-          "instance_name": "prod-pgvector",
-          "source": "remote",
-          "description": "Registered pgvector connector — reuse existing"
+          "description": "External PostgreSQL with pgvector",
+          "instances": [
+            { "id": "f7a8b9c0-d1e2-f3a4-b5c6-d7e8f9a0b1c2", "name": "prod-pgvector" }
+          ]
         }
       ]
     },
@@ -1803,14 +1798,12 @@ Authorization: Bearer <access_token>
         {
           "id": "vllm",
           "name": "vLLM Instruct",
-          "source": "local",
           "description": "Deploy new instruct model on vLLM",
           "schema": "/api/v1/components/llm/providers/vllm/params"
         },
         {
           "id": "watsonx",
           "name": "IBM watsonx.ai Instruct",
-          "source": "local",
           "description": "Configure watsonx.ai for instruct models",
           "schema": "/api/v1/components/llm/providers/watsonx/params"
         }
