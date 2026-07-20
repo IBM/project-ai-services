@@ -1,14 +1,17 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 var (
@@ -95,6 +98,50 @@ func SanitizeFilePath(path string) string {
 	}
 
 	return cleanPath
+}
+
+// ConfirmDeletion prompts the user to confirm deletion and logs pods to be deleted.
+func ConfirmDeletion(ctx context.Context, pods []types.Pod) (bool, error) {
+	// Print pods to be deleted
+	logger.InfofCtx(ctx, "Below are the list of pods to be deleted")
+	for _, pod := range pods {
+		logger.Infof("\t-> %s\n", pod.Name)
+	}
+
+	// Confirm deletion
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
+	if err != nil {
+		return false, fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.InfolnCtx(ctx, "Deletion cancelled")
+
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// GetCatalogPods return the list of catalog pod.
+func GetCatalogPods(rt runtime.Runtime) ([]types.Pod, error) {
+	// Check if catalog pods exist
+	pods, err := rt.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey ,catalogConstants.CatalogAppName)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	if len(pods) == 0 {
+		logger.Infoln("Catalog service is not deployed")
+
+		return nil, nil
+	}
+
+	logger.Infof("Found %d catalog pod(s)\n", len(pods))
+
+	return pods, nil
 }
 
 // Made with Bob

@@ -7,11 +7,12 @@ import (
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const defaultUninstallTimeout = 5 * time.Minute
@@ -28,18 +29,21 @@ func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) e
 	}
 
 	// Check if the catalog release exists
-	if installed, err := isCatalogInstalled(helmClient, catalog, namespace); err != nil || !installed {
+	if installed, err := isCatalogInstalled(ctx, helmClient, catalog, namespace); err != nil || !installed {
 		return err
 	}
 
-	// Confirm deletion unless auto-yes is set
-	if !opts.AutoYes {
-		if confirmed, err := confirmDeletion(catalog); !confirmed || err != nil {
-			return err
-		}
+	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	logger.Infoln("Proceeding with uninstall...")
+	// Confirm deletion unless auto-yes is set
+	if confirmed, err := confirmDeletion(ctx, rt, opts.AutoYes); err != nil || !confirmed {
+		return err
+	}
+
+	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
 
 	s := spinner.New("Uninstalling catalog '" + catalog + "'...")
 	s.Start(ctx)
@@ -52,17 +56,30 @@ func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) e
 
 	s.Stop("Catalog '" + catalog + "' uninstalled successfully")
 
-	return cleanupPVCs(opts.SkipCleanup, catalog, namespace)
+	return cleanupPVCs(ctx, rt, opts.SkipCleanup, catalog)
 }
 
-func isCatalogInstalled(helmClient *helm.Helm, catalog, namespace string) (bool, error) {
+func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (bool, error) {
+	if autoYes {
+		return true, nil
+	}
+
+	pods, err := catalogUtils.GetCatalogPods(rt)
+	if err != nil || len(pods) == 0 {
+		return false, err
+	}
+
+	return catalogUtils.ConfirmDeletion(ctx, pods)
+}
+
+func isCatalogInstalled(ctx context.Context, helmClient *helm.Helm, catalog, namespace string) (bool, error) {
 	exists, err := helmClient.IsReleaseExist(catalog)
 	if err != nil {
 		return false, fmt.Errorf("failed to check if catalog exists: %w", err)
 	}
 
 	if !exists {
-		logger.Infof("Catalog '%s' does not exist in namespace '%s'\n", catalog, namespace)
+		logger.InfofCtx(ctx, "Catalog '%s' does not exist in namespace '%s'\n", catalog, namespace)
 
 		return false, nil
 	}
@@ -70,34 +87,14 @@ func isCatalogInstalled(helmClient *helm.Helm, catalog, namespace string) (bool,
 	return true, nil
 }
 
-func confirmDeletion(catalog string) (bool, error) {
-	confirmed, err := utils.ConfirmAction("Are you sure you want to uninstall the catalog '" + catalog + "'?")
-	if err != nil {
-		return false, fmt.Errorf("failed to take user input: %w", err)
-	}
-
-	if !confirmed {
-		logger.Infoln("Uninstall cancelled")
-
-		return false, nil
-	}
-
-	return true, nil
-}
-
-func cleanupPVCs(skipCleanup bool, catalog, namespace string) error {
+func cleanupPVCs(ctx context.Context, rt runtime.Runtime, skipCleanup bool, catalog string) error {
 	if skipCleanup {
 		return nil
 	}
 
-	logger.Debugln("Cleaning up Persistent Volume Claims...")
+	logger.DebuglnCtx(ctx, "Cleaning up Persistent Volume Claims...")
 
-	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
-	if err != nil {
-		return fmt.Errorf("failed to create openshift client: %w", err)
-	}
-
-	if err := rt.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", catalog)); err != nil {
+	if err := rt.DeletePVCs(fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
 		return fmt.Errorf("failed to cleanup PVCs: %w", err)
 	}
 
