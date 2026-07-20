@@ -129,7 +129,7 @@ func runConfigure() error {
 		}
 
 		opts := catalogUtils.PodmanConfigureOptions{
-			BaseDir:     baseDir,
+			BaseDir:     aiServicesDir,
 			DomainName:  domainName,
 			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
 			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
