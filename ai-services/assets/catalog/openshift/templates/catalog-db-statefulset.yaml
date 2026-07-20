@@ -44,6 +44,10 @@ spec:
                 secretKeyRef:
                   name: catalog-db-secret
                   key: db-password
+            # By default, PostgreSQL is designed to block everything unless explicitly told otherwise.
+            # The POSTGRES_INITDB_ARGS variable acts as a key to override this default behavior.
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256"
           ports:
             - name: postgres-port
               containerPort: 5432

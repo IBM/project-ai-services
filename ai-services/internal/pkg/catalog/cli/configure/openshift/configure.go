@@ -20,10 +20,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-const (
-	catalogDBSecretName = "catalog-db-secret"
-)
-
 // DeployCatalog deploys the catalog service to OpenShift using the Helm chart.
 func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOptions) error {
 	logger.Infof("Deploying catalog service to OpenShift in namespace '%s'\n", opts.Namespace)
@@ -128,7 +124,7 @@ func generateArgParams(rt *runtimeOpenshift.OpenshiftClient, passwordHash string
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 
-	dbSecretExists, err := rt.SecretExists(catalogDBSecretName)
+	dbSecretExists, err := rt.SecretExists(catalogconstants.CatalogDBSecretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check db secret existence: %w", err)
 	}
