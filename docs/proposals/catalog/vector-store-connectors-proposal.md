@@ -170,14 +170,21 @@ A **Vector Store Connector** is a `components` row with `source = 'remote'` and 
 
 ### 5.2 Additions to Existing `components` Table
 
-**No new columns are required.** The three columns added by the Model Management proposal (`tags`, `created_by`, `source`) fully support vector store connectors. The `component_status` enum values (`Syncing`, `Running`, `Error`) defined there apply unchanged.
-
-The only new content is the `vector_store` value added to the existing `component_type` enum:
+One new column and one new enum value are required:
 
 ```sql
+-- New column: human-readable unique instance name, indexable
+ALTER TABLE components ADD COLUMN instance_name VARCHAR(100);
+CREATE UNIQUE INDEX components_instance_name_idx ON components (instance_name)
+    WHERE instance_name IS NOT NULL;
+
 -- Extended (existing): new value added to component_type
 ALTER TYPE component_type ADD VALUE 'vector_store';
 ```
+
+`instance_name` is `NULL` for infrastructure components deployed by the application pipeline (i.e. `created_by IS NULL`). It is set to the user-supplied name at creation time for all user-registered connectors (`created_by IS NOT NULL`). The unique partial index enforces uniqueness only over non-NULL values, so infrastructure components are unaffected.
+
+The two columns added by the Model Management proposal (`created_by`, `source`) apply unchanged. The `component_status` enum values (`Syncing`, `Running`, `Error`) defined there also apply unchanged.
 
 #### `component_status` enum values used by vector store connectors
 
@@ -211,7 +218,7 @@ Non-secret connection config stored in `components.params`:
 -- Extended (existing): new value added to component_type
 ALTER TYPE component_type ADD VALUE 'vector_store';
 
--- source_type, component_status — already defined by the Model Management proposal; no changes required
+-- source_type, component_status, created_by — already defined by the Model Management proposal; no changes required
 ```
 
 ---
@@ -251,6 +258,7 @@ erDiagram
 
     components {
         UUID id PK
+        VARCHAR instance_name "UNIQUE, nullable"
         VARCHAR type
         VARCHAR provider
         source_type source
@@ -260,7 +268,6 @@ erDiagram
         TEXT version
         JSONB metadata
         JSONB params
-        JSONB tags
         VARCHAR created_by
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
@@ -328,7 +335,7 @@ Content-Type: application/json
 
 ```json
 {
-  "tags": { "name": "prod-opensearch" },
+  "instance_name": "prod-opensearch",
   "provider": "opensearch",
   "params": {
     "endpoint_url": "https://my-opensearch-cluster.us-east-1.es.amazonaws.com",
@@ -345,7 +352,7 @@ Content-Type: application/json
 
 ```json
 {
-  "tags": { "name": "prod-pgvector" },
+  "instance_name": "prod-pgvector",
   "provider": "pg_vector",
   "params": {
     "endpoint_url": "postgresql://my-db-host:5432",
@@ -362,7 +369,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `tags` | object | Yes | Label bag. Must include `"name"` key (3–100 chars, slug-safe) |
+| `instance_name` | string | Yes | Unique human-readable name for this connector (3–100 chars, slug-safe). Stored as `components.instance_name`; used as the resolution key at deploy time |
 | `provider` | string | Yes | Connector backend: `opensearch`, `pg_vector` |
 | `params` | object | Yes | Endpoint + auth — mirrors the fields defined in `values.schema.json` for this provider |
 | `params.endpoint_url` | string | Yes | Remote service base URL or connection string |
@@ -374,7 +381,7 @@ Content-Type: application/json
 **Credential handling — Podman secret created at registration:**
 
 ```
-# Secret name pattern: vector-store-creds-{tags.name}
+# Secret name pattern: vector-store-creds-{instance_name}
 # Example for prod-opensearch:
 CreateSecret(name="vector-store-creds-prod-opensearch", data={"username": "admin", "password": "s3cret"})
 ```
@@ -395,7 +402,7 @@ CreateSecret(name="vector-store-creds-prod-opensearch", data={"username": "admin
 |---|---|
 | `400 Bad Request` | Missing required fields, unknown `provider` |
 | `401 Unauthorized` | Invalid or missing access token |
-| `409 Conflict` | A connector with the same `tags.name` already exists |
+| `409 Conflict` | A connector with the same `instance_name` already exists |
 | `500 Internal Server Error` | Podman secret creation failure |
 
 ---
@@ -435,8 +442,8 @@ GET /api/v1/connectors/vector-stores?provider=opensearch
   "data": [
     {
       "id": "e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0",
+      "instance_name": "prod-opensearch",
       "source": "remote",
-      "tags": { "name": "prod-opensearch" },
       "provider": "opensearch",
       "params": {
         "endpoint_url": "https://my-opensearch-cluster.us-east-1.es.amazonaws.com",
@@ -448,8 +455,8 @@ GET /api/v1/connectors/vector-stores?provider=opensearch
     },
     {
       "id": "f7a8b9c0-d1e2-f3a4-b5c6-d7e8f9a0b1c2",
+      "instance_name": "prod-pgvector",
       "source": "remote",
-      "tags": { "name": "prod-pgvector" },
       "provider": "pg_vector",
       "params": {
         "endpoint_url": "postgresql://my-db-host:5432",
@@ -509,8 +516,8 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 ```json
 {
   "id": "e5f6a7b8-c9d0-e1f2-a3b4-c5d6e7f8a9b0",
+  "instance_name": "prod-opensearch",
   "source": "remote",
-  "tags": { "name": "prod-opensearch" },
   "type": "vector_store",
   "provider": "opensearch",
   "status": "Running",
@@ -575,7 +582,7 @@ WHERE sd.dependency_id = :id
 
 **Processing steps when `params.auth` is present:**
 
-1. Update the Podman secret `vector-store-creds-<tags.name>` with new credential values.
+1. Update the Podman secret `vector-store-creds-<instance_name>` with new credential values.
 2. Reset `components.status = 'Syncing'`.
 3. Merge supplied `metadata` and non-auth `params` fields into stored record (omitted keys preserved).
 4. Update `updated_at`.
@@ -609,7 +616,7 @@ WHERE sd.dependency_id = :id
 
 | Step | Call | Detail |
 |---|---|---|
-| 1 | `DeleteSecret` | Removes Podman secret `vector-store-creds-<tags.name>` |
+| 1 | `DeleteSecret` | Removes Podman secret `vector-store-creds-<instance_name>` |
 | 2 | Delete `components` row | Final cleanup |
 
 **Response (`202 Accepted`):**
@@ -652,7 +659,7 @@ After every connector creation or credential update, `vectorstoremanager` fires 
 ```
 POST /api/v1/connectors/vector-stores
 { provider: "opensearch",
-  tags: {"name":"prod-opensearch"},
+  instance_name: "prod-opensearch",
   params: {endpoint_url: "https://my-opensearch-cluster.us-east-1.es.amazonaws.com",
            auth: {type: "basic", username: "admin", password: "s3cret"}} }
 
@@ -663,11 +670,11 @@ POST /api/v1/connectors/vector-stores
   3. CreateSecret(name="vector-store-creds-prod-opensearch",
                   data={"username": "admin", "password": "s3cret"})
   4. INSERT into components (type='vector_store', provider='opensearch', source='remote',
-                             status='Syncing', tags={"name":"prod-opensearch"}, created_by=<user>,
+                             status='Syncing', instance_name='prod-opensearch', created_by=<user>,
                              endpoints=[{type:"api", url: params.endpoint_url}],
                              params={endpoint_url: ...,
                                      auth: {type: "basic", username: "admin"}  ← password not stored})
-  5. Return 201 {source: "remote", id: components.id, status: "Syncing", ...}
+  5. Return 201 {instance_name: "prod-opensearch", id: components.id, status: "Syncing", ...}
   6. [async] vectorstoremanager probes endpoint using credentials from Podman secret
   7. [async] UPDATE components SET status='Running' or status='Error'
 ```
@@ -677,7 +684,7 @@ POST /api/v1/connectors/vector-stores
 ```
 POST /api/v1/connectors/vector-stores
 { provider: "pg_vector",
-  tags: {"name":"prod-pgvector"},
+  instance_name: "prod-pgvector",
   params: {endpoint_url: "postgresql://my-db-host:5432",
            auth: {type: "basic", username: "rag_user", password: "s3cret"}} }
 
@@ -688,11 +695,11 @@ POST /api/v1/connectors/vector-stores
   3. CreateSecret(name="vector-store-creds-prod-pgvector",
                   data={"username": "rag_user", "password": "s3cret"})
   4. INSERT into components (type='vector_store', provider='pg_vector', source='remote',
-                             status='Syncing', tags={"name":"prod-pgvector"}, created_by=<user>,
+                             status='Syncing', instance_name='prod-pgvector', created_by=<user>,
                              endpoints=[{type:"api", url: params.endpoint_url}],
                              params={endpoint_url: ...,
                                      auth: {type: "basic", username: "rag_user"}  ← password not stored})
-  5. Return 201 {source: "remote", id: components.id, status: "Syncing", ...}
+  5. Return 201 {instance_name: "prod-pgvector", id: components.id, status: "Syncing", ...}
   6. [async] vectorstoremanager probes endpoint using credentials from Podman secret
   7. [async] UPDATE components SET status='Running' or status='Error'
 ```
@@ -706,7 +713,7 @@ DELETE /api/v1/connectors/vector-stores/:id
 
   1. Verify created_by=user
   2. Return 202
-  3. [async] DeleteSecret(name="vector-store-creds-<tags.name>")
+  3. [async] DeleteSecret(name="vector-store-creds-<instance_name>")
   4. [async] DELETE components row
 ```
 
@@ -720,7 +727,7 @@ DELETE /api/v1/connectors/vector-stores/:id
 
 ### 2. Credentials Never Enter the Database
 
-Credentials are written to a Podman secret (`vector-store-creds-<tags.name>`) at connector-creation time. Only `params.auth.type` and non-secret fields (e.g. `username`) are persisted in the Catalog DB. At delete time, `DeleteSecret` removes the secret before the row is deleted.
+Credentials are written to a Podman secret (`vector-store-creds-<instance_name>`) at connector-creation time. Only `params.auth.type` and non-secret fields (e.g. `username`) are persisted in the Catalog DB. At delete time, `DeleteSecret` removes the secret before the row is deleted.
 
 ### 3. `deployment_strategy: remote` in `metadata.yaml` is the Only Branch Point
 
@@ -738,9 +745,9 @@ The API layer distinguishes user-created connectors from infrastructure componen
 
 `component_status.Running` means the last connection probe succeeded — endpoint was reachable and credentials were accepted. UI status display logic is uniform — green = Running.
 
-### 7. Secret Name = `vector-store-creds-{tags.name}`
+### 7. Secret Name = `vector-store-creds-{instance_name}`
 
-Naming the Podman secret after the user-provided `tags.name` (e.g. `vector-store-creds-prod-opensearch`) allows consumer services and teardown logic to derive the secret name without an extra DB lookup.
+Naming the Podman secret after `components.instance_name` (e.g. `vector-store-creds-prod-opensearch`) allows consumer services and teardown logic to derive the secret name with a single direct column lookup — no JSONB extraction required.
 
 ---
 
@@ -749,7 +756,7 @@ Naming the Podman secret after the user-provided `tags.name` (e.g. `vector-store
 ### All active vector store connectors:
 ```sql
 SELECT
-    id, tags->>'name' AS name, provider, status,
+    id, instance_name, provider, status,
     endpoints
 FROM components
 WHERE type = 'vector_store'
@@ -760,7 +767,7 @@ ORDER BY provider, created_at DESC;
 
 ### Get connectors still syncing (probe in progress):
 ```sql
-SELECT id, tags->>'name' AS name, provider, endpoints, created_at
+SELECT id, instance_name, provider, endpoints, created_at
 FROM components
 WHERE type = 'vector_store'
   AND source = 'remote'
@@ -770,10 +777,8 @@ ORDER BY created_at DESC;
 
 ### Get vector store connectors in use by a specific application:
 ```sql
-SELECT c.id, c.provider, c.status,
-       c.tags->>'name' AS name,
-       c.metadata->>'index_name' AS index_name,
-       c.metadata->>'table_name' AS table_name
+SELECT c.id, c.instance_name, c.provider, c.status,
+       c.params->>'endpoint_url' AS endpoint_url
 FROM components c
 JOIN service_dependencies sd ON sd.dependency_id = c.id
 JOIN services s ON s.id = sd.service_id

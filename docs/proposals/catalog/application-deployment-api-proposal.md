@@ -870,7 +870,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `POST /api/v1/applications/`
 
-**Description:** Creates a new application (architecture or service) with required component and version selections.
+**Description:** Creates a new application (architecture or service) with required component and version selections. For each component the caller supplies a `provider_id` and optionally an `instance_name`. The server resolves the component using the following priority: if the component has no `instance_name`, the `provider_id` is matched against `metadata.yaml` and a new local pod is **deployed**; if `instance_name` is present, it is matched against `components.instance_name` in the DB and the existing connector is **reused**. If either resolution fails, the request is rejected with `422`.
 
 **Request Headers:**
 
@@ -910,7 +910,8 @@ Content-Type: application/json
         {
           "type": "component",
           "component_type": "vector_store",
-          "provider_id": "opensearch"
+          "provider_id": "opensearch",
+          "instance_name": "prod-opensearch"
         }
       ]
     }
@@ -938,8 +939,9 @@ Content-Type: application/json
 |-------|------|----------|-------------|
 | type | string | Yes | Must be `"component"` |
 | component_type | string | Yes | Component type (e.g., `"llm"`, `"embedding"`, `"vector_store"`, `"reranker"`) |
-| provider_id | string | Yes | Provider identifier (e.g., `"vllm-spyre"`, `"vllm-cpu"`, `"opensearch"`, `"watsonx"`) |
-| params | object | No | Provider-specific configuration parameters (omit if no params needed) |
+| provider_id | string | Yes | Provider type identifier (e.g., `"vllm-spyre"`, `"vllm-cpu"`, `"opensearch"`, `"pg_vector"`). For local deployments this is the resolution key matched against `metadata.yaml` |
+| instance_name | string | No | **Required for remote connectors; mutually exclusive with `params`.** Must match `components.instance_name` of an existing registered connector. Omit for new local deployments. Any value that does not match a registered connector in the DB returns `422` |
+| params | object | No | Provider-specific configuration parameters for new local deployments. **Must be omitted when `instance_name` is present.** |
 
 **Response (202 Accepted):**
 
@@ -959,7 +961,7 @@ Content-Type: application/json
 - `400 Bad Request` - Invalid request body or validation errors
 - `401 Unauthorized` - Invalid or missing access token
 - `409 Conflict` - Application name already exists
-- `422 Unprocessable Entity` - Parameter validation failed or invalid catalog ID/version
+- `422 Unprocessable Entity` - Parameter validation failed; invalid catalog ID/version; `provider_id` not found in `metadata.yaml` for a local component; or `instance_name` does not match any registered connector in the DB
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
@@ -975,7 +977,11 @@ Query the `applications` table for an existing record with the same name. Return
 Validate the request payload against catalog metadata:
 - Verify `catalog_id` exists as an architecture or standalone service in the catalog.
 - For each service, verify its `catalog_id` and `version` exist in the catalog.
-- For each component, verify `component_type` and `provider_id` are valid and that `params` conform to the provider's JSON Schema.
+- For each component, verify `component_type` and `provider_id` are valid.
+- Reject `400` if a component supplies both `instance_name` and `params` — they are mutually exclusive.
+- For each component without `instance_name`: verify `provider_id` exists as a provider key in `assets/components/<component_type>/<provider_id>/metadata.yaml`; return `422` if not found.
+- For each component with `instance_name`: verify a `components` row exists in the DB where `instance_name = :instance_name` and `type = component_type`; return `422` if not found.
+- If `params` are supplied, verify they conform to the provider's JSON Schema.
 
 **Phase 3 — Deployment Planning** (`DeploymentPlanner`)
 
@@ -986,19 +992,28 @@ Produces a `DeploymentPlan` synchronously before any DB writes or runtime calls:
 3. **Process each service** — For every service in the request:
    - Resolve the service's catalog path (`services/<catalog_id>/podman`).
    - Build merged parameter values via `ParamBuilder`, combining request `params` with defaults from the service's `values.yaml`.
-4. **Process each component** — For every component in a service:
-   - Compute a **component hash** from `(component_type, provider_id, params)`. Components with identical hashes are deduplicated — only one instance is deployed and shared across services.
-   - Resolve the component's catalog path (`components/<component_type>/<provider_id>/podman`).
-5. **Spyre card allocation** — For each component that requires IBM Spyre accelerator cards, query free PCI addresses from the host. Fail fast if the total required exceeds available cards.
+4. **Process each component** — For every component in a service, resolve the deployment action:
+
+   | Condition | Resolved action |
+   |-----------|-----------------|
+   | No `instance_name` — `provider_id` found in `metadata.yaml` | **Deploy** a new local pod-backed component |
+   | `instance_name` present — matches `components.instance_name` in DB | **Reuse** the existing connector; link via `service_dependencies`; skip deploy |
+   | No `instance_name` and `provider_id` not in `metadata.yaml` | **Reject** — `422 Unprocessable Entity` |
+   | `instance_name` present but no DB match | **Reject** — `422 Unprocessable Entity` |
+
+   - Resolve the component's catalog path (`components/<component_type>/<provider_id>/podman`) for new local deployments only.
+5. **Spyre card allocation** — For each new local component that requires IBM Spyre accelerator cards, query free PCI addresses from the host. Fail fast if the total required exceeds available cards.
 
 **Phase 4 — Database Insertion**
 
 Write all records before starting the async goroutine:
 
 1. Insert `applications` row: `status = "Downloading"`, `message = "Initializing deployment"`.
-2. Insert one `components` row per deduplicated component: `status = "Initializing"`. Sensitive `params` fields (marked `format: "password"` in the provider schema) are stripped before writing to `metadata`.
+2. For each component:
+   - **New local** → insert `components` row: `status = "Initializing"`, `source = "local"`, `instance_name = NULL` (infrastructure components have no user-facing name). Sensitive `params` fields (marked `format: "password"`) are stripped before writing to `metadata`.
+   - **Reused** (`instance_name` matched in DB) → skip insert; record the existing `components.id` for dependency linking.
 3. Insert one `services` row per service: `status = "Initializing"`.
-4. Insert `service_dependencies` rows linking each service to its component IDs.
+4. Insert `service_dependencies` rows linking each service to its component IDs (new or reused).
 
 **Phase 5 — Async Execution** (`PodmanDeployer` via `DeploymentExecutor`)
 
@@ -1008,10 +1023,10 @@ The deployer runs the following steps in order:
 
 | Step | Action |
 |------|--------|
-| 1a | Pull all required container images (collected from service and component templates) |
+| 1a | Pull all required container images for new local components |
 | 1b | Download any AI models specified in component `params` |
 | — | Update application status → `"Deploying"` |
-| 2 | Deploy infrastructure components **concurrently** (e.g., opensearch, vllm-spyre). Each component's pod templates are rendered and started via Podman. Endpoints discovered after startup are propagated back into the plan for use by services. |
+| 2 | Deploy new local infrastructure components **concurrently** (e.g., opensearch, vllm-spyre). Reused components are skipped — they are already running. Endpoints discovered after startup are propagated back into the plan for use by services. |
 | 3 | Deploy services **sequentially**. Pod templates are rendered with merged values (service params + injected component endpoints), then started via Podman. |
 | 4 | Register all service routes with the Caddy reverse proxy. |
 | — | Update application status → `"Running"` |
@@ -1390,7 +1405,7 @@ GET /api/v1/architectures/rag
   "certified_by": "IBM",
   "runtimes": ["podman", "openshift"],
   "global_components": [
-    { "type": "vector_db" }
+    { "type": "vector_store" }
   ],
   "services": [
     { "id": "chat", "version": ">=1.0.0" },
@@ -1415,7 +1430,7 @@ GET /api/v1/architectures/rag
 | type | string | Always "architecture" |
 | certified_by | string | Certification authority |
 | runtimes | array | List of supported runtime environments (e.g., "podman", "openshift") |
-| global_components | array | Component types shared across all services (e.g., `{ "type": "vector_db" }`) |
+| global_components | array | Component types shared across all services (e.g., `{ "type": "vector_store" }`) |
 | services | array | Array of service reference objects |
 | links | object | Related links (demo, code, documentation) |
 
@@ -1584,7 +1599,7 @@ This section describes the endpoints for retrieving deployment options, componen
 
 **Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
 
-**Description:** Retrieves available providers and dependency rules for all services and their components within an architecture. Returns providers (blueprints) for creating new components and dependency rules.
+**Description:** Retrieves available providers and their named instances for all services and their components within an architecture. Local entries represent a new pod to be deployed — identified by `provider_id` alone. Remote entries represent existing registered connectors — each carries an `instance_name` that matches `components.instance_name` in the DB and must be submitted verbatim in the Create Application request to reuse that connector.
 
 **Request Headers:**
 
@@ -1608,15 +1623,30 @@ Authorization: Bearer <access_token>
   "version": "1.0.0",
   "global_components": [
     {
-      "type": "vector_db",
-      "name": "Vector store",
+      "type": "vector_store",
+      "name": "Vector Store",
       "providers": [
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "description": "Distributed search and analytics engine",
+          "source": "local",
+          "description": "OpenSearch vector store",
           "default": true,
-          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
+          "schema": "/api/v1/components/vector_store/providers/opensearch/params"
+        },
+        {
+          "id": "opensearch",
+          "name": "OpenSearch",
+          "instance_name": "prod-opensearch",
+          "source": "remote",
+          "description": "Registered OpenSearch connector — reuse existing"
+        },
+        {
+          "id": "pg_vector",
+          "name": "PG Vector",
+          "instance_name": "prod-pgvector",
+          "source": "remote",
+          "description": "Registered pgvector connector — reuse existing"
         }
       ]
     }
@@ -1635,12 +1665,14 @@ Authorization: Bearer <access_token>
             {
               "id": "vllm",
               "name": "vLLM Instruct",
+              "source": "local",
               "description": "Deploy new instruct model on vLLM",
               "schema": "/api/v1/components/llm/providers/vllm/params"
             },
             {
               "id": "watsonx",
               "name": "IBM watsonx.ai Instruct",
+              "source": "local",
               "description": "Configure watsonx.ai for instruct models",
               "schema": "/api/v1/components/llm/providers/watsonx/params"
             }
@@ -1666,20 +1698,23 @@ Authorization: Bearer <access_token>
 **Global Component Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Component type (e.g., "vector_db", "embedding") |
+| type | string | Component type (e.g., `"vector_store"`, `"embedding"`) |
 | name | string | Display name for the component |
-| providers | array | Array of provider objects available for this component type |
+| providers | array | Array of provider objects for this component type |
 
 **Provider Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Provider identifier (e.g., "opensearch", "vllm", "watsonx") |
-| name | string | Provider display name |
-| description | string | Provider description |
-| version | string | Provider version |
-| default | boolean | Whether this is the default provider |
-| schema | string | URL to fetch configuration parameters for this provider; empty string if no parameters exposed |
-| resources | object | Optional resource requirements for this provider |
+| id | string | Provider type identifier (e.g., `"opensearch"`, `"pg_vector"`, `"vllm"`) |
+| name | string | Human-readable display label for the UI — always the provider display name (e.g., `"OpenSearch"`, `"PG Vector"`, `"vLLM Instruct"`). Never used as a resolution key |
+| instance_name | string | **Remote only** (`source = "remote"`). The `components.instance_name` value of the registered connector — submit this verbatim as `instance_name` in the Create Application request body to reuse this connector. Absent for `source = "local"` entries |
+| source | string | `"local"` — new pod to be deployed; `"remote"` — existing connector to be reused. UI shows a creation form only for `"local"` entries |
+| description | string | Provider or instance description |
+| default | boolean | Whether this is the default selection |
+| schema | string | URL to fetch configuration parameters; present only when `source = "local"` — omitted for `source = "remote"` |
+| resources | object | Optional resource requirements; present only when `source = "local"` |
+
+> **Server resolution logic:** Local entries are resolved by `provider_id` alone — the server deploys a new pod. Remote entries are resolved by `instance_name` — the server matches it against `components.instance_name` and reuses the existing connector. The two paths never overlap.
 
 **Service Object (in services array):**
 | Field | Type | Description |
@@ -1709,7 +1744,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `GET /api/v1/services/{id}/deploy-options`
 
-**Description:** Retrieves available providers and dependency rules for a specific service. Returns providers for creating new components, scoped to a single service.
+**Description:** Retrieves available providers and their named instances for a specific service. Local entries represent a new pod to be deployed — identified by `provider_id` alone. Remote entries represent existing registered connectors — each carries an `instance_name` matching `components.instance_name` in the DB that must be submitted verbatim in the Create Application request to reuse that connector.
 
 **Request Headers:**
 
@@ -1734,22 +1769,30 @@ Authorization: Bearer <access_token>
   "schema": "/api/v1/services/digitize/params",
   "components": [
     {
-      "type": "vector_db",
-      "name": "Vector store",
+      "type": "vector_store",
+      "name": "Vector Store",
       "providers": [
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "description": "Distributed search and analytics engine",
+          "source": "local",
+          "description": "OpenSearch vector store",
           "default": true,
-          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
+          "schema": "/api/v1/components/vector_store/providers/opensearch/params"
         },
         {
-          "id": "milvus",
-          "name": "Milvus",
-          "description": "Cloud-native vector database",
-          "default": false,
-          "schema": "/api/v1/components/vector_db/providers/milvus/params"
+          "id": "opensearch",
+          "name": "OpenSearch",
+          "instance_name": "prod-opensearch",
+          "source": "remote",
+          "description": "Registered OpenSearch connector — reuse existing"
+        },
+        {
+          "id": "pg_vector",
+          "name": "PG Vector",
+          "instance_name": "prod-pgvector",
+          "source": "remote",
+          "description": "Registered pgvector connector — reuse existing"
         }
       ]
     },
@@ -1760,12 +1803,14 @@ Authorization: Bearer <access_token>
         {
           "id": "vllm",
           "name": "vLLM Instruct",
+          "source": "local",
           "description": "Deploy new instruct model on vLLM",
           "schema": "/api/v1/components/llm/providers/vllm/params"
         },
         {
           "id": "watsonx",
           "name": "IBM watsonx.ai Instruct",
+          "source": "local",
           "description": "Configure watsonx.ai for instruct models",
           "schema": "/api/v1/components/llm/providers/watsonx/params"
         }
@@ -1809,7 +1854,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| component_type | string | Yes | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
+| component_type | string | Yes | Component type (e.g., "vector_store", "llm", "embedding", "reranker") |
 | provider_id | string | Yes | Provider identifier (e.g., "opensearch", "vllm", "watsonx", "milvus") |
 
 **Request Body:** None
