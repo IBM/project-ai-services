@@ -16,7 +16,7 @@ import (
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
-func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
+func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) error {
 	// Initialize runtime
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
@@ -32,13 +32,13 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	logger.Warningln("Ensure no applications are running before uninstalling the catalog, as they may go stale when the catalog is uninstalled and will need to be deleted manually")
 
 	// Confirm deletion if not auto-yes
-	if !autoYes {
+	if !opts.AutoYes {
 		if confirmed, err := confirmDeletion(pods); !confirmed || err != nil {
 			return err
 		}
 	}
 
-	return performCleanup(rt, pods, skipCleanup)
+	return performCleanup(rt, pods, opts.SkipCleanup)
 }
 
 // validateCatalogExists checks if catalog resources exist and returns them.

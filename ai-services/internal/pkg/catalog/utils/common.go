@@ -8,6 +8,7 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 var (
@@ -21,6 +22,13 @@ type PodmanConfigureOptions struct {
 	SSLCertPath string // Path to user-provided SSL certificate
 	SSLKeyPath  string // Path to user-provided SSL private key
 	HttpsPort   int
+}
+
+// UninstallOptions contains the configuration for uninstalling the catalog service.
+type UninstallOptions struct {
+	Runtime     types.RuntimeType
+	AutoYes     bool
+	SkipCleanup bool
 }
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -36,7 +37,7 @@ Examples:
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return uninstall.Uninstall(uninstall.UninstallOptions{
+			return uninstall.Uninstall(catalogUtils.UninstallOptions{
 				Runtime:     vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
 				SkipCleanup: skipCleanup,
