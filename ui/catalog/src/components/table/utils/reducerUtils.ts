@@ -1,7 +1,7 @@
 import type {
   BaseTableState,
   SharedTableAction,
-} from "@/components/table/shared/types";
+} from "@/components/table/types";
 
 export function handleSharedTableAction<S extends BaseTableState>(
   state: S,
