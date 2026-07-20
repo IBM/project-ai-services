@@ -604,15 +604,17 @@ func ValidateCatalogLoginOutput(output string) error {
 	return nil
 }
 
-// ValidateCatalogLogoutOutput validates a successful 'catalog logout' output.
+// ValidateCatalogHashpwOutput validates that 'catalog hashpw' produced a well-formed hash.
 func ValidateCatalogHashpwOutput(output string) error {
+	const hashParts = 3 // expected "iterations.salt.hash" dot-separated format
+
 	trimmed := strings.TrimSpace(output)
 	if trimmed == "" {
 		return fmt.Errorf("catalog hashpw validation failed: output is empty")
 	}
 
-	parts := strings.SplitN(trimmed, ".", 3)
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+	parts := strings.SplitN(trimmed, ".", hashParts)
+	if len(parts) != hashParts || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return fmt.Errorf("catalog hashpw validation failed: output does not match expected format 'iterations.salt.hash'\nOutput: %s", trimmed)
 	}
 

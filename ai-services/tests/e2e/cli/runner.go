@@ -15,6 +15,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
@@ -252,10 +253,7 @@ func (e AppEndpoints) DigitizeURL() string { return e[catalogSvcDigitize][endpoi
 // SimilarityURL returns the similarity service API URL.
 func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][endpointTypeAPI] }
 
-// CatalogGetApplicationEndpoints fetches endpoint URLs for a named application
-// via the catalog REST API (GET /api/v1/applications?catalog_id=...).
-// Returns AppEndpoints keyed by service catalog_id → endpoint type → URL.
-// Requires a valid session (call CatalogLogin first).
+// CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
 func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
 	appClient, err := client.NewApplicationClient()
 	if err != nil {
@@ -267,38 +265,43 @@ func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
 		return nil, fmt.Errorf("list applications: %w", err)
 	}
 
-	// Find the application by name.
 	for _, app := range list.Data {
-		if app.Name != appName {
-			continue
+		if app.Name == appName {
+			return buildAppEndpoints(app.Services), nil
 		}
-
-		eps := make(AppEndpoints)
-		for _, svc := range app.Services {
-			if len(svc.Endpoints) == 0 {
-				continue
-			}
-			svcEps := make(map[string]string)
-			for _, ep := range svc.Endpoints {
-				epType, _ := ep["type"].(string)
-				epURL, _ := ep["url"].(string)
-				if epType != "" && epURL != "" {
-					svcEps[epType] = epURL
-				}
-			}
-			if len(svcEps) > 0 {
-				eps[svc.CatalogID] = svcEps
-			}
-		}
-
-		return eps, nil
 	}
 
 	return nil, fmt.Errorf("application %q not found via catalog API", appName)
 }
 
+// buildAppEndpoints converts a service list into an AppEndpoints map.
+func buildAppEndpoints(services []types.ApplicationService) AppEndpoints {
+	eps := make(AppEndpoints)
+	for _, svc := range services {
+		svcEps := collectEndpoints(svc.Endpoints)
+		if len(svcEps) > 0 {
+			eps[svc.CatalogID] = svcEps
+		}
+	}
+
+	return eps
+}
+
+// collectEndpoints extracts type→URL pairs from an endpoint list.
+func collectEndpoints(endpoints []map[string]any) map[string]string {
+	result := make(map[string]string)
+	for _, ep := range endpoints {
+		epType, _ := ep["type"].(string)
+		epURL, _ := ep["url"].(string)
+		if epType != "" && epURL != "" {
+			result[epType] = epURL
+		}
+	}
+
+	return result
+}
+
 // getRAGURLs returns backend and UI URLs for a deployed RAG application.
-// For podman, URLs come from 'application info'; for openshift from the create output.
 func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
 	if appRuntime == "openshift" {
 		urls := ExtractURLsFromOutput(createOutput)
@@ -326,7 +329,6 @@ func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, cr
 }
 
 // extractCatalogRAGURLs extracts the chat backend and UI URLs from 'application info' output.
-// Matches by URL host substring — robust against info.md title changes.
 func extractCatalogRAGURLs(output string) (string, string) {
 	return extractURLBySubstring(output, svcChatBotBackend),
 		extractURLBySubstring(output, svcChatBotUI)
