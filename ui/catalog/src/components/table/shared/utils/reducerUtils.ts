@@ -1,4 +1,65 @@
-import type { BaseTableState } from "@/components/table/shared/types";
+import type {
+  BaseTableState,
+  SharedTableAction,
+} from "@/components/table/shared/types";
+
+export function handleSharedTableAction<S extends BaseTableState>(
+  state: S,
+  action: SharedTableAction,
+): S | undefined {
+  switch (action.type) {
+    case "SHARED_SET_SEARCH":
+      return { ...state, ...setSearch(action.payload) };
+    case "SHARED_SET_PAGE":
+      return { ...state, ...setPage(action.payload) };
+    case "SHARED_SET_PAGE_SIZE":
+      return { ...state, ...setPageSize(action.payload) };
+    case "SHARED_OPEN_DELETE_DIALOG":
+      return { ...state, ...openDeleteDialog(action.payload) };
+    case "SHARED_CLOSE_DELETE_DIALOG":
+      return {
+        ...state,
+        ...closeDeleteDialog(action.hasError, action.selectedRowId),
+      };
+    case "SHARED_SET_CONFIRMED":
+      return { ...state, ...setConfirmed(action.payload) };
+    case "SHARED_SET_SELECTED_ROW_ID":
+      return { ...state, ...setSelectedRowId(action.payload) };
+    case "SHARED_SET_LOADING":
+      return { ...state, ...setLoading(action.payload) };
+    case "SHARED_SHOW_ERROR":
+      return { ...state, ...showError(action.payload) };
+    case "SHARED_HIDE_ERROR":
+      return { ...state, ...hideError() };
+    case "SHARED_OPEN_EXPORT_DIALOG":
+      return { ...state, ...openExportDialog() };
+    case "SHARED_CLOSE_EXPORT_DIALOG":
+      return { ...state, ...closeExportDialog() };
+    case "SHARED_SET_CSV_FILENAME":
+      return { ...state, ...setCsvFilename(action.payload) };
+    case "SHARED_SET_EXPORT_ERROR":
+      return { ...state, ...setExportError(action.payload) };
+    case "SHARED_CLEAR_EXPORT_ERROR":
+      return { ...state, ...clearExportError() };
+    case "SHARED_SET_EXPORTING":
+      return { ...state, ...setExporting(action.payload) };
+    case "SHARED_SHOW_EXPORT_TOAST":
+      return { ...state, ...showExportToast(action.payload) };
+    case "SHARED_HIDE_EXPORT_TOAST":
+      return { ...state, ...hideExportToast() };
+    case "SHARED_TOGGLE_COLUMN_VISIBILITY":
+      return {
+        ...state,
+        ...toggleColumnVisibility(state.visibleColumns, action.payload),
+      };
+    case "SHARED_RESET_COLUMN_VISIBILITY":
+      return { ...state, ...resetColumnVisibility(action.defaultColumns) };
+    case "SHARED_SET_FETCH_ERROR":
+      return { ...state, fetchError: action.payload, isLoading: false };
+    default:
+      return undefined;
+  }
+}
 
 // Search
 
