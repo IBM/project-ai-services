@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,42 +20,125 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-var GET_CALL_TIMEOUT = 10 * time.Second
-var POST_CALL_TIMEOUT = 60 * time.Second
-var DOC_CALL_TIMEOUT = 30 * time.Second
+// ErrJobNotFound is returned by GetJobStatus on HTTP 404; WaitForJobCompletion treats it as terminal to avoid infinite polling after cleanup.
+var ErrJobNotFound = errors.New("job not found (404)")
 
-// appRuntime holds the current runtime environment (podman or openshift).
-var appRuntime string
+// getCallTimeout is the end-to-end deadline for a status-poll round-trip (dial + TLS + headers + body); 30 s covers nip.io TLS and slow Spyre pods.
+var getCallTimeout = 30 * time.Second //nolint:mnd
 
-// SetAppRuntime sets the application runtime for the digitize package.
-func SetAppRuntime(runtime string) {
-	appRuntime = runtime
+// postCallTimeout is the end-to-end deadline for a POST request round-trip.
+var postCallTimeout = 60 * time.Second //nolint:mnd
+
+// docCallTimeout is 60 s to accommodate large JSON/markdown content responses over nip.io TLS.
+var docCallTimeout = 60 * time.Second //nolint:mnd
+
+// Transport tuning constants for sharedDigitizeTransport.
+const (
+	transportMaxIdleConnsPerHost   = 4                //nolint:mnd
+	transportIdleConnTimeout       = 90 * time.Second //nolint:mnd
+	transportResponseHeaderTimeout = 25 * time.Second //nolint:mnd
+	transportDialTimeout           = 15 * time.Second //nolint:mnd
+	transportDialKeepAlive         = 30 * time.Second //nolint:mnd
+)
+
+// sharedDigitizeTransport pools TLS connections; ResponseHeaderTimeout and DialContext deadlines prevent hangs on dead keep-alive sockets that http.Client.Timeout alone cannot catch.
+var sharedDigitizeTransport = &http.Transport{
+	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+	MaxIdleConnsPerHost: transportMaxIdleConnsPerHost,
+	IdleConnTimeout:     transportIdleConnTimeout,
+	// ResponseHeaderTimeout guards against dead keep-alive sockets that never send response headers.
+	ResponseHeaderTimeout: transportResponseHeaderTimeout,
+	DialContext: (&net.Dialer{
+		Timeout:   transportDialTimeout,
+		KeepAlive: transportDialKeepAlive,
+	}).DialContext,
 }
 
-// getHTTPClient returns an HTTP client configured based on the runtime.
-// For OpenShift, it skips TLS certificate verification.
+// getHTTPClient returns an HTTP client with the given timeout using the shared pooled transport.
 func getHTTPClient(timeout time.Duration) *http.Client {
-	client := &http.Client{Timeout: timeout}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: sharedDigitizeTransport,
+	}
+}
 
-	if appRuntime == "openshift" {
-		// Skip TLS certificate verification for OpenShift
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+// drainAndClose drains and closes the body so the underlying TCP connection is returned to the pool.
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, body)
+	_ = body.Close()
+}
+
+func doGet(ctx context.Context, url string, timeout time.Duration) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return client
+	resp, err := getHTTPClient(timeout).Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer drainAndClose(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return body, resp.StatusCode, nil
+}
+
+// doDelete sends a DELETE request to url, reads the body, and returns (body, statusCode, error).
+func doDelete(ctx context.Context, url string, timeout time.Duration) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := getHTTPClient(timeout).Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer drainAndClose(resp.Body)
+
+	body, _ := io.ReadAll(resp.Body)
+
+	return body, resp.StatusCode, nil
+}
+
+// unmarshalOK asserts expectedStatus and unmarshals body into v; shared by all GET/DELETE success paths.
+func unmarshalOK(body []byte, statusCode, expectedStatus int, v any) error {
+	if statusCode != expectedStatus {
+		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
+	}
+
+	if v == nil {
+		return nil
+	}
+
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return nil
+}
+
+// expectError returns the parsed error body when status != successStatus, or an error if the call unexpectedly succeeded.
+func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
+	if statusCode != successStatus {
+		return parseErrorResponse(body, statusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
 // GetTestPDFPath returns the path to a test PDF file.
 func GetTestPDFPath() string {
-	// Get the path to the test PDF from the ingestion test docs
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		return ""
 	}
 
-	// Navigate to ingestion/docs/test_doc.pdf
 	testDir := filepath.Dir(filename)
 	testPDFPath := filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
 
@@ -106,19 +191,22 @@ type PaginationInfo struct {
 	Offset int `json:"offset"`
 }
 
-// DocumentListItem represents a document in the list.
-type DocumentListItem struct {
-	ID           string                 `json:"id"`
-	JobID        string                 `json:"job_id"`
-	Name         string                 `json:"name"`
-	Type         string                 `json:"type"`
-	Status       string                 `json:"status"`
-	OutputFormat string                 `json:"output_format"`
-	SubmittedAt  string                 `json:"submitted_at"`
-	CompletedAt  *string                `json:"completed_at"`
-	Error        interface{}            `json:"error"`
-	Metadata     map[string]interface{} `json:"metadata"`
+// DocumentDetailResponse represents a document returned by both the list and detail endpoints (same JSON shape).
+type DocumentDetailResponse struct {
+	ID           string         `json:"id"`
+	JobID        string         `json:"job_id"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	Status       string         `json:"status"`
+	OutputFormat string         `json:"output_format"`
+	SubmittedAt  string         `json:"submitted_at"`
+	CompletedAt  *string        `json:"completed_at"`
+	Error        any            `json:"error"`
+	Metadata     map[string]any `json:"metadata"`
 }
+
+// DocumentListItem is an alias for DocumentDetailResponse; list and detail endpoints share the same JSON shape.
+type DocumentListItem = DocumentDetailResponse
 
 // DocumentsListResponse represents the response when listing documents.
 type DocumentsListResponse struct {
@@ -126,24 +214,10 @@ type DocumentsListResponse struct {
 	Pagination PaginationInfo     `json:"pagination"`
 }
 
-// DocumentDetailResponse represents detailed document information.
-type DocumentDetailResponse struct {
-	ID           string                 `json:"id"`
-	JobID        string                 `json:"job_id"`
-	Name         string                 `json:"name"`
-	Type         string                 `json:"type"`
-	Status       string                 `json:"status"`
-	OutputFormat string                 `json:"output_format"`
-	SubmittedAt  string                 `json:"submitted_at"`
-	CompletedAt  *string                `json:"completed_at"`
-	Error        interface{}            `json:"error"`
-	Metadata     map[string]interface{} `json:"metadata"`
-}
-
 // DocumentContentResponse represents the document content.
 type DocumentContentResponse struct {
-	OutputFormat string      `json:"output_format"`
-	Result       interface{} `json:"result"`
+	OutputFormat string `json:"output_format"`
+	Result       any    `json:"result"`
 }
 
 // HealthCheckResponse represents the health check response.
@@ -161,16 +235,28 @@ type ErrorResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// IsResourceLockedError checks if an error is a resource locked error (409).
+// IsResourceLockedError reports whether err is an HTTP 409 resource-lock error; bare 409s are also treated as locked since the digitize API only returns 409 for that reason.
 func IsResourceLockedError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	return strings.Contains(err.Error(), "409") &&
-		(strings.Contains(err.Error(), "RESOURCE_LOCKED") ||
-			strings.Contains(err.Error(), "locked") ||
-			strings.Contains(err.Error(), "active"))
+	msg := err.Error()
+	if !strings.Contains(msg, "409") {
+		return false
+	}
+
+	lockSignals := []string{
+		"RESOURCE_LOCKED", "locked", "active", "in use", "in_progress",
+	}
+	for _, s := range lockSignals {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+
+	// Plain 409 with no other context is still a resource-locked response.
+	return true
 }
 
 // IsRateLimitError checks if an error is a rate limit error (429).
@@ -193,17 +279,17 @@ func GetDigitizeBaseURL(port string) string {
 func HealthCheck(ctx context.Context, baseURL string) error {
 	url := fmt.Sprintf("%s/health", baseURL)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -255,18 +341,18 @@ func createMultipartBody(filePath string) (*bytes.Buffer, *multipart.Writer, err
 
 // sendJobRequest sends the HTTP request and returns the response body.
 func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 
-	client := getHTTPClient(POST_CALL_TIMEOUT)
+	client := getHTTPClient(postCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainAndClose(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -306,32 +392,19 @@ func CreateJob(ctx context.Context, baseURL, filePath, operation, outputFormat, 
 
 // GetJobStatus retrieves the status of a specific job.
 func GetJobStatus(ctx context.Context, baseURL, jobID string) (*JobStatusResponse, error) {
-	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	// 404 → job deleted or never existed; return ErrJobNotFound so callers can distinguish "gone" from transient errors.
+	if statusCode == http.StatusNotFound {
+		return nil, ErrJobNotFound
 	}
 
 	var jobStatus JobStatusResponse
-	if err := json.Unmarshal(body, &jobStatus); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := unmarshalOK(body, statusCode, http.StatusOK, &jobStatus); err != nil {
+		return nil, err
 	}
 
 	return &jobStatus, nil
@@ -351,39 +424,49 @@ func handleJobStatus(status *JobStatusResponse, jobID string) (*JobStatusRespons
 		}
 
 		return status, fmt.Errorf("job failed: %s", errMsg), true
-	case "in_progress":
+	case "accepted", "pending", "in_progress":
+		// Transient states (accepted/pending/in_progress): keep polling.
 		return nil, nil, false
 	default:
 		return status, fmt.Errorf("unknown job status: %s", status.Status), true
 	}
 }
 
-// WaitForJobCompletion waits for a job to complete.
+// WaitForJobCompletion polls job status every 15 s until completed, failed, timeout, or ErrJobNotFound (404 treated as terminal).
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobStatusResponse, error) {
+	const pollInterval = 15 * time.Second
+
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ctx.Done():
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for job %s to complete after %s", jobID, timeout)
+		}
+
+		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("timeout waiting for job completion")
+		}
+
+		status, err := GetJobStatus(ctx, baseURL, jobID)
+		if err != nil {
+			// 404 → job deleted externally; treat as terminal.
+			if errors.Is(err, ErrJobNotFound) {
+				logger.Infof("[DIGITIZE] Job %s not found (404) — treating as complete (already deleted)", jobID)
+
+				return nil, nil
 			}
-
-			status, err := GetJobStatus(ctx, baseURL, jobID)
-			if err != nil {
-				logger.Warningf("[DIGITIZE] Failed to get job status: %v", err)
-
-				continue
-			}
-
+			logger.Warningf("[DIGITIZE] Failed to get job status for %s: %v — retrying in %s", jobID, err, pollInterval)
+		} else {
 			result, resultErr, done := handleJobStatus(status, jobID)
 			if done {
 				return result, resultErr
 			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(pollInterval):
 		}
 	}
 }
@@ -398,30 +481,14 @@ func ListJobs(ctx context.Context, baseURL string, latest bool, limit, offset in
 		url += fmt.Sprintf("&operation=%s", operation)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, url, getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var jobsList JobsListResponse
-	if err := json.Unmarshal(body, &jobsList); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := unmarshalOK(body, statusCode, http.StatusOK, &jobsList); err != nil {
+		return nil, err
 	}
 
 	return &jobsList, nil
@@ -429,24 +496,13 @@ func ListJobs(ctx context.Context, baseURL string, latest bool, limit, offset in
 
 // DeleteJob deletes a specific job.
 func DeleteJob(ctx context.Context, baseURL, jobID string) error {
-	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID), getCallTimeout)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
 	}
 
 	logger.Infof("[DIGITIZE] Job deleted: %s", jobID)
@@ -454,8 +510,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 	return nil
 }
 
-// ListDocuments retrieves a list of documents with optional status and name filters.
-// Pass empty strings for status and name to list all documents without filters.
+// ListDocuments retrieves documents with optional status/name filters; pass empty strings to list all.
 func ListDocuments(ctx context.Context, baseURL string, limit, offset int, status, name string) (*DocumentsListResponse, error) {
 	url := fmt.Sprintf("%s/v1/documents?limit=%d&offset=%d", baseURL, limit, offset)
 	if status != "" {
@@ -465,30 +520,14 @@ func ListDocuments(ctx context.Context, baseURL string, limit, offset int, statu
 		url += fmt.Sprintf("&name=%s", name)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, url, getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var docsList DocumentsListResponse
-	if err := json.Unmarshal(body, &docsList); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := unmarshalOK(body, statusCode, http.StatusOK, &docsList); err != nil {
+		return nil, err
 	}
 
 	return &docsList, nil
@@ -496,32 +535,14 @@ func ListDocuments(ctx context.Context, baseURL string, limit, offset int, statu
 
 // GetDocument retrieves detailed information about a specific document.
 func GetDocument(ctx context.Context, baseURL, docID string) (*DocumentDetailResponse, error) {
-	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/documents/%s", baseURL, docID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var doc DocumentDetailResponse
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := unmarshalOK(body, statusCode, http.StatusOK, &doc); err != nil {
+		return nil, err
 	}
 
 	return &doc, nil
@@ -529,32 +550,14 @@ func GetDocument(ctx context.Context, baseURL, docID string) (*DocumentDetailRes
 
 // GetDocumentContent retrieves the content of a specific document.
 func GetDocumentContent(ctx context.Context, baseURL, docID string) (*DocumentContentResponse, error) {
-	url := fmt.Sprintf("%s/v1/documents/%s/content", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/documents/%s/content", baseURL, docID), docCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := getHTTPClient(DOC_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var content DocumentContentResponse
-	if err := json.Unmarshal(body, &content); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := unmarshalOK(body, statusCode, http.StatusOK, &content); err != nil {
+		return nil, err
 	}
 
 	return &content, nil
@@ -562,24 +565,13 @@ func GetDocumentContent(ctx context.Context, baseURL, docID string) (*DocumentCo
 
 // DeleteDocument deletes a specific document.
 func DeleteDocument(ctx context.Context, baseURL, docID string) error {
-	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/documents/%s", baseURL, docID), getCallTimeout)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
 	}
 
 	logger.Infof("[DIGITIZE] Document deleted: %s", docID)
@@ -589,24 +581,13 @@ func DeleteDocument(ctx context.Context, baseURL, docID string) error {
 
 // DeleteAllDocuments deletes all documents.
 func DeleteAllDocuments(ctx context.Context, baseURL string) error {
-	url := fmt.Sprintf("%s/v1/documents?confirm=true", baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/documents?confirm=true", baseURL), docCallTimeout)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
 
-	client := getHTTPClient(DOC_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
 	}
 
 	logger.Infof("[DIGITIZE] All documents deleted")
@@ -614,11 +595,16 @@ func DeleteAllDocuments(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// parseErrorResponse parses the response body as an error response.
+// parseErrorResponse parses body as ErrorResponse; returns a plain HTTP-status error on invalid JSON or empty payload.
 func parseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error) {
 	var errorResp ErrorResponse
 	if err := json.Unmarshal(respBody, &errorResp); err != nil {
-		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(respBody))
+		return nil, fmt.Errorf("HTTP %d: %s", statusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	// Guard against empty `{}` or `{"error":{}}` responses.
+	if errorResp.Error.Code == "" && errorResp.Error.Message == "" {
+		return nil, fmt.Errorf("HTTP %d: empty error body: %s", statusCode, string(respBody))
 	}
 
 	return &errorResp, nil
@@ -638,7 +624,6 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, operation, 
 		return nil, err
 	}
 
-	// If not accepted, parse as error response
 	if statusCode != http.StatusAccepted {
 		return parseErrorResponse(respBody, statusCode)
 	}
@@ -648,147 +633,60 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, operation, 
 
 // GetJobStatusExpectingError retrieves job status and returns error response if status is not 200.
 func GetJobStatusExpectingError(ctx context.Context, baseURL, jobID string) (*ErrorResponse, error) {
-	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// If not OK, parse as error response
-	if resp.StatusCode != http.StatusOK {
-		return parseErrorResponse(body, resp.StatusCode)
-	}
-
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+	return expectError(body, statusCode, http.StatusOK)
 }
 
 // GetDocumentExpectingError retrieves document details and returns error response if status is not 200.
 func GetDocumentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
-	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/documents/%s", baseURL, docID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// If not OK, parse as error response
-	if resp.StatusCode != http.StatusOK {
-		return parseErrorResponse(body, resp.StatusCode)
-	}
-
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+	return expectError(body, statusCode, http.StatusOK)
 }
 
 // GetDocumentContentExpectingError retrieves document content and returns error response if status is not 200.
 func GetDocumentContentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
-	url := fmt.Sprintf("%s/v1/documents/%s/content", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, statusCode, err := doGet(ctx, fmt.Sprintf("%s/v1/documents/%s/content", baseURL, docID), docCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(DOC_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// If not OK, parse as error response
-	if resp.StatusCode != http.StatusOK {
-		return parseErrorResponse(body, resp.StatusCode)
-	}
-
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+	return expectError(body, statusCode, http.StatusOK)
 }
 
-// DeleteJobExpectingError deletes a job and returns error response if status is not 200/204.
+// DeleteJobExpectingError deletes a job and returns the error response for any non-200/204 status code.
 func DeleteJobExpectingError(ctx context.Context, baseURL, jobID string) (*ErrorResponse, error) {
-	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return parseErrorResponse(body, statusCode)
 	}
 
-	// If not OK or NoContent, parse as error response
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return parseErrorResponse(body, resp.StatusCode)
-	}
-
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
 // DeleteDocumentExpectingError deletes a document and returns error response if status is not 200/204.
 func DeleteDocumentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
-	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	body, statusCode, err := doDelete(ctx, fmt.Sprintf("%s/v1/documents/%s", baseURL, docID), getCallTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return parseErrorResponse(body, statusCode)
 	}
 
-	// If not OK or NoContent, parse as error response
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return parseErrorResponse(body, resp.StatusCode)
-	}
-
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
 // createMultipartBodyWithMultipleFiles creates a multipart form body with multiple files.
@@ -796,7 +694,6 @@ func createMultipartBodyWithMultipleFiles(filePaths []string) (*bytes.Buffer, *m
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add multiple files
 	for _, filePath := range filePaths {
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -835,12 +732,40 @@ func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths [
 		return nil, err
 	}
 
-	// For this test, we expect a 400 error
-	if statusCode == http.StatusBadRequest {
+	if statusCode != http.StatusAccepted {
 		return parseErrorResponse(respBody, statusCode)
 	}
 
-	return nil, fmt.Errorf("unexpected status code %d: %s", statusCode, string(respBody))
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(respBody))
+}
+
+// IngestTestDocumentViaDigitizeAPI ingests test_doc.pdf via the digitize microservice (operation=ingestion) so it is indexed in OpenSearch before RAG evaluation.
+func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobName string) error {
+	pdfPath := GetTestPDFPath()
+	if pdfPath == "" {
+		return fmt.Errorf("could not resolve test PDF path")
+	}
+
+	logger.Infof("[INGEST] Submitting ingestion job for %s (job name: %s)", filepath.Base(pdfPath), jobName)
+
+	jobResp, err := CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", jobName)
+	if err != nil {
+		return fmt.Errorf("failed to create ingestion job: %w", err)
+	}
+
+	logger.Infof("[INGEST] Job submitted (job_id=%s) — waiting for completion", jobResp.JobID)
+
+	const ingestTimeout = 20 * time.Minute // OCR + embedding + OpenSearch indexing can take up to 20 min.
+
+	finalStatus, err := WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, ingestTimeout)
+	if err != nil {
+		return fmt.Errorf("ingestion job %s did not complete: %w", jobResp.JobID, err)
+	}
+
+	logger.Infof("[INGEST] Job %s completed — status=%s docs=%d",
+		jobResp.JobID, finalStatus.Status, len(finalStatus.Documents))
+
+	return nil
 }
 
 // Made with Bob

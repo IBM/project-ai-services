@@ -13,8 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-const execPerm = 0o755
-
 var testBinDir string
 
 // SetTestBinDir sets the temporary directory for test binaries.
@@ -156,7 +154,6 @@ func buildUsingMake(
 		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
-	// Determine OS and architecture using runtime package
 	osArch := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
 	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-"+osArch)
 	if _, err := os.Stat(srcBinPath); err != nil {
@@ -172,7 +169,7 @@ func buildUsingGo(
 	moduleRoot string,
 	tempBinDir string,
 ) (string, error) {
-	if err := os.MkdirAll(tempBinDir, execPerm); err != nil {
+	if err := os.MkdirAll(tempBinDir, dirPerm); err != nil {
 		return "", fmt.Errorf("failed to create temp bin directory: %w", err)
 	}
 
@@ -198,7 +195,7 @@ func buildUsingGo(
 
 // copyBinaryToTemp copies binary to temp directory.
 func copyBinaryToTemp(srcBinPath, tempBinDir string) (string, error) {
-	if err := os.MkdirAll(tempBinDir, execPerm); err != nil {
+	if err := os.MkdirAll(tempBinDir, dirPerm); err != nil {
 		return "", fmt.Errorf("failed to create temp bin directory: %w", err)
 	}
 
@@ -221,7 +218,7 @@ func copyBinaryToTemp(srcBinPath, tempBinDir string) (string, error) {
 	}
 
 	if err := os.Chmod(destBinPath, execPerm); err != nil {
-		return "", fmt.Errorf("failed to execute binary: %w", err)
+		return "", fmt.Errorf("failed to set executable permission on binary: %w", err)
 	}
 
 	return destBinPath, nil
