@@ -8,7 +8,7 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	osruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -51,20 +51,7 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 
 	s.Stop("Catalog '" + catalog + "' uninstalled successfully")
 
-	if !skipCleanup {
-		logger.Debugln("Cleaning up Persistent Volume Claims...")
-
-		rt, err := osruntime.NewOpenshiftClientWithNamespace(namespace)
-		if err != nil {
-			return fmt.Errorf("failed to create openshift client: %w", err)
-		}
-
-		if err := rt.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", catalog)); err != nil {
-			return fmt.Errorf("failed to cleanup PVCs: %w", err)
-		}
-	}
-
-	return nil
+	return cleanupPVCs(skipCleanup, catalog, namespace)
 }
 
 func isCatalogInstalled(helmClient *helm.Helm, catalog, namespace string) (bool, error) {
@@ -96,3 +83,24 @@ func confirmDeletion(catalog string) (bool, error) {
 
 	return true, nil
 }
+
+func cleanupPVCs(skipCleanup bool, catalog, namespace string) error {
+	if skipCleanup {
+		return nil
+	}
+
+	logger.Debugln("Cleaning up Persistent Volume Claims...")
+
+	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to create openshift client: %w", err)
+	}
+
+	if err := rt.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", catalog)); err != nil {
+		return fmt.Errorf("failed to cleanup PVCs: %w", err)
+	}
+
+	return nil
+}
+
+// Made with Bob
