@@ -36,6 +36,10 @@ const (
 	PodmanAuthSecret = "podman-auth-secret"
 	// CatalogSecretName represents the catalog secret name.
 	CatalogSecretName = "catalog-secret"
+	// CatalogDBSecretName represents the catalog database secret name.
+	CatalogDBSecretName = "catalog-db-secret"
+	// CatalogDBSecretKey is the data key inside catalog-db-secret that holds the database password.
+	CatalogDBSecretKey = "db-password"
 	// CatalogPodmanAuthSecretName represent the podman auth secret name.
 	CatalogPodmanAuthSecretName = "podman-auth-secret"
 )
