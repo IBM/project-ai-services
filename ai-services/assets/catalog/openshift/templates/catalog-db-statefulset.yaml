@@ -11,7 +11,6 @@ spec:
   serviceName: "catalog-db-headless"
   replicas: 1
   persistentVolumeClaimRetentionPolicy:
-    whenDeleted: Delete
     whenScaled: Delete
   selector:
     matchLabels:
