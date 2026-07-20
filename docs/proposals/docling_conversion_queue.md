@@ -14,7 +14,7 @@ currently consumed directly by two pipelines:
 - **Digitization** — `pipeline/digitize.py` → `convert_document_format()`
 - **Ingestion** — `processing/orchestrator.py` → `convert_document()`
 
-Two new consumers are planned:
+Three new consumers are planned:
 
 - **Data Source Connectors** — sync remote data sources into the vector DB by running the
   ingestion pipeline. They have their own API endpoints, their own DB table, and their own
@@ -24,6 +24,9 @@ Two new consumers are planned:
   conversion) so it can attach a `doc_id` to a digitize document record. It therefore calls
   the same `pipeline/digitize.py` → `convert_doc()` path that `POST /v1/jobs` (digitization)
   uses today.
+- **Translation service** — converts PDF and DOCX files to Markdown format via the digitize
+  service. It calls `POST /v1/jobs?operation=digitization`, receives a `job_id`, and polls
+  `GET /v1/jobs/{job_id}` for the resulting Markdown output.
 
 Both new consumers reach `convert_doc()` through the **same existing pipeline functions** —
 they do not bypass them. The problem is purely that neither consumer can share the conversion
@@ -109,8 +112,6 @@ CREATE TABLE conversion_tasks (
 );
 
 CREATE INDEX idx_ct_status_op_queued ON conversion_tasks (status, operation, queued_at);
-CREATE INDEX idx_ct_job_id           ON conversion_tasks (job_id);
-CREATE INDEX idx_ct_doc_id           ON conversion_tasks (doc_id);
 ```
 
 `is_large` is derived from `page_count >= heavy_doc_page_threshold` at enqueue time and
@@ -229,10 +230,10 @@ conversion_semaphore = WeightedSemaphore(
 
 ### 3. Entry point — `api/v1/jobs.py` (existing endpoint, extended)
 
-No new endpoint is introduced. `POST /v1/jobs` already provides the full caller contract:
-it validates the file, stages it, creates the job/doc DB records, and returns a `job_id`
-immediately with `202 Accepted`. Callers already poll `GET /v1/jobs/{job_id}` for status.
-The only change is **what happens after the job is accepted**.
+`POST /v1/jobs` is the entry point for both operations. It validates the file, stages it,
+creates the job/doc DB records, inserts `conversion_tasks` rows, and returns a `job_id`
+immediately with `202 Accepted`. The only change from today is **what happens after the
+job is accepted** — the endpoint returns immediately and the dispatcher drives execution.
 
 #### Current flow (digitization)
 
@@ -542,7 +543,7 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
     except Exception as exc:
         db_manager.update_task_status(task.task_id, "failed", error=str(exc))
     finally:
-        # Clean up cached input; keep result_path until TTL reaper runs
+        # Clean up cached input; result_path is kept until the user deletes or exports it
         _safe_remove(task.cached_file)
         await conversion_semaphore.release(weight)
 ```
@@ -712,14 +713,14 @@ Re-running is safe because `convert_doc` is deterministic for the same input.
 
 | Event | Input cache | Output file |
 |---|---|---|
-| Task completes | Deleted immediately after export | Kept until TTL (default 1 h) |
+| Task completes | Deleted immediately | Kept permanently until the user deletes or exports it |
 | Task fails | Deleted | N/A |
 | Startup: `running` → `failed` | `chunks/` dir deleted; input deleted | N/A |
 | Startup: `queued`, file present | Kept (job will run) | N/A |
 | Startup: `queued`, file missing | N/A | N/A |
 
-A background `asyncio.create_task` TTL reaper deletes `result_path` and sets
-`result_path = NULL` for completed tasks older than `CONVERSION_RESULT_TTL_SECONDS`.
+Output files are **not** auto-deleted. They persist until the user explicitly deletes or
+exports the result. There is no background TTL reaper for completed output files.
 
 ---
 
@@ -730,6 +731,11 @@ HTTP round-trip. The dispatcher picks the tasks up and drives execution.
 
 #### `pipeline/digitize.py`
 
+The `conversion_tasks` row for the digitization job is already inserted by `POST /v1/jobs`
+at admission time. The digitize pipeline no longer owns the conversion step — it simply
+looks up the `conversion_tasks` row for its `job_id` and polls until the dispatcher marks
+it terminal.
+
 Current:
 ```python
 with ProcessPoolExecutor(max_workers=1) as executor:
@@ -739,33 +745,159 @@ with ProcessPoolExecutor(max_workers=1) as executor:
 
 Proposed:
 ```python
-task_id = enqueue_conversion(
-    job_id=job_id, doc_id=doc_id,
-    file_path=file_path, output_format=output_format,
-)
-output_file, conversion_time = await poll_until_complete(task_id)
+# The conversion_tasks row was inserted by POST /v1/jobs — no enqueue here.
+# Retrieve the task_id for this job and poll until the dispatcher completes it.
+task = db_manager.get_conversion_task_by_job_id(job_id)
+while task.status not in ("completed", "failed"):
+    await asyncio.sleep(settings.digitize.conversion_poll_interval)
+    task = db_manager.get_conversion_task_by_job_id(job_id)
+if task.status == "failed":
+    raise RuntimeError(task.error)
+output_file, conversion_time = task.result_path, task.conversion_time
 ```
-
-`enqueue_conversion` and `poll_until_complete` are thin helpers in a new
-`utils/conversion_client.py` module; they call the DB manager directly (no HTTP
-round-trip for in-process callers).
 
 #### `processing/orchestrator.py`
 
-Currently submits `convert_document()` into a `ProcessPoolExecutor`.
-Under this proposal it enqueues each file and polls, replacing the
-`conversion_futures` dict with `task_id → path` tracking.
-The rest of the pipeline (process → chunk → index) is unchanged.
+The `conversion_tasks` rows for every file in the ingestion job are inserted by
+`POST /v1/jobs` at admission time. `process_documents` reads them and
+**reacts as each task reaches a terminal state**, driving the downstream stages
+(process → chunk → index) for that file immediately.
+
+The `ProcessPoolExecutor` used today for `convert_document()`, the light/heavy
+`_run_batch` split, and the `conversion_futures` dict are all removed. The dispatcher
+owns CPU parallelism; `process_documents` owns the in-process post-conversion pipeline.
+
+The function becomes `async` so it can `await asyncio.sleep()` inside the poll loop.
+
+```python
+async def process_documents(
+    input_paths, out_path, llm_model, llm_endpoint, emb_endpoint,
+    max_tokens, job_id, doc_id_dict, indexing_callback=None
+):
+    """
+    Drive the post-conversion pipeline (process → chunk → index) for every
+    file in the ingestion job.
+
+    conversion_tasks rows were already inserted by POST /v1/jobs at admission
+    time.  This function polls their status and reacts as each one reaches a
+    terminal state, feeding completed conversions into the downstream in-process
+    pipeline immediately rather than waiting for all conversions to finish first.
+    """
+    status_mgr = get_status_manager(job_id)
+
+    # Build task_id → path lookup from the rows already in conversion_tasks.
+    # db_manager.get_conversion_tasks_by_job_id returns all rows for the job.
+    tasks = db_manager.get_conversion_tasks_by_job_id(job_id)
+    task_id_to_path = {t.task_id: p for t, p in
+                       zip(tasks, input_paths)}  # aligned by insertion order
+
+    pending_task_ids = set(task_id_to_path)
+    process_futures  = {}
+    chunk_futures    = {}
+    indexing_futures = {}
+
+    with ContextAwareThreadPoolExecutor(max_workers=WORKER_SIZE) as processor_executor, \
+         ContextAwareThreadPoolExecutor(max_workers=WORKER_SIZE) as chunker_executor,   \
+         ContextAwareThreadPoolExecutor(max_workers=WORKER_SIZE) as indexer_executor:
+
+        while pending_task_ids or process_futures or chunk_futures or indexing_futures:
+
+            # --- A. React to completed/failed conversion tasks ---
+            for task_id in list(pending_task_ids):
+                task = db_manager.get_conversion_task(task_id)
+                path = task_id_to_path[task_id]
+                doc_id = doc_id_dict.get(Path(path).name)
+
+                if task.status == "completed":
+                    pending_task_ids.discard(task_id)
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.DIGITIZED, ...})
+                    status_mgr.update_job_progress(doc_id, DocStatus.DIGITIZED, JobStatus.IN_PROGRESS)
+                    p_future = processor_executor.submit(
+                        process_converted_document, task.result_path, path,
+                        out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
+                    )
+                    process_futures[p_future] = path
+
+                elif task.status == "failed":
+                    pending_task_ids.discard(task_id)
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED},
+                                                   error=task.error)
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+
+            # --- B. Drain completed process futures → submit chunking ---
+            for fut in list(process_futures):
+                if not fut.done():
+                    continue
+                path = process_futures.pop(fut)
+                doc_id = doc_id_dict.get(Path(path).name)
+                try:
+                    txt_json, tab_json, pgs, tabs, timings, doc_lang = fut.result()
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.PROCESSED, ...})
+                    c_future = chunker_executor.submit(
+                        chunk_single_file, txt_json, tab_json, out_path,
+                        emb_endpoint, max_tokens, doc_id=doc_id, language=doc_lang
+                    )
+                    chunk_futures[c_future] = path
+                except Exception as e:
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=str(e))
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+
+            # --- C. Drain completed chunk futures → submit indexing ---
+            for fut in list(chunk_futures):
+                if not fut.done():
+                    continue
+                path = chunk_futures.pop(fut)
+                doc_id = doc_id_dict.get(Path(path).name)
+                try:
+                    text_chunk_json, table_chunk_json, total_time = fut.result()
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.CHUNKED, ...})
+                    if indexing_callback:
+                        doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
+                        for chunk in doc_chunks:
+                            chunk["doc_id"] = doc_id
+                        index_future = indexer_executor.submit(indexing_callback, doc_id, doc_chunks, path)
+                        indexing_futures[index_future] = doc_id
+                except Exception as e:
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=str(e))
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+
+            # --- D. Drain completed indexing futures ---
+            for fut in list(indexing_futures):
+                if not fut.done():
+                    continue
+                doc_id = indexing_futures.pop(fut)
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"Indexing failed for {doc_id}: {e}", exc_info=True)
+
+            await asyncio.sleep(settings.digitize.conversion_poll_interval)
+```
+
+**Key design properties:**
+
+- **No `ProcessPoolExecutor` in orchestrator** — conversion CPU work is fully owned by the
+  dispatcher. The orchestrator runs only in-process I/O-bound work (process, chunk, index).
+- **No light/heavy split** — `_run_batch` is removed. The dispatcher's semaphore weights and
+  round-robin already handle large vs normal files; the orchestrator sees only a flat set of
+  `task_id`s to watch.
+- **Reactive, not blocking** — as soon as a conversion completes, its downstream stages start
+  immediately. Files that convert fast are not held back waiting for slower ones.
+- **Single poll loop** — the `while` condition covers all four in-flight collections; the loop
+  exits only when every stage for every file has reached a terminal state.
+- **Status updates unchanged** — `DocStatus` transitions (`IN_PROGRESS → DIGITIZED → PROCESSED
+  → CHUNKED`) and `status_mgr` calls are identical to today; only the trigger changes from
+  `Future.result()` to `task.status == "completed"`.
 
 #### Data Source Connectors
 
 Data Source Connectors drive the **ingestion pipeline** — they sync remote data sources into
 the vector DB via `processing/orchestrator.py`, the same path used by `POST /v1/jobs`
 (ingestion). They have their own entry-point, their own API surface, and their own
-concurrency limits, but the point where `convert_document()` is called is identical.
+concurrency limits, but the point where conversion is triggered is identical.
 
 Under this proposal nothing changes for them structurally: their ingestion-pipeline call
-lands in the same `processing/orchestrator.py` → `enqueue_conversion()` path that the
+lands in the same `processing/orchestrator.py` → `process_documents()` path that the
 `POST /v1/jobs` ingestion flow uses. All conversions — regardless of which entry point
 triggered ingestion — share the same `conversion_tasks` queue and `WeightedSemaphore`.
 
@@ -776,8 +908,6 @@ reference a `doc_id` from an existing digitize document record. It therefore cal
 `POST /v1/jobs?operation=digitization` exactly as any other caller does — it gets a `job_id`
 back and polls `GET /v1/jobs/{job_id}` for the result. The `conversion_tasks` row inserted
 by that job carries both `job_id` and `doc_id`, giving Extract & Tag the reference it needs.
-
-No special treatment required. Extract & Tag is just another caller of the same endpoint.
 
 ---
 
@@ -790,11 +920,10 @@ Added to `DigitizeConfig` in `settings.py`:
 | `ingestion_queue_quota` | `DIGITIZE_INGESTION_QUEUE_QUOTA` | `10` | Max queued ingestion tasks (multi-file jobs) |
 | `digitization_queue_quota` | `DIGITIZE_DIGITIZATION_QUEUE_QUOTA` | `5` | Max queued digitization tasks (1 file per job) |
 | `conversion_poll_interval` | `DIGITIZE_CONVERSION_POLL_INTERVAL` | `2` | Dispatcher poll interval (s) |
-| `conversion_result_ttl` | `DIGITIZE_CONVERSION_RESULT_TTL` | `3600` | Output file TTL (s) |
 
 `doc_worker_size` (default 4) continues to serve as the semaphore capacity.
 `heavy_doc_page_threshold` (default 500) is reused as the large-file boundary.
-The two quotas are independent. No `conversion_queue_max` setting is needed — each operation type has its own quota field.
+The two quotas are independent — each operation type has its own quota field.
 
 ---
 
@@ -803,15 +932,15 @@ The two quotas are independent. No `conversion_queue_max` setting is needed — 
 | File | Change |
 |---|---|
 | `db/models.py` | Add `ConversionTask` ORM model with `operation` column |
-| `db/manager.py` | Add `ConversionTask` CRUD + `_try_claim(operation, available)` + `get_queued_count_by_op()` — `get_running_weight()` is no longer needed at admission time |
-| `settings.py` | Add `ingestion_queue_quota`, `digitization_queue_quota`, `conversion_poll_interval`, `conversion_result_ttl` to `DigitizeConfig` |
+| `db/manager.py` | Add `ConversionTask` CRUD + `_try_claim(operation, available)` + `get_queued_count_by_op()` |
+| `settings.py` | Add `ingestion_queue_quota`, `digitization_queue_quota`, `conversion_poll_interval` to `DigitizeConfig` |
 | `workers/conversion_semaphore.py` | **New** — `WeightedSemaphore` |
 | `workers/conversion_dispatcher.py` | **New** — round-robin dispatcher loop + `_run_conversion` |
 | `utils/recovery.py` | Add `recover_conversion_tasks()` |
 | `api/v1/jobs.py` | Replace `ConcurrencyManager` semaphore + background task dispatch with per-op quota check + `conversion_tasks` INSERT per file. Remove `has_active_jobs()` call. |
 | `app.py` | Start dispatcher task in `lifespan`; call `recover_conversion_tasks()` on startup |
 | `pipeline/digitize.py` | Remove `ProcessPoolExecutor` wrapper; call `convert_doc()` directly (dispatcher holds semaphore) |
-| `processing/orchestrator.py` | Replace `converter_executor.submit(convert_document, …)` with queue enqueue calls |
+| `processing/orchestrator.py` | Remove `ProcessPoolExecutor` + light/heavy `_run_batch` split; make `process_documents` async; poll `conversion_tasks` rows (inserted by `POST /v1/jobs`) reactively — feed each completed conversion immediately into process → chunk → index |
 | `parsing/converter.py` | No changes to `convert_doc()` itself |
 | `workers/concurrency.py` | Remove entirely — superseded by `WeightedSemaphore` + per-op quotas |
 
@@ -1085,9 +1214,7 @@ stateDiagram-v2
 
     running --> failed : convert_doc() throws\nrelease semaphore weight
 
-    completed --> completed_expired : TTL reaper fires\ndelete output file
-
-    completed_expired --> [*]
+    completed --> [*]
     failed --> [*] : input cache deleted\njob/doc row marked failed
 
     note right of running
@@ -1120,8 +1247,6 @@ stateDiagram-v2
 | Dispatcher claims the same task twice on concurrent invocations | `SELECT … FOR UPDATE SKIP LOCKED` is atomic; only one claim succeeds |
 | Semaphore drifts if `_run_conversion` crashes before `release` | `finally: await semaphore.release(weight)` — release always runs |
 | Race between admission check and INSERT (two jobs admitted simultaneously) | Both checks happen inside one `SELECT … FOR UPDATE` transaction; only one wins the race |
-| Cache volume fills with large PDFs | Emit a warning log when cache dir free space < threshold; TTL reaper prevents unbounded growth |
-| Caller polls forever on stuck task | Dispatcher sets a per-task wall-clock timeout (e.g. 30 min); marks timed-out tasks `failed` |
 | Digitization task queues behind a large ingestion job's overflow | Queue is FIFO by `queued_at`; tasks from all jobs interleave naturally — a digitization task submitted after an ingestion job's overflow tasks will wait its fair turn |
 | Two concurrent ingestion jobs interleaving chunks into the vector DB | Each doc has a unique `doc_id` keying its chunks; concurrent ingestion jobs write independent document sets with no overlap |
 | `page_count` unavailable before enqueue (e.g. DOCX) | `get_document_page_count()` returns 0 for DOCX; treat 0 as `is_large=False` (weight 1) |
@@ -1133,13 +1258,12 @@ stateDiagram-v2
 1. **ORM + migration** — add `ConversionTask` to `db/models.py`; `Base.metadata.create_all` creates the table on next startup.
 2. **`WeightedSemaphore`** — implement and unit-test in isolation (`workers/conversion_semaphore.py`).
 3. **`db/manager.py` CRUD** — `create_task`, `claim_queued_tasks`, `update_task_status`, `get_conversion_tasks`, `get_running_weight`, `get_queued_count`.
-4. **Settings** — add `ingestion_queue_quota`, `digitization_queue_quota`, `conversion_poll_interval`, `conversion_result_ttl` to `DigitizeConfig`.
+4. **Settings** — add `ingestion_queue_quota`, `digitization_queue_quota`, `conversion_poll_interval` to `DigitizeConfig`.
 5. **Dispatcher** — implement `conversion_dispatcher.py`; write integration test using a stub `convert_doc`.
 6. **Recovery** — `recover_conversion_tasks()` in `utils/recovery.py`; add call to `app.py` lifespan alongside existing `recover_zombie_jobs()`.
-7. **TTL reaper** — background `asyncio.create_task` loop; delete completed output files older than `conversion_result_ttl`.
-8. **Modify `api/v1/jobs.py`** — both paths: remove `ConcurrencyManager` semaphore acquire + background task dispatch; replace with per-op queue quota check + `conversion_tasks` INSERT per file. Remove `has_active_jobs()` call.
-9. **Modify `pipeline/digitize.py`** — remove `ProcessPoolExecutor` wrapper; call `convert_doc()` directly (dispatcher already holds the semaphore slot).
-10. **Modify `processing/orchestrator.py`** — replace `converter_executor.submit(convert_document, …)` with enqueue calls; add logic to await all `conversion_tasks` for the job before continuing to process → chunk → index.
-11. **Remove `ConcurrencyManager`** from `workers/concurrency.py` and `has_active_jobs()` from `utils/jobs.py` — both superseded.
-12. **Start dispatcher in `app.py` lifespan**.
-13. **Integration tests** — queue quota rejection, large-batch jobs draining through queue, concurrent ingestion jobs sharing capacity, admission while all workers busy (tasks queued, not rejected), crash recovery sweep.
+7. **Modify `api/v1/jobs.py`** — both paths: remove `ConcurrencyManager` semaphore acquire + background task dispatch; replace with per-op queue quota check + `conversion_tasks` INSERT per file. Remove `has_active_jobs()` call.
+8. **Modify `pipeline/digitize.py`** — remove `ProcessPoolExecutor` wrapper; call `convert_doc()` directly (dispatcher already holds the semaphore slot).
+9. **Modify `processing/orchestrator.py`** — remove `ProcessPoolExecutor` + `_run_batch`; make `process_documents` async; replace `conversion_futures` dict with a `task_id → path` poll loop that reacts to each `conversion_tasks` row reaching `completed` or `failed` and immediately submits the downstream process → chunk → index stages.
+10. **Remove `ConcurrencyManager`** from `workers/concurrency.py` and `has_active_jobs()` from `utils/jobs.py` — both superseded.
+11. **Start dispatcher in `app.py` lifespan**.
+12. **Integration tests** — queue quota rejection, large-batch jobs draining through queue, concurrent ingestion jobs sharing capacity, admission while all workers busy (tasks queued, not rejected), crash recovery sweep.
