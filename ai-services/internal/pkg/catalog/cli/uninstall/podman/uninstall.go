@@ -23,7 +23,7 @@ func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) e
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	pods, err := catalogUtils.GetCatalogPods(rt)
+	pods, err := catalogUtils.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return err
 	}

@@ -64,7 +64,7 @@ func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (boo
 		return true, nil
 	}
 
-	pods, err := catalogUtils.GetCatalogPods(rt)
+	pods, err := catalogUtils.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return false, err
 	}

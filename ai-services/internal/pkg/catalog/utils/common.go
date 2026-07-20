@@ -105,7 +105,7 @@ func ConfirmDeletion(ctx context.Context, pods []types.Pod) (bool, error) {
 	// Print pods to be deleted
 	logger.InfofCtx(ctx, "Below are the list of pods to be deleted")
 	for _, pod := range pods {
-		logger.Infof("\t-> %s\n", pod.Name)
+		logger.InfofCtx(ctx, "\t-> %s\n", pod.Name)
 	}
 
 	// Confirm deletion
@@ -124,7 +124,7 @@ func ConfirmDeletion(ctx context.Context, pods []types.Pod) (bool, error) {
 }
 
 // GetCatalogPods return the list of catalog pod.
-func GetCatalogPods(rt runtime.Runtime) ([]types.Pod, error) {
+func GetCatalogPods(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
 	// Check if catalog pods exist
 	pods, err := rt.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey ,catalogConstants.CatalogAppName)},
@@ -134,12 +134,12 @@ func GetCatalogPods(rt runtime.Runtime) ([]types.Pod, error) {
 	}
 
 	if len(pods) == 0 {
-		logger.Infoln("Catalog service is not deployed")
+		logger.InfolnCtx(ctx, "Catalog service is not deployed")
 
 		return nil, nil
 	}
 
-	logger.Infof("Found %d catalog pod(s)\n", len(pods))
+	logger.InfofCtx(ctx, "Found %d catalog pod(s)\n", len(pods))
 
 	return pods, nil
 }
