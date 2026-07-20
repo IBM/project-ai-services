@@ -27,28 +27,14 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	}
 
 	// Check if the catalog release exists
-	exists, err := helmClient.IsReleaseExist(catalog)
-	if err != nil {
-		return fmt.Errorf("failed to check if catalog exists: %w", err)
-	}
-
-	if !exists {
-		logger.Infof("Catalog '%s' does not exist in namespace '%s'\n", catalog, namespace)
-
-		return nil
+	if installed, err := isCatalogInstalled(helmClient, catalog, namespace); err != nil || !installed {
+		return err
 	}
 
 	// Confirm deletion unless auto-yes is set
 	if !autoYes {
-		confirmed, err := utils.ConfirmAction("Are you sure you want to uninstall the catalog '" + catalog + "'?")
-		if err != nil {
-			return fmt.Errorf("failed to take user input: %w", err)
-		}
-
-		if !confirmed {
-			logger.Infoln("Uninstall cancelled")
-
-			return nil
+		if confirmed, err := confirmDeletion(catalog); !confirmed || err != nil {
+			return err
 		}
 	}
 
@@ -79,4 +65,34 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	}
 
 	return nil
+}
+
+func isCatalogInstalled(helmClient *helm.Helm, catalog, namespace string) (bool, error) {
+	exists, err := helmClient.IsReleaseExist(catalog)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if catalog exists: %w", err)
+	}
+
+	if !exists {
+		logger.Infof("Catalog '%s' does not exist in namespace '%s'\n", catalog, namespace)
+
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func confirmDeletion(catalog string) (bool, error) {
+	confirmed, err := utils.ConfirmAction("Are you sure you want to uninstall the catalog '" + catalog + "'?")
+	if err != nil {
+		return false, fmt.Errorf("failed to take user input: %w", err)
+	}
+
+	if !confirmed {
+		logger.Infoln("Uninstall cancelled")
+
+		return false, nil
+	}
+
+	return true, nil
 }
