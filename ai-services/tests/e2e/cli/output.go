@@ -19,6 +19,27 @@ func checkRequiredStrings(output, label string, required []string) error {
 	return nil
 }
 
+// checkAnyPattern returns nil if output contains at least one of the given
+// patterns (case-insensitive OR logic). If none match, it returns an error
+// quoting the checked patterns and the actual output for easy diagnosis.
+// Used by all failure-scenario validators in this file.
+func checkAnyPattern(output, label string, patterns []string) error {
+	lower := strings.ToLower(output)
+	for _, p := range patterns {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"%s output did not contain any expected pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		label,
+		patterns,
+		output,
+	)
+}
+
 // checkNotOpenShiftUnsupported returns an error when the openshift-not-supported warning is missing.
 func checkNotOpenShiftUnsupported(output, label string) error {
 	const marker = "WARNING:  Not supported for openshift runtime"
@@ -581,43 +602,30 @@ func ValidateCatalogUninstallOutput(output string) error {
 // ValidateRegistryLoginFailureOutput verifies that the output from a failed
 // `podman login` attempt contains a recognisable authentication-error string.
 //
-// Known strings emitted by Podman / Skopeo on credential rejection:
+// Known strings emitted by Podman on credential rejection:
 //   - "invalid username/password"
 //   - "unauthorized"
 //   - "authentication required"
-//   - "login attempt to" … "failed with status"
+//   - "failed with status"
 //   - "Error logging in to"
 func ValidateRegistryLoginFailureOutput(output string) error {
 	knownPatterns := []string{
 		"invalid username/password",
 		"unauthorized",
 		"authentication required",
+		// Podman: "login attempt to https://.../v2/ failed with status: 401 Unauthorized"
 		"failed with status",
+		// Podman: "Error logging in to registry"
 		"Error logging in to",
-		"error logging in",
-		"401",
-		// ICR (IBM Container Registry) returns 400 Bad Request for invalid credentials
-		// rather than the more common 401 Unauthorized.
-		"400",
+		// ICR (IBM Container Registry) returns 400 Bad Request for invalid credentials.
+		// "bad request" covers this without matching bare numbers in unrelated output.
 		"bad request",
-		// Generic Podman/Skopeo auth failure prefix
+		// Generic Podman auth failure prefix
 		"authenticating creds",
 		"requesting bearer token",
 	}
 
-	lowerOutput := strings.ToLower(output)
-	for _, pattern := range knownPatterns {
-		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"registry login failure output did not contain any expected authentication-error pattern.\n"+
-			"Checked patterns: %v\nActual output:\n%s",
-		knownPatterns,
-		output,
-	)
+	return checkAnyPattern(output, "registry login failure", knownPatterns)
 }
 
 // ValidateCatalogLoginFailureOutput verifies that the output from a failed
@@ -640,19 +648,7 @@ func ValidateCatalogLoginFailureOutput(output string) error {
 		"invalid username or password",
 	}
 
-	lowerOutput := strings.ToLower(output)
-	for _, pattern := range knownPatterns {
-		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"catalog login failure output did not contain any expected authentication-error pattern.\n"+
-			"Checked patterns: %v\nActual output:\n%s",
-		knownPatterns,
-		output,
-	)
+	return checkAnyPattern(output, "catalog login failure", knownPatterns)
 }
 
 // ValidateCatalogUnreachableOutput verifies that the output from a failed
@@ -678,19 +674,7 @@ func ValidateCatalogUnreachableOutput(output string) error {
 		"network",
 	}
 
-	lowerOutput := strings.ToLower(output)
-	for _, pattern := range knownPatterns {
-		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"catalog unreachable-server output did not contain any expected connectivity-error pattern.\n"+
-			"Checked patterns: %v\nActual output:\n%s",
-		knownPatterns,
-		output,
-	)
+	return checkAnyPattern(output, "catalog unreachable-server", knownPatterns)
 }
 
 // ValidateBootstrapValidateFailureOutput verifies that the output from a failed
@@ -713,19 +697,7 @@ func ValidateBootstrapValidateFailureOutput(output string) error {
 		"error",
 	}
 
-	lowerOutput := strings.ToLower(output)
-	for _, pattern := range knownPatterns {
-		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"bootstrap validate failure output did not contain any expected validation-error pattern.\n"+
-			"Checked patterns: %v\nActual output:\n%s",
-		knownPatterns,
-		output,
-	)
+	return checkAnyPattern(output, "bootstrap validate failure", knownPatterns)
 }
 
 // ValidateInvalidRuntimeOutput verifies that the output from a
@@ -743,19 +715,7 @@ func ValidateInvalidRuntimeOutput(output string) error {
 		"--runtime",
 	}
 
-	lowerOutput := strings.ToLower(output)
-	for _, pattern := range knownPatterns {
-		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf(
-		"invalid runtime output did not contain any expected rejection pattern.\n"+
-			"Checked patterns: %v\nActual output:\n%s",
-		knownPatterns,
-		output,
-	)
+	return checkAnyPattern(output, "invalid runtime", knownPatterns)
 }
 
 // OutputIndicatesSpyreAbsence returns true when the bootstrap validate output

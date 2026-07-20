@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -123,10 +124,8 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 
 						registryURL, _, _ := bootstrap.GetPodManCreds()
 						if registryURL == "" {
-							// Fall back to a well-known public registry so the test
-							// can still exercise authentication failure handling even
-							// when REGISTRY_URL is not exported.
-							registryURL = "docker.io"
+							// Fall back to ICR — the project's default registry —
+							registryURL = "icr.io"
 						}
 
 						logger.Infof(
@@ -191,23 +190,27 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 						)
 						defer cancel()
 
-						// Resolve the catalog server URL so we can test an
-						// authentication failure against a *real* (or recently real)
-						// catalog endpoint.  If the catalog is not yet running the
-						// test falls through to the error-output assertion which
-						// will still detect a failure.
+						// Resolve the catalog server URL.  The test requires a real
+						// catalog endpoint to exercise authentication failure against —
+						// a guessed URL would make the assertion non-deterministic.
 						serverURL, _, _ := bootstrap.GetCatalogCreds()
 						if serverURL == "" {
-							// Try to discover a running catalog instance.
+							// Try to discover a running catalog instance via catalog info.
 							infoOut, infoErr := cli.CatalogInfo(ctx, cfg, appRuntime)
 							if infoErr == nil {
 								serverURL = cli.ExtractCatalogBackendURL(infoOut)
 							}
 						}
 						if serverURL == "" {
-							// No catalog URL resolvable — fall back to localhost default
-							// so the test still exercises the CLI error path.
-							serverURL = "http://localhost:8080"
+							// No catalog URL resolvable — fail rather than skip so that
+							// a misconfigured environment is surfaced clearly in CI.
+							// The catalog service must be running for this test to be valid.
+							// Remaining tests continue executing (ginkgo.Fail does not abort the suite).
+							ginkgo.Fail(
+								"[FAILURE-TEST][Catalog] Catalog credentials test cannot run: " +
+									"no catalog URL available. " +
+									"Set CATALOG_SERVER_URL or ensure the catalog service is running.",
+							)
 						}
 
 						logger.Infof(
@@ -364,21 +367,20 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 				// a known acceptable state.  This test explicitly exercises the failure
 				// path so the error message and exit code are verified in automation.
 				//
-				// Approach — GHW_CHROOT override (no files modified on disk):
+				// Approach — lspci detection + conditional GHW_CHROOT:
 				//
-				//   The ghw library (used internally by the CLI to scan PCI buses)
-				//   reads hardware info from the filesystem under a configurable root.
-				//   By setting GHW_CHROOT to an empty temporary directory before
-				//   invoking the CLI, ghw finds no PCI devices at all, so
-				//   IsApplicable() returns false and the SpyreRule emits the expected
-				//   "not attached" error regardless of what hardware is actually
-				//   present on the machine.
+				//   lspci is first used to check whether Spyre cards (vendor 1014,
+				//   device 06a7/06a8) are physically present on this machine.
 				//
-				//   This makes the test deterministic and always-runnable — it does
-				//   not skip on production LPARs that have real Spyre cards.
+				//   • No cards:
+				//     Run bootstrap validate directly — the validator naturally emits
+				//     the "not attached" error without any environment manipulation.
 				//
-				//   The original GHW_CHROOT value (if any) is restored in a deferred
-				//   cleanup so the environment is never permanently altered.
+				//   • Cards present:
+				//     Set GHW_CHROOT to an empty temp directory so the ghw library
+				//     (used by IsApplicable() inside the validator) finds no PCI
+				//     devices, making the test deterministic regardless of hardware.
+				//     GHW_CHROOT is restored in a deferred cleanup.
 				ginkgo.It(
 					"bootstrap validate reports missing Spyre accelerator card",
 					ginkgo.Label("failure-test", "validation", "spyre"),
@@ -388,78 +390,81 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 								"Spyre accelerator check is only performed for the podman runtime",
 							)
 						}
-
+	
 						ctx, cancel := context.WithTimeout(
 							context.Background(),
 							bootstrapFailureTestTimeout,
 						)
 						defer cancel()
-
-						// Create an empty temporary directory.  When ghw is told to
-						// use this as its chroot it will find no /sys/bus/pci/devices
-						// entries and therefore detect zero Spyre cards.
-						emptyChrootDir, err := os.MkdirTemp("", "ais-spyre-failure-test-*")
-						if err != nil {
-							ginkgo.Fail(fmt.Sprintf(
-								"[FAILURE-TEST][Spyre] Could not create empty chroot dir: %v",
-								err,
-							))
-						}
-						defer func() {
-							if removeErr := os.RemoveAll(emptyChrootDir); removeErr != nil {
-								logger.Errorf(
-									"[FAILURE-TEST][Spyre] Failed to remove temp chroot dir %s: %v",
-									emptyChrootDir,
-									removeErr,
-								)
-							}
-						}()
-
-						// Save and override GHW_CHROOT.  The CLI subprocess inherits
-						// the test process environment, so setting this here causes
-						// ghw.PCI() inside the CLI to read from the empty dir.
-						origGHWChroot := os.Getenv("GHW_CHROOT")
-						defer func() {
-							// Restore the original value (empty string means unset).
-							if origGHWChroot == "" {
-								_ = os.Unsetenv("GHW_CHROOT")
-							} else {
-								_ = os.Setenv("GHW_CHROOT", origGHWChroot)
-							}
-							logger.Infof("[FAILURE-TEST][Spyre] GHW_CHROOT restored")
-						}()
-
-						if err := os.Setenv("GHW_CHROOT", emptyChrootDir); err != nil {
-							ginkgo.Fail(fmt.Sprintf(
-								"[FAILURE-TEST][Spyre] Could not set GHW_CHROOT: %v",
-								err,
-							))
-						}
-
+	
+						// Use lspci to determine whether Spyre cards are physically
+						// present.  IsApplicable() checks count > 0, so the threshold
+						// here is simply ≥ 1 card detected.
+						present, cardCount := spyreCardsPresent()
 						logger.Infof(
-							"[FAILURE-TEST][Spyre] Running bootstrap validate with GHW_CHROOT=%s (empty dir → no Spyre cards visible)",
-							emptyChrootDir,
+							"[FAILURE-TEST][Spyre] lspci detected %d Spyre card(s) on this machine",
+							cardCount,
 						)
-
-						output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
-
-						// Restore immediately so subsequent log calls are unaffected.
-						if origGHWChroot == "" {
-							_ = os.Unsetenv("GHW_CHROOT")
+	
+						if present {
+							// Cards are present — mask them from the validator using
+							// GHW_CHROOT so the test is deterministic on any LPAR.
+							emptyChrootDir, mkErr := os.MkdirTemp("", "ais-spyre-failure-test-*")
+							if mkErr != nil {
+								ginkgo.Fail(fmt.Sprintf(
+									"[FAILURE-TEST][Spyre] Could not create empty chroot dir: %v",
+									mkErr,
+								))
+							}
+							defer func() {
+								if removeErr := os.RemoveAll(emptyChrootDir); removeErr != nil {
+									logger.Errorf(
+										"[FAILURE-TEST][Spyre] Failed to remove temp chroot dir %s: %v",
+										emptyChrootDir,
+										removeErr,
+									)
+								}
+							}()
+	
+							origGHWChroot := os.Getenv("GHW_CHROOT")
+							defer func() {
+								if origGHWChroot == "" {
+									_ = os.Unsetenv("GHW_CHROOT")
+								} else {
+									_ = os.Setenv("GHW_CHROOT", origGHWChroot)
+								}
+								logger.Infof("[FAILURE-TEST][Spyre] GHW_CHROOT restored")
+							}()
+	
+							if setErr := os.Setenv("GHW_CHROOT", emptyChrootDir); setErr != nil {
+								ginkgo.Fail(fmt.Sprintf(
+									"[FAILURE-TEST][Spyre] Could not set GHW_CHROOT: %v",
+									setErr,
+								))
+							}
+							logger.Infof(
+								"[FAILURE-TEST][Spyre] %d Spyre card(s) present — GHW_CHROOT=%s to mask them from validator",
+								cardCount,
+								emptyChrootDir,
+							)
 						} else {
-							_ = os.Setenv("GHW_CHROOT", origGHWChroot)
+							logger.Infof(
+								"[FAILURE-TEST][Spyre] 0 Spyre cards detected via lspci — running validate directly",
+							)
 						}
-
+	
+						output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
+	
 						// ── Assertions ──────────────────────────────────────
 						gomega.Expect(err).To(
 							gomega.HaveOccurred(),
-							"Expected bootstrap validate to report missing Spyre card (GHW_CHROOT pointed at empty dir), but it succeeded",
+							"Expected bootstrap validate to report missing Spyre card, but it succeeded",
 						)
-
+	
 						gomega.Expect(
 							cli.ValidateSpyreAbsenceOutput(output),
 						).To(gomega.Succeed())
-
+	
 						logger.Infof(
 							"[FAILURE-TEST][Spyre] bootstrap validate correctly reported missing Spyre accelerator. Error: %v",
 							err,
@@ -474,6 +479,40 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 // ─────────────────────────────────────────────────────────────────────────────
 // File-local helper functions
 // ─────────────────────────────────────────────────────────────────────────────
+
+// spyreCardsPresent returns whether at least one IBM Spyre PCI card is
+// physically attached to the LPAR, and the total count detected.
+// Uses lspci with the known vendor/device IDs:
+//
+//	vendor 1014 (IBM), device 06a7 (Rev1) or 06a8 (Rev2)
+//
+// This mirrors the detection used by accelerator/spyre/spyre.go:ListCards().
+// A non-zero exit from lspci (no matches) is treated as "no cards present".
+func spyreCardsPresent() (bool, int) {
+	count := 0
+
+	// Count Rev1 cards (06a7)
+	out1, err1 := exec.Command("lspci", "-d", "1014:06a7").CombinedOutput()
+	if err1 == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out1)), "\n") {
+			if strings.TrimSpace(line) != "" {
+				count++
+			}
+		}
+	}
+
+	// Count Rev2 cards (06a8)
+	out2, err2 := exec.Command("lspci", "-d", "1014:06a8").CombinedOutput()
+	if err2 == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out2)), "\n") {
+			if strings.TrimSpace(line) != "" {
+				count++
+			}
+		}
+	}
+
+	return count > 0, count
+}
 
 // attemptPodmanRegistryLogin runs `podman login` directly (not via the
 // ai-services CLI) so that registry authentication can be tested independently
