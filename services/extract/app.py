@@ -1,26 +1,14 @@
 """
 Extract Information Service — FastAPI application.
-
-This file implements the Schema Registry endpoints:
-  POST   /v1/schemas
-  GET    /v1/schemas
-  GET    /v1/schemas/{schema_id}
-  DELETE /v1/schemas/{schema_id}
-  DELETE /v1/schemas          (bulk, confirm=true)
-
-The async extraction endpoints (POST /v1/extract, POST /v1/extract/jobs,
-GET  /v1/extract/jobs, etc.) are scaffolded with stubs and will be fully
-implemented in a follow-up iteration.
 """
 
 import asyncio
-import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import IntegrityError
@@ -41,13 +29,11 @@ from extract.models import (
 )
 from extract.schema_utils import (
     SchemaValidationError,
-    check_registration_budget,
+    check_schema_share_in_context,
     compute_token_counts,
     normalize_schema,
-    validate_custom_prompt,
     validate_examples,
-    validate_json_schema_structure,
-    validate_schema_size,
+    validate_json_schema_structure
 )
 from extract.settings import settings
 
@@ -218,8 +204,7 @@ def _fmt_dt(dt) -> Optional[str]:
         "2. Per-property `\"required\": true` tags are normalized into a standard "
         "`required` array (nested sub-schemas are handled recursively)\n"
         "3. Every `examples[i].output` validates against the normalized schema\n"
-        "4. `custom_prompt` is checked for prompt-injection patterns\n"
-        "5. Token-count budget check: fixed overhead ≤ CONTEXT_SCHEMA_SHARE × MAX_MODEL_LEN\n\n"
+        "4. Token-count budget check: fixed overhead ≤ CONTEXT_SCHEMA_SHARE × MAX_MODEL_LEN\n\n"
         "The stored schema is always the **normalized** form."
     ),
     tags=["schemas"],
@@ -264,7 +249,7 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
 
     # --- Registration budget check ---
     max_model_len = settings.common.llm.max_model_len
-    check_registration_budget(schema_tokens, examples_tokens, custom_prompt_tokens, max_model_len)
+    check_schema_share_in_context(schema_tokens, examples_tokens, custom_prompt_tokens, max_model_len)
 
     # ---  Persist ---
     schema_id = str(uuid.uuid4())

@@ -44,68 +44,7 @@ class SchemaValidationError(Exception):
         super().__init__(message)
 
 
-# ---------------------------------------------------------------------------
-# Prompt-injection guard (mirrors chatbot service pattern)
-# ---------------------------------------------------------------------------
 
-# Patterns that suggest prompt-injection attempts in the custom_prompt field.
-_INJECTION_PATTERNS: List[re.Pattern] = [
-    re.compile(r"ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?|rules?)", re.I),
-    re.compile(r"you\s+are\s+now\s+a", re.I),
-    re.compile(r"disregard\s+(all\s+)?(previous|above|prior)", re.I),
-    re.compile(r"act\s+as\s+(if\s+you\s+are|a\s+)", re.I),
-    re.compile(r"(system|assistant)\s*:\s*", re.I),
-    re.compile(r"<\s*/?\s*(system|assistant|user)\s*>", re.I),
-    re.compile(r"forget\s+(all\s+)?(previous|your\s+previous)", re.I),
-    re.compile(r"new\s+(instructions?|directive|task|role)", re.I),
-    re.compile(r"override\s+(the\s+)?(system\s+)?prompt", re.I),
-    re.compile(r"jailbreak", re.I),
-    re.compile(r"do\s+not\s+follow\s+(the\s+)?instructions?", re.I),
-]
-
-
-def validate_custom_prompt(custom_prompt: Optional[str]) -> None:
-    """
-    Raise SchemaValidationError if *custom_prompt* contains prompt-injection
-    patterns.  No-op when *custom_prompt* is None or empty.
-    """
-    if not custom_prompt:
-        return
-    for pattern in _INJECTION_PATTERNS:
-        if pattern.search(custom_prompt):
-            raise SchemaValidationError(
-                "INVALID_CUSTOM_PROMPT",
-                "The custom_prompt field contains potentially unsafe content. "
-                "Domain hints and formatting rules are allowed; instructions that "
-                "alter the assistant's core behaviour are not.",
-                status=400,
-            )
-
-
-# ---------------------------------------------------------------------------
-# Schema-size guard
-# ---------------------------------------------------------------------------
-
-def validate_schema_size(json_schema: Dict[str, Any]) -> None:
-    """
-    Raise SchemaValidationError when the JSON-serialized *json_schema* exceeds
-    settings.extract.max_schema_bytes.
-
-    The check uses compact JSON encoding (no whitespace) so the limit applies
-    to storage size, not pretty-printed representation.
-    """
-    serialized = json.dumps(json_schema, separators=(",", ":"), ensure_ascii=False)
-    byte_size = len(serialized.encode("utf-8"))
-    limit = settings.extract.max_schema_bytes
-    if byte_size > limit:
-        raise SchemaValidationError(
-            "SCHEMA_TOO_LARGE",
-            f"Serialized schema is {byte_size:,} bytes; the limit is {limit:,} bytes. "
-            "Reduce property count, description length, or use $ref/$defs to factor out "
-            "repeated sub-schemas.",
-            status=400,
-            details={"size_bytes": byte_size, "limit_bytes": limit},
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +253,7 @@ def compute_token_counts(
 # Registration budget check (Section 5.1.2 of proposal)
 # ---------------------------------------------------------------------------
 
-def check_registration_budget(
+def check_schema_share_in_context(
     schema_tokens: int,
     examples_tokens: int,
     custom_prompt_tokens: int,

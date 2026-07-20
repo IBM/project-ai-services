@@ -2,9 +2,28 @@
 Shared pytest fixtures for extract service tests.
 """
 
+import os
 import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
+
+# CRITICAL: Patch the crash handler BEFORE importing any application modules.
+os.environ['DISABLE_CRASH_HANDLER'] = '1'
+
+import common.diagnostic_logger
+
+def _mock_crash_handler(logger):
+    """Mock crash handler that doesn't manipulate file descriptors."""
+    mock_stderr_monitor = Mock(name="stderr_monitor")
+    mock_stderr_monitor.start = Mock()
+    mock_stderr_monitor.stop = Mock()
+    return (
+        Mock(name="diagnostic_logger"),
+        mock_stderr_monitor,
+        Mock(name="signal_handler"),
+    )
+
+common.diagnostic_logger.setup_comprehensive_crash_handler = _mock_crash_handler
 
 
 VALID_SCHEMA = {
