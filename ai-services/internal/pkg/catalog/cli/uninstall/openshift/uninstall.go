@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -18,7 +18,7 @@ import (
 const defaultUninstallTimeout = 5 * time.Minute
 
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs.
-func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) error {
+func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	catalog := catalogConstants.CatalogAppName
 	namespace := catalog
 
@@ -64,12 +64,12 @@ func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (boo
 		return true, nil
 	}
 
-	pods, err := catalogUtils.GetCatalogPods(ctx, rt)
+	pods, err := utils.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return false, err
 	}
 
-	return catalogUtils.ConfirmDeletion(ctx, pods)
+	return utils.ConfirmDeletion(ctx, pods)
 }
 
 func isCatalogInstalled(ctx context.Context, helmClient *helm.Helm, catalog, namespace string) (bool, error) {

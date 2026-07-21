@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -16,14 +18,14 @@ import (
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
-func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) error {
+func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error {
 	// Initialize runtime
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	pods, err := catalogUtils.GetCatalogPods(ctx, rt)
+	pods, err := cliutils.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return err
 	}
@@ -33,7 +35,7 @@ func UninstallCatalog(ctx context.Context, opts catalogUtils.UninstallOptions) e
 
 	// Confirm deletion if not auto-yes
 	if !opts.AutoYes {
-		if confirmed, err := catalogUtils.ConfirmDeletion(ctx, pods); !confirmed || err != nil {
+		if confirmed, err := cliutils.ConfirmDeletion(ctx, pods); !confirmed || err != nil {
 			return err
 		}
 	}

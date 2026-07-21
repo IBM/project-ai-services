@@ -6,12 +6,12 @@ import (
 
 	catalogOpenshift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/podman"
-	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 // Uninstall removes the catalog service and cleans up resources.
-func Uninstall(opts catalogUtils.UninstallOptions) error {
+func Uninstall(opts cliutils.UninstallOptions) error {
 	ctx := context.Background()
 
 	// Remove catalog service based on runtime
