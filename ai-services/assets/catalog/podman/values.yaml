@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.185
+  image: icr.io/ai-services-cicd/ai-services:v0.0.186
   runtime: ""
   adminPasswordHash: ""
   podman:
@@ -14,7 +14,7 @@ backend:
 db:
   port: ""
   image: icr.io/ai-services-cicd/postgres:18-4
-  user: "admin"
+  user: "postgres"
   database: "ai_services"
   password: ""
   resources:

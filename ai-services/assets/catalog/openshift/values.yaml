@@ -9,7 +9,7 @@ ui:
       cpu: "500m"
 
 backend:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.185
+  image: icr.io/ai-services-cicd/ai-services:v0.0.186
   runtime: "openshift"
   adminPasswordHash: ""
   resources:
@@ -21,8 +21,8 @@ backend:
       cpu: "1000m"
 
 db:
-  image: icr.io/ai-services-cicd/postgres:18-3
-  user: "admin"
+  image: icr.io/ai-services-cicd/postgres:18-4
+  user: "postgres"
   database: "ai_services"
   password: ""
   storage: 5Gi
