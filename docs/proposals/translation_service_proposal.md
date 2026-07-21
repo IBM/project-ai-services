@@ -80,15 +80,45 @@ A 25k-token input document at a 1:1 translation ratio consumes ~50k tokens per j
 
 ### 2.3 Chunking Strategy
 
-Chunks are formed by a greedy paragraph-boundary algorithm:
+#### Unit of measurement — tokens, not words
 
-1. **Split on paragraph boundaries.** The digitized markdown is split on double-newline (`\n\n`) boundaries first. Each resulting block is a candidate unit (heading, paragraph, table, list block).
-2. **Greedy packing.** Starting from an empty chunk, blocks are appended one at a time. When appending the next block would exceed the configured chunk token budget, the current chunk is closed and a new one is started.
-3. **Sentence-level fallback.** If a single block is larger than the entire chunk budget (e.g., an unusually long paragraph), it is split further at sentence boundaries (`. `, `! `, `? `) to produce sub-blocks that fit.
+The chunker measures chunk size in **tokens**, not words. Translation output length tracks input token count closely (approximately 1:1), so the chunk budget must be expressed in the same unit the LLM context window uses. Word count — used by the summarize service's chunker — is an approximation that works for summarization (output is shorter than input, so over-estimating is safe). For translation the margin is much tighter: a chunk that is 10% too large in token terms may push the combined prompt over the context window.
 
-> **`CHUNK_TOKEN_BUDGET`** controls the maximum number of input tokens allowed per chunk. During greedy packing (step 2), a new chunk is started whenever appending the next block would cause the running token count to exceed this value. The budget is checked using the same `/tokenize` endpoint used by the context-window guard — each block's token count is obtained before packing decisions are made. The sentence-level fallback (step 3) also uses this budget as its target: sub-blocks are accumulated until adding the next sentence would exceed it.
->
-> The initial value will be determined empirically during development, informed by testing with real documents and observing LLM translation quality and latency. See §13 for the default and the environment variable name.
+Token counts are obtained via `tokenize_with_llm(block_text, llm_endpoint)` from `common/llm_utils.py`, which calls `POST {OPENAI_BASE_URL}/tokenize`. This is the same call used by the context-window guard — no new dependency is introduced. The token count of each block is measured **once** when the block is first considered for packing and cached for the remainder of the packing loop.
+
+#### Algorithm
+
+**Step 1 — Split on paragraph boundaries.**
+The full markdown string is split on double-newline (`\n\n`) into a list of blocks. Each block is one of: a heading line, a prose paragraph, a GFM table (the full `| pipe |` block including separator row), or a list block. Blocks are the atomic units passed to the packing loop.
+
+**Step 2 — Greedy packing.**
+Maintain a running chunk (a list of blocks) and a running token count. For each block in order:
+
+```
+block_tokens = tokenize_with_llm(block_text)   # one /tokenize call per block
+
+if running_tokens + block_tokens <= CHUNK_TOKEN_BUDGET:
+    append block to current chunk
+    running_tokens += block_tokens
+else:
+    close current chunk → emit as chunk[i]
+    start new chunk with this block
+    running_tokens = block_tokens
+```
+
+When the loop ends, the remaining open chunk is emitted as the final chunk.
+
+**Step 3 — Sentence-level fallback for oversized blocks.**
+If a single block's token count exceeds `CHUNK_TOKEN_BUDGET` on its own (e.g., a very long paragraph with no sub-structure), it cannot be placed as a unit. It is split at sentence boundaries (`.`, `!`, `?` followed by whitespace) and the resulting sentences are packed greedily using the same token-counting logic above.
+
+#### Parameters
+
+| Parameter | What it controls | How it's used |
+|:---|:---|:---|
+| `CHUNK_TOKEN_BUDGET` | Max input tokens per chunk | Packing decision threshold in steps 2 and 3 |
+| `OPENAI_BASE_URL` (shared) | `/tokenize` endpoint | Token count per block; one call per block, result cached |
+
+> The initial value of `CHUNK_TOKEN_BUDGET` will be determined empirically during development by testing with real German/English documents and observing translation quality and latency. A reasonable starting point is half of `MAX_MODEL_LEN` minus `PROMPT_OVERHEAD_TOKENS`, which reserves the other half for the translated output. See §13 for the env var.
 
 ### 2.4 Concatenation and Coherence
 
@@ -103,6 +133,135 @@ Markdown tables from the digitize service are emitted as contiguous `| pipe |` b
 
 - During greedy packing, if a table block would overflow the current chunk budget, the current chunk is closed first, and the table starts a new chunk on its own.
 - If a table is larger than the entire chunk budget on its own, it occupies a chunk by itself and the budget is allowed to be exceeded for that chunk only — the alternative (splitting a table mid-row) would produce malformed markdown and an untranslatable fragment.
+
+### 2.6 Chunk Join Strategy and Boundary Preservation
+
+How chunk translations are joined back together depends on **what kind of content was split** at the chunk boundary. There are two distinct cases, and they require different join logic.
+
+#### Case 1 — Block boundary (the common case)
+
+When the chunk boundary falls between two whole blocks (a heading, a paragraph, a table, a list block), the blocks are separated by `\n\n` in the original. The join is simply:
+
+```python
+translated_markdown = "\n\n".join(chunk_translations)
+```
+
+The `\n\n` re-inserts the paragraph separator that existed between the blocks in the original. No information is lost and no discontinuity is visible.
+
+**Example:**
+
+Input document (two blocks, boundary between them):
+```markdown
+## Einleitung
+
+Deutschland unterzeichnete das Abkommen im Jahr 2024.
+
+| Quartal | Umsatz |
+|---|---|
+| Q1 | 1,2 Mio. € |
+```
+
+Chunk 1 (heading + paragraph packed together):
+```markdown
+## Einleitung
+
+Deutschland unterzeichnete das Abkommen im Jahr 2024.
+```
+Chunk 2 (table alone — overflowed the budget):
+```markdown
+| Quartal | Umsatz |
+|---|---|
+| Q1 | 1,2 Mio. € |
+```
+
+After translation and `"\n\n".join(...)`:
+```markdown
+## Introduction
+
+Germany signed the agreement in 2024.
+
+| Quarter | Revenue |
+|---|---|
+| Q1 | €1.2M |
+```
+✅ Identical structure to the original. No separator artifacts.
+
+---
+
+#### Case 2 — Sentence fallback boundary (a single oversized paragraph split mid-block)
+
+When a single prose paragraph exceeds `CHUNK_TOKEN_BUDGET` on its own, it is split into sentence sub-groups across two or more chunks. These sub-groups **belong to the same paragraph** in the original — they must be rejoined with a single space (` `), not a `\n\n`, otherwise the output introduces a false paragraph break in the middle of a continuous passage.
+
+To enable the correct join, each chunk produced by the sentence fallback is tagged with a **join type** metadata field alongside the text:
+
+| `join_after` value | Meaning | Join character |
+|:---|:---|:---|
+| `"paragraph"` (default) | Boundary between two whole blocks | `"\n\n"` |
+| `"sentence"` | Boundary within a split paragraph | `" "` (single space) |
+
+The final assembly iterates over `(chunk_translation, join_after)` pairs and uses the correct separator between each adjacent pair:
+
+```python
+result_parts = []
+for i, (translation, join_after) in enumerate(zip(chunk_translations, chunk_metadata)):
+    result_parts.append(translation)
+    if i < len(chunk_translations) - 1:
+        separator = " " if chunk_metadata[i]["join_after"] == "sentence" else "\n\n"
+        result_parts.append(separator)
+translated_markdown = "".join(result_parts)
+```
+
+**Example:**
+
+Input: one oversized paragraph (too large for `CHUNK_TOKEN_BUDGET`):
+```markdown
+The contract was signed on January 1st. All parties agreed to the terms. The agreement covers all territories. Payment is due quarterly. Disputes shall be resolved by arbitration.
+```
+
+After sentence splitting into two chunks:
+
+Chunk A (`join_after="sentence"`):
+```
+The contract was signed on January 1st. All parties agreed to the terms. The agreement covers all territories.
+```
+Chunk B (`join_after="paragraph"`):
+```
+Payment is due quarterly. Disputes shall be resolved by arbitration.
+```
+
+After translation:
+- Chunk A → `"Der Vertrag wurde am 1. Januar unterzeichnet. Alle Parteien stimmten den Bedingungen zu. Das Abkommen gilt für alle Gebiete."`
+- Chunk B → `"Die Zahlung ist vierteljährlich fällig. Streitigkeiten werden durch Schiedsverfahren beigelegt."`
+
+Joined with `" "` (because chunk A's `join_after == "sentence"`):
+```markdown
+Der Vertrag wurde am 1. Januar unterzeichnet. Alle Parteien stimmten den Bedingungen zu. Das Abkommen gilt für alle Gebiete. Die Zahlung ist vierteljährlich fällig. Streitigkeiten werden durch Schiedsverfahren beigelegt.
+```
+✅ One continuous paragraph — the original paragraph structure is preserved exactly.
+
+Compare to the broken output without join-type metadata (naive `"\n\n".join`):
+```markdown
+Der Vertrag wurde am 1. Januar unterzeichnet. Alle Parteien stimmten den Bedingungen zu. Das Abkommen gilt für alle Gebiete.
+
+Die Zahlung ist vierteljährlich fällig. Streitigkeiten werden durch Schiedsverfahren beigelegt.
+```
+❌ False paragraph break inserted mid-passage — incorrect structure in both the markdown result and the reconstructed PDF/DOCX.
+
+---
+
+#### What this means for the chunk data structure
+
+Each chunk produced by the chunker carries two fields:
+
+```python
+@dataclass
+class TranslationChunk:
+    index: int          # position in the original sequence; used to sort results after gather
+    text: str           # the block or sentence group to translate
+    join_after: str     # "paragraph" | "sentence" — how to join this chunk's result to the next
+```
+
+The `index` field ensures correct ordering after `asyncio.gather` regardless of completion order. The `join_after` field drives the assembly step. Both are set by the chunker and are read-only for the rest of the pipeline.
 
 ---
 
@@ -922,9 +1081,120 @@ job_limiter = asyncio.BoundedSemaphore(settings.translate.max_concurrent_jobs)  
 | `job_limiter`        | Async jobs   | 4 (configurable) | Caps background workers; bounds staging disk usage and digitize-service load.                      |
 | `concurrency_limiter`| Global       | 32            | Caps total concurrent vLLM connections across sync + async paths.                                    |
 
-The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` for the LLM call. Because each translation job makes exactly one LLM call and holds no vLLM slot while digitizing or polling, async jobs consume very little of the vLLM budget — the sync path stays responsive even at full job concurrency.
+The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` per chunk LLM call, releasing it as soon as each response returns. Because the worker holds no vLLM slot while digitizing, polling, or running the chunker, async jobs consume the vLLM budget only during active inference — the sync path stays responsive even at full job concurrency.
 
-### 9.3 Digitize Service Backpressure
+### 9.3 LLM Call Strategy
+
+**Each chunk is translated in an independent `POST /v1/chat/completions` call.** All chunks for a given job are dispatched concurrently using `asyncio.gather`, each independently acquiring a slot on `concurrency_limiter`.
+
+#### Call structure (per chunk)
+
+The translation service defines its own `query_vllm_translate` function in `services/translate/llm_utils.py`. It is a thin async wrapper around `httpx.AsyncClient` — the same client already used for digitize service calls — posting directly to `POST {OPENAI_BASE_URL}/v1/chat/completions`:
+
+```python
+async def query_vllm_translate(
+    client: httpx.AsyncClient,
+    llm_endpoint: str,
+    messages: list[dict],
+    model: str,
+    max_tokens: int,
+    temperature: float = 0.0,
+) -> tuple[str, int, int]:
+    """
+    Send one translation call to the vLLM endpoint.
+    Returns (translated_text, input_tokens, output_tokens).
+    """
+    payload = {
+        "messages": messages,
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    response = await client.post(
+        f"{llm_endpoint}/v1/chat/completions",
+        json=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    content = data["choices"][0]["message"]["content"].strip()
+    input_tokens  = data.get("usage", {}).get("prompt_tokens", 0)
+    output_tokens = data.get("usage", {}).get("completion_tokens", 0)
+    return content, input_tokens, output_tokens
+```
+
+Each per-chunk call passes the two-message array built from the prompt templates (§10.1):
+
+```python
+messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user",   "content": user_prompt.format(
+        source_language=resolved_source_language,
+        target_language=target_language,
+        text=chunk.text,                          # chunk.text from TranslationChunk (§2.6)
+    )},
+]
+translation, in_tok, out_tok = await query_vllm_translate(
+    client=http_client,
+    llm_endpoint=llm_endpoint,
+    messages=messages,
+    model=model_name,
+    max_tokens=chunk_max_tokens,    # computed per-chunk by the context-window guard (§8.2)
+    temperature=0.0,
+)
+```
+
+`query_vllm_translate` is fully async — it does not block the event loop and does not require `asyncio.to_thread`.
+
+#### Per-chunk task and failure handling
+
+Each chunk is a `TranslationChunk` dataclass (§2.6) carrying `index`, `text`, and `join_after`. Each is executed as an `asyncio.Task`. A `chunk_semaphore` (`asyncio.BoundedSemaphore(CHUNK_PARALLELISM)`) limits how many chunks of a single job run simultaneously, nested inside `concurrency_limiter`:
+
+```python
+async def translate_chunk(chunk: TranslationChunk) -> tuple[TranslationChunk, str, int, int]:
+    async with chunk_semaphore:          # per-job parallelism cap
+        async with concurrency_limiter:  # global vLLM cap
+            translation, in_tok, out_tok = await query_vllm_translate(
+                client=http_client,
+                llm_endpoint=llm_endpoint,
+                messages=build_messages(chunk.text, resolved_source_language, target_language),
+                model=model_name,
+                max_tokens=compute_max_tokens(chunk),   # §8.2
+                temperature=0.0,
+            )
+    return chunk, translation, in_tok, out_tok
+
+tasks = [asyncio.create_task(translate_chunk(chunk)) for chunk in chunks]
+try:
+    results = await asyncio.gather(*tasks)
+except Exception:
+    for t in tasks:
+        if not t.done():
+            t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    raise
+```
+
+If any chunk fails (HTTP error, timeout, context guard breach), all sibling tasks are cancelled immediately and the job is marked `failed`. No partial results are written.
+
+#### Result assembly
+
+`asyncio.gather` returns results in the same order as the task list (input chunk order), so no sort is needed. Assembly uses the `join_after` field from each `TranslationChunk` to choose the correct separator between adjacent translated chunks — `"\n\n"` at block boundaries and `" "` at sentence-fallback boundaries (§2.6):
+
+```python
+# results: list of (chunk, translation, in_tok, out_tok) in chunk index order
+parts = []
+for i, (chunk, translation, in_tok, out_tok) in enumerate(results):
+    parts.append(translation)
+    if i < len(results) - 1:
+        parts.append(" " if chunk.join_after == "sentence" else "\n\n")
+
+translated_markdown = "".join(parts)
+```
+
+This is the value stored in `result.json` as `data.translation` and passed to the reconstruction step (§3).
+
+### 9.4 Digitize Service Backpressure
 
 The digitize service applies its own semaphore and may return `429` when saturated. The translate worker handles this:
 
@@ -1284,6 +1554,7 @@ $$ language 'plpgsql';
 | `TRANSLATION_TEMPERATURE` | LLM temperature for all translation calls | `0.0` |
 | `MAX_CONCURRENT_REQUESTS` | Global vLLM semaphore | `32` |
 | `MAX_CONCURRENT_JOBS` | Async job admission semaphore | `4` |
+| `CHUNK_PARALLELISM` | Max number of chunks translated concurrently within a single job (§9.3). Each concurrent chunk holds one `concurrency_limiter` slot. Set to a fraction of `MAX_CONCURRENT_REQUESTS` so a single large job cannot monopolise the vLLM semaphore. | `4` |
 | `SUPPORTED_LANGUAGES` | Comma-separated allowlist of active language names | `english,german` (initial v1 scope; `french,italian` pending test coverage) |
 | `DIGITIZE_BASE_URL` | Digitize service endpoint | `http://digitize:4000` |
 | `DIGITIZE_POLL_INTERVAL_SECS` | Poll interval for digitize job status | `3` |
