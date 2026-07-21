@@ -12,6 +12,7 @@ on:
       - .github/scripts/check_image_names.py
     branches:
       - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -24,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run image name consistency check
         run: python3 .github/scripts/check_image_names.py
