@@ -2,7 +2,7 @@ import type { DeployOptionsResponse } from "@/types/api.types";
 import type {
   DeployFormData,
   ServiceConfig as BaseServiceConfig,
-} from "../shared/types";
+} from "../Shared/types";
 
 // Re-export shared types so existing consumers of this file keep working.
 export type {
@@ -11,7 +11,7 @@ export type {
   BaseStepProps,
   ResourceItem,
   SharedDeployFlowAction,
-} from "../shared/types";
+} from "../Shared/types";
 
 // UI-only field for tracking the selected LLM provider ID. Removed in PR 9.
 export interface ServiceConfig extends BaseServiceConfig {

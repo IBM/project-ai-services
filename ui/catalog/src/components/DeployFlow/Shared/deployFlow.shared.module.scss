@@ -1,0 +1,333 @@
+@use "./tokens" as *;
+
+// Tearsheet sizing — 48px top, 32px left/right
+:global(.c4p--tearsheet.customTearsheet) {
+  padding-top: $spacing-09;
+}
+
+:global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__container) {
+  inline-size: calc(100% - 2 * #{$spacing-07}) !important;
+  max-block-size: calc(100% - #{$spacing-07}) !important;
+}
+
+.influencerContent {
+  padding: $spacing-07 $spacing-07;
+}
+
+.stepContent {
+  padding: $spacing-06 $spacing-07;
+}
+
+.stepHeader {
+  margin-bottom: $spacing-06;
+}
+
+.sectionTitle {
+  @include type-style("heading-compact-02");
+  margin-bottom: $spacing-05;
+}
+
+.formGrid {
+  row-gap: $spacing-07;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.formField {
+  max-width: 50%;
+
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-01 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+  }
+}
+
+.formSection {
+  margin-bottom: $spacing-07;
+}
+
+.stepTitle {
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-06 0;
+}
+
+.labelWithInfo {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+
+  > span {
+    @include type-style("label-01");
+  }
+
+  :global(.cds--toggletip-button) {
+    padding: 0;
+    min-height: auto;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    line-height: 1;
+
+    svg {
+      fill: $icon-secondary;
+      vertical-align: middle;
+    }
+  }
+}
+
+.resourceGrid {
+  display: flex;
+  gap: $spacing-06;
+  flex-wrap: wrap;
+}
+
+.required {
+  @include type-style("heading-04");
+}
+
+// Resource tiles
+.resourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-08;
+  min-height: 120px;
+  background-color: transparent;
+  border: 1px solid $border-subtle;
+  flex: 1;
+  min-width: 200px;
+}
+
+.resourceLabel {
+  @include type-style("body-compact-01");
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.resourceValue {
+  @include type-style("heading-04");
+}
+
+.unit {
+  @include type-style("heading-01");
+}
+
+.green {
+  fill: $support-success;
+  color: $support-success;
+}
+
+.warning {
+  fill: $support-warning;
+  color: $support-warning;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.resourceLoading {
+  padding: $spacing-05 0;
+}
+
+.serviceConfigCard {
+  margin-bottom: $spacing-05;
+  position: relative;
+
+  :global(.c4p--card__description) {
+    @include type-style("body-compact-01");
+    margin: $spacing-05 0;
+    max-width: 75%;
+  }
+}
+
+.cardEditAction,
+.cardActions {
+  position: absolute;
+  top: $spacing-05;
+  right: $spacing-05;
+  z-index: 1;
+  display: flex;
+  gap: $spacing-03;
+}
+
+// Service config card — read-only display
+.serviceConfigContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+}
+
+.serviceConfigItem {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: $spacing-05;
+}
+
+.serviceConfigItemLabel {
+  @include type-style("body-short-01");
+  color: $text-secondary;
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+.serviceConfigItemValue {
+  @include type-style("body-short-01");
+  color: $text-primary;
+  flex: 1;
+  word-break: break-word;
+}
+
+// Credential display
+.apiKeyValue {
+  @include font-family("mono");
+  margin-right: $spacing-03;
+}
+
+.apiKeyToggle {
+  min-height: auto;
+  padding: 0;
+  margin-left: $spacing-02;
+  vertical-align: middle;
+
+  svg {
+    vertical-align: middle;
+  }
+}
+
+.systemPromptTextArea {
+  margin-top: 0;
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+
+  :global(.cds--text-area) {
+    background-color: $field-02 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  :global(.cds--text-area__wrapper) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  :global(.cds--text-area__field-wrapper) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+.cloudCredentialsSection {
+  // margin-top is intentionally omitted — each consuming file owns its own
+  // spacing. DA sets margin-top: -$spacing-06 (grid gap cancellation) inside
+  // .serviceConfigFieldRow; Services sets margin-top: $spacing-05 locally.
+}
+
+.cloudCredentialsTitle {
+  @include type-style("heading-compact-01");
+  margin-bottom: $spacing-05;
+}
+
+// Model description accordion
+.modelDescriptionSection {
+  margin-top: $spacing-03;
+  margin-bottom: $spacing-05;
+}
+
+.modelDescriptionContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+.modelDescriptionFullWidth {
+  width: 100%;
+}
+
+.modelDescriptionRow {
+  display: flex;
+  gap: $spacing-05;
+  width: 100%;
+
+  @include breakpoint-down(md) {
+    flex-direction: column;
+  }
+}
+
+.modelDescriptionHalf {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.modelDescriptionTitle {
+  @include type-style("heading-compact-01");
+  margin: 0;
+  color: $text-primary;
+}
+
+.modelDescriptionText {
+  @include type-style("body-01");
+  margin: 0;
+  color: $text-secondary;
+  white-space: pre-line;
+}
+
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.errorContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  color: $text-error;
+
+  p {
+    @include type-style("body-compact-01");
+  }
+}
+
+@include breakpoint-down(lg) {
+  .formField {
+    max-width: 100%;
+  }
+}
+
+// Responsive — Carbon Tearsheet has no built-in responsive behaviour
+@include breakpoint-down(md) {
+  :global(.c4p--tearsheet.customTearsheet) {
+    padding-top: $spacing-09 !important;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__influencer) {
+    display: none;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__content) {
+    width: 100%;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__container) {
+    inline-size: calc(100% - 2 * #{$spacing-07}) !important;
+    max-block-size: calc(100% - #{$spacing-11}) !important;
+  }
+}

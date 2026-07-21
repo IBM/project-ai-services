@@ -1,7 +1,7 @@
 import { Toggletip, ToggletipButton, ToggletipContent } from "@carbon/react";
 import { Information } from "@carbon/icons-react";
 import { parseMarkdownLinks } from "@/utils/string";
-import styles from "../ServicesDeployFlow.module.scss";
+import styles from "../../Shared/deployFlow.shared.module.scss";
 
 interface ServiceFieldLabelProps {
   label: string;
@@ -26,7 +26,7 @@ export const ServiceFieldLabel: React.FC<ServiceFieldLabelProps> = ({
 
   // Return label with info tooltip
   return (
-    <div className={`${styles.serviceLabelWithInfo} ${className || ""}`}>
+    <div className={`${styles.labelWithInfo} ${className || ""}`}>
       <span>{label}</span>
       <Toggletip align="top">
         <ToggletipButton label="Additional information">

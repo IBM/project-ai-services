@@ -10,7 +10,7 @@ import {
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import { getResourceStatus } from "../utils/StepTwo.utils";
-import type { ResourceItem } from "../../shared/types";
+import type { ResourceItem } from "../../Shared/types";
 
 interface ResourceRequirementsProps {
   resourceRequirements: ResourceItem[];
@@ -76,7 +76,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                 key={`${resource.label}-${resource.acceleratorType || ""}`}
                 className={styles.resourceItem}
               >
-                <div className={styles.resourceLabel}>
+                <p className={styles.resourceLabel}>
                   <span>{resource.label}</span>
                   {status === "sufficient" && (
                     <CheckmarkFilled size={16} className={styles.green} />
@@ -95,7 +95,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                       </button>
                     </Tooltip>
                   )}
-                </div>
+                </p>
                 <p className={styles.resourceValue}>
                   <span className={styles.required}>{resource.required}</span>
                   {resource.available !== "N/A" && (

@@ -1,5 +1,5 @@
 import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
-import type { DeployFormData } from "../shared/types";
+import type { DeployFormData } from "../Shared/types";
 
 // Re-export shared types so existing consumers of this file keep working.
 export type {
@@ -9,7 +9,7 @@ export type {
   BaseStepProps,
   ResourceItem,
   SharedDeployFlowAction,
-} from "../shared/types";
+} from "../Shared/types";
 
 export interface ServicesDeployFlowProps {
   open: boolean;

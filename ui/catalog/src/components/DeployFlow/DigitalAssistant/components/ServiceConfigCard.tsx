@@ -699,7 +699,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       return hasCredentialFields ? (
                         <>
                           <div />
-                          <div style={{ gridColumn: "1 / -1" }}>
+                          <div className={styles.cloudCredentialsSection}>
                             <h4 className={styles.cloudCredentialsTitle}>
                               {(fieldValue || "")
                                 .toLowerCase()
