@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "chat-bot"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: chat-bot-ui
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: chat-bot-ui
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image }}"
+          resources:
+            requests:
+              cpu: {{ .Values.ui.resources.requests.cpu | quote }}
+              memory: {{ .Values.ui.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.ui.resources.limits.cpu | quote }}
+              memory: {{ .Values.ui.resources.limits.memory | quote }}
+          env:
+            - name: BACKEND_HOST
+              value: "chat-bot-backend"
+            - name: BACKEND_PORT
+              value: "5000"
+            - name: SIMILARITY_SEARCH_HOST
+              value: "similarity-api"
+            - name: SIMILARITY_SEARCH_PORT
+              value: "7000"
+            - name: CHATBOT_SEARCH_MODE
+              value: "{{ .Values.chatbot.searchMode }}"
+            - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
+              value: "{{ .Values.chatbot.numChunksPostReranker }}"
+            - name: CHATBOT_RERANK
+              value: "{{ .Values.chatbot.rerank }}"
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3

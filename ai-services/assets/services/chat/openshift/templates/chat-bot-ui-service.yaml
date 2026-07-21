@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "chat-bot-ui"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  selector:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/component: chat-bot-ui
+  ports:
+    - name: ui
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "instruct-predictor"
+  labels:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  selector:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/name: instruct
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

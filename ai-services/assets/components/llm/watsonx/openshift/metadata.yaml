@@ -1,0 +1,8 @@
+name: llm-watsonx
+version: "1.0.0"
+
+# Resource requirements (LiteLLM proxy only — model runs remotely on watsonx.ai)
+resources:
+  cpu: 1
+  memory: 4294967296 # 4Gi in bytes
+  storage: 0 # No local model storage
