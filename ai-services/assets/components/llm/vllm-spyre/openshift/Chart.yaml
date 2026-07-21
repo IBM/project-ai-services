@@ -1,0 +1,7 @@
+apiVersion: v1
+name: llm-vllm-spyre
+description: A Helm chart for deploying the LLM instruct model using vLLM Spyre inference on OpenShift (via KServe InferenceService)
+type: application
+
+version: 0.0.1
+appVersion: "0.0.1"

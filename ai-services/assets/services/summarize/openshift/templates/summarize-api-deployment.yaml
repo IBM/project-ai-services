@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "summarize-api"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: summarize-api
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: summarize-api
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: summarize-db-init
+          image: "{{ .Values.summarize.image }}"
+          command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.summarize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
+      containers:
+        - name: summarize-api
+          image: "{{ .Values.summarize.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "uvicorn"
+            - "summarize.app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "6000"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.summarize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
+            - name: DB_POOL_SIZE
+              value: "5"
+            - name: DB_MAX_OVERFLOW
+              value: "5"
+            - name: PORT
+              value: "6000"
+            - name: LLM_ENDPOINT
+              value: http://instruct-predictor:8000
+            - name: LLM_MODEL
+              value: {{ .Values.llm.model.name | quote }}
+            - name: LLM_MAX_MODEL_LEN
+              value: {{ .Values.llm.model.maxModelLen | quote }}
+            - name: LLM_MAX_BATCH_SIZE
+              value: {{ .Values.llm.model.maxBatchSize | quote }}
+            - name: LOG_LEVEL
+              value: "{{ .Values.summarize.log_level }}"
+            {{- if .Values.llm.apiKey }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "vllm-instruct-api-key"
+                  key: apiKey
+            {{- end }}
+          ports:
+            - containerPort: 6000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.summarize.resources.requests.cpu | quote }}
+              memory: {{ .Values.summarize.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.summarize.resources.limits.cpu | quote }}
+              memory: {{ .Values.summarize.resources.limits.memory | quote }}
