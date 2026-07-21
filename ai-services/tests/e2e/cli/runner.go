@@ -302,6 +302,7 @@ func collectEndpoints(endpoints []map[string]any) map[string]string {
 }
 
 // getRAGURLs returns backend and UI URLs for a deployed RAG application.
+// For podman, URLs come from 'application info'; for openshift from the create output.
 func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
 	if appRuntime == "openshift" {
 		urls := ExtractURLsFromOutput(createOutput)
@@ -329,6 +330,7 @@ func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, cr
 }
 
 // extractCatalogRAGURLs extracts the chat backend and UI URLs from 'application info' output.
+// Matches by URL host substring — robust against info.md title changes.
 func extractCatalogRAGURLs(output string) (string, string) {
 	return extractURLBySubstring(output, svcChatBotBackend),
 		extractURLBySubstring(output, svcChatBotUI)
@@ -923,6 +925,7 @@ func ExtractURLsFromOutput(output string) []string {
 }
 
 // CatalogApiServerHelp runs 'catalog apiserver --help' and returns the output.
+// The real apiserver requires a live database; we only verify its help text in e2e.
 func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "catalog apiserver help", "catalog", "apiserver", "--help", "--runtime", appRuntime)
 }
@@ -953,6 +956,7 @@ func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (
 }
 
 // CatalogDbMigrateHelp runs 'catalog dbmigrate --help' and returns the output.
+// The full dbmigrate subcommands require a live database; we verify help text in e2e.
 func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
 	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
 }

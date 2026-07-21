@@ -256,8 +256,8 @@ func ValidateStartAppOutputOpenshift(output string) (err error) {
 	return nil
 }
 
-// scanPSLines iterates ps output lines, calling fn(podName, status) for each data row.
-func scanPSLines(psOutput string, fn func(podName, status string) error) error {
+// scanCmdOutput iterates command output lines, calling fn(podName, status) for each data row.
+func scanCmdOutput(psOutput string, fn func(podName, status string) error) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -282,7 +282,7 @@ func scanPSLines(psOutput string, fn func(podName, status string) error) error {
 
 // ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
 func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
-	if err := scanPSLines(psOutput, func(podName, status string) error {
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
 		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
 			return fmt.Errorf("main pod %s not in Exited state for app %s (got: %s)", podName, appName, status)
 		}
@@ -455,7 +455,7 @@ func isMainPod(pod string, appRuntime string) bool {
 
 // ValidatePodsRunningAfterStart checks that the main pods are running after application start.
 func ValidatePodsRunningAfterStart(psOutput, appName, appRuntime string) error {
-	if err := scanPSLines(psOutput, func(podName, status string) error {
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
 		if isMainPod(podName, appRuntime) && !strings.Contains(strings.ToLower(status), "running") {
 			return fmt.Errorf("main pod %s not running after start for app %s", podName, appName)
 		}
@@ -577,22 +577,55 @@ func ValidateCatalogApiServerHelpOutput(output string) error {
 func ValidateCatalogConfigureOutput(output string) error {
 	// configure prints either "Access the Catalog Backend at" (first run) or
 	// "Catalog Backend API is available at" (already running). Either is success.
-	if strings.Contains(output, "Access the Catalog Backend at") ||
-		strings.Contains(output, "Catalog Backend API is available at") ||
-		strings.Contains(output, "catalog service is already running") {
-		return nil
+	const markerFirst = "Access the Catalog Backend at"
+	const markerRunning = "Catalog Backend API is available at"
+
+	switch {
+	case strings.Contains(output, markerFirst):
+		if url := extractURLAfterMarker(output, markerFirst); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerFirst, output)
+		}
+	case strings.Contains(output, markerRunning):
+		if url := extractURLAfterMarker(output, markerRunning); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerRunning, output)
+		}
+	case strings.Contains(output, "catalog service is already running"):
+		// no URL expected in this branch
+	default:
+		return fmt.Errorf("catalog configure validation failed: expected catalog backend URL in output\nOutput: %s", output)
 	}
 
-	return fmt.Errorf("catalog configure validation failed: expected catalog backend URL in output\nOutput: %s", output)
+	return nil
 }
 
 // ValidateCatalogInfoOutput validates 'catalog info' output.
 func ValidateCatalogInfoOutput(output string) error {
-	if !strings.Contains(output, "Catalog Backend API is available at") {
+	const marker = "Catalog Backend API is available at"
+	if !strings.Contains(output, marker) {
 		return fmt.Errorf("catalog info validation failed: missing backend URL marker\nOutput: %s", output)
 	}
 
+	url := extractURLAfterMarker(output, marker)
+	if url == "" {
+		return fmt.Errorf("catalog info validation failed: backend URL is empty\nOutput: %s", output)
+	}
+
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("catalog info validation failed: backend URL %q is not a valid http/https URL", url)
+	}
+
 	return nil
+}
+
+// extractURLAfterMarker returns the trimmed text on the first line containing marker, after marker itself.
+func extractURLAfterMarker(output, marker string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(marker):]), " .,")
+		}
+	}
+
+	return ""
 }
 
 // ValidateCatalogLoginOutput validates a successful 'catalog login' output.
@@ -624,7 +657,6 @@ func ValidateCatalogHashpwOutput(output string) error {
 // ValidateCatalogWhoamiOutput validates 'catalog whoami' output.
 func ValidateCatalogWhoamiOutput(output string) error {
 	required := []string{"Server", "Username"}
-
 	return checkRequiredStrings(output, "catalog whoami", required)
 }
 

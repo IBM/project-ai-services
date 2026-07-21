@@ -117,7 +117,7 @@ func expectErrResp(err error, errorResp any) {
 func catalogLoginWithDiscovery(loginCtx context.Context, fatal bool) {
 	_, loginUsername, loginPassword := bootstrap.GetCatalogCreds()
 	loginInsecure := bootstrap.GetCatalogInsecure()
-	if loginPassword == "" || appRuntime != "podman" {
+	if loginPassword == "" {
 		return
 	}
 
