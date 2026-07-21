@@ -3,6 +3,7 @@ package openshift
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -22,6 +24,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -450,6 +453,23 @@ func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
 	return true, nil
 }
 
+func (kc *OpenshiftClient) UpdateSecret(name string, data map[string][]byte) error {
+	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
+
+	existing, err := secretClient.Get(kc.Ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get existing secret: %w", err)
+	}
+
+	existing.Data = data
+	_, err = secretClient.Update(kc.Ctx, existing, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update secret: %w", err)
+	}
+
+	return nil
+}
+
 func (kc *OpenshiftClient) DeleteVolume(name string) error {
 	logger.Warningln("Not implemented")
 
@@ -478,4 +498,39 @@ func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources
 		MemUsage:   0,
 		SpyreCards: []string{},
 	}, nil
+}
+
+// RolloutRestartDeployment triggers a rollout restart for the named deployment by
+// patching the pod template annotation "kubectl.kubernetes.io/restartedAt", which is
+// the same mechanism used by `kubectl rollout restart deployment <name>`.
+func (kc *OpenshiftClient) RolloutRestartDeployment(name string) error {
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"annotations": map[string]string{
+						"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal restart patch: %w", err)
+	}
+
+	_, err = kc.KubeClient.AppsV1().Deployments(kc.Namespace).Patch(
+		kc.Ctx,
+		name,
+		k8stypes.MergePatchType,
+		data,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to restart deployment %q: %w", name, err)
+	}
+
+	return nil
 }
