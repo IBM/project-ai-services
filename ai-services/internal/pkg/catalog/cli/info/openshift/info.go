@@ -1,9 +1,11 @@
 package openshift
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
+	aiconst "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -13,7 +15,7 @@ import (
 )
 
 // DisplayCatalogInfo displays detailed information about the catalog service on OpenShift.
-func DisplayCatalogInfo() error {
+func DisplayCatalogInfo(ctx context.Context) error {
 	// Initialize OpenShift client scoped to the catalog namespace
 	runtime, err := oc.NewOpenshiftClientWithNamespace(constants.CatalogAppName)
 	if err != nil {
@@ -22,7 +24,7 @@ func DisplayCatalogInfo() error {
 
 	// Step 1: Check if catalog pods exist in the namespace
 	listFilters := map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", constants.CatalogAppName)},
+		"label": {fmt.Sprintf("%s=%s", aiconst.ApplicationAnnotationKey, constants.CatalogAppName)},
 	}
 
 	pods, err := runtime.ListPods(listFilters)
@@ -31,20 +33,20 @@ func DisplayCatalogInfo() error {
 	}
 
 	if len(pods) == 0 {
-		logger.Infof("Catalog service is not configured or running.\n")
-		logger.Infof("Run 'ai-services catalog configure --runtime openshift' to set up the catalog service.\n")
+		logger.InfofCtx(ctx, "Catalog service is not configured or running.\n")
+		logger.InfofCtx(ctx, "Run 'ai-services catalog configure --runtime openshift' to set up the catalog service.\n")
 
 		return nil
 	}
 
-	logger.Infoln("Catalog Service Name: " + constants.CatalogAppName)
+	logger.InfolnCtx(ctx, "Catalog Service Name: "+constants.CatalogAppName)
 
 	// Step 2: Fetch and print the template and version label values
 	catalogTemplate := pods[0].Labels[string(vars.TemplateLabel)]
-	logger.Infoln("Catalog Template: " + catalogTemplate)
+	logger.InfolnCtx(ctx, "Catalog Template: "+catalogTemplate)
 
 	version := pods[0].Labels[string(vars.VersionLabel)]
-	logger.Infoln("Version: " + version)
+	logger.InfolnCtx(ctx, "Version: "+version)
 
 	// Step 3: Read and print the info.md file
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")

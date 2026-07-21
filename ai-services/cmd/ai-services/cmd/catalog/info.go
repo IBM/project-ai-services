@@ -31,7 +31,7 @@ func NewInfoCmd() *cobra.Command {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return info.Run(vars.RuntimeFactory.GetRuntimeType())
+			return info.Run(cmd.Context(), vars.RuntimeFactory.GetRuntimeType())
 		},
 	}
 
