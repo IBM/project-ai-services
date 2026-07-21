@@ -69,7 +69,7 @@ This proposal extends the existing Catalog Service with two new capabilities:
 | `local` | Locally deployed pod — owned and managed by the system | ✅ | optional | Podman secret (optional API key) | vLLM |
 | `remote` | User registered an external model endpoint; no pod | ❌ | ❌ | LiteLLM Gateway | WatsonX, OpenAI-compatible, HuggingFace |
 
-Three new columns on `components` (`tags`, `created_by`, `source`) and no new tables are the complete schema delta. Credentials never touch the database.
+Three new columns on `components` (`instance_name`, `created_by`, `source`) and no new tables are the complete schema delta. Credentials never touch the database.
 
 ---
 
@@ -480,20 +480,20 @@ A **Connector** is a `components` row with `source = 'remote'`. It has no pod an
 
 ### 6.2 Additions to Existing `components` Table
 
-No existing columns are changed or removed. **Three** new columns are added; `component_status` is extended with new lifecycle and validation values.
+No existing columns are changed or removed. **Four** new columns are added; `component_status` is extended with new lifecycle and validation values.
 
 #### New columns
 
 ```sql
 ALTER TABLE components
-    ADD COLUMN tags       JSONB        DEFAULT '{}',                -- free-form labels; "name" key carries the human-readable label
+    ADD COLUMN instance_name VARCHAR(100),                          -- human-readable label supplied by the user at deploy/create time
     ADD COLUMN created_by VARCHAR(100),                             -- NULL for app-pipeline infra
     ADD COLUMN source     source_type NOT NULL DEFAULT 'local';  -- 'local' | 'remote'
 ```
 
 | Column | Data Type | Nullable | Description |
 |---|---|---|---|
-| `tags` | JSONB | Yes, DEFAULT `'{}'` | Free-form label bag. The `"name"` key carries the human-readable label (e.g., `{"name": "granite-llm"}`). Additional keys such as `"env"`, `"team"`, or `"app"` may be added freely without schema changes |
+| `instance_name` | VARCHAR(100) | Yes | Human-readable label for this deployed instance (3–100 chars, slug-safe), supplied by the user at deploy or create time (e.g. `"granite-llm"`). NULL for components created by the application pipeline |
 | `created_by` | VARCHAR(100) | Yes | User who created this row via `POST /api/v1/models`. NULL for components created by the application pipeline |
 | `source` | `source_type` | No, DEFAULT `'local'` | `local` — locally deployed pod. `remote` — external endpoint registered by user; no pod, credentials stored in LiteLLM Gateway |
 
@@ -522,25 +522,19 @@ Full enum after migration:
 
 > `Running` and `Error` are shared terminal states — same enum value, same DB column, same UI treatment for both sources. `Deploying` and `Syncing` are the source-specific transient states.
 
-#### `metadata` JSONB — per-source fields
+#### `params` JSONB — per-source fields
 
-`local` model rows (`vllm-spyre`) — value stored in `components.metadata`:
+`local` model rows (`vllm-spyre`) — value stored in `components.params`:
 ```json
 {
   "model_name": "ibm-granite/granite-3.3-8b-instruct"
 }
 ```
 
-`remote` rows (`watsonx`) — value stored in `components.metadata`:
+`remote` rows (`watsonx`) — value stored in `components.params`:
 ```json
 {
-  "model_name": "ibm/granite-3-8b-instruct"
-}
-```
-
-`remote` rows — non-secret connection config stored in `components.params`:
-```json
-{
+  "model_name": "ibm/granite-3-8b-instruct",
   "endpoint_url": "https://us-south.ml.cloud.ibm.com",
   "project_id": "my-watsonx-project-id",
   "auth": { "type": "api-key" }
@@ -549,12 +543,11 @@ Full enum after migration:
 
 > Secret fields (`api_key`, `token`, etc.) are **never stored** in `components.params.auth` or anywhere in the Catalog DB — only `auth.type` is persisted so the UI knows what credential shape was registered. The actual secret lives in LiteLLM.
 
-| `metadata` key | `local` | `remote` |
-|---|---|---|
-| `model_name` | ✅ | ✅ |
+> `instance_name` is a separate top-level column on `components`, not a key inside `params`.
 
 | `params` key | `local` | `remote` |
 |---|---|---|
+| `model_name` | ✅ | ✅ |
 | `endpoint_url` | ❌ | ✅ |
 | `project_id` | ❌ | ✅ (watsonx) |
 | `auth.type` | ❌ | ✅ |
@@ -612,6 +605,7 @@ erDiagram
 
     components {
         UUID id PK
+        VARCHAR instance_name
         VARCHAR type
         VARCHAR provider
         source_type source
@@ -619,8 +613,6 @@ erDiagram
         TEXT message
         JSONB endpoints
         TEXT version
-        JSONB metadata
-        JSONB tags
         VARCHAR created_by
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
@@ -639,7 +631,7 @@ erDiagram
     }
 ```
 
-> **No new tables. No credentials column.** `local` credentials live in Podman secrets. `remote` credentials are passed directly to LiteLLM at route-registration time and never touch the Catalog DB.
+> **No new tables. No credentials column.** `instance_name` is a dedicated top-level column. `local` credentials live in Podman secrets. `remote` credentials are passed directly to LiteLLM at route-registration time and never touch the Catalog DB.
 
 ---
 
@@ -700,9 +692,9 @@ Content-Type: application/json
 ```json
 {
   "type": "llm",
-  "tags": { "name": "granite-llm" },
+  "instance_name": "granite-llm",
   "provider": "vllm-spyre",
-  "metadata": {
+  "params": {
     "model_name": "ibm-granite/granite-3.3-8b-instruct"
   }
 }
@@ -713,15 +705,15 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Component type: `llm`, `embedding`, `reranker` |
-| `tags` | object | Yes | Label bag. Must include `"name"` key (3–100 chars, slug-safe) |
+| `instance_name` | string | Yes | Human-readable label for this deployed instance (3–100 chars, slug-safe) |
 | `provider` | string | Yes | Local backend: `vllm-cpu`, `vllm-spyre` |
-| `metadata` | object | Yes | Model-level config — polymorphic on `provider` |
+| `params` | object | Yes | Model and provider config — polymorphic on `provider` |
 
-**Polymorphic `metadata` — required fields per `provider`:**
+**Polymorphic `params` — required fields per `provider`:**
 
-The `modelmanager` package validates `metadata` against the `params` block in `assets/components/<type>/<provider>/metadata.yaml`. Adding a new provider requires only a new asset file.
+The `modelmanager` package validates `params` against the `params` block in `assets/components/<type>/<provider>/metadata.yaml`. Adding a new provider requires only a new asset file.
 
-| `provider` | Required `metadata` fields |
+| `provider` | Required `params` fields |
 |---|---|
 | `vllm-cpu`, `vllm-spyre` | `model_name` |
 
@@ -767,10 +759,10 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
     {
       "id": "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
       "source": "local",
-      "tags": { "name": "granite-llm" },
+      "instance_name": "granite-llm",
       "type": "llm",
       "provider": "vllm-spyre",
-      "metadata": { "model_name": "ibm-granite/granite-3.3-8b-instruct" },
+      "params": { "model_name": "ibm-granite/granite-3.3-8b-instruct" },
       "status": "Running",
       "created_at": "2026-07-01T10:00:00Z",
       "updated_at": "2026-07-01T10:05:00Z"
@@ -801,10 +793,10 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
 {
   "id": "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
   "source": "local",
-  "tags": { "name": "granite-llm" },
+  "instance_name": "granite-llm",
   "type": "llm",
   "provider": "vllm-spyre",
-  "metadata": { "model_name": "ibm-granite/granite-3.3-8b-instruct" },
+  "params": { "model_name": "ibm-granite/granite-3.3-8b-instruct" },
   "status": "Running",
   "message": "Model running",
   "endpoints": [
@@ -813,9 +805,7 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
   "in_use_by": [
     {
       "application_id": "a1b2c3d4-1234-5678-abcd-ef0123456789",
-      "app_name": "my-rag-app",
-      "service_id": "svc-uuid-here",
-      "service_role": "llm"
+      "app_name": "my-rag-app"
     }
   ],
   "created_at": "2026-07-01T10:00:00Z",
@@ -829,15 +819,13 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
 {
   "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
   "source": "remote",
-  "tags": { "name": "prod-watsonx" },
+  "instance_name": "prod-watsonx",
   "type": "llm",
   "provider": "watsonx",
   "status": "Running",
   "message": "Endpoint reachable and credentials accepted",
-  "metadata": {
-    "model_name": "ibm/granite-3-8b-instruct"
-  },
   "params": {
+    "model_name": "ibm/granite-3-8b-instruct",
     "endpoint_url": "https://us-south.ml.cloud.ibm.com",
     "project_id": "my-watsonx-project-id",
     "auth": { "type": "api-key" }
@@ -845,9 +833,7 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
   "in_use_by": [
     {
       "application_id": "a1b2c3d4-1234-5678-abcd-ef0123456789",
-      "app_name": "my-rag-app",
-      "service_id": "svc-uuid-here",
-      "service_role": "llm"
+      "app_name": "my-rag-app"
     }
   ],
   "created_by": "user@example.com",
@@ -861,8 +847,7 @@ The `modelmanager` package validates `metadata` against the `params` block in `a
 **`in_use_by` SQL (server-side):**
 
 ```sql
-SELECT sd.service_id, s.app_id AS application_id, a.name AS app_name,
-       sd.dependency_type AS service_role
+SELECT DISTINCT s.app_id AS application_id, a.name AS app_name
 FROM service_dependencies sd
 JOIN services s ON s.id = sd.service_id
 JOIN applications a ON a.id = s.app_id
@@ -940,12 +925,10 @@ Content-Type: application/json
 ```json
 {
   "type": "llm",
-  "tags": { "name": "prod-watsonx" },
+  "instance_name": "prod-watsonx",
   "provider": "watsonx",
-  "metadata": {
-    "model_name": "ibm/granite-3-8b-instruct"
-  },
   "params": {
+    "model_name": "ibm/granite-3-8b-instruct",
     "endpoint_url": "https://us-south.ml.cloud.ibm.com",
     "project_id": "my-watsonx-project-id",
     "auth": {
@@ -961,22 +944,22 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Component type: `llm`, `embedding`, `reranker` |
-| `tags` | object | Yes | Label bag. Must include `"name"` key (3–100 chars, slug-safe) |
+| `instance_name` | string | Yes | Human-readable label for this connector (3–100 chars, slug-safe) |
 | `provider` | string | Yes | Connector backend: `watsonx`, `openai-compatible`, `huggingface`, `generic-http` |
-| `metadata` | object | Conditional | Model-level config — polymorphic on `provider` |
-| `params` | object | Yes | Endpoint + auth — mirrors the fields defined in `values.schema.json` for this provider |
+| `params` | object | Yes | Model and endpoint config — mirrors the fields defined in `values.schema.json` for this provider |
+| `params.model_name` | string | Conditional | Model identifier — required for all providers except `generic-http` |
 | `params.endpoint_url` | string | Yes | Remote service base URL |
 | `params.auth` | object | Yes | Auth object — `type` discriminates the shape; secret fields passed to LiteLLM; **never stored in Catalog DB** |
 | `params.auth.type` | string | Yes | `api-key`, `bearer-token`, `basic`, `none` |
 
-**Polymorphic `metadata` — required fields per `provider`:**
+**Polymorphic `params` — required fields per `provider`:**
 
-| `provider` | Required `metadata` fields |
+| `provider` | Required `params` fields |
 |---|---|
-| `watsonx` | `model_name` |
-| `openai-compatible` | `model_name` |
-| `huggingface` | `model_name` |
-| `generic-http` | — |
+| `watsonx` | `model_name`, `endpoint_url`, `auth` |
+| `openai-compatible` | `model_name`, `endpoint_url`, `auth` |
+| `huggingface` | `model_name`, `endpoint_url`, `auth` |
+| `generic-http` | `endpoint_url`, `auth` |
 
 **Polymorphic `params.auth` — shape per `type`:**
 
@@ -1042,11 +1025,11 @@ GET /api/v1/connectors/models?type=llm,embedding
     {
       "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
       "source": "remote",
-      "tags": { "name": "prod-watsonx" },
+      "instance_name": "prod-watsonx",
       "type": "llm",
       "provider": "watsonx",
-      "metadata": { "model_name": "ibm/granite-3-8b-instruct" },
       "params": {
+        "model_name": "ibm/granite-3-8b-instruct",
         "endpoint_url": "https://us-south.ml.cloud.ibm.com",
         "project_id": "my-watsonx-project-id",
         "auth": { "type": "api-key" }
@@ -1058,11 +1041,11 @@ GET /api/v1/connectors/models?type=llm,embedding
     {
       "id": "d2e3f4a5-b6c7-8901-defa-234567890bcd",
       "source": "remote",
-      "tags": { "name": "prod-embeddings" },
+      "instance_name": "prod-embeddings",
       "type": "embedding",
       "provider": "openai-compatible",
-      "metadata": { "model_name": "text-embedding-3-small" },
       "params": {
+        "model_name": "text-embedding-3-small",
         "endpoint_url": "https://api.openai.com",
         "auth": { "type": "api-key" }
       },
@@ -1112,16 +1095,14 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 |---|---|
 | `:id` | Connector UUID |
 
-**Description:** Updates a connector's `metadata` or `params`. Only applicable to `source=remote` rows — local pod components are immutable after deploy. If `params.auth` is supplied the LiteLLM route is updated with new credentials, `status` resets to `Syncing`, and the validation probe is re-fired immediately in the background.
+**Description:** Updates a connector's `params`. Only applicable to `source=remote` rows — local pod components are immutable after deploy. If `params.auth` is supplied the LiteLLM route is updated with new credentials, `status` resets to `Syncing`, and the validation probe is re-fired immediately in the background.
 
 **Request Body (all fields optional):**
 
 ```json
 {
-  "metadata": {
-    "model_name": "ibm/granite-3-8b-instruct"
-  },
   "params": {
+    "model_name": "ibm/granite-3-8b-instruct",
     "endpoint_url": "https://eu-de.ml.cloud.ibm.com",
     "project_id": "new-project-id",
     "auth": {
@@ -1136,7 +1117,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 1. Re-register LiteLLM route (`DELETE /model/delete` then `POST /model/new`) with updated `params.auth` secret fields.
 2. Reset `components.status = 'Syncing'`.
-3. Merge supplied `metadata` and non-auth `params` fields into stored record (omitted keys preserved).
+3. Merge supplied `params` fields into stored record (omitted keys preserved).
 4. Update `updated_at`.
 
 **Response (200 OK):** Full connector object in same shape as §8.5 response.
@@ -1171,15 +1152,13 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 {
   "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
   "source": "remote",
-  "tags": { "name": "prod-watsonx" },
+  "instance_name": "prod-watsonx",
   "type": "llm",
   "provider": "watsonx",
   "status": "Running",
   "message": "Endpoint reachable and credentials accepted",
-  "metadata": {
-    "model_name": "ibm/granite-3-8b-instruct"
-  },
   "params": {
+    "model_name": "ibm/granite-3-8b-instruct",
     "endpoint_url": "https://us-south.ml.cloud.ibm.com",
     "project_id": "my-watsonx-project-id",
     "auth": { "type": "api-key" }
@@ -1187,9 +1166,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
   "in_use_by": [
     {
       "application_id": "a1b2c3d4-1234-5678-abcd-ef0123456789",
-      "app_name": "my-rag-app",
-      "service_id": "svc-uuid-here",
-      "service_role": "llm"
+      "app_name": "my-rag-app"
     }
   ],
   "created_by": "user@example.com",
@@ -1308,7 +1285,7 @@ catalog configure  (same command that starts postgres, caddy, catalog API)
     7. [NEW] Poll InspectPod until liveness probe passes
     8. [NEW] INSERT components (type='llm', provider='litellm', source='local',
                                 status='Running', created_by=NULL,
-                                metadata={model_name: "litellm"})
+                                params={model_name: "litellm"})
 
   No gateway-wide virtual key is generated at configure time.
   Per-model virtual keys are created on each individual model deploy (see flows below).
@@ -1320,7 +1297,7 @@ catalog configure  (same command that starts postgres, caddy, catalog API)
 ```
 POST /api/v1/models
 { type: "llm", source: "local", provider: "vllm-spyre",
-  tags: {"name":"granite-llm"}, metadata: {model_name: "ibm-granite/granite-3.3-8b-instruct"} }
+  instance_name: "granite-llm", params: {model_name: "ibm-granite/granite-3.3-8b-instruct"} }
 
   Read assets/components/llm/vllm-spyre/metadata.yaml → deployment_strategy: pod
 
@@ -1328,8 +1305,8 @@ POST /api/v1/models
   2. Pre-flight check → 422 if insufficient
   3. Render vllm-server.yaml.tmpl → CreatePod
   4. INSERT into components (type=llm, provider=vllm-spyre, source='local',
-                             status='Deploying', tags={"name":"granite-llm"}, created_by=<user>,
-                             metadata={model_name: "ibm-granite/granite-3.3-8b-instruct"})  ← from request metadata.model_name
+                             status='Deploying', instance_name='granite-llm', created_by=<user>,
+                             params={model_name: "ibm-granite/granite-3.3-8b-instruct"})  ← from request params.model_name
   5. Return 202 {source: "local", id: components.id, status: "Deploying", ...}
   6. [async] Poll InspectPod until liveness probe passes
   7. [async] UPDATE components SET status='Running'
@@ -1346,8 +1323,9 @@ POST /api/v1/models
 ```
 POST /api/v1/connectors/models
 { type: "llm", provider: "watsonx",
-  tags: {"name":"prod-watsonx"}, metadata: {model_name: "ibm/granite-3-8b-instruct"},
-  params: {endpoint_url: "https://us-south.ml.cloud.ibm.com", project_id: "my-watsonx-project-id",
+  instance_name: "prod-watsonx",
+  params: {model_name: "ibm/granite-3-8b-instruct",
+           endpoint_url: "https://us-south.ml.cloud.ibm.com", project_id: "my-watsonx-project-id",
            auth: {type: "api-key", api_key: "sk-..."}} }
 
   Read assets/components/llm/watsonx/metadata.yaml → deployment_strategy: remote
@@ -1355,12 +1333,12 @@ POST /api/v1/connectors/models
   1. Validate request fields
   2. No pod, no pre-flight resource check
   3. POST /model/new to LiteLLM Gateway (passing params.auth secret fields directly — never stored in Catalog DB)
-             route_id = "{sanitised model_name}-{provider}"  (e.g. ibm-granite-3-8b-instruct-watsonx)
+             route_id = "{sanitised params.model_name}-{provider}"  (e.g. ibm-granite-3-8b-instruct-watsonx)
   4. INSERT into components (type=llm, provider=watsonx, source='remote',
-                             status='Syncing', tags={"name":<name>}, created_by=<user>,
+                             status='Syncing', instance_name=<instance_name>, created_by=<user>,
                              endpoints=[{type:"api", url: params.endpoint_url}],
-                             metadata={model_name: ...},         ← from request metadata.model_name
-                             params={endpoint_url: ...,          ← from request params.endpoint_url
+                             params={model_name: ...,            ← from request params.model_name
+                                     endpoint_url: ...,          ← from request params.endpoint_url
                                      project_id: ...,            ← from request params.project_id
                                      auth: {type: "api-key"}     ← only auth.type stored; secret fields not stored})
   5. Return 201 {source: "remote", id: components.id, status: "Syncing", ...}
@@ -1455,9 +1433,9 @@ The pre-flight response always includes every constraint result (satisfied or no
 ### All active models for an application — single query:
 ```sql
 SELECT
-    id, source, tags->>'name' AS name, type, provider, status,
+    id, source, instance_name, type, provider, status,
     endpoints,
-    metadata->>'model_name' AS model_name    -- local only; NULL for remote connectors
+    params->>'model_name' AS model_name
 FROM components
 WHERE created_by IS NOT NULL
   AND type IN ('llm', 'embedding', 'reranker')
@@ -1472,7 +1450,7 @@ SELECT
     s.id AS service_id, s.catalog_id AS service_type,
     c.id AS model_id, c.source AS model_source,
     c.type AS model_role, c.provider, c.status AS model_status,
-    c.metadata->>'model_name' AS model_name
+    c.params->>'model_name' AS model_name
 FROM applications a
 LEFT JOIN services s ON s.app_id = a.id
 LEFT JOIN components c ON c.created_by IS NOT NULL
@@ -1482,7 +1460,7 @@ ORDER BY c.type, c.source;
 
 ### Get connectors still syncing (probe in progress):
 ```sql
-SELECT id, tags->>'name' AS name, provider, endpoints, created_at
+SELECT id, instance_name, provider, endpoints, created_at
 FROM components
 WHERE source = 'remote'
   AND status = 'Syncing'
@@ -1557,7 +1535,7 @@ ai-services model deploy [name] --type <type> --provider <provider> --runtime po
 |---|---|---|---|
 | `--type` | `-t` | Yes | Component type: `llm`, `embedding`, `reranker` |
 | `--provider` | `-p` | Yes | Backend provider: `vllm-cpu`, `vllm-spyre` |
-| `--params` | | No | Inline metadata key=value pairs (e.g. `model_name=ibm-granite/granite-3.3-8b-instruct`) |
+| `--params` | | No | Inline key=value pairs for `params` (e.g. `model_name=ibm-granite/granite-3.3-8b-instruct`) |
 
 ```bash
 # Deploy a vLLM-Spyre LLM model
