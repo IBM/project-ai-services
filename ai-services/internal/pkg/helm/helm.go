@@ -91,6 +91,20 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	return nil
 }
 
+// InstallOrUpgrade installs a release if it does not exist, or upgrades it if it does.
+func (h *Helm) InstallOrUpgrade(release string, chart chart.Charter, values map[string]any, timeout time.Duration) error {
+	exists, err := h.IsReleaseExist(release)
+	if err != nil {
+		return fmt.Errorf("failed to check release existence: %w", err)
+	}
+
+	if !exists {
+		return h.Install(release, chart, &InstallOpts{Values: values, Timeout: timeout})
+	}
+
+	return h.Upgrade(release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
+}
+
 func (h *Helm) IsReleaseExist(release string) (bool, error) {
 	client := action.NewGet(h.actionConfig)
 

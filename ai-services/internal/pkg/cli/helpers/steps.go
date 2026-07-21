@@ -100,7 +100,7 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 			}
 			params["HOST_IP"] = hostIP
 		case "route":
-			route, err := runtime.ListRoutes()
+			route, err := runtime.ListRoutes("")
 			if err != nil {
 				return fmt.Errorf("unable to fetch the route: %w", err)
 			}

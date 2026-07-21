@@ -18,6 +18,4 @@ postgres:
 llm:
   model:
     name: ""
-    maxModelLen: 4096
-    maxBatchSize: 32
   apiKey: ""
