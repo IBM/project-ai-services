@@ -657,6 +657,7 @@ func ValidateCatalogHashpwOutput(output string) error {
 // ValidateCatalogWhoamiOutput validates 'catalog whoami' output.
 func ValidateCatalogWhoamiOutput(output string) error {
 	required := []string{"Server", "Username"}
+
 	return checkRequiredStrings(output, "catalog whoami", required)
 }
 
