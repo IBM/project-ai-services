@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -64,7 +65,7 @@ func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (boo
 		return true, nil
 	}
 
-	pods, err := utils.GetCatalogPods(ctx, rt)
+	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return false, err
 	}

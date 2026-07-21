@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -25,7 +26,7 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	pods, err := cliutils.GetCatalogPods(ctx, rt)
+	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return err
 	}
