@@ -1,7 +1,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: "api"
+  name: "summarize-api"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}

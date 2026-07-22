@@ -37,8 +37,3 @@ llm:
     maxModelLen: 4096
     maxBatchSize: 32
   apiKey: ""
-
-opensearch:
-  auth:
-    username: "admin"
-    password: ""
