@@ -1653,7 +1653,19 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			if summarizeBaseURL == "" {
-				ginkgo.Fail("Summarization service URL is not set — ensure summarization service was deployed successfully")
+				if providedAppName != "" {
+					ginkgo.Fail(fmt.Sprintf("Summarization service URL is not set.\n\n"+
+						"You provided -app-name=%s but the application is not running or catalog is not accessible.\n\n"+
+						"Please ensure:\n"+
+						"  1. Catalog is running: ai-services catalog configure --runtime %s\n"+
+						"  2. Application exists and is running: ai-services application info %s --runtime %s\n\n"+
+						"Or remove -app-name flag to let the test create a new application.",
+						providedAppName, appRuntime, providedAppName, appRuntime))
+				} else {
+					ginkgo.Fail("Summarization service URL is not set — ensure summarization service was deployed successfully.\n\n"+
+						"This usually means the application creation step was skipped.\n"+
+						"Remove --label-filter to run the full test suite including application creation.")
+				}
 			}
 
 			logger.Infof("[SUMMARIZE] Setting up summarization tests with URL: %s", summarizeBaseURL)
