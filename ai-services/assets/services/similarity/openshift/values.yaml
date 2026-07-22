@@ -17,8 +17,3 @@ embedding:
 reranker:
   model:
     name: ""
-
-opensearch:
-  auth:
-    username: "admin"
-    password: ""
