@@ -22,6 +22,7 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
+	"github.com/project-ai-services/ai-services/tests/e2e/summarization"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
@@ -32,6 +33,7 @@ var (
 	runID                       string
 	appName                     string
 	providedAppName             string
+	providedTemplate            string
 	appRuntime                  string
 	deleteExistingApp           bool
 	tempDir                     string
@@ -43,6 +45,7 @@ var (
 	templateName                string
 	goldenPath                  string
 	ragBaseURL                  string
+	summarizeBaseURL            string
 	judgeBaseURL                string
 	backendPort                 string
 	uiPort                      string
@@ -60,6 +63,7 @@ var (
 
 func init() {
 	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
+	flag.StringVar(&providedTemplate, "template", "rag", "Template to use for application creation (rag, summarize, digitize)")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
 }
@@ -138,7 +142,13 @@ var _ = ginkgo.BeforeSuite(func() {
 	logger.Infof("[SETUP] Test binary directory: %s", tempBinDir)
 
 	ginkgo.By("Setting template name")
-	templateName = "rag"
+	if providedTemplate != "" {
+		templateName = providedTemplate
+		logger.Infof("[SETUP] Using provided template: %s", templateName)
+	} else {
+		templateName = "rag"
+		logger.Infof("[SETUP] Using default template: %s", templateName)
+	}
 
 	ginkgo.By("Resolving application name")
 	if providedAppName != "" {
@@ -178,6 +188,36 @@ var _ = ginkgo.BeforeSuite(func() {
 	binVersion, err = bootstrap.CheckBinaryVersion(aiServiceBin)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	logger.Infof("[SETUP] ai-services version: %s", binVersion)
+
+	// Extract URLs from existing application (if provided) - must happen after CLI is built
+	if providedAppName != "" {
+		ginkgo.By("Extracting URLs from existing application")
+		logger.Infof("[SETUP] Attempting to extract URL for app=%s, template=%s, runtime=%s", appName, templateName, appRuntime)
+		
+		extractCtx, extractCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer extractCancel()
+		
+		infoOut, infoErr := cli.ApplicationInfo(extractCtx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Errorf("[SETUP] ERROR: Failed to get application info: %v", infoErr)
+			logger.Errorf("[SETUP] This will cause tests to fail if they require the application URL")
+		} else {
+			logger.Infof("[SETUP] Application info retrieved successfully")
+			if templateName == "rag" {
+				ragBaseURL, _ = cli.GetBaseURL(infoOut, backendPort)
+				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+				logger.Infof("[SETUP] Extracted RAG URL: %s", ragBaseURL)
+			} else if templateName == "summarize" {
+				summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
+				if summarizeBaseURL == "" {
+					logger.Errorf("[SETUP] ERROR: ExtractCatalogSummarizeURL returned empty string!")
+					logger.Errorf("[SETUP] Application info output:\n%s", infoOut)
+				} else {
+					logger.Infof("[SETUP] Extracted Summarize URL: %s", summarizeBaseURL)
+				}
+			}
+		}
+	}
 
 	ginkgo.By("Logging in to catalog API server (if already running)")
 	catalogServerURL, catalogUsername, catalogPassword := bootstrap.GetCatalogCreds()
@@ -354,8 +394,28 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates rag application, runs health checks and validates RAG endpoints", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent"), func() {
 			if providedAppName != "" {
+				// Extract URLs from existing application
+				ctx, cancel := withTimeout(5 * time.Minute)
+				defer cancel()
+				
+				infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
+				
+				if templateName == "rag" {
+					ragBaseURL, err := cli.GetBaseURL(infoOut, backendPort)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+					logger.Infof("[TEST] Using existing RAG application: %s (URL: %s)", appName, ragBaseURL)
+				} else if templateName == "summarize" {
+					summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
+					gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty(), "Failed to extract summarize URL from existing application")
+					logger.Infof("[TEST] Using existing summarization application: %s (URL: %s)", appName, summarizeBaseURL)
+				} else if templateName == "digitize" {
+					logger.Infof("[TEST] Using existing digitize application: %s", appName)
+				}
+				
 				ginkgo.Skip("Skipping creation — using existing application")
 			}
 
@@ -389,43 +449,92 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 			}
 
-			pods := []string{"backend", "ui", "db"}
 			params := ""
 			cliOptions := cli.CreateOptions{
 				SkipModelDownload: false,
 				ImagePullPolicy:   "IfNotPresent",
 			}
 
-			createOutput, err := cli.CreateRAGAppAndValidate(
-				ctx,
-				cfg,
-				appName,
-				templateName,
-				params,
-				backendPort,
-				uiPort,
-				cliOptions,
-				pods,
-				appRuntime,
-			)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			// Podman: chat-backend URL is only in 'application info', not create output.
-			if appRuntime == "podman" {
-				infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
-				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
-				ragBaseURL, err = cli.GetBaseURL(infoOut, backendPort)
+			// Handle different templates
+			if templateName == "rag" {
+				pods := []string{"backend", "ui", "db"}
+				createOutput, err := cli.CreateRAGAppAndValidate(
+					ctx,
+					cfg,
+					appName,
+					templateName,
+					params,
+					backendPort,
+					uiPort,
+					cliOptions,
+					pods,
+					appRuntime,
+				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+
+				// Extract RAG URLs
+				if appRuntime == "podman" {
+					infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+					gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
+					ragBaseURL, err = cli.GetBaseURL(infoOut, backendPort)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
+				} else {
+					ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					judgeBaseURL, err = cli.GetBaseURL(createOutput, judgePort)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+				logger.Infof("[TEST] RAG application %s created and validated", appName)
+			} else if templateName == "summarize" || templateName == "digitize" {
+				// Deploy standalone service (summarize or digitize)
+				createOutput, err := cli.CreateApp(
+					ctx,
+					cfg,
+					appName,
+					templateName,
+					params,
+					cliOptions,
+					appRuntime,
+				)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				logger.Infof("[TEST] %s service deployment initiated: %s", templateName, appName)
+
+				// Extract service URL
+				if appRuntime == "podman" {
+					infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+					gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
+					
+					if templateName == "summarize" {
+						summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
+						gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty())
+						
+						// Verify summarization service health
+						healthCtx, healthCancel := withTimeout(2 * time.Minute)
+						defer healthCancel()
+						err = summarization.HealthCheck(healthCtx, summarizeBaseURL)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						logger.Infof("[TEST] Summarization service deployed and healthy at: %s", summarizeBaseURL)
+					}
+				} else {
+					if templateName == "summarize" {
+						summarizeBaseURL = cli.ExtractCatalogSummarizeURL(createOutput)
+						gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty())
+						
+						// Verify summarization service health
+						healthCtx, healthCancel := withTimeout(2 * time.Minute)
+						defer healthCancel()
+						err = summarization.HealthCheck(healthCtx, summarizeBaseURL)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						logger.Infof("[TEST] Summarization service deployed and healthy at: %s", summarizeBaseURL)
+					}
+				}
+				logger.Infof("[TEST] %s service %s created successfully", templateName, appName)
 			} else {
-				ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				judgeBaseURL, err = cli.GetBaseURL(createOutput, judgePort)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize", templateName))
 			}
-
-			logger.Infof("[TEST] Application %s created, healthy, and RAG endpoints validated", appName)
 		})
+
 	})
 	ginkgo.Context("Application Observability", func() {
 		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent"), func() {
@@ -1532,6 +1641,344 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
 			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
 			logger.Infof("[TEST] ✓ Blank PDF ingestion completed successfully")
+		})
+	})
+	ginkgo.Context("Summarization Tests", ginkgo.Label("summarization-tests"), func() {
+		var createdJobIDs []string
+
+		ginkgo.BeforeAll(func() {
+			// Skip all summarization tests if template is not "summarize"
+			if templateName != "summarize" {
+				ginkgo.Skip(fmt.Sprintf("Skipping summarization tests — template is '%s', not 'summarize'", templateName))
+			}
+
+			if summarizeBaseURL == "" {
+				ginkgo.Fail("Summarization service URL is not set — ensure summarization service was deployed successfully")
+			}
+
+			logger.Infof("[SUMMARIZE] Setting up summarization tests with URL: %s", summarizeBaseURL)
+
+			// Set the runtime for the summarization package
+			summarization.SetAppRuntime(appRuntime)
+
+			logger.Infof("[SUMMARIZE] Summarize Base URL: %s", summarizeBaseURL)
+		})
+
+		ginkgo.AfterEach(func() {
+			// Cleanup: delete created jobs
+			for _, jobID := range createdJobIDs {
+				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				_, _ = summarization.WaitForJobCompletion(cleanCtx, summarizeBaseURL, jobID, 5*time.Minute)
+				_ = summarization.DeleteJob(cleanCtx, summarizeBaseURL, jobID)
+				cleanCancel()
+			}
+			createdJobIDs = nil
+		})
+
+		ginkgo.It("verifies summarization service health", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			err := summarization.HealthCheck(ctx, summarizeBaseURL)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Summarization service health check passed")
+		})
+
+		ginkgo.It("summarizes a PDF file with standard level", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			pdfPath := testFilePath("ingestion/docs/test_doc.pdf")
+			jobName := fmt.Sprintf("pdf-summary-%d", time.Now().Unix())
+
+			// Create summarization job
+			jobResp, err := summarization.CreateJobWithFile(ctx, summarizeBaseURL, pdfPath, "standard", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created PDF summarization job: %s", jobResp.JobID)
+
+			// Wait for job completion
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+			logger.Infof("[TEST] ✓ PDF summarization job completed: %s", jobResp.JobID)
+
+			// Get job result
+			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
+			summary, ok := result.Data["summary"].(string)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(summary).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ PDF summary retrieved successfully (length: %d chars)", len(summary))
+		})
+
+		ginkgo.It("summarizes a TXT file with brief level", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			txtPath := testFilePath("ingestion/docs/sample_txt.txt")
+			jobName := fmt.Sprintf("txt-summary-%d", time.Now().Unix())
+
+			// Create summarization job
+			jobResp, err := summarization.CreateJobWithFile(ctx, summarizeBaseURL, txtPath, "brief", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created TXT summarization job: %s", jobResp.JobID)
+
+			// Wait for job completion
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+			logger.Infof("[TEST] ✓ TXT summarization job completed: %s", jobResp.JobID)
+
+			// Get job result
+			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
+			summary, ok := result.Data["summary"].(string)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(summary).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ TXT summary retrieved successfully (length: %d chars)", len(summary))
+		})
+
+		ginkgo.It("summarizes text input with detailed level", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			testText := "Artificial Intelligence (AI) is transforming industries worldwide. Machine learning algorithms enable computers to learn from data and improve their performance over time. Deep learning, a subset of machine learning, uses neural networks with multiple layers to process complex patterns. Natural language processing allows machines to understand and generate human language. Computer vision enables machines to interpret and analyze visual information from the world."
+			jobName := fmt.Sprintf("text-summary-%d", time.Now().Unix())
+
+			// Create summarization job
+			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "detailed", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created text summarization job: %s", jobResp.JobID)
+
+			// Wait for job completion
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+			logger.Infof("[TEST] ✓ Text summarization job completed: %s", jobResp.JobID)
+
+			// Get job result
+			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
+			summary, ok := result.Data["summary"].(string)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(summary).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ Text summary retrieved successfully (length: %d chars)", len(summary))
+		})
+
+		ginkgo.It("tests different summary levels produce different outputs", func() {
+			ctx, cancel := withTimeout(20 * time.Minute)
+			defer cancel()
+
+			testText := "Climate change is one of the most pressing challenges facing humanity today. Rising global temperatures are causing ice caps to melt, sea levels to rise, and weather patterns to become more extreme. Scientists agree that human activities, particularly the burning of fossil fuels, are the primary drivers of this change. Renewable energy sources like solar and wind power offer promising solutions. Governments and organizations worldwide are working to reduce carbon emissions and transition to sustainable practices."
+
+			levels := []string{"brief", "standard", "detailed"}
+			summaries := make(map[string]string)
+
+			for _, level := range levels {
+				jobName := fmt.Sprintf("level-test-%s-%d", level, time.Now().Unix())
+
+				// Create job
+				jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, level, jobName, false)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+				// Wait for completion
+				time.Sleep(jobStartDelay)
+				finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+
+				// Get result
+				result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				summary, ok := result.Data["summary"].(string)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				summaries[level] = summary
+				logger.Infof("[TEST] %s summary length: %d chars", level, len(summary))
+			}
+
+			// Verify summaries are different
+			gomega.Expect(summaries["brief"]).NotTo(gomega.Equal(summaries["standard"]))
+			gomega.Expect(summaries["standard"]).NotTo(gomega.Equal(summaries["detailed"]))
+			logger.Infof("[TEST] ✓ Different summary levels produce different outputs")
+		})
+
+		ginkgo.It("tests streaming mode", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			testText := "The Internet of Things (IoT) connects everyday devices to the internet, enabling them to send and receive data. Smart homes use IoT devices to automate lighting, heating, and security systems. Wearable technology tracks health metrics and fitness activities. Industrial IoT improves manufacturing efficiency and predictive maintenance."
+			jobName := fmt.Sprintf("stream-test-%d", time.Now().Unix())
+
+			// Create job with streaming enabled
+			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "standard", jobName, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created streaming summarization job: %s", jobResp.JobID)
+
+			// Wait for completion
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+			logger.Infof("[TEST] ✓ Streaming summarization job completed: %s", jobResp.JobID)
+		})
+
+		ginkgo.It("handles empty text input - job fails with appropriate error", func() {
+			ctx, cancel := withTimeout(2 * time.Minute)
+			defer cancel()
+
+			jobName := fmt.Sprintf("empty-text-%d", time.Now().Unix())
+			// API accepts empty files but job fails during processing
+			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, "", "standard", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] Created empty text job: %s", jobResp.JobID)
+
+			// Wait for job to process (will fail)
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 2*time.Minute)
+			
+			// Job should fail with "Extracted text is empty" error
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("job failed"))
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusFailed))
+			gomega.Expect(finalStatus.Error).NotTo(gomega.BeNil())
+			gomega.Expect(*finalStatus.Error).To(gomega.ContainSubstring("Extracted text is empty"))
+			logger.Infof("[TEST] ✓ Empty text correctly failed with error: %s", *finalStatus.Error)
+			
+			// Cleanup
+			time.Sleep(5 * time.Second)
+			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("handles invalid summary level - defaults to standard", func() {
+			ctx, cancel := withTimeout(2 * time.Minute)
+			defer cancel()
+
+			testText := "This is a test text for invalid level. Artificial Intelligence is transforming industries."
+			jobName := fmt.Sprintf("invalid-level-%d", time.Now().Unix())
+			
+			// API accepts invalid level and defaults to "standard"
+			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "invalid_level", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] Created job with invalid level (will default to standard): %s", jobResp.JobID)
+
+			// Wait for completion
+			time.Sleep(jobStartDelay)
+			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 2*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
+			logger.Infof("[TEST] ✓ Job completed successfully with default level")
+			
+			// Cleanup
+			time.Sleep(5 * time.Second)
+			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("handles invalid file format error", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			// Create a temporary invalid file
+			invalidPath := filepath.Join(os.TempDir(), fmt.Sprintf("invalid-%d.xyz", time.Now().Unix()))
+			err := os.WriteFile(invalidPath, []byte("invalid content"), 0644)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer os.Remove(invalidPath)
+
+			jobName := fmt.Sprintf("invalid-file-%d", time.Now().Unix())
+			errorResp, statusCode, err := summarization.CreateJobExpectingError(ctx, summarizeBaseURL, invalidPath, "standard", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(415)) // Unsupported Media Type
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal(415))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Or(
+				gomega.ContainSubstring(".txt"),
+				gomega.ContainSubstring(".pdf"),
+				gomega.ContainSubstring("allowed"),
+			))
+			logger.Infof("[TEST] ✓ Invalid file format correctly rejected: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("lists jobs with pagination and filters", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			// Create multiple jobs
+			testText := "Test text for listing jobs."
+			jobNames := []string{
+				fmt.Sprintf("list-test-1-%d", time.Now().Unix()),
+				fmt.Sprintf("list-test-2-%d", time.Now().Unix()),
+			}
+
+			for _, jobName := range jobNames {
+				jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "brief", jobName, false)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				createdJobIDs = append(createdJobIDs, jobResp.JobID)
+				time.Sleep(1 * time.Second) // Small delay between jobs
+			}
+
+			// List all jobs
+			listResp, err := summarization.ListJobs(ctx, summarizeBaseURL, 10, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(len(listResp.Data)).To(gomega.BeNumerically(">=", 2))
+			logger.Infof("[TEST] ✓ Listed %d jobs", len(listResp.Data))
+
+			// Test pagination
+			listResp, err = summarization.ListJobs(ctx, summarizeBaseURL, 1, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(len(listResp.Data)).To(gomega.Equal(1))
+			logger.Infof("[TEST] ✓ Pagination works correctly")
+
+			// Test filtering by job name
+			listResp, err = summarization.ListJobs(ctx, summarizeBaseURL, 10, 0, "", jobNames[0])
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(len(listResp.Data)).To(gomega.BeNumerically(">=", 1))
+			logger.Infof("[TEST] ✓ Job name filtering works correctly")
+		})
+
+		ginkgo.It("deletes a job successfully", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			testText := "Test text for job deletion."
+			jobName := fmt.Sprintf("delete-test-%d", time.Now().Unix())
+
+			// Create job
+			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "brief", jobName, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] Created job for deletion: %s", jobResp.JobID)
+
+			// Wait for completion
+			time.Sleep(jobStartDelay)
+			_, err = summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Delete job
+			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Job deleted successfully: %s", jobResp.JobID)
+
+			// Verify job is deleted (should return error)
+			_, err = summarization.GetJobDetail(ctx, summarizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Verified job no longer exists")
 		})
 	})
 	ginkgo.Context("Application Teardown", func() {
