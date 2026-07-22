@@ -8,3 +8,17 @@ similarity:
     limits:
       cpu: "500m"
       memory: "1Gi"
+
+embedding:
+  model:
+    name: ""
+    maxModelLen: 512
+
+reranker:
+  model:
+    name: ""
+
+opensearch:
+  auth:
+    username: "admin"
+    password: ""

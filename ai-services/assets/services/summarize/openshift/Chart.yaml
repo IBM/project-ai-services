@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: v2
 name: summarize
 description: A Helm chart for deploying the Summarize service on OpenShift
 type: application

@@ -24,3 +24,25 @@ chatbot:
   searchMode: "hybrid"
   numChunksPostReranker: 3
   rerank: true
+
+embedding:
+  model:
+    name: ""
+    maxModelLen: 512
+
+llm:
+  model:
+    name: ""
+    maxModelLen: 4096
+    maxBatchSize: 32
+  apiKey: ""
+
+reranker:
+  model:
+    name: ""
+
+opensearch:
+  numShards: 1
+  auth:
+    username: "admin"
+    password: ""

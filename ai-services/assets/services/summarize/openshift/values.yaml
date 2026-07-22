@@ -14,3 +14,10 @@ postgres:
   image: icr.io/ai-services-cicd/postgres:18-4
   storage: 5Gi
   password: "Aiservicesdb@1234"
+
+llm:
+  model:
+    name: ""
+    maxModelLen: 4096
+    maxBatchSize: 32
+  apiKey: ""

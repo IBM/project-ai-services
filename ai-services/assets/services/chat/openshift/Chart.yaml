@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: v2
 name: chat
 description: A Helm chart for deploying the Question and Answer chat service on OpenShift
 type: application

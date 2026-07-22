@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: v2
 name: similarity
 description: A Helm chart for deploying the Find Similar Items service on OpenShift
 type: application

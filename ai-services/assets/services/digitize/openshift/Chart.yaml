@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: v2
 name: digitize
 description: A Helm chart for deploying the Digitize Documents service on OpenShift
 type: application
