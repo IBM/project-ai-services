@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: v2
 name: vector-db-opensearch
 description: A Helm chart for deploying OpenSearch as a vector store on OpenShift
 type: application
