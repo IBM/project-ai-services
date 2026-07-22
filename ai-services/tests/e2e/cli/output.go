@@ -379,20 +379,14 @@ func ValidateModelListOutput(output string, templateName string, appRuntime stri
 			"summarize": {
 				"ibm-granite/granite-3.3-8b-instruct",
 			},
-			"digitize": {
-				// No models required for digitize template
-			},
+			"digitize": {},
 		},
 		"openshift": {
 			"rag": {
 				"WARNING:  Not supported for openshift runtime",
 			},
-			"summarize": {
-				"WARNING:  Not supported for openshift runtime",
-			},
-			"digitize": {
-				"WARNING:  Not supported for openshift runtime",
-			},
+			"summarize": {},
+			"digitize":  {},
 		},
 	}
 
