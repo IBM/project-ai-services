@@ -24,10 +24,6 @@ import type {
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 
-// ============================================================================
-// ARCHITECTURE & SERVICE CATALOG
-// ============================================================================
-
 // Fetches the list of available digital assistant architectures
 export async function fetchArchitectures(): Promise<ArchitectureSummary[]> {
   const response = await api.get<ArchitectureSummary[]>(
@@ -56,13 +52,11 @@ export async function fetchArchitectureDetails(
 
 // Fetches details about a specific service
 export async function fetchServiceDetails(serviceId: string): Promise<Service> {
-  const response = await api.get<Service>(`/services/${serviceId}`);
+  const response = await api.get<Service>(
+    SERVICE_ENDPOINTS.GET_SERVICE_DETAILS(serviceId),
+  );
   return response.data;
 }
-
-// ============================================================================
-// DEPLOY OPTIONS
-// ============================================================================
 
 // Fetches deployment options for a specific architecture
 export async function fetchDeployOptions(
@@ -79,41 +73,15 @@ export async function fetchServiceDeployOptions(
   serviceId: string,
 ): Promise<ServiceDeployOptions> {
   const response = await api.get<ServiceDeployOptions>(
-    `/services/${serviceId}/deploy-options`,
+    SERVICE_ENDPOINTS.GET_SERVICE_DEPLOY_OPTIONS(serviceId),
   );
   return response.data;
 }
 
 // Fetches deploy options for digital assistant (all services)
 export async function fetchDigitalAssistantDeployOptions(): Promise<DeployOptions> {
-  const response = await api.get<DeployOptions>("/deploy-options");
-  return response.data;
-}
-
-// ============================================================================
-// PROVIDER SCHEMAS
-// ============================================================================
-
-// Fetches configuration parameters for a specific provider component (digital assistant flow)
-export async function fetchProviderParams(
-  componentType: string,
-  providerId: string,
-): Promise<{
-  properties?: Record<
-    string,
-    {
-      type?: string;
-      default?: unknown;
-      title?: string;
-      description?: string;
-      format?: string;
-      oneOf?: Array<{ const: string; title: string; description?: string }>;
-      [key: string]: unknown;
-    }
-  >;
-}> {
-  const response = await api.get(
-    SERVICE_ENDPOINTS.GET_COMPONENT_PROVIDER_PARAMS(componentType, providerId),
+  const response = await api.get<DeployOptions>(
+    DIGITAL_ASSISTANTS_ENDPOINTS.DIGITAL_ASSISTANT_DEPLOY_OPTIONS,
   );
   return response.data;
 }
@@ -150,14 +118,10 @@ export async function fetchProviderSchema(
   providerId: string,
 ): Promise<ProviderSchema> {
   const response = await api.get<ProviderSchema>(
-    `/components/${componentType}/providers/${providerId}/params`,
+    SERVICE_ENDPOINTS.GET_COMPONENT_PROVIDER_PARAMS(componentType, providerId),
   );
   return response.data;
 }
-
-// ============================================================================
-// LLM / MODEL OPTIONS
-// ============================================================================
 
 // Fetches LLM options with model information from provider schemas
 export async function fetchLLMOptionsWithModels(
@@ -327,10 +291,6 @@ export async function fetchComponentModelsWithSchemas(
   }
 }
 
-// ============================================================================
-// APPLICATIONS
-// ============================================================================
-
 // Fetches a list of deployed applications with optional filtering parameters
 export async function fetchApplications(
   params: FetchApplicationsParams = {},
@@ -358,7 +318,7 @@ export async function fetchApplicationById(id: string): Promise<Application> {
 // Deploys a new application with the provided configuration payload
 export async function deployApplication(
   payload: DeploymentPayload,
-): Promise<DeployApplicationResponse | void> {
+): Promise<DeployApplicationResponse> {
   const response = await api.post<DeployApplicationResponse>(
     APPLICATION_ENDPOINTS.GET_APPLICATIONS,
     payload,
@@ -383,10 +343,6 @@ export async function fetchResources(): Promise<ResourcesResponse> {
   );
   return response.data;
 }
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
 
 // Calculates and formats the uptime duration from a creation timestamp
 export function calculateUptime(createdAt: string): string {

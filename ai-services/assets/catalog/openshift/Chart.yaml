@@ -1,0 +1,9 @@
+apiVersion: v1
+name: catalog
+description: A Helm chart for deploying the AI Services catalog on OpenShift
+type: application
+
+# Below are chart and app version numbers.
+# Both needs to be incremented each time when we make a new AI Services binary release
+version: 0.0.1
+appVersion: "0.0.1"

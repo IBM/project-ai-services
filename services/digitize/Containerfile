@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/service-base:v0.0.34
+FROM icr.io/ai-services-cicd/service-base:v0.0.37
 
 WORKDIR /opt/services/digitize
 

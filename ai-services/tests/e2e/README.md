@@ -198,6 +198,103 @@ OR
 ```
 ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname>  --runtime=<runtime>
 ```
+## Running Bootstrap Failure Tests
+
+Bootstrap failure tests are in `bootstrap_failure_test.go` and cover the three most critical error paths: invalid registry credentials, catalog service unavailability, and missing prerequisites detected by `bootstrap validate`.
+
+These tests are **independent of the main lifecycle** (no running application required) and can be run at any time.
+
+Point the test suite at the binary you just built:
+```bash
+export AI_SERVICES_BIN=<path to ai-services binary>
+```
+### Run all failure tests
+
+```bash
+ginkgo -r \
+  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="failure-test" \
+  --timeout=5m \
+  ./tests/e2e
+
+go test -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+   -v -run TestE2E -timeout 5m \
+   -ginkgo.label-filter="failure-test" \
+   -runtime=podman \
+   ./tests/e2e
+```
+
+### Run a specific failure category
+
+```bash
+# Registry authentication failures
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote"  \ 
+  --label-filter="failure-test && registry" --timeout=2m ./tests/e2e
+
+# Catalog service failures (wrong credentials + unreachable server)
+ginkgo -r \
+  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="failure-test && catalog" \
+  --timeout=2m \
+  ./tests/e2e
+
+# Bootstrap validation failures (missing prerequisites)
+ginkgo -r \
+  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="failure-test && validation && spyre-independent" \
+  --timeout=2m \
+  ./tests/e2e
+
+# Run only the Spyre-specific failure test
+ginkgo -r \
+  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="failure-test && spyre" \
+  --timeout=2m \
+  ./tests/e2e
+```
+
+### Exclude failure tests from a normal run
+
+```bash
+ginkgo -r --label-filter="!failure-test" ./tests/e2e
+```
+
+### Environment variables required
+
+The failure tests reuse the same environment variables as the main suite.  No
+additional variables are needed — the tests deliberately supply *wrong* values
+internally and only read the registry/catalog URLs from the environment so they
+know which endpoint to target.
+
+```bash
+export REGISTRY_URL="icr.io"          # used to target the correct registry endpoint
+export CATALOG_SERVER_URL="..."        # optional — auto-discovered from 'catalog info' if absent
+```
+
+### Failure test labels reference
+
+| Label | Tests |
+|---|---|
+| `failure-test` | All tests in `bootstrap_failure_test.go` |
+| `failure-test && registry` | Invalid registry credentials |
+| `failure-test && catalog` | Wrong catalog password + unreachable catalog server |
+| `failure-test && validation` | `bootstrap validate` with missing Podman |
+
+### Adding new failure tests
+
+Follow the same component-per-file convention:
+
+- Bootstrap failures → `bootstrap_failure_test.go`
+- Digitization failures → `digitization_failure_test.go` *(future)*
+- Ingestion failures → `ingestion_failure_test.go` *(future)*
+
+Each failure `It()` block must:
+1. Label itself with `"failure-test"` plus a component label (e.g. `"registry"`).
+2. Assert `err` **is non-nil** (the command must fail).
+3. Call the matching `ValidateXxxFailureOutput()` function in `cli/output.go` to verify the error message is actionable.
+4. Clean up any environment changes in a `defer` block.
+
+---
 
 ## Adding new E2E tests
 
@@ -244,6 +341,7 @@ Below is an accurate overview of the current `ai-services/tests/e2e` layout and 
 ```text
 ai-services/tests/e2e/
    ├─ e2e_suite_test.go           # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
+   ├─ bootstrap_failure_test.go   # NEW: bootstrap failure scenarios (registry, catalog, validation)
    ├─ bootstrap/                  # runtime preparation and bootstrap helpers
    │   ├─ bootstrap.go
    │   ├─ build.go
