@@ -6,12 +6,12 @@ import ServiceCardSkeleton from "@/components/ServiceCard/ServiceCardSkeleton";
 import type { ServiceDetailData } from "@/components";
 import styles from "./Services.module.scss";
 import { DeployedServicesTable } from "@/components";
-import { ServicesDeployFlow } from "@/components/ServicesDeployFlow";
+import { ServicesDeployFlow } from "@/components/DeployFlow/Services";
 import DeploymentDetails from "@/components/DeploymentDetails";
 import { useServices } from "@/hooks/useServices";
 import { servicesReducer, initialState } from "./types";
-import type { Service } from "@/services/deployment.api";
-import type { DeploymentDetails as DeploymentDetailsType } from "@/types/digitalAssistants";
+import type { Service } from "@/types/api.types";
+import type { DeploymentDetails as DeploymentDetailsType } from "@/types/api.types";
 
 const sortServicesByDeployabilityAndName = (
   services: ServiceDetailData[],

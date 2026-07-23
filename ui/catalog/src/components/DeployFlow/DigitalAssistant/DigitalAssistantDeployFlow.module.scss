@@ -1,0 +1,93 @@
+@use "../Shared/tokens" as *;
+@use "../Shared/deployFlow.shared.module" as *;
+
+// TODO PR 9: DOM structure aligns with Services when ServiceConfigCard is unified — move to shared then
+.serviceConfigFieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-06;
+  width: 100%;
+
+  // Credentials section always spans both columns.
+  // Negative margin cancels the grid row gap so spacing matches Services.
+  .cloudCredentialsSection {
+    grid-column: 1 / -1;
+    margin-top: -$spacing-06;
+  }
+
+  // White background for dropdowns and text inputs in edit mode
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-02 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: $field-02 !important;
+    }
+  }
+
+  // System prompt textarea spans full width
+  > div:has(.systemPromptTextArea) {
+    grid-column: 1 / -1;
+  }
+}
+
+// TODO PR 9: move to shared once ServiceConfigCard is unified
+.readonlyField {
+  :global {
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: transparent !important;
+      cursor: not-allowed;
+    }
+  }
+}
+
+// TODO PR 9: move to shared once DynamicSchemaFields is unified
+.dynamicSchemaFields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-06;
+  align-items: start;
+
+  > * {
+    min-width: 0;
+  }
+
+  // Textareas span full width
+  :global(.cds--text-area__wrapper),
+  :global(.cds--text-area) {
+    grid-column: 1 / -1;
+  }
+
+  // UI-only checkbox (e.g. system prompt toggle) spans full width
+  :global(.cds--checkbox-wrapper) {
+    grid-column: 1 / -1;
+    margin-top: $spacing-07;
+    margin-bottom: $spacing-03;
+  }
+
+  // Single-column when a controlled field is present
+  &:has(.systemPromptTextArea) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// TODO PR 9: unify with Services deployErrorNotification into one shared class
+.customToast {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
+}
+
+// TODO PR 9: move to shared @breakpoint-down(lg) block once serviceConfigFieldRow is unified
+@include breakpoint-down(lg) {
+  .serviceConfigFieldRow {
+    grid-template-columns: 1fr;
+  }
+}

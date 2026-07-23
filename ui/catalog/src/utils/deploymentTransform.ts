@@ -2,13 +2,13 @@ import type {
   DeployFormData,
   ComponentConfig,
   ServiceConfig,
-} from "@/components/DeployFlow/types";
+} from "@/components/DeployFlow/DigitalAssistant/types";
 import type {
   DeployOptionsResponse,
-  Service,
-  Component,
+  DeployOptionsService as Service,
+  DeployOptionsComponent as Component,
   Provider,
-} from "@/types/digitalAssistants";
+} from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
 

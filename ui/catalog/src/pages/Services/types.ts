@@ -1,4 +1,4 @@
-import type { DeploymentDetails } from "@/types/digitalAssistants";
+import type { DeploymentDetails } from "@/types/api.types";
 
 // State type
 export interface ServicesState {

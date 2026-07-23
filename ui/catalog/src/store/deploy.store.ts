@@ -6,7 +6,7 @@ import type {
   ArchitectureDetailsResponse,
   DeployOptionsResponse,
   ResourcesResponse,
-} from "@/types/digitalAssistants";
+} from "@/types/api.types";
 
 interface ProviderParamsCache {
   data: Record<string, unknown>;

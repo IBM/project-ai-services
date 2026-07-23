@@ -1,0 +1,136 @@
+@use "../Shared/tokens" as *;
+@use "../Shared/deployFlow.shared.module" as *;
+
+// TODO PR 9: DOM structure aligns with DA when StepTwo is unified — move to shared then
+.serviceConfigFieldRow {
+  display: flex;
+  gap: $spacing-05;
+  width: 100%;
+  margin-bottom: $spacing-05;
+
+  // White background for dropdowns and text inputs in edit mode
+  // (mirrors DA's serviceConfigFieldRow override — duplicate is intentional until PR 9 unifies layout)
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-02 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: $field-02 !important;
+    }
+  }
+}
+
+// TODO PR 9: move to shared once StepTwo is unified
+.serviceConfigFieldHalf {
+  flex: 1;
+  min-width: 0;
+  max-width: 50%;
+}
+
+// Services owns the top-spacing for credentials (shared rule is intentionally empty).
+.cloudCredentialsSection {
+  margin-top: $spacing-05;
+}
+
+// TODO PR 9: unify with DA customToast into one shared class
+.deployErrorNotification {
+  position: fixed;
+  top: $spacing-07;
+  right: $spacing-07;
+  z-index: 9999;
+  max-width: 400px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+// StepZero — service selection
+.selected {
+  border: 2px solid $border-interactive;
+  padding: calc(#{$spacing-05} - 1px);
+}
+
+.serviceSelectionGrid {
+  padding: 0;
+}
+
+.serviceTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 160px;
+  height: 100%;
+  padding: $spacing-05;
+  border: 1px solid $border-subtle;
+  background-color: $layer-01;
+  transition: border-color $duration-moderate-01 motion(standard, productive);
+  text-decoration: none !important;
+
+  &,
+  &:hover,
+  &:focus,
+  &:active {
+    text-decoration: none !important;
+
+    * {
+      text-decoration: none !important;
+    }
+  }
+
+  &:hover {
+    border-color: $border-strong;
+  }
+}
+
+.selectedIndicator {
+  position: absolute;
+  top: $spacing-05;
+  right: $spacing-05;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: $spacing-06;
+  height: $spacing-06;
+  background-color: $background-inverse;
+  border-radius: 50%;
+
+  svg {
+    fill: $icon-on-color;
+  }
+}
+
+.serviceTileContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.serviceTileName {
+  @include type-style("heading-03");
+  margin: 0;
+  padding-right: $spacing-07;
+  color: $text-primary;
+  text-decoration: none;
+}
+
+.certifiedBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  margin-bottom: 0;
+
+  svg {
+    fill: $support-success;
+  }
+}
+
+.serviceTileDescription {
+  @include type-style("body-compact-01");
+  margin: 0;
+  color: $text-primary;
+}
