@@ -24,6 +24,9 @@ const (
 	pollInterval    = 5 * time.Second   // Polling interval for job status
 )
 
+// SetAppRuntime stores the application runtime for summarization tests.
+func SetAppRuntime(string) {}
+
 // getHTTPClient returns an HTTP client configured based on the runtime.
 // Skips TLS certificate verification for both Podman (nip.io self-signed certs) and OpenShift.
 func getHTTPClient(timeout time.Duration) *http.Client {
@@ -260,6 +263,7 @@ func CreateJobWithFile(ctx context.Context, baseURL, filePath, level, jobName st
 	}
 
 	logger.Infof("[SUMMARIZE] Job created: %s", jobResp.JobID)
+
 	return &jobResp, nil
 }
 
@@ -300,62 +304,6 @@ func createTempTextFile(text string) (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// createJobRequest creates and sends a job creation request.
-func createJobRequest(ctx context.Context, url, filePath string) (*http.Response, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer func() {
-		_ = file.Close() //nolint:errcheck // Cleanup, error not critical
-	}()
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
-	}
-
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, fmt.Errorf("failed to copy file content: %w", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	client := getHTTPClient(postCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusAccepted {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var jobResp JobCreatedResponse
-	if err := json.Unmarshal(respBody, &jobResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	logger.Infof("[SUMMARIZE] Job created: %s", jobResp.JobID)
-	return &jobResp, nil
-}
 
 // GetJobDetail retrieves the details of a specific job.
 func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailResponse, error) {
@@ -448,18 +396,17 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 
 			logger.Infof("[SUMMARIZE] Job %s status: %s", jobID, detail.Status)
 
-			if detail.Status == JobStatusCompleted {
+			switch detail.Status {
+			case JobStatusCompleted:
 				return detail, nil
-			}
-
-			if detail.Status == JobStatusFailed {
+			case JobStatusFailed:
 				errMsg := "unknown error"
 				if detail.Error != nil {
 					errMsg = *detail.Error
 				}
+
 				return detail, fmt.Errorf("job failed: %s", errMsg)
 			case JobStatusAccepted, JobStatusInProgress:
-				// Continue waiting
 				continue
 			default:
 				return detail, fmt.Errorf("unknown job status: %s", detail.Status)
@@ -525,10 +472,12 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
+
 		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	logger.Infof("[SUMMARIZE] Job deleted: %s", jobID)
+
 	return nil
 }
 
@@ -550,10 +499,12 @@ func DeleteAllJobs(ctx context.Context, baseURL string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
+
 		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	logger.Infof("[SUMMARIZE] All jobs deleted")
+
 	return nil
 }
 
@@ -563,6 +514,7 @@ func parseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error)
 	if err := json.Unmarshal(respBody, &errorResp); err != nil {
 		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(respBody))
 	}
+
 	return &errorResp, nil
 }
 
@@ -586,6 +538,7 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, level, jobN
 		if parseErr != nil {
 			return nil, statusCode, parseErr
 		}
+
 		return errorResp, statusCode, nil
 	}
 
@@ -609,67 +562,13 @@ func CreateJobWithTextExpectingError(ctx context.Context, baseURL, text, level, 
 	return CreateJobExpectingError(ctx, baseURL, tmpFile, level, jobName, stream)
 }
 
-// createJobErrorRequest creates and sends a job creation request expecting an error.
-func createJobErrorRequest(ctx context.Context, url, filePath string) (*http.Response, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer func() {
-		_ = file.Close() //nolint:errcheck // Cleanup, error not critical
-	}()
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
-	}
-
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, fmt.Errorf("failed to copy file content: %w", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	client := getHTTPClient(postCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// If not accepted, parse as error response
-	if resp.StatusCode != http.StatusAccepted {
-		errorResp, parseErr := parseErrorResponse(respBody, resp.StatusCode)
-		if parseErr != nil {
-			return nil, resp.StatusCode, parseErr
-		}
-		return errorResp, resp.StatusCode, nil
-	}
-
-	return nil, resp.StatusCode, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(respBody))
-}
 
 // IsResourceLockedError checks if an error is a resource locked error (409).
 func IsResourceLockedError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	return strings.Contains(err.Error(), "409") &&
 		(strings.Contains(err.Error(), "RESOURCE_LOCKED") ||
 			strings.Contains(err.Error(), "locked") ||
@@ -681,6 +580,7 @@ func IsRateLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	return strings.Contains(err.Error(), "429") &&
 		(strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") ||
 			strings.Contains(err.Error(), "Too many"))
