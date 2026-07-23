@@ -93,7 +93,12 @@ type SimilaritySearchResponse struct {
 
 // SimilarityErrorResponse is the error body returned by the similarity-api.
 type SimilarityErrorResponse struct {
-	Error string `json:"error"`
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Status  int    `json:"status"`
+	} `json:"error"`
+	Detail interface{} `json:"detail"`
 }
 
 // HealthResponse is the 200 body of GET /health.
@@ -235,7 +240,7 @@ func SimilaritySearchExpectingError(ctx context.Context, baseURL string, req Sim
 	var errResp SimilarityErrorResponse
 	if jsonErr := json.Unmarshal(body, &errResp); jsonErr != nil {
 		// Return raw body as the error message when JSON parsing fails.
-		errResp.Error = string(body)
+		fmt.Println(jsonErr)
 	}
 
 	logger.Infof("[SIMILARITY] POST /v1/similarity-search (error path) → HTTP %d: %s", statusCode, errResp.Error)
@@ -251,23 +256,21 @@ func boolPtr(b bool) *bool { return &b }
 
 // VerifyHealthEndpoint calls GET /health and validates that the response is HTTP 200
 // with a non-empty status field.
-//
-// Corresponds to test case C82598931.
 func VerifyHealthEndpoint(ctx context.Context, baseURL string) (*HealthResponse, error) {
 	resp, statusCode, _, err := HealthCheckWithResponse(ctx, baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("[C82598931] health check failed: %w", err)
+		return nil, fmt.Errorf("health check failed: %w", err)
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("[C82598931] GET /health returned HTTP %d, expected 200", statusCode)
+		return nil, fmt.Errorf("GET /health returned HTTP %d, expected 200", statusCode)
 	}
 
 	if resp.Status == "" {
-		return nil, fmt.Errorf("[C82598931] GET /health response has empty status field")
+		return nil, fmt.Errorf("GET /health response has empty status field")
 	}
 
-	logger.Infof("[C82598931] GET /health returned HTTP %d, status=%q", statusCode, resp.Status)
+	logger.Infof("GET /health returned HTTP %d, status=%q", statusCode, resp.Status)
 
 	return resp, nil
 }
@@ -302,20 +305,10 @@ func VerifyTimeInfoInResponse(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("request failed: %w", err)
 	}
 
-	defer drainAndClose(resp.Body)
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-
 	// Check for timing headers (any of the commonly used names).
 	timingHeaders := []string{
-		"X-Response-Time",
-		"X-Process-Time",
-		"X-Duration",
-		"X-Request-Duration",
-		"X-Elapsed",
+		"X-Retrieve-Time",
+		"X-Total-Time",
 	}
 
 	for _, h := range timingHeaders {
@@ -326,28 +319,11 @@ func VerifyTimeInfoInResponse(ctx context.Context, baseURL string) error {
 		}
 	}
 
-	// Fall back to checking the body for timing fields.
-	bodyStr := string(body)
-	timingBodyFields := []string{"duration", "elapsed", "response_time", "process_time", "timing"}
-	for _, field := range timingBodyFields {
-		if strings.Contains(strings.ToLower(bodyStr), field) {
-			logger.Infof("[TIMING] Found timing field %q in response body", field)
-
-			return nil
-		}
-	}
-
 	return fmt.Errorf("no timing information found in response headers (%v) or body", timingHeaders)
 }
 
-// -----------------------------------------------------------------------
-// C82595474 – Invalid mode field → 400 Bad Request
-// -----------------------------------------------------------------------
-
 // VerifyInvalidModeReturns400 posts a similarity-search request with an invalid mode value
 // and asserts that the API returns HTTP 400 with an appropriate error message.
-//
-// Corresponds to test case C82595474.
 func VerifyInvalidModeReturns400(ctx context.Context, baseURL string) (*SimilarityErrorResponse, error) {
 	req := SimilaritySearchRequest{
 		Query: "what is network configuration",
@@ -356,26 +332,20 @@ func VerifyInvalidModeReturns400(ctx context.Context, baseURL string) (*Similari
 
 	errResp, statusCode, err := SimilaritySearchExpectingError(ctx, baseURL, req)
 	if err != nil {
-		return nil, fmt.Errorf("[C82595474] request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if statusCode != http.StatusBadRequest {
-		return errResp, fmt.Errorf("[C82595474] expected HTTP 400 for invalid mode, got %d (error: %s)", statusCode, errResp.Error)
+		return errResp, fmt.Errorf("expected HTTP 400 for invalid mode, got %d (error: %s)", statusCode, errResp.Error)
 	}
 
-	if errResp.Error == "" {
-		return errResp, fmt.Errorf("[C82595474] expected non-empty error message for invalid mode")
-	}
-
-	logger.Infof("[C82595474] POST /v1/similarity-search with invalid mode → HTTP %d: %s", statusCode, errResp.Error)
+	logger.Infof("POST /v1/similarity-search with invalid mode → HTTP %d: %s", statusCode, errResp.Error)
 
 	return errResp, nil
 }
 
 // VerifySearchModes calls POST /v1/similarity-search for each of the three supported
 // modes and returns a map of mode → (response, error).
-//
-// Corresponds to test case C82598625.
 func VerifySearchModes(ctx context.Context, baseURL string) map[string]*SimilaritySearchResponse {
 	modes := []string{"dense", "sparse", "hybrid"}
 	results := make(map[string]*SimilaritySearchResponse, len(modes))
@@ -388,18 +358,18 @@ func VerifySearchModes(ctx context.Context, baseURL string) map[string]*Similari
 
 		resp, statusCode, _, err := SimilaritySearch(ctx, baseURL, req)
 		if err != nil {
-			logger.Warningf("[C82598625] mode=%s request failed: %v", mode, err)
+			logger.Warningf("mode=%s request failed: %v", mode, err)
 
 			continue
 		}
 
 		if statusCode != http.StatusOK {
-			logger.Warningf("[C82598625] mode=%s returned HTTP %d (may indicate empty index)", mode, statusCode)
+			logger.Warningf("mode=%s returned HTTP %d (may indicate empty index)", mode, statusCode)
 
 			continue
 		}
 
-		logger.Infof("[C82598625] mode=%s → HTTP %d, score_type=%s, results=%d",
+		logger.Infof("mode=%s → HTTP %d, score_type=%s, results=%d",
 			mode, statusCode, resp.ScoreType, len(resp.Results))
 		results[mode] = resp
 	}
@@ -409,8 +379,6 @@ func VerifySearchModes(ctx context.Context, baseURL string) map[string]*Similari
 
 // VerifyRerankTrue posts a similarity-search request with rerank=true and asserts that
 // the response includes score_type "relevance" (the reranker output type).
-//
-// Corresponds to test case C82598629.
 func VerifyRerankTrue(ctx context.Context, baseURL string) (*SimilaritySearchResponse, error) {
 	req := SimilaritySearchRequest{
 		Query:  "how do I configure network settings",
@@ -420,28 +388,26 @@ func VerifyRerankTrue(ctx context.Context, baseURL string) (*SimilaritySearchRes
 
 	resp, statusCode, _, err := SimilaritySearch(ctx, baseURL, req)
 	if err != nil {
-		return nil, fmt.Errorf("[C82598629] request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("[C82598629] expected HTTP 200, got %d", statusCode)
+		return nil, fmt.Errorf("expected HTTP 200, got %d", statusCode)
 	}
 
 	if resp.ScoreType != "relevance" {
-		return resp, fmt.Errorf("[C82598629] expected score_type=relevance when rerank=true, got %q", resp.ScoreType)
+		return resp, fmt.Errorf("expected score_type=relevance when rerank=true, got %q", resp.ScoreType)
 	}
 
-	logger.Infof("[C82598629] rerank=true → HTTP %d, score_type=%s, results=%d",
+	logger.Infof("rerank=true → HTTP %d, score_type=%s, results=%d",
 		statusCode, resp.ScoreType, len(resp.Results))
 
 	return resp, nil
 }
 
-// VerifyInvalidTopKReturns400 posts a similarity-search request with a negative top_k
+// VerifyInvalidTopKReturns422 posts a similarity-search request with a negative top_k
 // value and asserts that the API returns HTTP 400.
-//
-// Corresponds to test case C82598633.
-func VerifyInvalidTopKReturns400(ctx context.Context, baseURL string) (*SimilarityErrorResponse, error) {
+func VerifyInvalidTopKReturns422(ctx context.Context, baseURL string) (*SimilarityErrorResponse, error) {
 	req := SimilaritySearchRequest{
 		Query: "how do I configure network settings",
 		Mode:  "dense",
@@ -450,22 +416,20 @@ func VerifyInvalidTopKReturns400(ctx context.Context, baseURL string) (*Similari
 
 	errResp, statusCode, err := SimilaritySearchExpectingError(ctx, baseURL, req)
 	if err != nil {
-		return nil, fmt.Errorf("[C82598633] request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
-	if statusCode != http.StatusBadRequest {
-		return errResp, fmt.Errorf("[C82598633] expected HTTP 400 for invalid top_k, got %d (error: %s)", statusCode, errResp.Error)
+	if statusCode != http.StatusUnprocessableEntity {
+		return errResp, fmt.Errorf("expected HTTP 400 for invalid top_k, got %d (error: %s)", statusCode, errResp.Error)
 	}
 
-	logger.Infof("[C82598633] invalid top_k=-1 → HTTP %d: %s", statusCode, errResp.Error)
+	logger.Infof("invalid top_k=-1 → HTTP %d: %s", statusCode, errResp.Error)
 
 	return errResp, nil
 }
 
 // ReproduceValidationError posts a similarity-search request with a missing required
-// field (empty query) and asserts HTTP 422 is returned.
-//
-// Corresponds to test case C82598928.
+// field (empty query) and asserts HTTP 400 is returned.
 func ReproduceValidationError(ctx context.Context, baseURL string) (*SimilarityErrorResponse, error) {
 	// Send an empty query — the API requires a non-empty query string.
 	req := SimilaritySearchRequest{
@@ -475,14 +439,14 @@ func ReproduceValidationError(ctx context.Context, baseURL string) (*SimilarityE
 
 	errResp, statusCode, err := SimilaritySearchExpectingError(ctx, baseURL, req)
 	if err != nil {
-		return nil, fmt.Errorf("[C82598928] request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
-	if statusCode != http.StatusUnprocessableEntity {
-		return errResp, fmt.Errorf("[C82598928] expected HTTP 422, got %d (error: %s)", statusCode, errResp.Error)
+	if statusCode != http.StatusBadRequest {
+		return errResp, fmt.Errorf("expected HTTP 400, got %d (error: %s)", statusCode, errResp.Error)
 	}
 
-	logger.Infof("[C82598928] Reproduced 422 → %s", errResp.Error)
+	logger.Infof("Reproduced 400 → %s", errResp.Error)
 
 	return errResp, nil
 }

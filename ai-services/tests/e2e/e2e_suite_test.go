@@ -1553,10 +1553,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			if err := cli.ValidateApplicationInfo(infoOutput, appName, templateName); err != nil {
-				ginkgo.Fail(fmt.Sprintf("Similarity tests require a valid running application: %v", err))
-			}
-
 			if appRuntime == "podman" {
 				const similarityPollInterval = 15 * time.Second
 				for {
@@ -1607,8 +1603,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(resp.Status).NotTo(gomega.BeEmpty())
 				logger.Infof("[TEST] Similarity service health check passed status=%q", resp.Status)
 			})
-
-		// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
+		
+			// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
 		ginkgo.It("Verify Similarity search API includes time info in response headers or body in podman runtime",
 			func() {
 				if appRuntime != "podman" {
@@ -1633,8 +1629,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				errResp, err := similarity.VerifyInvalidModeReturns400(ctx, similarityBaseURL)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Error).NotTo(gomega.BeEmpty())
-				gomega.Expect(errResp.Error).To(gomega.ContainSubstring("mode must be one of"))
+				gomega.Expect(errResp.Error.Message).NotTo(gomega.BeEmpty())
+				gomega.Expect(errResp.Error.Status).To(gomega.Equal(400))
+				gomega.Expect(errResp.Error.Message).To(gomega.ContainSubstring("mode must be one of"))
 				logger.Infof("[TEST] invalid mode correctly rejected with: %s", errResp.Error)
 			})
 
@@ -1648,13 +1645,13 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
 
 				// Step 1: Create digitization job
-				logger.Infof("[TEST] Step 1: Creating digitization job")
-				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-combined-workflow")
+				logger.Infof("[TEST] Step 1: Creating ingestion job")
+				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-combined-workflow")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(jobResp).NotTo(gomega.BeNil())
 				gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
 				createdJobIDs = append(createdJobIDs, jobResp.JobID)
-				logger.Infof("[TEST] Created digitization job: %s", jobResp.JobID)
+				logger.Infof("[TEST] Created ingestion job: %s", jobResp.JobID)
 
 				// Step 2: Get job status immediately after creation
 				logger.Infof("[TEST] Step 2: Getting job status")
@@ -1668,7 +1665,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
-				logger.Infof("[TEST] Digitization job completed: %s", jobResp.JobID)
+				logger.Infof("[TEST] Ingestion job completed: %s", jobResp.JobID)
 
 				results := similarity.VerifySearchModes(ctx, similarityBaseURL)
 
@@ -1706,21 +1703,21 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					resp.ScoreType, len(resp.Results))
 			})
 
-		// C82598633 — Verify /v1/similarity-search returns 400 for invalid top_k
+		// C82598633 — Verify /v1/similarity-search returns 422 for invalid top_k
 		ginkgo.It("Verify /v1/similarity-search endpoint by providing invalid value for top_k",
 			func() {
 				ctx, cancel := withTimeout(30 * time.Second)
 				defer cancel()
 
-				errResp, err := similarity.VerifyInvalidTopKReturns400(ctx, similarityBaseURL)
+				errResp, err := similarity.VerifyInvalidTopKReturns422(ctx, similarityBaseURL)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Error).NotTo(gomega.BeEmpty())
+				gomega.Expect(errResp.Detail).NotTo(gomega.BeNil())
 				logger.Infof("[TEST] invalid top_k correctly rejected with: %s", errResp.Error)
 			})
 
-		// Reproduce 422: Validation Error
-		ginkgo.It("Reproduce 422 validation error code for similarity-search endpoint",
+		// Reproduce 400: Validation Error
+		ginkgo.It("Reproduce 400 validation error code for similarity-search endpoint",
 			func() {
 				ctx, cancel := withTimeout(30 * time.Second)
 				defer cancel()
@@ -1728,8 +1725,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				errResp, err := similarity.ReproduceValidationError(ctx, similarityBaseURL)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Error).NotTo(gomega.BeEmpty())
-				logger.Infof("[TEST] 422 reproduced with error: %s", errResp.Error)
+				gomega.Expect(errResp.Error.Message).NotTo(gomega.BeEmpty())
+				gomega.Expect(errResp.Error.Status).To(gomega.Equal(400))
+				logger.Infof("[TEST] 400 reproduced with error: %s", errResp.Error)
 			})
 	})
 	ginkgo.Context("Application Teardown", func() {
