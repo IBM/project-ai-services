@@ -2,7 +2,7 @@ import { useMemo, useEffect } from "react";
 import { TextInput, Dropdown, Grid, Column } from "@carbon/react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ComponentConfig } from "../types";
-import { useBatchProviderParams } from "../hooks/useProviderParams";
+import { useMultiTypeProviderParams } from "../hooks/useProviderParams";
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -17,7 +17,7 @@ export const StepOne: React.FC<StepProps> = ({
     { id: deployOptions.version, text: deployOptions.version },
   ];
 
-  // Collect provider IDs for batch parameter fetching
+  // Collect provider IDs for all global component types for batch fetching
   const providerIdsByType = useMemo(() => {
     const result: Record<string, string[]> = {};
     deployOptions.global_components.forEach((component) => {
@@ -26,21 +26,27 @@ export const StepOne: React.FC<StepProps> = ({
     return result;
   }, [deployOptions.global_components]);
 
-  // Dynamically fetch provider parameters for all component types
-  const componentTypes = Object.keys(providerIdsByType);
-  const providerParamsHooks = componentTypes.reduce(
-    (acc, type) => {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      acc[type] = useBatchProviderParams(type, providerIdsByType[type] || []);
-      return acc;
-    },
-    {} as Record<string, ReturnType<typeof useBatchProviderParams>>,
-  );
+  // Fetch provider parameters for all component types in a single hook call,
+  // respecting Rules of Hooks (no hooks inside loops or callbacks)
+  const {
+    paramsByType,
+    errorsByType,
+  } = useMultiTypeProviderParams(providerIdsByType);
 
-  const providerParamsByType = useMemo(
-    () => providerParamsHooks,
-    [providerParamsHooks],
-  );
+  const providerParamsByType = useMemo(() => {
+    const result: Record<
+      string,
+      { paramsMap: Record<string, import("@/types/api.types").ProviderSchema>; isLoading: boolean; errors: Record<string, string> }
+    > = {};
+    Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
+      result[componentType] = {
+        paramsMap,
+        isLoading: false,
+        errors: errorsByType[componentType] || {},
+      };
+    });
+    return result;
+  }, [paramsByType, errorsByType]);
 
   // Extract model names from provider schemas for display
   const modelNames = useMemo(() => {

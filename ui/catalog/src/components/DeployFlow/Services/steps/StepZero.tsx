@@ -89,4 +89,3 @@ export const StepZero: React.FC<StepZeroProps> = ({
   );
 };
 
-// Made with Bob

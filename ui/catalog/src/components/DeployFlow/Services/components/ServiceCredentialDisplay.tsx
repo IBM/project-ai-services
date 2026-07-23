@@ -97,4 +97,3 @@ export const ServiceCredentialDisplay: React.FC<
   );
 };
 
-// Made with Bob

@@ -764,5 +764,3 @@ export const StepTwo: React.FC<StepProps> = ({
     </>
   );
 };
-
-// Made with Bob

@@ -370,5 +370,3 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     </div>
   );
 };
-
-// Made with Bob

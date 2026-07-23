@@ -97,4 +97,3 @@ export interface StepProps {
   showNameError?: boolean;
 }
 
-// Made with Bob
