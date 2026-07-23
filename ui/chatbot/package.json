@@ -17,19 +17,19 @@
     },
     "devDependencies": {
         "@ianvs/prettier-plugin-sort-imports": "^4.7.0",
-        "@vitejs/plugin-react": "^5.1.0",
+        "@vitejs/plugin-react": "^5.2.0",
         "eslint": "^9.39.1",
         "eslint-plugin-react": "^7.37.5",
         "eslint-plugin-react-hooks": "^7.0.1",
         "prettier": "^3.7.4",
         "typescript": "^5.9.3",
-        "vite": "^7.3.4"
+        "vite": "^8.1.4"
     },
     "scripts": {
         "dev": "vite",
         "build": "vite build",
         "preview": "vite preview",
-        "lint": "eslint .",
+        "lint": "eslint . --max-warnings 0 --report-unused-disable-directives",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,scss,md}\"",
         "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,css,scss,md}\""
@@ -51,13 +51,5 @@
             "last 1 firefox version",
             "last 1 safari version"
         ]
-    },
-    "overrides": {
-        "esbuild": "^0.28.1",
-        "@babel/core": ">=7.30.0",
-        "dompurify": ">=3.4.9",
-        "form-data": ">=4.0.6",
-        "js-yaml": ">=4.1.2",
-        "markdown-it": ">=14.1.2"
     }
 }

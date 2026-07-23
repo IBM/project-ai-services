@@ -9,7 +9,7 @@ import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS } from "@/constants";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { NoDataEmptyState } from "@carbon/ibm-products";
-import type { DeploymentDetails } from "@/types/digitalAssistants";
+import type { DeploymentDetails } from "@/types/api.types";
 import {
   DataTable,
   DataTableSkeleton,
@@ -50,7 +50,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
-import { calculateUptime } from "@/services/deployment.api";
+import { calculateUptime } from "@/api/applications.api";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {

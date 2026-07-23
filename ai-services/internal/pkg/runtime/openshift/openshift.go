@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -437,9 +438,16 @@ func (kc *OpenshiftClient) DeleteSecret(name string) error {
 }
 
 func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
-	logger.Warningln("Not implemented")
+	_, err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
 
-	return false, nil
+		return false, fmt.Errorf("failed to check secret existence: %w", err)
+	}
+
+	return true, nil
 }
 
 func (kc *OpenshiftClient) DeleteVolume(name string) error {

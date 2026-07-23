@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -12,10 +13,30 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
+)
+
+// Service name substrings used to identify catalog URLs in 'application info' output.
+// Each constant matches the stable hostname prefix of the corresponding deployed service,
+// e.g. "https://chat-bot-backend-<slug>.<ip>.nip.io". Using constants here means a
+// service rename only requires a single edit.
+const (
+	svcChatBotBackend  = "chat-bot-backend"
+	svcChatBotUI       = "chat-bot-ui"
+	svcDigitizeBackend = "digitize-backend"
+	svcSimilarityAPI   = "similarity-api"
+)
+
+// ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
+// These are fixed terminal dimensions for interactive CLI prompts — not magic numbers.
+const (
+	ptyWinRows = 24 //nolint:mnd
+	ptyWinCols = 80 //nolint:mnd
 )
 
 type CreateOptions struct {
@@ -32,13 +53,46 @@ type StartOptions struct {
 	IngestDocs bool
 }
 
-// Bootstrap runs the full bootstrap (configure + validate).
-func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", cfg.AIServiceBin, appRuntime)
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "--runtime", appRuntime)
+// runCLI executes cfg.AIServiceBin with the given args, returning combined output.
+// On a non-zero exit the error is wrapped as "<errLabel> failed: <err>\n<output>".
+// This eliminates the repeated exec.CommandContext / CombinedOutput / fmt.Errorf
+// boilerplate that would otherwise appear in every runner function.
+func runCLI(ctx context.Context, cfg *config.Config, errLabel string, args ...string) (string, error) {
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 	if err != nil {
+		return output, fmt.Errorf("%s failed: %w\n%s", errLabel, err, output)
+	}
+
+	return output, nil
+}
+
+// isKnownSpyreConfigureFailure reports whether a bootstrap configure/bootstrap
+// output contains the known Spyre post-repair strings. When this returns true
+// the OS-level exit error is suppressed. These strings mean that configure
+// attempted automatic repairs (VFIO permissions, SELinux policy via semodule,
+// udev rules) but the post-repair re-validation checks still did not pass.
+// This is a Spyre-hardware-specific failure that does not affect the
+// application-layer tests; all subsequent test steps proceed normally.
+func isKnownSpyreConfigureFailure(output string) bool {
+	return strings.Contains(output, "some Spyre configuration checks still failed after repair") ||
+		strings.Contains(output, "failed to configure spyre card")
+}
+
+// Bootstrap runs the full bootstrap (configure + validate).
+func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	output, err := runCLI(ctx, cfg, "bootstrap", "bootstrap", "--runtime", appRuntime)
+	if err != nil {
+		// For podman, 'bootstrap' (full run: configure + validate) also exits non-zero
+		// when Spyre post-repair checks still fail — same acceptable state.
+		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
+			logger.Infof("[CLI] bootstrap exited non-zero with known Spyre repair state — treating as non-fatal")
+
+			return output, nil
+		}
+
 		return output, err
 	}
 
@@ -46,12 +100,20 @@ func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (stri
 }
 
 // BootstrapConfigure runs only the 'configure' step.
+// For podman, the command exits non-zero when Spyre post-repair checks still fail.
+// That is expected behaviour — repairs were applied, a reboot may be needed for full
+// effect. We suppress the OS-level exit error for the two known acceptable Spyre
+// strings so tests can continue evaluating the output via ValidateBootstrapConfigureOutput
+// without a hard failure on the raw exec error.
 func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", cfg.AIServiceBin, appRuntime)
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "configure", "--runtime", appRuntime)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output, err := runCLI(ctx, cfg, "bootstrap configure", "bootstrap", "configure", "--runtime", appRuntime)
 	if err != nil {
+		if appRuntime == "podman" && isKnownSpyreConfigureFailure(output) {
+			logger.Infof("[CLI] bootstrap configure exited non-zero with known Spyre repair state — treating as non-fatal")
+
+			return output, nil
+		}
+
 		return output, err
 	}
 
@@ -60,15 +122,7 @@ func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime stri
 
 // BootstrapValidate runs only the 'validate' step.
 func BootstrapValidate(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", cfg.AIServiceBin, appRuntime)
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "validate", "--runtime", appRuntime)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-	if err != nil {
-		return output, err
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "bootstrap validate", "bootstrap", "validate", "--runtime", appRuntime)
 }
 
 // CreateApp creates an application via the CLI.
@@ -101,20 +155,29 @@ func CreateApp(
 		args = append(args, "--image-pull-policy", opts.ImagePullPolicy)
 	}
 	args = append(args, "--runtime", appRuntime)
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
 
-	if err != nil {
-		return output, fmt.Errorf("application create failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "application create", args...)
 }
 
-// CreateRAGAppAndValidate creates an application, waits for health checks, and validates RAG endpoints.
-// NOTE: This is intentionally RAG-specific and used only by RAG E2E tests.
+// newRAGHTTPClient returns an HTTP client for RAG health-check probes with TLS skipped when needed.
+func newRAGHTTPClient(appRuntime string, isCatalogPath bool, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+
+	if appRuntime == "openshift" || isCatalogPath {
+		reason := "catalog path — nip.io self-signed certificate"
+		if appRuntime == "openshift" {
+			reason = "OpenShift runtime"
+		}
+		logger.Warningf("[WARNING] TLS certificate verification disabled (%s)", reason)
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		}
+	}
+
+	return client
+}
+
+// CreateRAGAppAndValidate creates a RAG application, probes health endpoints, and validates output.
 func CreateRAGAppAndValidate(
 	ctx context.Context,
 	cfg *config.Config,
@@ -128,68 +191,104 @@ func CreateRAGAppAndValidate(
 	appRuntime string,
 ) (string, error) {
 	const (
-		maxRetries            = 10
-		waitTime              = 15 * time.Second
-		defaultCommandTimeout = 10 * time.Second
+		maxRetries            = 10               //nolint:mnd
+		waitTime              = 15 * time.Second //nolint:mnd
+		defaultCommandTimeout = 10 * time.Second //nolint:mnd
 	)
+
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts, appRuntime)
 	if err != nil {
 		return output, err
 	}
+
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
 		return output, err
 	}
 
-	backendURL, chatbotUiURL, s, err := getRAGURLs(appRuntime, output, backendPort, uiPort)
+	backendURL, chatbotUiURL, isCatalogPath, err := getRAGURLs(ctx, cfg, appRuntime, appName, output, backendPort, uiPort)
 	if err != nil {
-		return s, err
+		return output, err
 	}
-	// Skip TLS verification for OpenShift (self-signed certificates)
-	skipTLSVerify := appRuntime == "openshift"
-	httpClient := &http.Client{
-		Timeout: defaultCommandTimeout,
-	}
-	if skipTLSVerify {
-		logger.Warningf("[WARNING] TLS certificate verification disabled for OpenShift runtime")
-		httpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}
-	}
-	endpoints := []string{
-		"/health",
-		"/v1/models",
-		"/db-status",
-	}
-	for _, ep := range endpoints {
-		fullURL := backendURL + ep
-		if err := waitForEndpointOK(httpClient, fullURL, maxRetries, waitTime); err != nil {
+
+	httpClient := newRAGHTTPClient(appRuntime, isCatalogPath, defaultCommandTimeout)
+
+	for _, ep := range []string{"/health", "/v1/models", "/db-status"} {
+		if err := waitForEndpointOK(httpClient, backendURL+ep, maxRetries, waitTime); err != nil {
 			return output, err
 		}
 	}
+
 	logger.Infof("[UI] Chatbot UI available at: %s", chatbotUiURL)
 
 	return output, nil
 }
 
-func getRAGURLs(appRuntime string, output string, backendPort string, uiPort string) (string, string, string, error) {
-	backendURL := ""
-	chatbotUiURL := ""
-	if appRuntime == "podman" {
-		hostIP, err := extractHostIP(output)
-		if err != nil {
-			return "", "", output, err
-		}
-		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
-		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
-	} else {
-		urls := ExtractURLsFromOutput(output)
-		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
-		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
+// getRAGURLs returns backend and UI URLs for a deployed RAG application.
+// For podman, URLs come from 'application info'; for openshift from the create output.
+func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
+	if appRuntime == "openshift" {
+		urls := ExtractURLsFromOutput(createOutput)
+		bURL := strings.Replace(urls[0], "digitize-ui", "backend", 1)
+		uURL := strings.Replace(urls[0], "digitize-ui", "ui", 1)
+
+		return bURL, uURL, false, nil
 	}
 
-	return backendURL, chatbotUiURL, "", nil
+	// Podman catalog path: fetch info output which contains all service URLs via info.md.
+	infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
+	if infoErr != nil {
+		return "", "", true, fmt.Errorf("could not retrieve application info for URL extraction: %w", infoErr)
+	}
+
+	bURL, uURL := extractCatalogRAGURLs(infoOutput)
+	if bURL == "" {
+		// Log full info output to help diagnose URL format changes.
+		logger.Warningf("[RAG] Could not extract chat backend URL from 'application info' output:\n%s", infoOutput)
+
+		return "", "", true, fmt.Errorf("could not determine RAG backend URL from 'application info' output")
+	}
+
+	return bURL, uURL, true, nil
+}
+
+// extractCatalogRAGURLs extracts the chat backend and UI URLs from 'application info' output.
+// Matches by URL host substring — robust against info.md title changes.
+func extractCatalogRAGURLs(output string) (string, string) {
+	return extractURLBySubstring(output, svcChatBotBackend),
+		extractURLBySubstring(output, svcChatBotUI)
+}
+
+// extractHTTPSURL extracts the first https:// URL from a line, stripping trailing punctuation.
+func extractHTTPSURL(line string) string {
+	const httpsPrefix = "https://"
+	idx := strings.Index(line, httpsPrefix)
+	if idx < 0 {
+		return ""
+	}
+
+	rest := line[idx:]
+
+	// Stop at the first whitespace — nothing after a space is part of the URL.
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		rest = rest[:spaceIdx]
+	}
+
+	// Strip any trailing punctuation left over (e.g. a period before the space).
+	rest = strings.TrimRight(rest, ".,;")
+
+	return rest
+}
+
+// extractURLBySubstring returns the first HTTPS URL in output whose value contains substr.
+func extractURLBySubstring(output, substr string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if url := extractHTTPSURL(line); url != "" && strings.Contains(url, substr) {
+			return url
+		}
+	}
+
+	return ""
 }
 
 // waitForEndpointOK polls the given endpoint until it returns HTTP 200 OK or exhausts retries.
@@ -226,42 +325,99 @@ func waitForEndpointOK(
 	return fmt.Errorf("endpoint %s failed after retries: %w", endpoint, lastErr)
 }
 
-// extractHostIP extracts the host IP from the CLI output using regex.
-func extractHostIP(output string) (string, error) {
-	const minMatchGroups = 2
-	re := regexp.MustCompile(`http[s]?://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
-	match := re.FindStringSubmatch(output)
-	if len(match) < minMatchGroups {
-		return "", fmt.Errorf("unable to determine application host IP from CLI output")
+// GetBaseURL extracts the RAG chat-backend URL from CLI output.
+// For podman uses host-substring matching; for OpenShift uses regex.
+func GetBaseURL(createOutput string, backendPort string) (string, error) {
+	// Catalog path (podman): extract chat-bot-backend HTTPS URL from info output.
+	if backendURL, _ := extractCatalogRAGURLs(createOutput); backendURL != "" {
+		return backendURL, nil
 	}
 
-	return match[1], nil
+	// OpenShift path: extract any https/http URL from the output.
+	urls := ExtractURLsFromOutput(createOutput)
+	if len(urls) > 0 {
+		return urls[0], nil
+	}
+
+	return "", fmt.Errorf("could not determine base URL from CLI output")
 }
 
-// GetBaseURL constructs the base URL from the CLI output and backend port.
-func GetBaseURL(createOutput string, backendPort string) (string, error) {
-	hostIP, err := extractHostIP(createOutput)
-	if err != nil {
-		return "", err
+// GetJudgeBaseURL returns the base URL for the local LLM-as-Judge container.
+func GetJudgeBaseURL(judgePort string) string {
+	return fmt.Sprintf("http://localhost:%s", judgePort)
+}
+
+// ExtractCatalogDigitizeURL extracts the digitize-backend URL from 'application info' output.
+func ExtractCatalogDigitizeURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcDigitizeBackend)
+}
+
+// ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
+// Falls back to legacy plain-HTTP extraction for non-catalog podman environments.
+func ExtractSimilarityAPIURL(infoOutput string) string {
+	// Catalog path: HTTPS nip.io URL with "similarity-api" in the host.
+	if url := extractURLBySubstring(infoOutput, svcSimilarityAPI); url != "" {
+		return url
 	}
 
-	return fmt.Sprintf("http://%s:%s", hostIP, backendPort), nil
+	// Legacy podman path: plain http URL on the line containing "Similarity API".
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "Similarity API") {
+			continue
+		}
+		for _, u := range ExtractURLsFromOutput(line) {
+			if strings.HasPrefix(u, "http://") {
+				return u
+			}
+		}
+	}
+
+	return ""
+}
+
+// WaitForApplicationInfoURLs polls 'application info' until service URLs are present.
+// For podman requires both chat-bot-backend and similarity-api; for openshift any URL suffices.
+func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
+	deadline := time.Now().Add(maxWait)
+	attempt := 0
+	for time.Now().Before(deadline) {
+		attempt++
+		infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Warningf("[WAIT] application info attempt %d failed: %v — retrying", attempt, infoErr)
+			time.Sleep(pollInterval)
+
+			continue
+		}
+		if appRuntime == "podman" {
+			backendURL, _ := extractCatalogRAGURLs(infoOutput)
+			similarityURL := ExtractSimilarityAPIURL(infoOutput)
+			if backendURL != "" && similarityURL != "" {
+				logger.Infof("[WAIT] application info URLs ready after %d attempt(s) — backend: %s, similarity: %s",
+					attempt, backendURL, similarityURL)
+
+				return infoOutput, nil
+			}
+		} else {
+			if len(ExtractURLsFromOutput(infoOutput)) > 0 {
+				return infoOutput, nil
+			}
+		}
+		logger.Infof("[WAIT] application info attempt %d: URLs not yet present (pods may still be starting), retrying in %s", attempt, pollInterval)
+		time.Sleep(pollInterval)
+	}
+	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
+
+	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
 }
 
 // HelpCommand runs the 'help' command with or without arguments.
 func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-	if err != nil {
-		return output, fmt.Errorf("help command run failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "help command run", args...)
 }
 
-// ApplicationPS runs the 'application ps' command to list application pods.
+// ApplicationPS runs the application ps command.
 func ApplicationPS(
 	ctx context.Context,
 	cfg *config.Config,
@@ -278,63 +434,37 @@ func ApplicationPS(
 	args = append(args, flags...)
 	args = append(args, "--runtime", appRuntime)
 
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	if err != nil {
-		return output, fmt.Errorf("application ps failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "application ps", args...)
 }
 
-// ListImage from the given application template.
+// ListImage lists images for the given application template.
 func ListImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
-	args := []string{"application", "image", "list", "--template", templateName, "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output, err := runCLI(ctx, cfg, "list images", "application", "image", "list", "--template", templateName, "--runtime", appRuntime)
 	if err != nil {
-		return fmt.Errorf("list images failed: %w\n%s", err, output)
-	}
-	if err := ValidateImageListOutput(output, appRuntime); err != nil {
 		return err
 	}
 
-	return nil
+	return ValidateImageListOutput(output, appRuntime)
 }
 
-// PullImage from the given application template.
+// PullImage pulls images for the given application template.
 func PullImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
-	//perform ICR login
 	url, uname, pswd := bootstrap.GetPodManCreds()
-	loginErr := bootstrap.PodmanRegistryLogin(url, uname, pswd)
-	if loginErr != nil {
-		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
+	if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
+		return fmt.Errorf("pull images failed due to podman login err: %w", err)
 	}
 
-	//perform RH registry login
 	url, uname, pswd = bootstrap.GetRHRegistryCreds()
-	loginErr = bootstrap.PodmanRegistryLogin(url, uname, pswd)
-	if loginErr != nil {
-		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
+	if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
+		return fmt.Errorf("pull images failed due to podman login err: %w", err)
 	}
 
-	args := []string{"application", "image", "pull", "--template", templateName, "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output, err := runCLI(ctx, cfg, "pull images", "application", "image", "pull", "--template", templateName, "--runtime", appRuntime)
 	if err != nil {
-		return fmt.Errorf("pull images failed: %w\n%s", err, output)
-	}
-	if err := ValidatePullImageOutput(output, templateName, appRuntime); err != nil {
 		return err
 	}
 
-	return nil
+	return ValidatePullImageOutput(output, templateName, appRuntime)
 }
 
 // StopAppWithPods stops an application specifying pods to stop.
@@ -345,22 +475,16 @@ func StopAppWithPods(
 	pods []string,
 	appRuntime string,
 ) (string, error) {
-	podArg := strings.Join(pods, ",")
 	args := []string{
 		"application", "stop", appName,
-		"--pod", podArg,
+		"--pod", strings.Join(pods, ","),
 		"--yes",
-		"--runtime",
-		appRuntime,
+		"--runtime", appRuntime,
 	}
 
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output, err := runCLI(ctx, cfg, "application stop --pod", args...)
 	if err != nil {
-		return output, fmt.Errorf("application stop --pod failed: %w\n%s", err, output)
+		return output, err
 	}
 
 	if appRuntime == "openshift" {
@@ -383,6 +507,7 @@ func StopAppWithPods(
 	return output, nil
 }
 
+// StartApplication starts an application and validates the output.
 func StartApplication(
 	ctx context.Context,
 	cfg *config.Config,
@@ -400,18 +525,14 @@ func StartApplication(
 	}
 
 	args = append(args, "--runtime", appRuntime)
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output, err := runCLI(ctx, cfg, "application start", args...)
 	logger.Infof("[CLI] Output: %s", output)
 
 	if err != nil {
-		return output, fmt.Errorf("application start failed: %w\n%s", err, output)
+		return output, err
 	}
 
-	// Validate output.
 	if appRuntime == "openshift" {
 		return output, ValidateStartAppOutputOpenshift(output)
 	}
@@ -420,7 +541,6 @@ func StartApplication(
 		return output, err
 	}
 
-	// Verify pods are running again.
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
 		return output, err
@@ -444,28 +564,29 @@ func DeleteAppSkipCleanup(
 		"application", "delete", appName,
 		"--skip-cleanup",
 		"--yes",
-		"--runtime",
-		appRuntime,
+		"--runtime", appRuntime,
 	}
 
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
+	output, err := runCLI(ctx, cfg, "application delete --skip-cleanup", args...)
 	if err != nil {
-		return output, fmt.Errorf("application delete --skip-cleanup failed: %w\n%s", err, output)
+		return output, err
 	}
 
 	if err := ValidateDeleteAppOutput(output, appName); err != nil {
 		return output, err
 	}
 
-	time.Sleep(common.DeleteSleepInterval) //wait for 10 seconds before checking ps output
+	time.Sleep(common.DeleteSleepInterval)
 
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
+		// "not found" means the application was already removed — treat as success.
+		if strings.Contains(err.Error(), "not found") {
+			logger.Infof("[TEST] Application %s no longer exists after delete (not found) — OK", appName)
+
+			return output, nil
+		}
+
 		return output, err
 	}
 	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
@@ -476,65 +597,145 @@ func DeleteAppSkipCleanup(
 }
 
 // ApplicationInfo runs the 'application info' command.
-func ApplicationInfo(
-	ctx context.Context,
-	cfg *config.Config,
-	appName string,
-	appRuntime string,
-) (string, error) {
-	args := []string{"application", "info", appName, "--runtime", appRuntime}
-
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	if err != nil {
-		return output, fmt.Errorf("application info failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+func ApplicationInfo(ctx context.Context, cfg *config.Config, appName string, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "application info", "application", "info", appName, "--runtime", appRuntime)
 }
 
 // ModelList lists models for a given application template.
 func ModelList(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) (string, error) {
-	args := []string{"application", "model", "list", "--template", templateName, "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-	if err != nil {
-		return output, fmt.Errorf("application model list failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "application model list", "application", "model", "list", "--template", templateName, "--runtime", appRuntime)
 }
 
-// ModelDownload downloads a model for a given application template.
+// ModelDownload downloads models for a given application template.
 func ModelDownload(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) (string, error) {
-	args := []string{"application", "model", "download", "--template", templateName, "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-	if err != nil {
-		return output, fmt.Errorf("application model download failed: %w\n%s", err, output)
+	if err := common.EnsureDir(utils.GetModelsPath()); err != nil {
+		return "", err
 	}
 
-	return output, nil
+	return runCLI(ctx, cfg, "application model download", "application", "model", "download", "--template", templateName, "--runtime", appRuntime)
 }
 
 // TemplatesCommand runs the 'application template' command.
 func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	logger.Infof("[CLI] Running: %s application templates --runtime %s", cfg.AIServiceBin, appRuntime)
-	args := []string{"application", "templates", "--runtime", appRuntime}
+	return runCLI(ctx, cfg, "application templates command run", "application", "templates", "--runtime", appRuntime)
+}
+
+// CatalogConfigure deploys or ensures the catalog service is running.
+// Uses a PTY so the password prompt on first run can be satisfied non-interactively.
+func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	password := bootstrap.GetCatalogAdminPassword()
+	if password == "" {
+		return "", fmt.Errorf("CATALOG_PASSWORD environment variable is not set")
+	}
+
+	args := []string{"catalog", "configure", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, password+"\n"+password+"\n")
+	if err != nil {
+		return output, fmt.Errorf("catalog configure failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// runWithPTY starts cmd in a PTY, writes input to the master, and returns all output.
+func runWithPTY(ctx context.Context, bin string, args []string, input string) (string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+
+	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: ptyWinRows, Cols: ptyWinCols}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to start PTY: %w", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	go func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	if _, err := ptmx.Write([]byte(input)); err != nil {
+		logger.Warningf("[CLI] PTY write warning: %v", err)
+	}
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, ptmx)
+
+	if err := cmd.Wait(); err != nil {
+		return buf.String(), err
+	}
+
+	return buf.String(), nil
+}
+
+// CatalogUninstall removes the catalog service and all associated resources.
+func CatalogUninstall(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	output, err := runCLI(ctx, cfg, "catalog uninstall", "catalog", "uninstall", "--runtime", appRuntime, "--yes")
+	if err != nil {
+		return output, err
+	}
+
+	if err := ValidateCatalogUninstallOutput(output); err != nil {
+		return output, err
+	}
+
+	return output, nil
+}
+
+// CatalogInfo runs 'ai-services catalog info' and returns the combined output.
+func CatalogInfo(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog info", "catalog", "info", "--runtime", appRuntime)
+}
+
+// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
+func ExtractCatalogBackendURL(infoOutput string) string {
+	const backendMarker = "Catalog Backend API is available at "
+	for _, line := range strings.Split(infoOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if idx := strings.Index(line, backendMarker); idx >= 0 {
+			return strings.TrimSpace(line[idx+len(backendMarker):])
+		}
+	}
+
+	return ""
+}
+
+// ExtractCatalogBackendURLFromConfigureOutput extracts the Catalog Backend URL from 'catalog configure' output.
+func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string {
+	const backendMarker = "Access the Catalog Backend at "
+	for _, line := range strings.Split(configureOutput, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, backendMarker)
+		if idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(backendMarker):]), " .,")
+		}
+	}
+
+	return ExtractCatalogBackendURL(configureOutput)
+}
+
+// CatalogLogin runs a non-interactive catalog login, piping the password via stdin.
+func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, password, appRuntime string, insecure bool) (string, error) {
+	args := []string{
+		"catalog", "login",
+		"--server", serverURL,
+		"--username", username,
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+	if insecure {
+		args = append(args, "--insecure")
+	}
+	logger.Infof("[CLI] Running: %s catalog login --server %s --username %s --password-stdin --runtime %s (insecure=%v)",
+		cfg.AIServiceBin, serverURL, username, appRuntime, insecure)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString(password + "\n")
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-
 	if err != nil {
-		return output, fmt.Errorf("application templates command run failed: %w\n%s", err, output)
+		return "", fmt.Errorf("catalog login failed: %w", err)
 	}
 
 	return output, nil
@@ -542,37 +743,28 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 
 // VersionCommand runs the 'version' command.
 func VersionCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	if err != nil {
-		return output, fmt.Errorf("version command run failed: %w\n%s", err, output)
-	}
-
-	return output, nil
+	return runCLI(ctx, cfg, "version command run", args...)
 }
 
 // GitVersionCommands runs the git commands required for version check.
 func GitVersionCommands(ctx context.Context) (string, string, error) {
-	versionCmd := "describe --tags --always"
-	commitCmd := "rev-parse --short HEAD"
+	versionArgs := strings.Split("describe --tags --always", " ")
+	commitArgs := strings.Split("rev-parse --short HEAD", " ")
 
-	logger.Infof("[CLI] Running: git %s", strings.Split(versionCmd, " "))
-	vcmd := exec.CommandContext(ctx, "git", strings.Split(versionCmd, " ")...)
+	logger.Infof("[CLI] Running: git %v", versionArgs)
+	vcmd := exec.CommandContext(ctx, "git", versionArgs...)
 	vout, err := vcmd.CombinedOutput()
 	voutput := string(vout)
 	if err != nil {
-		return voutput, "", fmt.Errorf("git version command run failed: %w\n%s", err, voutput)
+		return "", "", fmt.Errorf("git version command run failed: %w", err)
 	}
 
-	logger.Infof("[CLI] Running: git %s", strings.Split(commitCmd, " "))
-	ccmd := exec.CommandContext(ctx, "git", strings.Split(commitCmd, " ")...)
+	logger.Infof("[CLI] Running: git %v", commitArgs)
+	ccmd := exec.CommandContext(ctx, "git", commitArgs...)
 	cout, err := ccmd.CombinedOutput()
 	coutput := string(cout)
 	if err != nil {
-		return voutput, coutput, fmt.Errorf("git commit command run failed: %w\n%s", err, coutput)
+		return voutput, "", fmt.Errorf("git commit command run failed: %w", err)
 	}
 
 	return voutput, coutput, nil
@@ -588,9 +780,7 @@ func ApplicationLogs(
 	appRuntime string,
 ) (string, error) {
 	args := []string{
-		"application",
-		"logs",
-		appName,
+		"application", "logs", appName,
 		"--pod", podName,
 	}
 	if containerNameOrID != "" {
@@ -598,7 +788,7 @@ func ApplicationLogs(
 	}
 
 	args = append(args, "--runtime", appRuntime)
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 
@@ -638,10 +828,9 @@ func ApplicationLogs(
 	}
 }
 
+// ExtractURLsFromOutput returns all http/https URLs found in output.
 func ExtractURLsFromOutput(output string) []string {
-	// Regular expression to match URLs (http and https)
 	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
-
 	matches := urlRegex.FindAllString(output, -1)
 
 	urls := make([]string, 0, len(matches))

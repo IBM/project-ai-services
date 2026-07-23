@@ -27,17 +27,12 @@ services:
   - id: similarity
     version: ">=1.0.0"
 
-  - id: summarize
-    version: ">=1.0.0"
-    optional: true
-
 about:
   - title: "Services"
     values:
       - "Digitize Documents"
       - "Find Similar Items"
       - "Question and Answer"
-      - "Summarize"
 
   - title: "Use case domains"
     sections:
@@ -93,6 +88,6 @@ about:
       - title: "Retrieval-Augmented Generation (RAG)"
         description: "Discover the architecture behind this pre-built digital assistant"
         ctaLabel: "Watch"
-        url: "https://github.com/user-attachments/assets/958980a7-f653-4474-84a7-28d657b5f7d1"
+        url: "https://ibm.biz/aiservicestechdemo"
 
 # Made with Bob

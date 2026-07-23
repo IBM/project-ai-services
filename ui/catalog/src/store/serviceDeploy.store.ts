@@ -5,7 +5,7 @@ import type {
   LLMOption,
   Service,
   ProviderSchema,
-} from "@/services/deployment.api";
+} from "@/types/api.types";
 import type { ServiceDetailData } from "@/components";
 
 interface ServiceDeployState {

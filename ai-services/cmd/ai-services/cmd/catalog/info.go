@@ -21,14 +21,17 @@ func NewInfoCmd() *cobra.Command {
 - UI endpoint URL
 - Backend API endpoint URL`,
 		Example: `  # Display catalog service info for podman
-  ai-services catalog info --runtime podman`,
+  ai-services catalog info --runtime podman
+
+  # Display catalog service info for openshift
+  ai-services catalog info --runtime openshift`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return info.Run(vars.RuntimeFactory.GetRuntimeType())
+			return info.Run(cmd.Context(), vars.RuntimeFactory.GetRuntimeType())
 		},
 	}
 

@@ -1,5 +1,5 @@
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
-import type { ProviderSchema } from "@/services/deployment.api";
+import type { ProviderSchema } from "@/types/api.types";
 
 /**
  * Custom hook to get provider schema from the store
