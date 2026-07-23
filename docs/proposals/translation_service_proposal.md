@@ -597,20 +597,20 @@ curl -X POST http://localhost:9000/v1/translate \
 
 **Background worker:**
 
-1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (pdf/docx) or `'translating'` (txt/md).
-2. **PDF/DOCX path:** submit to digitize — `POST http://digitize-url/v1/jobs` with `output_format=md`. Store `digitize_job_id`. Poll `GET /v1/jobs/{digitize_job_id}` every `DIGITIZE_POLL_INTERVAL_SECS` (default 3) until `completed`/`failed` or `DIGITIZE_JOB_TIMEOUT_SECS` (default 300). Fetch text via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id`.
+1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (pdf/docx) or `'chunking'` (txt/md).
+2. **PDF/DOCX path:** submit to digitize via `httpx.AsyncClient` — `POST {DIGITIZE_BASE_URL}/v1/jobs` with `output_format=md`. Store `digitize_job_id`. Poll `GET /v1/jobs/{digitize_job_id}` every `DIGITIZE_POLL_INTERVAL_SECS` (default 3) until `completed`/`failed` or `DIGITIZE_JOB_TIMEOUT_SECS` (default 300) is reached. On `429` from digitize, apply exponential backoff (§9.4). Fetch markdown via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id`.
    **TXT/MD path:** read the staged file directly (UTF-8 decode).
-3. **Run lingua detection** on the full text (up to 500 chars sampled) to resolve `source_language` if `"auto"` (§10.2).
-4. **Chunk the text** (§2.3): split on paragraph boundaries, greedily pack blocks up to `CHUNK_TOKEN_BUDGET` tokens per chunk, apply sentence-level fallback for oversized blocks, treat tables as atomic units. Each block's token count is obtained via `/tokenize` during packing.
-5. `metadata.phase='translating'`: for each chunk in order:
-   a. Run the hard context-window guard on the chunk (§8). On breach → `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`.
-   b. Build prompt with resolved `source_language` and `target_language`.
-   c. Acquire `concurrency_limiter`; call vLLM at `temperature=0.0`; release `concurrency_limiter`.
-   d. Append translated chunk to results list.
-6. Concatenate translated chunks in index order (§2.4) → final translated markdown string.
-7. Write `/var/cache/translate/results/{job_id}_result.json`.
-8. Update row → `status='completed'`, `completed_at=now()` (or `status='failed'` + `error`).
-9. Delete `/var/cache/translate/staging/{job_id}/`; release `job_limiter`.
+3. **Run lingua detection** on the full text (up to 500 chars sampled) to resolve `source_language` if `"auto"` (§10.2). Update `metadata.phase='chunking'`.
+4. **Chunk the text** (§2.3): split on `\n\n` boundaries into blocks; greedily pack blocks into `TranslationChunk` objects, calling `tokenize_with_llm(block)` per block (token count cached). Close current chunk when `running_tokens + block_tokens > CHUNK_TOKEN_BUDGET`. Apply sentence-level fallback for blocks that exceed the budget alone. Treat table blocks as atomic (§2.5). Each chunk carries `index`, `text`, and `join_after` (`"paragraph"` or `"sentence"`) (§2.6). **Run the context-window guard on each chunk** (§8.2): if `chunk_tokens + PROMPT_OVERHEAD_TOKENS > MAX_MODEL_LEN - MIN_OUTPUT_TOKENS` for any chunk → abort immediately with `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`. Store `chunk_count` and `chunk_token_budget` in `metadata.chunking`.
+5. Update `metadata.phase='translating'`. Dispatch all chunks concurrently via `asyncio.gather` (§9.3): each chunk runs as an `asyncio.Task` that acquires `chunk_semaphore` then `concurrency_limiter`, builds the two-message prompt (`system` + `user`) with resolved `source_language`, `target_language`, and `chunk.text`, and calls `query_vllm_translate` at `temperature=0.0` with `chunk_max_tokens` computed from the context-window budget (§8.2). If any chunk task fails, all sibling tasks are cancelled and the job fails.
+6. **Assemble** translated chunks using `join_after`-aware concatenation (§2.6): `"\n\n"` between block-boundary chunks, `" "` between sentence-fallback chunks → `translated_markdown` string.
+7. **Reconstruct output document** (pdf/docx input only). Update `metadata.phase='reconstructing'`.
+   - **PDF input:** `translated_markdown` → HTML → PDF via `weasyprint`. Write `results/{job_id}_translated.pdf`. Set `pdf_available=true/false`.
+   - **DOCX input:** `translated_markdown` → DOCX via `python-docx`. Write `results/{job_id}_translated.docx`. Set `docx_available=true/false`.
+   - Reconstruction failure is non-fatal (§3.3): log warning, set flag to `false`, continue. Store result in `metadata.reconstruction`.
+8. Write `/var/cache/translate/results/{job_id}_result.json`.
+9. Update row → `status='completed'`, `completed_at=now()` (or `status='failed'` + `error` on any hard failure).
+10. Delete `/var/cache/translate/staging/{job_id}/`; release `job_limiter`.
 
 > **Digitize lifecycle note:** the digitized document remains in the digitize service's cache after translation, keyed by `digitize_doc_id`. Users manage its lifecycle through the digitize service's own `DELETE /v1/documents/{id}`. The translate service does not delete upstream artifacts.
 
@@ -1293,9 +1293,9 @@ sequenceDiagram
     API-->>User: 202 Accepted {job_id}
 
     activate Worker
-    Worker->>PG: status=in_progress, phase=digitizing or translating
 
     alt File is PDF or DOCX
+        Worker->>PG: status=in_progress, phase=digitizing
         Worker->>DIG: POST /v1/jobs (output_format=md)
         Note over Worker,DIG: 429 -> exponential backoff and resubmit
         DIG-->>Worker: 202 {digitize_job_id}
@@ -1307,47 +1307,52 @@ sequenceDiagram
         DIG-->>Worker: Digitized markdown text
         Worker->>PG: store digitize_job_id, digitize_doc_id
     else File is TXT or MD
+        Worker->>PG: status=in_progress, phase=chunking
         Worker->>FS: Read staged file (UTF-8)
     end
 
+    Worker->>PG: phase=chunking
     Note over Worker: Lingua detection - resolve source_language if auto
-    Note over Worker: Chunk text into N chunks using CHUNK_TOKEN_BUDGET
-    Note over Worker: Each block tokenized via /tokenize during packing
-
-    Worker->>PG: phase=translating
-
-    loop For each chunk 1..N
-        Worker->>vLLM: POST /tokenize (chunk text)
-        vLLM-->>Worker: chunk_tokens
-
-        alt Context guard breached for chunk
-            Worker->>PG: status=failed (CONTEXT_LIMIT_EXCEEDED + diagnostics)
-            Note over Worker: Abort remaining chunks
-        else Guard passed
-            Worker->>vLLM: POST /v1/chat/completions (chunk, temperature=0.0, max_tokens)
-            vLLM-->>Worker: Translated chunk
-            Note over Worker: Append to results list
+    Note over Worker: Split on double-newline into blocks
+    loop For each block
+        Worker->>vLLM: POST /tokenize (block text)
+        vLLM-->>Worker: block_tokens
+        Note over Worker: Pack into TranslationChunk - set join_after
+    end
+    Note over Worker: Context guard - check each chunk fits window
+    alt Any chunk breaches MAX_MODEL_LEN - PROMPT_OVERHEAD - MIN_OUTPUT
+        Worker->>PG: status=failed (CONTEXT_LIMIT_EXCEEDED + diagnostics)
+    else All chunks pass guard
+        Worker->>PG: phase=translating - store chunk_count and chunk_token_budget
+        par asyncio.gather - all chunks concurrently
+            Worker->>vLLM: POST /v1/chat/completions (chunk 1, temp=0.0, max_tokens)
+            vLLM-->>Worker: Translated chunk 1
+        and
+            Worker->>vLLM: POST /v1/chat/completions (chunk 2, temp=0.0, max_tokens)
+            vLLM-->>Worker: Translated chunk 2
+        and
+            Worker->>vLLM: POST /v1/chat/completions (chunk N, temp=0.0, max_tokens)
+            vLLM-->>Worker: Translated chunk N
         end
+        Note over Worker: Assemble using join_after - paragraph boundary or sentence boundary
+
+        alt Input was PDF
+            Worker->>PG: phase=reconstructing
+            Worker->>Worker: translated markdown -> HTML -> PDF via weasyprint
+            Worker->>FS: Write results/{job_id}_translated.pdf
+            Note over Worker: Reconstruction failure is non-fatal - log and continue
+            Worker->>PG: update pdf_available=true/false
+        else Input was DOCX
+            Worker->>PG: phase=reconstructing
+            Worker->>Worker: translated markdown -> DOCX via python-docx
+            Worker->>FS: Write results/{job_id}_translated.docx
+            Note over Worker: Reconstruction failure is non-fatal - log and continue
+            Worker->>PG: update docx_available=true/false
+        end
+
+        Worker->>FS: Write results/{job_id}_result.json
+        Worker->>PG: status=completed, completed_at=now()
     end
-
-    Note over Worker: Concatenate translated chunks in index order
-
-    alt Input was PDF
-        Worker->>PG: phase=reconstructing
-        Worker->>Worker: translated markdown -> HTML -> PDF via weasyprint
-        Worker->>FS: Write results/{job_id}_translated.pdf
-        Note over Worker: If reconstruction fails, log warning and continue
-        Worker->>PG: update pdf_available=true/false
-    else Input was DOCX
-        Worker->>PG: phase=reconstructing
-        Worker->>Worker: translated markdown -> DOCX via python-docx
-        Worker->>FS: Write results/{job_id}_translated.docx
-        Note over Worker: If reconstruction fails, log warning and continue
-        Worker->>PG: update docx_available=true/false
-    end
-
-    Worker->>FS: Write results/{job_id}_result.json
-    Worker->>PG: status=completed, completed_at=now()
 
     Worker->>FS: Delete staging/{job_id}/
     deactivate Worker
