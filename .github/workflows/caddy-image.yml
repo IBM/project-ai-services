@@ -5,40 +5,26 @@ on:
       - 'images/caddy/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/caddy/**'
       - '.github/workflows/caddy-image.yml'
     branches:
       - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  ICR_REGISTRY: icr.io
-  ICR_NAMESPACE: ai-services-cicd
-
 jobs:
   build-publish-image:
     name: Build and Publish Image
-    runs-on: ubuntu-24.04-ppc64le
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-      
-      - name: Build caddy image
-        working-directory: images/caddy
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
-
-      - name: Publish caddy image
-        working-directory: images/caddy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'images/caddy'
+    secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
