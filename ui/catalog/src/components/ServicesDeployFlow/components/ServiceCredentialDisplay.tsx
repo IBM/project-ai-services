@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Button } from "@carbon/react";
 import { View, ViewOff } from "@carbon/icons-react";
-import type { ProviderSchema } from "../../../services/deployment.api";
+import type { ProviderSchema } from "@/types/api.types";
 import styles from "../ServicesDeployFlow.module.scss";
 
 interface ServiceCredentialDisplayProps {

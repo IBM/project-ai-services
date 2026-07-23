@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { fetchProviderParams } from "@/api/digitalAssistants";
+import { fetchProviderSchema } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
+import type { ProviderSchema } from "@/types/api.types";
 
 interface UseProviderParamsResult {
-  params: Record<string, unknown> | null;
+  params: ProviderSchema | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -40,7 +41,7 @@ export function useProviderParams(
         try {
           const requestKey = `providerParams:${componentType}:${providerId}`;
           const response = await dedupe(requestKey, () =>
-            fetchProviderParams(componentType, providerId),
+            fetchProviderSchema(componentType, providerId),
           );
           setProviderParams(componentType, providerId, response);
         } catch (err) {
@@ -80,7 +81,7 @@ export function useBatchProviderParams(
   componentType: string,
   providerIds: string[],
 ): {
-  paramsMap: Record<string, Record<string, unknown>>;
+  paramsMap: Record<string, ProviderSchema>;
   isLoading: boolean;
   errors: Record<string, string>;
 } {
@@ -91,7 +92,7 @@ export function useBatchProviderParams(
     useDeployStore();
 
   // Build params map from cache
-  const paramsMap: Record<string, Record<string, unknown>> = {};
+  const paramsMap: Record<string, ProviderSchema> = {};
   for (const providerId of providerIds) {
     const cached = getProviderParams(componentType, providerId);
     if (cached) {
@@ -123,7 +124,7 @@ export function useBatchProviderParams(
         providersToFetch.map(async (providerId) => {
           const requestKey = `providerParams:${componentType}:${providerId}`;
           const response = await dedupe(requestKey, () =>
-            fetchProviderParams(componentType, providerId),
+            fetchProviderSchema(componentType, providerId),
           );
           return { providerId, response };
         }),
@@ -173,7 +174,7 @@ export function useBatchProviderParams(
 export function useMultiTypeProviderParams(
   componentTypesWithIds: Record<string, string[]>,
 ): {
-  paramsByType: Record<string, Record<string, Record<string, unknown>>>;
+  paramsByType: Record<string, Record<string, ProviderSchema>>;
   isLoading: boolean;
   errorsByType: Record<string, Record<string, string>>;
 } {
@@ -185,11 +186,7 @@ export function useMultiTypeProviderParams(
   const { getProviderParams, setProviderParams, isProviderParamsStale } =
     useDeployStore();
 
-  // Build params map from cache for all component types
-  const paramsByType: Record<
-    string,
-    Record<string, Record<string, unknown>>
-  > = {};
+  const paramsByType: Record<string, Record<string, ProviderSchema>> = {};
   for (const [componentType, providerIds] of Object.entries(
     componentTypesWithIds,
   )) {
@@ -237,7 +234,7 @@ export function useMultiTypeProviderParams(
         providersToFetch.map(async ({ componentType, providerId }) => {
           const requestKey = `providerParams:${componentType}:${providerId}`;
           const response = await dedupe(requestKey, () =>
-            fetchProviderParams(componentType, providerId),
+            fetchProviderSchema(componentType, providerId),
           );
           return { componentType, providerId, response };
         }),

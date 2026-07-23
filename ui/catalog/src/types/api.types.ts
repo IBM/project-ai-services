@@ -1,4 +1,3 @@
-// Architecture Types - Used for listing available architectures
 export interface ArchitectureSummary {
   id: string;
   name: string;
@@ -7,7 +6,6 @@ export interface ArchitectureSummary {
   services: string[];
 }
 
-// Architecture Details Types - Used for fetching full architecture information
 export interface AboutSectionValue {
   title?: string;
   value?: string;
@@ -15,8 +13,8 @@ export interface AboutSectionValue {
 
 export interface AboutSectionItem {
   title?: string;
-  value?: string; // Single value for resource allocation items (e.g., "15 - 20")
-  values?: string[]; // Multiple values for use case domain items (e.g., ["Assistant 1", "Assistant 2"])
+  value?: string;
+  values?: string[];
   url?: string;
   ctaLabel?: string;
   description?: string;
@@ -48,7 +46,6 @@ export interface ArchitectureDetailsResponse {
   about: AboutSection[];
 }
 
-// Service Summary Types - Used for listing available services
 export interface ServiceSummary {
   id: string;
   name: string;
@@ -57,7 +54,6 @@ export interface ServiceSummary {
   architectures: string[];
 }
 
-// Deploy Options Types - Used for fetching deployment configuration
 export interface Provider {
   id: string;
   name: string;
@@ -73,30 +69,34 @@ export interface Provider {
   };
 }
 
-export interface Component {
+export interface DeployOptionsComponent {
   type: string;
   name: string;
   providers: Provider[];
 }
 
-export interface Service {
+export interface DeployOptionsService {
   id: string;
   name: string;
   version: string;
   schema?: string;
-  components: Component[];
-  resources?: Resources;
+  components: DeployOptionsComponent[];
+  resources?: {
+    cpu: number;
+    memory: number;
+    storage?: number;
+    accelerators?: Record<string, number>;
+  };
 }
 
 export interface DeployOptionsResponse {
   id: string;
   name: string;
   version: string;
-  global_components: Component[];
-  services: Service[];
+  global_components: DeployOptionsComponent[];
+  services: DeployOptionsService[];
 }
 
-// Application Types - Used for managing deployed digital assistants
 export interface ServiceComponent {
   id: string;
   type: string;
@@ -148,7 +148,6 @@ export interface ApplicationListResponse {
   pagination: PaginationMetadata;
 }
 
-// API Request/Response Types
 export interface FetchApplicationsParams {
   page?: number;
   page_size?: number;
@@ -166,7 +165,7 @@ export interface DeployApplicationResponse {
   id: string;
 }
 
-// Resources API Types - Used for fetching system resource availability
+// Available system resources (total and available capacity)
 export interface ResourcesResponse {
   cpu: {
     total_cpu: number;
@@ -184,7 +183,19 @@ export interface ResourcesResponse {
   };
 }
 
-// DeploymentDetails Types - Used for displaying application deployment details
+// Currently consumed resources
+export interface UsedResourcesResponse {
+  cpu: {
+    used_cpu: number;
+    total_cpu: number;
+  };
+  memory: {
+    used_bytes: number;
+    total_bytes: number;
+  };
+  accelerators: Record<string, { used: number; total: number }>;
+}
+
 export interface ResourceAllocation {
   name: string;
   used: number;
@@ -227,18 +238,6 @@ export interface DeployIntegrationEndpoints {
   interactiveAPIs: string[];
 }
 
-export interface ResourcesApiResponse {
-  cpu: {
-    used_cpu: number;
-    total_cpu: number;
-  };
-  memory: {
-    used_bytes: number;
-    total_bytes: number;
-  };
-  accelerators: Record<string, { used: number; total: number }>;
-}
-
 export interface ApplicationDetailsApiResponse {
   id: string;
   name: string;
@@ -263,3 +262,120 @@ export interface ApplicationDetailsApiResponse {
     }>;
   }>;
 }
+
+export interface Service {
+  id: string;
+  name: string;
+  description: string;
+  certified_by?: string;
+  architectures?: string[];
+  standalone?: boolean;
+  version?: string;
+}
+
+export interface DeployComponent {
+  type: string;
+  name?: string;
+  description?: string;
+  providers: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    default?: boolean;
+    schema?: string;
+    version?: string;
+    resources?: {
+      cpu?: number;
+      memory?: number;
+      storage?: number;
+      accelerators?: Record<string, number>;
+    };
+    [key: string]: unknown;
+  }>;
+}
+
+export interface DeployOptions {
+  version: string;
+  global_components: DeployComponent[];
+  services: DeployOptionsService[];
+}
+
+export interface ServiceDeployOptions {
+  id: string;
+  name: string;
+  description?: string;
+  version: string;
+  components: DeployComponent[];
+  resources?: {
+    cpu: number;
+    memory: number;
+    storage?: number;
+    accelerators?: Record<string, number>;
+  };
+}
+
+export interface ProviderSchemaProperty {
+  default?: string;
+  description?: string;
+  title?: string;
+  type?: string;
+  format?: string;
+  oneOf?: Array<{
+    const: string;
+    description?: string;
+    title?: string;
+  }>;
+}
+
+export interface ProviderSchema {
+  $schema?: string;
+  properties: {
+    model?: ProviderSchemaProperty;
+    [key: string]: ProviderSchemaProperty | undefined;
+  };
+  required?: string[];
+  type: string;
+}
+
+export interface LLMOption {
+  id: string;
+  text: string;
+  providerId: string;
+  providerName: string;
+}
+
+export interface DeploymentComponent {
+  component_type: string;
+  provider_id: string;
+  version: string;
+  params?: Record<string, unknown>;
+}
+
+export interface DeploymentService {
+  catalog_id: string;
+  version: string;
+  components: DeploymentComponent[];
+  params?: {
+    backend?: Record<string, unknown>;
+  };
+}
+
+export interface ArchitectureDeploymentPayload {
+  name: string;
+  catalog_id: string;
+  version: string;
+  services: DeploymentService[];
+}
+
+export interface ServiceDeploymentPayload {
+  name: string;
+  catalog_id: string;
+  version: string;
+  deployment_type: "service";
+  services: DeploymentService[];
+  global_components?: Record<string, string>;
+}
+
+export type DeploymentPayload =
+  | ArchitectureDeploymentPayload
+  | ServiceDeploymentPayload;

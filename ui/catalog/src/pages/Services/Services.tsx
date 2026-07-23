@@ -10,8 +10,8 @@ import { ServicesDeployFlow } from "@/components/ServicesDeployFlow";
 import DeploymentDetails from "@/components/DeploymentDetails";
 import { useServices } from "@/hooks/useServices";
 import { servicesReducer, initialState } from "./types";
-import type { Service } from "@/services/deployment.api";
-import type { DeploymentDetails as DeploymentDetailsType } from "@/types/digitalAssistants";
+import type { Service } from "@/types/api.types";
+import type { DeploymentDetails as DeploymentDetailsType } from "@/types/api.types";
 
 const sortServicesByDeployabilityAndName = (
   services: ServiceDetailData[],
