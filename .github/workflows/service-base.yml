@@ -5,40 +5,26 @@ on:
       - 'images/service-base/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/service-base/**'
       - .github/workflows/service-base.yml
     branches:
       - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  ICR_REGISTRY: icr.io
-  ICR_NAMESPACE: ai-services-cicd
-
 jobs:
   build-publish-image:
     name: Build and Publish Image
-    runs-on: ubuntu-24.04-ppc64le-p10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Build service-base image
-        working-directory: images/service-base
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-
-      - name: Publish service-base image
-        working-directory: images/service-base
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'images/service-base'
+    secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
