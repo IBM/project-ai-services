@@ -101,6 +101,11 @@ export RAG_ACCURACY_THRESHOLD=0.70
 # Catalog setup
 export CATALOG_PASSWORD=<your-catalog-admin-password>
 export CATALOG_INSECURE=true           # set false only if using valid TLS certs
+
+# Language Support Tests (TC-7 golden dataset validation — optional)
+export GERMAN_GOLDEN_DATASET_FILE="german_golden.csv"
+export FRENCH_GOLDEN_DATASET_FILE="french_golden.csv"
+export ITALIAN_GOLDEN_DATASET_FILE="italian_golden.csv"
 ```
 
 ## Running Golden Dataset Validation Independently
@@ -198,6 +203,7 @@ OR
 ```
 ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname>  --runtime=<runtime>
 ```
+
 ## Running Bootstrap Failure Tests
 
 Bootstrap failure tests are in `bootstrap_failure_test.go` and cover the three most critical error paths: invalid registry credentials, catalog service unavailability, and missing prerequisites detected by `bootstrap validate`.
@@ -296,6 +302,56 @@ Each failure `It()` block must:
 
 ---
 
+## Running Language Support Tests
+
+The Language Support Tests validate the chatbot pipeline for German (DE), French (FR) and Italian (IT) — including automatic language detection, PDF ingestion, RAG retrieval, and golden dataset accuracy.
+
+The tests are labelled `language-tests` and can be run independently against an already running application.
+
+### Fixture files required
+
+| File | Location |
+|------|----------|
+| `german.pdf` | `ai-services/tests/e2e/ingestion/docs/german.pdf` |
+| `french.pdf` | `ai-services/tests/e2e/ingestion/docs/french.pdf` |
+| `italian.pdf` | `ai-services/tests/e2e/ingestion/docs/italian.pdf` |
+| `german_golden.csv` | `test/golden/german_golden.csv` |
+| `french_golden.csv` | `test/golden/french_golden.csv` |
+| `italian_golden.csv` | `test/golden/italian_golden.csv` |
+
+TC-3, TC-4 and TC-6 (smoke tests) run without any fixture files. TC-1, TC-2 and TC-5 require the PDF files. TC-7 requires the golden CSV files and LLM-as-Judge configuration.
+
+### Environment variables for Language Support Tests
+
+```bash
+# Required for TC-7 golden dataset validation (optional — tests skip if unset)
+export GERMAN_GOLDEN_DATASET_FILE="german_golden.csv"
+export FRENCH_GOLDEN_DATASET_FILE="french_golden.csv"
+export ITALIAN_GOLDEN_DATASET_FILE="italian_golden.csv"
+
+# LLM-as-Judge (same vars as golden dataset validation — required for TC-7)
+export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
+export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
+export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
+export LLM_JUDGE_PORT=8000
+```
+
+### Commands to run Language Support Tests
+
+```bash
+# Run all language tests (TC-1 through TC-7, TC-7 skipped until judge is set up)
+make test TEST_ARGS="--label-filter=language-tests --timeout=3h" APP_NAME=<existing-app-name>
+
+# Run only the smoke tests (TC-3, TC-4 and TC-6 — no PDFs or judge needed)
+make test TEST_ARGS="--label-filter=language-smoke --timeout=30m" APP_NAME=<existing-app-name>
+
+# Run only the golden dataset accuracy test (TC-7 — all three languages)
+make test TEST_ARGS="--label-filter=language-golden --timeout=3h" APP_NAME=<existing-app-name>
+
+# Using ginkgo CLI directly
+ginkgo -r --label-filter=language-tests --timeout=3h ./tests/e2e -- --app-name=<existing-app-name>
+```
+
 ## Adding new E2E tests
 
 Add new test files under `ai-services/tests/e2e/` as standard Go test files (package `e2e`). The suite's entrypoint is `e2e_suite_test.go` which registers the Ginkgo suite.
@@ -341,7 +397,8 @@ Below is an accurate overview of the current `ai-services/tests/e2e` layout and 
 ```text
 ai-services/tests/e2e/
    ├─ e2e_suite_test.go           # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
-   ├─ bootstrap_failure_test.go   # NEW: bootstrap failure scenarios (registry, catalog, validation)
+   ├─ language_e2e_test.go        # Language support tests (DE/FR/IT) — TC-1 through TC-7
+   ├─ bootstrap_failure_test.go   # Bootstrap failure scenarios (registry, catalog, validation)
    ├─ bootstrap/                  # runtime preparation and bootstrap helpers
    │   ├─ bootstrap.go
    │   ├─ build.go
@@ -363,10 +420,14 @@ ai-services/tests/e2e/
    │   └─ config.go
    ├─ digitization/               # digitization api test helper functions
    │   ├─ digitize.go
+   │   └─ digitize_lang.go        # language PDF path helpers and ingestion wrapper (DE/FR/IT)
    ├─ ingestion/                  # document ingestion helpers and test fixtures
    │   ├─ ingest.go
    │   ├─ wait.go
    │   └─ docs/                   # test documents for document ingestion and digitization
+   │       ├─ german.pdf          # German language fixture (IBM Power product page)
+   │       ├─ french.pdf          # French language fixture (IBM Power product page)
+   │       └─ italian.pdf         # Italian language fixture (IBM Power product page)
    ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
    ├─ rag/                        # RAG-related test helpers (embeddings, setup, validate)

@@ -1,0 +1,9 @@
+ID,Question,GoldenAnswer
+FR-001,Qu'est-ce qu'IBM Power?,IBM Power est une famille de serveurs haute performance particulièrement évolutifs et fiables pour les workloads les plus exigeants sur site et dans le cloud
+FR-002,Comment IBM Power protège-t-il contre les ransomwares?,IBM Power Cyber Vault aide les entreprises à se protéger contre les ransomwares en créant des sauvegardes de données prescriptives immuables et isolées physiquement
+FR-003,Quelles sont les caractéristiques de l'IBM Power S1112?,L'IBM Power S1112 est un serveur tour ou en rack 2U à faible encombrement doté d'une sécurité de niveau entreprise et d'une accélération IA intégrée pour des environnements distants de succursales et proches de la périphérie
+FR-004,Combien de cœurs de processeur et de mémoire offre l'IBM Power E1150?,L'IBM Power E1150 offre jusqu'à 120 cœurs de processeur Power11 et 16 To de mémoire DDR5
+FR-005,Quelles intégrations de workloads IBM Power prend-il en charge?,IBM Power prend en charge les intégrations SAP HANA Oracle et Red Hat
+FR-006,Comment Pfizer a-t-il utilisé IBM Power?,Pfizer a construit une architecture informatique cloud hybride avec SAP S/4HANA et la plateforme IBM Power en réduisant la base de données SAP ECC 6.0 vers S/4HANA de 93 pourcent
+FR-007,Quels systèmes d'exploitation IBM Power supporte-t-il?,IBM Power supporte IBM AIX IBM i et Linux on Power avec un plan de support pour AIX s'étendant au-delà de 2035
+FR-008,Quel est le prix indicatif de l'IBM Power S1122 en France?,Le prix indicatif est de 94200 euros hors TVA pour une configuration 8 cœurs 128 Go IBM i pour 100 utilisateurs
