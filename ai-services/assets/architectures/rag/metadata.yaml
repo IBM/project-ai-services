@@ -27,17 +27,12 @@ services:
   - id: similarity
     version: ">=1.0.0"
 
-  - id: summarize
-    version: ">=1.0.0"
-    optional: true
-
 about:
   - title: "Services"
     values:
       - "Digitize Documents"
       - "Find Similar Items"
       - "Question and Answer"
-      - "Summarize"
 
   - title: "Use case domains"
     sections:

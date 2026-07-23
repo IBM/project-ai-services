@@ -9,16 +9,13 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-)
-
-const (
-	defaultPasswordIterations = 100000
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -31,7 +28,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 
 	// Collect and hash password
 	// If secret exist passwordHash will be empty
-	passwordHash, err := collectAndHashPassword(deployCtx.Runtime)
+	passwordHash, err := catalogUtils.CollectAndHashPassword(deployCtx.Runtime)
 	if err != nil {
 		return err
 	}
@@ -199,12 +196,12 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 
 	// Set configure-specific values
 	argParams := make(map[string]string)
-	argParams["backend.adminPasswordHash"] = passwordHash
-	argParams["backend.runtime"] = "podman"
-	argParams["backend.podman.authFileContent"] = authFileBase64
-	argParams["backend.podman.uri"] = podmanSocketPath
-	argParams["db.password"] = dbPassword
-	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
+	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
+	argParams[configure.ArgParamRuntime] = "podman"
+	argParams[configure.ArgParamPodmanAuthFileContent] = authFileBase64
+	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
+	argParams[configure.ArgParamDBPassword] = dbPassword
+	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 
 	return argParams, nil
 }
