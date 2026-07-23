@@ -16,6 +16,7 @@ deploy them, and handle service metadata`,
 
 	catalogCMD.AddCommand(NewAPIServerCmd())
 	catalogCMD.AddCommand(NewConfigureCmd())
+	catalogCMD.AddCommand(NewBackupCmd())
 	catalogCMD.AddCommand(NewUninstallCmd())
 	catalogCMD.AddCommand(NewHashpwCmd())
 	catalogCMD.AddCommand(NewLoginCmd())
