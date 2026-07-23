@@ -18,29 +18,23 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-var GET_CALL_TIMEOUT = 10 * time.Second
-var POST_CALL_TIMEOUT = 120 * time.Second // Longer timeout for summarization
-
-// appRuntime holds the current runtime environment (podman or openshift).
-var appRuntime string
-
-// SetAppRuntime sets the application runtime for the summarize package.
-func SetAppRuntime(runtime string) {
-	appRuntime = runtime
-}
+const (
+	getCallTimeout  = 10 * time.Second
+	postCallTimeout = 120 * time.Second // Longer timeout for summarization
+	pollInterval    = 5 * time.Second   // Polling interval for job status
+)
 
 // getHTTPClient returns an HTTP client configured based on the runtime.
 // Skips TLS certificate verification for both Podman (nip.io self-signed certs) and OpenShift.
 func getHTTPClient(timeout time.Duration) *http.Client {
-	client := &http.Client{Timeout: timeout}
-
 	// Skip TLS certificate verification for both podman (nip.io) and openshift
 	// Podman uses self-signed certificates with nip.io domains
-	client.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
 	}
-
-	return client
 }
 
 // GetTestPDFPath returns the path to a test PDF file.
@@ -161,7 +155,7 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
@@ -170,10 +164,12 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+
 		return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	logger.Infof("[SUMMARIZE] Health check passed")
+
 	return nil
 }
 
@@ -186,6 +182,7 @@ func buildJobURL(baseURL, level, jobName string, stream bool) string {
 	if jobName != "" {
 		url += fmt.Sprintf("&job_name=%s", jobName)
 	}
+
 	return url
 }
 
@@ -224,7 +221,7 @@ func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, content
 	}
 	req.Header.Set("Content-Type", contentType)
 
-	client := getHTTPClient(POST_CALL_TIMEOUT)
+	client := getHTTPClient(postCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
@@ -268,35 +265,55 @@ func CreateJobWithFile(ctx context.Context, baseURL, filePath, level, jobName st
 
 // CreateJobWithText creates a new summarization job with text input.
 // Note: The API requires a file upload, so we create a temporary text file.
+//nolint:cyclop // Test helper function, complexity acceptable
 func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*JobCreatedResponse, error) {
-	url := buildJobURL(baseURL, level, jobName, stream)
+	// Create temporary file
+	tmpFile, err := createTempTextFile(text)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = os.Remove(tmpFile) //nolint:errcheck // Cleanup, error not critical
+	}()
 
-	// Create a temporary text file with the content
+	// Use the file-based creation
+	return CreateJobWithFile(ctx, baseURL, tmpFile, level, jobName, stream)
+}
+
+// createTempTextFile creates a temporary text file with the given content.
+func createTempTextFile(text string) (string, error) {
 	tmpFile, err := os.CreateTemp("", "summarize-text-*.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	defer func() {
+		_ = tmpFile.Close() //nolint:errcheck // Cleanup, error not critical
+	}()
 
 	if _, err := tmpFile.WriteString(text); err != nil {
-		return nil, fmt.Errorf("failed to write to temp file: %w", err)
+		_ = os.Remove(tmpFile.Name()) //nolint:errcheck // Cleanup on error path
+
+
+		return "", fmt.Errorf("failed to write to temp file: %w", err)
 	}
 
-	// Reopen file for reading
-	tmpFile.Close()
-	file, err := os.Open(tmpFile.Name())
+	return tmpFile.Name(), nil
+}
+
+// createJobRequest creates and sends a job creation request.
+func createJobRequest(ctx context.Context, url, filePath string) (*http.Response, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open temp file: %w", err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close() //nolint:errcheck // Cleanup, error not critical
+	}()
 
-	// Create multipart form
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add file field
-	part, err := writer.CreateFormFile("file", "input.txt")
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create form file: %w", err)
 	}
@@ -305,7 +322,9 @@ func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string
 		return nil, fmt.Errorf("failed to copy file content: %w", err)
 	}
 
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
 	if err != nil {
@@ -313,7 +332,7 @@ func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := getHTTPClient(POST_CALL_TIMEOUT)
+	client := getHTTPClient(postCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -347,7 +366,7 @@ func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailRespons
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -380,7 +399,7 @@ func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultRespons
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -405,9 +424,10 @@ func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultRespons
 }
 
 // WaitForJobCompletion waits for a job to complete.
+//nolint:cyclop // Polling logic, complexity acceptable for test helper
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobDetailResponse, error) {
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -422,15 +442,17 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 			detail, err := GetJobDetail(ctx, baseURL, jobID)
 			if err != nil {
 				logger.Warningf("[SUMMARIZE] Failed to get job detail: %v", err)
+
 				continue
 			}
 
 			logger.Infof("[SUMMARIZE] Job %s status: %s", jobID, detail.Status)
 
-			switch detail.Status {
-			case JobStatusCompleted:
+			if detail.Status == JobStatusCompleted {
 				return detail, nil
-			case JobStatusFailed:
+			}
+
+			if detail.Status == JobStatusFailed {
 				errMsg := "unknown error"
 				if detail.Error != nil {
 					errMsg = *detail.Error
@@ -461,7 +483,7 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jo
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -494,7 +516,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
@@ -519,7 +541,7 @@ func DeleteAllJobs(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(GET_CALL_TIMEOUT)
+	client := getHTTPClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
@@ -572,52 +594,54 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, level, jobN
 
 // CreateJobWithTextExpectingError creates a job with text and returns error response if status is not 202.
 // Note: The API requires a file upload, so we create a temporary text file.
+//nolint:cyclop // Test helper function, complexity acceptable
 func CreateJobWithTextExpectingError(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*ErrorResponse, int, error) {
-	url := buildJobURL(baseURL, level, jobName, stream)
-
-	// Create a temporary text file with the content
-	tmpFile, err := os.CreateTemp("", "summarize-text-*.txt")
+	// Create temporary file
+	tmpFile, err := createTempTextFile(text)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create temp file: %w", err)
+		return nil, 0, err
 	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	defer func() {
+		_ = os.Remove(tmpFile) //nolint:errcheck // Cleanup, error not critical
+	}()
 
-	if _, err := tmpFile.WriteString(text); err != nil {
-		return nil, 0, fmt.Errorf("failed to write to temp file: %w", err)
-	}
+	// Use the file-based error creation
+	return CreateJobExpectingError(ctx, baseURL, tmpFile, level, jobName, stream)
+}
 
-	// Reopen file for reading
-	tmpFile.Close()
-	file, err := os.Open(tmpFile.Name())
+// createJobErrorRequest creates and sends a job creation request expecting an error.
+func createJobErrorRequest(ctx context.Context, url, filePath string) (*http.Response, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to open temp file: %w", err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close() //nolint:errcheck // Cleanup, error not critical
+	}()
 
-	// Create multipart form
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add file field
-	part, err := writer.CreateFormFile("file", "input.txt")
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create form file: %w", err)
+		return nil, fmt.Errorf("failed to create form file: %w", err)
 	}
 
 	if _, err := io.Copy(part, file); err != nil {
-		return nil, 0, fmt.Errorf("failed to copy file content: %w", err)
+		return nil, fmt.Errorf("failed to copy file content: %w", err)
 	}
 
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := getHTTPClient(POST_CALL_TIMEOUT)
+	client := getHTTPClient(postCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
