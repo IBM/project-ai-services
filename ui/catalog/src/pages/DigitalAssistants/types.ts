@@ -1,8 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
-import type {
-  PaginationMetadata,
-  DeploymentDetails,
-} from "@/types/digitalAssistants";
+import type { PaginationMetadata, DeploymentDetails } from "@/types/api.types";
 
 export interface DigitalAssistantRow {
   id: string;

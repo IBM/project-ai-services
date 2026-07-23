@@ -15,7 +15,7 @@ import {
   type ParsedField,
   type JSONSchema,
 } from "@/utils/schemaParser";
-import type { ProviderSchema } from "@/services/deployment.api";
+import type { ProviderSchema } from "@/types/api.types";
 import { parseMarkdownLinks } from "@/utils/string";
 import styles from "../ServicesDeployFlow.module.scss";
 

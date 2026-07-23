@@ -4,7 +4,7 @@ import {
   fetchServiceDeployOptions,
   fetchLLMOptionsWithModels,
   fetchComponentModelsWithSchemas,
-} from "@/services/deployment.api";
+} from "@/api/applications.api";
 
 /**
  * Custom hook to fetch and cache service deploy options, LLM models, and component models

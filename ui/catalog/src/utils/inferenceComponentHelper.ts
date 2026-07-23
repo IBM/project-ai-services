@@ -3,7 +3,10 @@
  * Inference components have multiple providers with model input parameters.
  */
 
-import type { Component, Provider } from "@/types/digitalAssistants";
+import type {
+  DeployOptionsComponent as Component,
+  Provider,
+} from "@/types/api.types";
 
 // Checks if provider schema expects model input
 function providerExpectsModelInput(provider: Provider): boolean {

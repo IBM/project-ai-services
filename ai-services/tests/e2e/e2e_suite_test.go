@@ -113,6 +113,60 @@ const (
 // jobStartDelay lets the service begin processing before asserting in-progress state.
 const jobStartDelay = 2 * time.Second
 
+// langIngestTimeout is the end-to-end budget for OCR + embedding + OpenSearch indexing of a language PDF.
+const langIngestTimeout = 20 * time.Minute //nolint:mnd
+
+// e2eTestsDir is the absolute path to ai-services/tests/e2e/, resolved once at compile time.
+// All test files in this package can use it instead of calling runtime.Caller themselves.
+var e2eTestsDir = func() string {
+	_, f, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	return filepath.Dir(f)
+}()
+
+// aiServicesBaseDir is the absolute path to the ai-services/ module root (parent of tests/e2e).
+var aiServicesBaseDir = filepath.Clean(filepath.Join(e2eTestsDir, "..", ".."))
+
+// resolveDigitizeBaseURL extracts the digitize-backend base URL from application info output.
+// For podman it polls until the URL is available (the service may still be starting).
+// For OpenShift it extracts the first URL from the output and rewrites the path segment.
+// logPrefix is used in log messages to identify the calling context (e.g. "[LANG]").
+func resolveDigitizeBaseURL(ctx context.Context, cfg *config.Config, logPrefix string) string {
+	infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	const pollInterval = 15 * time.Second
+
+	if appRuntime == "podman" {
+		for {
+			if url := cli.ExtractCatalogDigitizeURL(infoOutput); url != "" {
+				return url
+			}
+			if ctx.Err() != nil {
+				ginkgo.Fail(logPrefix + " timed out waiting for digitize-backend URL in 'application info' output")
+			}
+			logger.Infof("%s digitize-backend URL not yet present — retrying in %s", logPrefix, pollInterval)
+			select {
+			case <-ctx.Done():
+				ginkgo.Fail(logPrefix + " timed out waiting for digitize-backend URL in 'application info' output")
+			case <-time.After(pollInterval):
+			}
+			infoOutput, err = cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+			if err != nil {
+				logger.Warningf("%s application info error while polling for digitize URL: %v", logPrefix, err)
+			}
+		}
+	}
+
+	urlList := cli.ExtractURLsFromOutput(infoOutput)
+	if len(urlList) == 0 {
+		ginkgo.Fail(logPrefix + " no URLs extracted from application info output")
+	}
+	return strings.Replace(urlList[0], "ui", "digitize-api", 1)
+}
+
 var _ = ginkgo.BeforeSuite(func() {
 	logger.Infoln("[SETUP] Starting AI Services E2E setup")
 

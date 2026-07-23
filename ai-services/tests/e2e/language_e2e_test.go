@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -19,21 +18,15 @@ import (
 
 // getLanguageGoldenPath resolves the absolute path to a language golden dataset CSV.
 // envVar is the environment variable holding the bare filename (e.g. "german_golden.csv").
-// Returns an empty string when the env var is unset or the path cannot be resolved.
+// Returns an empty string when the env var is unset or aiServicesBaseDir was not resolved.
 func getLanguageGoldenPath(envVar string) string {
 	filename := os.Getenv(envVar)
-	if filename == "" {
+	if filename == "" || aiServicesBaseDir == "" {
 		return ""
 	}
 
-	_, callerFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
-
-	// Navigate from ai-services/tests/e2e/ up to the repo root (3 levels).
-	e2eDir := filepath.Dir(callerFile)
-	repoRoot := filepath.Clean(filepath.Join(e2eDir, "..", "..", ".."))
+	// Navigate from ai-services/ up one more level to the repo root.
+	repoRoot := filepath.Clean(filepath.Join(aiServicesBaseDir, ".."))
 
 	return filepath.Join(repoRoot, "test", "golden", filename)
 }
@@ -56,11 +49,22 @@ func runLanguageIngestTest(
 	}
 
 	ginkgo.By(fmt.Sprintf("ingesting %s.pdf via digitize microservice", language))
-	ingestCtx, ingestCancel := context.WithTimeout(specCtx, 20*time.Minute)
+	ingestCtx, ingestCancel := context.WithTimeout(specCtx, langIngestTimeout)
 	defer ingestCancel()
 
+	// Job name uses the first two chars of the language name as a locale hint (e.g. "ge" for "german").
+	// Use a fixed map so the suffix is always the correct ISO 639-1 code regardless of language stem length.
+	localeCode := map[string]string{
+		"german":  "de",
+		"french":  "fr",
+		"italian": "it",
+	}
+	code, ok := localeCode[language]
+	if !ok {
+		code = language[:2]
+	}
 	err := digitization.IngestLanguageDocumentViaDigitizeAPI(
-		ingestCtx, digitizeBaseURL, pdfPath, fmt.Sprintf("e2e-lang-%s-ingest", language[:2]),
+		ingestCtx, digitizeBaseURL, pdfPath, fmt.Sprintf("e2e-lang-%s-ingest", code),
 	)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
 		"[%s] %s PDF ingestion should complete successfully", tcID, language)
@@ -108,8 +112,11 @@ var _ = ginkgo.Describe("Language Support Tests",
 		var langDigitizeBaseURL string
 
 		// ------------------------------------------------------------------ //
-		// BeforeAll: resolve the digitize service URL, same pattern used by
-		// the existing Digitization Tests context in e2e_suite_test.go.
+		// BeforeAll: resolve the RAG and digitize service URLs.
+		// ragBaseURL is resolved locally so this suite can run standalone with
+		// --label-filter=language-tests (Application Creation It() is skipped).
+		// langDigitizeBaseURL delegates to resolveDigitizeBaseURL which owns the
+		// podman polling loop — no boilerplate duplicated here.
 		// ------------------------------------------------------------------ //
 		ginkgo.BeforeAll(func() {
 			if appName == "" {
@@ -121,46 +128,18 @@ var _ = ginkgo.Describe("Language Support Tests",
 			setupCtx, setupCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer setupCancel()
 
-			infoOutput, err := cli.WaitForApplicationInfoURLs(setupCtx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			// Always resolve ragBaseURL locally — when running with --label-filter=language-tests
-			// the Application Creation It() block is skipped, so the suite-level ragBaseURL is empty.
+			// Resolve ragBaseURL when running standalone — the suite-level Application
+			// Creation It() block is skipped, leaving ragBaseURL empty.
 			if ragBaseURL == "" {
+				infoOutput, err := cli.WaitForApplicationInfoURLs(setupCtx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred(),
 					"[LANG] could not resolve RAG backend URL from application info")
 				logger.Infof("[LANG] Resolved RAG Base URL: %s", ragBaseURL)
 			}
 
-			if appRuntime == "podman" {
-				const pollInterval = 15 * time.Second
-				for {
-					langDigitizeBaseURL = cli.ExtractCatalogDigitizeURL(infoOutput)
-					if langDigitizeBaseURL != "" {
-						break
-					}
-					if setupCtx.Err() != nil {
-						ginkgo.Fail("Timed out waiting for digitize-backend URL in 'application info' output")
-					}
-					logger.Infof("[LANG] digitize-backend URL not yet present — retrying in %s", pollInterval)
-					select {
-					case <-setupCtx.Done():
-						ginkgo.Fail("Timed out waiting for digitize-backend URL in 'application info' output")
-					case <-time.After(pollInterval):
-					}
-					infoOutput, err = cli.ApplicationInfo(setupCtx, cfg, appName, appRuntime)
-					if err != nil {
-						logger.Warningf("[LANG] application info error while polling for digitize URL: %v", err)
-					}
-				}
-			} else {
-				urlList := cli.ExtractURLsFromOutput(infoOutput)
-				if len(urlList) == 0 {
-					ginkgo.Fail("No URLs extracted from application info output")
-				}
-				langDigitizeBaseURL = urlList[0]
-			}
+			langDigitizeBaseURL = resolveDigitizeBaseURL(setupCtx, cfg, "[LANG]")
 
 			logger.Infof("[LANG] Digitize Base URL: %s", langDigitizeBaseURL)
 			logger.Infof("[LANG] RAG Base URL: %s", ragBaseURL)

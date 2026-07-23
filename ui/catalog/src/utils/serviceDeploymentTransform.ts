@@ -5,28 +5,11 @@ import type {
 import type {
   ServiceDeployOptions,
   ProviderSchema,
-} from "@/services/deployment.api";
-import { fetchProviderParams } from "@/services/deployment.api";
-
-interface DeploymentComponent {
-  component_type: string;
-  provider_id: string;
-  version: string;
-  params?: Record<string, unknown>;
-}
-
-interface DeploymentService {
-  catalog_id: string;
-  version: string;
-  components: DeploymentComponent[];
-}
-
-export interface DeploymentPayload {
-  name: string;
-  catalog_id: string;
-  version: string;
-  services: DeploymentService[];
-}
+  ServiceDeploymentPayload,
+  DeploymentComponent,
+  DeploymentService,
+} from "@/types/api.types";
+import { fetchProviderSchema } from "@/api/applications.api";
 
 /**
  * Extracts parameters with their defaults from a provider schema
@@ -40,13 +23,13 @@ async function getProviderSchemaParams(
   try {
     // Use cached schema if available
     const schema =
-      cachedSchema || (await fetchProviderParams(componentType, providerId));
+      cachedSchema || (await fetchProviderSchema(componentType, providerId));
     const params: Record<string, unknown> = {};
 
     // Extract all properties with default values from schema
     if (schema?.properties) {
       for (const [key, property] of Object.entries(schema.properties)) {
-        if (property.default !== undefined) {
+        if (property && property.default !== undefined) {
           params[key] = property.default;
         }
       }
@@ -142,7 +125,7 @@ export async function transformToDeploymentPayload(
   deployOptions: ServiceDeployOptions,
   cachedSchemas?: Record<string, ProviderSchema>,
   _serviceId?: string | null,
-): Promise<DeploymentPayload> {
+): Promise<ServiceDeploymentPayload> {
   const services: DeploymentService[] = [];
 
   // Collect all unique provider/component combinations to fetch in parallel
@@ -210,6 +193,7 @@ export async function transformToDeploymentPayload(
     name: formData.name,
     catalog_id: deployOptions.id,
     version: formData.version,
+    deployment_type: "service",
     services,
   };
 }
