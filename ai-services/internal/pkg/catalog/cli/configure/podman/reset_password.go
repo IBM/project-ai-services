@@ -29,7 +29,7 @@ func ResetCatalogPassword() error {
 	}
 
 	// Collect new catalog password
-	passwordHash, err := promptAndHashPassword()
+	passwordHash, err := catalogUtils.PromptAndHashPassword()
 	if err != nil {
 		// Terminate reset password process if failed to collect password
 

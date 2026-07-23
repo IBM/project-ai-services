@@ -1,4 +1,4 @@
 name: ai-services-catalog
 description: "Catalog Services for Project AI-Service"
 openshift:
-  timeout: 10m
+  timeout: 15m

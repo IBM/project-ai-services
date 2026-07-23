@@ -2,11 +2,12 @@ name: Services Unit Tests
 
 on:
   pull_request:
-    branches:
-      - main
     paths:
       - 'services/**'
       - '.github/workflows/service-unit-tests.yml'
+    branches:
+      - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
