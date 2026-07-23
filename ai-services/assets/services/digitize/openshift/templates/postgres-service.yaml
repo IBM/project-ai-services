@@ -1,10 +1,9 @@
-{{- if not (lookup "apps/v1" "StatefulSet" .Release.Namespace "postgres") -}}
 ---
 # Headless service for StatefulSet pod discovery
 apiVersion: v1
 kind: Service
 metadata:
-  name: "postgres-headless"
+  name: "digitize-db-headless"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -13,6 +12,7 @@ metadata:
 spec:
   clusterIP: None
   selector:
+    ai-services.io/service: {{ .Release.Name }}
     ai-services.io/component: database
   ports:
     - name: postgres-port
@@ -24,7 +24,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: "postgres"
+  name: "digitize-db"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -32,10 +32,10 @@ metadata:
     ai-services.io/component: database
 spec:
   selector:
+    ai-services.io/service: {{ .Release.Name }}
     ai-services.io/component: database
   ports:
     - name: postgres-port
       port: 5432
       targetPort: 5432
       protocol: TCP
-{{- end -}}

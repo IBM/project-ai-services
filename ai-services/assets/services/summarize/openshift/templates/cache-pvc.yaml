@@ -1,8 +1,7 @@
-{{- if not (lookup "v1" "PersistentVolumeClaim" .Release.Namespace "cache") -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: "cache"
+  name: "summarize-cache"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -15,4 +14,3 @@ spec:
   resources:
     requests:
       storage: "4Gi"
-{{- end -}}

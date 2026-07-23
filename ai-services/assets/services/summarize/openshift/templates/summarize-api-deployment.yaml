@@ -27,7 +27,7 @@ spec:
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
           env:
             - name: POSTGRES_HOST
-              value: "postgres"
+              value: "summarize-db"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
@@ -37,7 +37,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "postgres-credentials"
+                  name: "summarize-db-secret"
                   key: password
       containers:
         - name: summarize-api
@@ -57,7 +57,7 @@ spec:
             - "httptools"
           env:
             - name: POSTGRES_HOST
-              value: "postgres"
+              value: "summarize-db"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
@@ -67,7 +67,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "postgres-credentials"
+                  name: "summarize-db-secret"
                   key: password
             - name: DB_POOL_SIZE
               value: "5"
@@ -124,4 +124,4 @@ spec:
       volumes:
         - name: cache
           persistentVolumeClaim:
-            claimName: cache
+            claimName: summarize-cache

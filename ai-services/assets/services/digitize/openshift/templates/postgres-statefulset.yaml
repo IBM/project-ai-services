@@ -1,15 +1,14 @@
-{{- if not (lookup "apps/v1" "StatefulSet" .Release.Namespace "postgres") -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: "postgres"
+  name: "digitize-db"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/component: database
 spec:
-  serviceName: "postgres-headless"
+  serviceName: "digitize-db-headless"
   replicas: 1
   persistentVolumeClaimRetentionPolicy:
     whenScaled: Delete
@@ -35,7 +34,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "postgres-credentials"
+                  name: "digitize-db-secret"
                   key: password
             - name: POSTGRES_DB
               value: "postgres"
@@ -91,4 +90,3 @@ spec:
         resources:
           requests:
             storage: "{{ .Values.postgres.storage }}"
-{{- end -}}
