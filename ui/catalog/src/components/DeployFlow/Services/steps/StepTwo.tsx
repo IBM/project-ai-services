@@ -17,6 +17,7 @@ import type { StepProps, ServiceConfig } from "../types";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { DynamicSchemaFields } from "../components/DynamicSchemaFields";
 import { ServiceCredentialDisplay } from "../components/ServiceCredentialDisplay";
+import { getDisplayName } from "../../Shared/utils/displayHelpers";
 
 export const StepTwo: React.FC<StepProps> = ({
   title,
@@ -212,16 +213,6 @@ export const StepTwo: React.FC<StepProps> = ({
       isValid: Object.keys(errors).length === 0,
       errors,
     };
-  };
-
-  // Helper function to get display name from ID
-  const getDisplayName = (
-    value: string | undefined,
-    options: Array<{ id: string; text: string }>,
-  ): string => {
-    if (!value) return "";
-    const option = options.find((opt) => opt.id === value);
-    return option?.text || value;
   };
 
   // Helper function to get model description from provider schema

@@ -15,7 +15,8 @@ import type {
 } from "./types.ts";
 import { ACTION_TYPES } from "./types.ts";
 import { deployApplication } from "@/api/applications.api";
-import { transformToDeploymentPayload } from "@/utils/serviceDeploymentTransform.ts";
+import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform";
+import { extractDeployError } from "../Shared/utils/deployError";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { StepZero } from "./steps/StepZero";
@@ -371,21 +372,10 @@ export const ServicesDeployFlow = ({
       dispatch({ type: ACTION_TYPES.RESET_STATE });
       onClose();
     } catch (error: unknown) {
-      // Extract error message from server response format: {"error":"message"}
-      let errorMessage = "Failed to deploy application";
-
-      if (error && typeof error === "object" && "response" in error) {
-        const axiosError = error as {
-          response?: { data?: { error?: string } };
-        };
-        if (axiosError.response?.data?.error) {
-          errorMessage = axiosError.response.data.error;
-        }
-      } else if (error instanceof Error) {
-        errorMessage = error.message;
-      }
-
-      dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: errorMessage });
+      dispatch({
+        type: ACTION_TYPES.SET_DEPLOY_ERROR,
+        payload: extractDeployError(error),
+      });
     } finally {
       dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
     }

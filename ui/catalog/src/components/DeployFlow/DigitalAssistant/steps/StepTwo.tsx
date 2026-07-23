@@ -13,7 +13,7 @@ import {
   useBatchProviderParams,
   useMultiTypeProviderParams,
 } from "../hooks/useProviderParams";
-import { getResourceSharingKey } from "@/utils/resourceSharing";
+import { getResourceSharingKey } from "../utils/resourceSharing";
 import { useDeployStore } from "@/store/deploy.store";
 import type {
   ResourcesResponse,

@@ -15,7 +15,8 @@ import type {
 import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
 import { deployApplication, fetchServices } from "@/api/applications.api";
-import { transformToDeploymentPayload } from "@/utils/deploymentTransform";
+import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
+import { extractDeployError } from "../Shared/utils/deployError";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
@@ -267,32 +268,10 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
       dispatch({ type: ACTION_TYPES.RESET_STATE });
       onClose();
     } catch (error: unknown) {
-      let errorMessage = "Failed to deploy application";
-
-      if (error && typeof error === "object") {
-        const err = error as {
-          response?: {
-            data?: {
-              detail?: string;
-              message?: string;
-              error?: string;
-            };
-          };
-          message?: string;
-        };
-
-        if (err.response?.data?.detail) {
-          errorMessage = err.response.data.detail;
-        } else if (err.response?.data?.message) {
-          errorMessage = err.response.data.message;
-        } else if (err.response?.data?.error) {
-          errorMessage = err.response.data.error;
-        } else if (err.message) {
-          errorMessage = err.message;
-        }
-      }
-
-      dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: errorMessage });
+      dispatch({
+        type: ACTION_TYPES.SET_DEPLOY_ERROR,
+        payload: extractDeployError(error),
+      });
       dispatch({ type: ACTION_TYPES.SHOW_DEPLOY_TOAST });
       console.error("Deployment error:", error);
     } finally {

@@ -14,7 +14,7 @@ import type {
   ProviderSchema,
 } from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
-import { shouldIncludeParam } from "./paramFilter";
+import { shouldIncludeParam } from "@/utils/paramFilter";
 
 /**
  * Determines the component type (llm or reranker) that uses the inference backend
