@@ -2,15 +2,16 @@
 
 ## 1. Overview
 
-This document proposes the design and implementation of the **Translation** microservice for the AI-Services platform. The service converts text and documents between languages, enabling multilingual operations, and global user experiences.
+This document proposes the design and implementation of the **Translation** microservice for the AI-Services platform. The service converts text and plain-text documents between languages, enabling multilingual operations and global user experiences.
 
-At its core, the service accepts text or a document and a target language, and returns the fully translated content. The source language is **optional** — when omitted (or explicitly set to `"auto"`), the LLM detects the language automatically. For plain text, the call is synchronous and returns immediately. For files — including `.txt`, `.md`, `.pdf`, and `.docx` — the service operates asynchronously: the file is staged, PDF and DOCX inputs are forwarded to the existing **Digitize Documents** service to produce a clean markdown representation, and the resulting text is passed to the LLM for translation. The translated output for document inputs is returned as a markdown string, preserving all headings, lists, and tables from the original.
+At its core, the service accepts text or a plain-text file and a target language, and returns the fully translated content. The source language is **optional** — when omitted (or explicitly set to `"auto"`), the service first attempts language detection via the `lingua` library; if confidence is insufficient, the LLM detects it automatically. For plain text submitted inline, the call is synchronous and returns immediately. For `.txt` and `.md` files, the service operates asynchronously: the file is staged, read as UTF-8, and the text is passed to the LLM for translation. The translated output is returned as a string, preserving all headings, lists, and tables present in the original markdown.
 
-**Two design choices have been made for document inputs and are described in detail in Sections 2 and 3:**
-- **Translation strategy:** Chunk-wise translation — the digitized markdown is split into paragraph-boundary chunks and each chunk is translated in a separate LLM call.
-- **Output format:** Translated markdown plus a reconstructed output document — PDF for `.pdf` inputs, DOCX for `.docx` inputs — so that users receive a usable, shareable document, not just raw markdown.
+**One key design choice has been made for document inputs and is described in detail in Section 2:**
+- **Translation strategy:** Chunk-wise translation — the markdown is split into paragraph-boundary chunks and each chunk is translated in an independent LLM call, then reassembled using boundary-aware join logic.
 
-The service is a first-class member of the AI-Services platform and follows the same architectural patterns established by the digitize and summarize services:
+> **Scope note:** PDF and DOCX file inputs, the Digitize Documents service integration, and document reconstruction (PDF/DOCX output) are **not in scope for v1**. They are documented as future enhancements in §17.
+
+The service is a first-class member of the AI-Services platform and follows the same architectural patterns established by the summarize service:
 
 - FastAPI application running as a Python service in a Podman container (ppc64le / RHEL).
 - Semaphore-based concurrency limiting: a 4-slot job admission semaphore for async jobs, and a shared 32-slot semaphore in front of the vLLM inference endpoint.
@@ -20,28 +21,26 @@ The service is a first-class member of the AI-Services platform and follows the 
 
 Two execution paths are provided:
 
-| Path                    | Endpoint                   | Use case                                                                                                                                         |
-|:------------------------|:---------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Synchronous**         | `POST /v1/translate`       | Plain text submitted inline. Blocking call, immediate translated text result. Stateless — no job record created.                                 |
-| **Asynchronous (jobs)** | `POST /v1/translate/jobs`  | File uploads (`.txt`, `.md`, `.pdf`, `.docx`). PDF and DOCX files are digitized via the Digitize Documents REST API before translation. Returns a `job_id` for polling. |
+| Path                    | Endpoint                   | Use case                                                                                                                                   |
+|:------------------------|:---------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| **Synchronous**         | `POST /v1/translate`       | Plain text submitted inline. Blocking call, immediate translated text result. Stateless — no job record created.                           |
+| **Asynchronous (jobs)** | `POST /v1/translate/jobs`  | File uploads (`.txt` or `.md`). File is staged, read as UTF-8, chunked and translated. Returns a `job_id` for polling.                    |
 
 ### 1.1 Concept-to-Design Mapping
 
 | Concept diagram element                                           | Design realization                                                                                                                                                        |
 |:------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Input: text to be translated                                      | Sync `text` field; async worker reads staged file (txt/md) or fetches digitized markdown from the digitize service (pdf/docx)                                             |
+| Input: text to be translated                                      | Sync `text` field; async worker reads staged `.txt` / `.md` file as UTF-8                                                                                                |
 | Input: source language (e.g., "German")                          | `source_language` parameter — optional; defaults to `"auto"`. When `"auto"`, the service runs `detect_language()` from `common/lang_utils.py` (lingua) before the LLM call to resolve the actual language; falls back to LLM auto-detect if confidence is below threshold. When provided explicitly, validated against a fixed allowlist. |
 | Input: target language (e.g., "English")                         | `target_language` parameter — validated against a fixed allowlist; `"auto"` is not permitted                                                                              |
 | Config: Version (e.g., 1.0.0)                                    | Not managed by the service — API versioned via `/v1/` path prefix                                                                                                         |
 | Config: LLM (granite-3.3-8b-instruct, mistral-small-3.1-24b, …) | `MODEL_NAME` env var (service default)                                                                                                                                    |
 | Config (optional): custom model weights                          | `OPENAI_BASE_URL` env var pointing to the desired vLLM deployment                                                                                                        |
-| Output: text translated to the provided output language          | `data.translation` in the response — a translated string; for document inputs, a translated markdown string preserving all headings, lists, and tables                   |
-| Output: pointers to digitized input documents                    | `data.digitize_doc_id` for async pdf/docx jobs — a durable pointer to the cached `.md` file in the digitize service                                                      |
+| Output: text translated to the provided output language          | `data.translation` in the response — translated string; for `.md` file inputs, markdown structure (headings, lists, tables) is preserved                                 |
 | External dependency: inferencing endpoint                        | Existing vLLM endpoint (`OPENAI_BASE_URL`), shared semaphore (`MAX_CONCURRENT_REQUESTS=32`)                                                                               |
-| Supported document formats: TXT, PDF/DOCX via digitize           | `.txt`, `.md` files handled natively; `.pdf` and `.docx` delegated to the Digitize Documents service via HTTP                                                             |
-| Supported contents: texts and tables                             | Markdown tables from the digitize service are preserved structurally; the LLM prompt explicitly instructs cell/header translation while keeping `\| pipe \|` syntax intact |
-| Translation strategy for documents                               | Chunk-wise — markdown split on paragraph boundaries, each chunk translated in a separate LLM call, results concatenated (Section 2)                                       |
-| Output format for pdf/docx inputs                                | Translated markdown string + reconstructed output document: PDF (via `weasyprint`) for `.pdf` inputs, DOCX (via `python-docx`) for `.docx` inputs (Section 3)            |
+| Supported input formats                                          | Sync: plain text inline. Async: `.txt` and `.md` files (UTF-8)                                                                                                           |
+| Supported contents: texts and tables                             | GFM markdown tables in `.md` files are preserved structurally; the LLM prompt explicitly instructs cell/header translation while keeping `\| pipe \|` syntax intact       |
+| Translation strategy for async jobs                              | Chunk-wise — markdown split on paragraph boundaries, each chunk translated in an independent LLM call, results reassembled with `join_after`-aware logic (Section 2)     |
 | SLAs: throughput / latency                                       | Governed by concurrency limits and the context-window guard applied per chunk (Section 8); to be quantified during performance testing                                    |
 
 ---
@@ -129,7 +128,7 @@ After all chunk translations are returned, they are concatenated in the original
 
 ### 2.5 Handling Tables at Chunk Boundaries
 
-Markdown tables from the digitize service are emitted as contiguous `| pipe |` blocks. Tables must be treated as **atomic units** — a table is never split across two chunks:
+GFM markdown tables in `.md` files are emitted as contiguous `| pipe |` blocks. Tables must be treated as **atomic units** — a table is never split across two chunks:
 
 - During greedy packing, if a table block would overflow the current chunk budget, the current chunk is closed first, and the table starts a new chunk on its own.
 - If a table is larger than the entire chunk budget on its own, it occupies a chunk by itself and the budget is allowed to be exceeded for that chunk only — the alternative (splitting a table mid-row) would produce malformed markdown and an untranslatable fragment.
@@ -245,7 +244,7 @@ Der Vertrag wurde am 1. Januar unterzeichnet. Alle Parteien stimmten den Bedingu
 
 Die Zahlung ist vierteljährlich fällig. Streitigkeiten werden durch Schiedsverfahren beigelegt.
 ```
-❌ False paragraph break inserted mid-passage — incorrect structure in both the markdown result and the reconstructed PDF/DOCX.
+❌ False paragraph break inserted mid-passage — incorrect structure in the markdown result.
 
 ---
 
@@ -265,111 +264,20 @@ The `index` field ensures correct ordering after `asyncio.gather` regardless of 
 
 ---
 
-## 3. Design Decision — PDF and DOCX Reconstruction from Translated Markdown
+## 3. (Reserved for Future Scope)
 
-**Decision: when the input is a `.pdf` or `.docx` file, the service returns both the translated markdown string and a reconstructed output document alongside it.** `.pdf` inputs produce a reconstructed PDF; `.docx` inputs produce a reconstructed DOCX. Returning only markdown is not sufficient for a production document translation service. Users need a deliverable they can actually use.
-
-### 3.1 Why Reconstruction is Essential
-
-When a user uploads a contract, report, or invoice in German and asks for it in English, they expect to receive a document back — not a markdown file. The cases where markdown-only output is acceptable are narrow:
-
-- A developer integrating the API into their own pipeline.
-- A downstream service that will render or re-format the content itself.
-
-For the majority of real-world use cases, markdown is an intermediate representation that the user cannot use directly:
-
-- **Non-technical users cannot open or read `.md` files.** A translated contract delivered as raw markdown is useless to a lawyer, procurement officer, or business user.
-- **PDF is the universal document interchange format.** Contracts, invoices, regulatory filings, and reports are circulated as PDFs. Returning a translated PDF closes the loop — users can print, sign, share, or archive the output.
-- **DOCX is the expected format for editable documents.** When the input is a `.docx`, the user needs an editable output — a Word document they can revise, reformat, and share. A reconstructed DOCX preserves editability; a PDF does not.
-- **The quality bar is "usable", not "identical".** Users understand that a translated document will not have the exact same fonts, images, or pixel layout as the original. What they need is: all translated text present, correct structure (headings, paragraphs, tables), and a usable file. This is achievable.
-
-### 3.2 Reconstruction Strategy
-
-Two reconstruction pipelines run depending on input type:
-
-**PDF inputs — markdown → HTML → PDF via `weasyprint`:**
-
-```
-translated_markdown  (string, output of chunk concatenation)
-        │
-        ▼
-   markdown → HTML          (Python's stdlib `markdown` module)
-        │   Apply a minimal CSS stylesheet: sensible font, page margins,
-        │   table borders, heading sizes, code blocks
-        ▼
-   HTML → PDF               (via weasyprint — pure Python, no binary dependency)
-        │
-        ▼
-  /var/cache/translate/results/{job_id}_translated.pdf
-```
-
-**DOCX inputs — markdown → DOCX via `python-docx`:**
-
-```
-translated_markdown  (string, output of chunk concatenation)
-        │
-        ▼
-   Parse markdown blocks      (headings, paragraphs, tables, lists, bold/italic)
-        │
-        ▼
-   Build DOCX document        (via python-docx — add_heading, add_paragraph,
-        │                      add_table; apply basic styles for headings and body)
-        ▼
-  /var/cache/translate/results/{job_id}_translated.docx
-```
-
-**Why `weasyprint` for PDF:**
-- Pure Python, installable via `pip` on ppc64le / RHEL — no binary compilation or system packages beyond fonts.
-- Renders HTML+CSS to PDF with correct heading hierarchy, paragraph flow, and table borders.
-- A single `requirements.txt` entry; no extra container layer complexity.
-
-**Why `python-docx` for DOCX:**
-- The standard Python library for creating and modifying `.docx` files; pure Python, available on ppc64le / RHEL via `pip`.
-- Produces a structurally clean DOCX with headings at the correct level, paragraph text, and tables — fully editable in Word or LibreOffice.
-- Output fidelity is "usable" — original fonts, images, and column widths from the source DOCX are not preserved, but all translated text and structure are present.
-
-**Note on existing packages:** `pdfplumber` and `pypdfium2` are already used in this project for **reading and parsing** PDFs — they are not suitable for writing output documents. `weasyprint` and `python-docx` fill the write path for PDF and DOCX respectively.
-
-### 3.3 Reconstruction is Non-Blocking
-
-Reconstruction runs as a post-translation step inside the background worker. It does **not** block the job's `completed` status:
-
-- If reconstruction succeeds → the relevant availability flag is set (`pdf_available = true` or `docx_available = true`) and the file is stored.
-- If reconstruction fails (exception, OOM, font issue, malformed markdown) → the flag is set to `false`, failure logged and recorded in `job_metadata.reconstruction.error`, job still marked `completed`. The translated markdown is always present and is the authoritative output.
-
-This means reconstruction failures are **non-fatal** — they degrade the output gracefully without losing the translation.
-
-### 3.4 Expected Limitations
-
-These limitations are known and accepted for v1. They do not prevent the output from being useful:
-
-| Limitation | Applies to | Impact | Acceptable? |
-|:---|:---|:---|:---|
-| Original fonts not preserved | PDF + DOCX | PDF uses generic serif/sans-serif; DOCX uses Normal/Heading styles | ✅ Yes — content is correct |
-| Images, watermarks, logos not included | PDF + DOCX | Visual branding absent | ✅ Yes — text content is complete |
-| Precise column widths not reproduced | PDF + DOCX | Tables may be slightly wider/narrower | ✅ Yes — table data is correct |
-| Complex multi-column layouts rendered as single-column | PDF | Some reports use two-column format | ⚠️ Acceptable for v1; noted for improvement |
-| Page breaks may differ from original | PDF | Page numbers will not match | ✅ Yes — expected for translated content |
-| Right-to-left languages need CSS / DOCX style addition | PDF + DOCX | Arabic, Hebrew output may render LTR | ⚠️ Not in v1 language scope; handled when RTL languages are added |
-| Inline markdown not fully parsed (e.g., nested lists) | DOCX | Complex nested lists rendered as flat paragraphs | ⚠️ Acceptable for v1 |
-
-### 3.5 Output Behaviour
-
-- For **`.txt` / `.md`** inputs: no reconstruction is attempted. `pdf_available` and `docx_available` are both `null` in the result.
-- For **`.pdf`** inputs: PDF reconstruction is attempted. `docx_available` is `null`.
-- For **`.docx`** inputs: DOCX reconstruction is attempted. `pdf_available` is `null`.
-- In all cases, the `translation` markdown string is always present and is the primary output.
+PDF and DOCX input support, Digitize Documents service integration, and output document reconstruction (PDF via `weasyprint`, DOCX via `python-docx`) are not in scope for v1. See §17 Future Enhancements for the full design.
 
 ---
 
 ## 4. Non-Goals
 
-- **Horizontal scaling:** Like the digitize and summarize services, this service is architected for single-replica deployment. Multi-replica deployments introduce contention on the vLLM inference engine and are out of scope.
+- **Horizontal scaling:** This service is architected for single-replica deployment. Multi-replica deployments introduce contention on the vLLM inference engine and are out of scope.
 - **UI:** No user interface is included in this document. The service is API-only.
 - **Multi-file jobs:** Each async job processes exactly one file. Clients submit one job per file.
 - **Multi-language batch translation:** Each job targets a single `target_language`. Clients submit one job per target language.
-- **Pixel-perfect PDF reconstruction:** The PDF reconstruction design (Section 3) targets usable best-effort output, not layout-identical reproduction of the original PDF. Preserving original fonts, images, watermarks, or precise column widths is out of scope.
-- **Document conversion / OCR:** The service does not implement PDF or DOCX parsing. All non-plaintext formats are delegated to the Digitize Documents service over its REST API.
+- **PDF and DOCX input:** Binary document formats are not accepted in v1. Only plain-text `.txt` and `.md` files are accepted for async jobs. PDF and DOCX support is deferred to a future release (§17).
+- **Document reconstruction output:** The service returns a translated text/markdown string only. Reconstructed PDF or DOCX output files are not produced in v1 (§17).
 - **Sync auditing:** Synchronous translation requests are stateless — no job record is created and no result is persisted. Auditability of sync calls is a Future Enhancement.
 - **Embedding model:** No embedding model is used in this service. Translation is a direct LLM inference task — there is no semantic search, retrieval, or vector storage involved. An embedding model would only be relevant for translation quality checking (e.g., measuring semantic similarity between source and translated text), which is out of scope for v1.
 
@@ -386,10 +294,6 @@ graph LR
         W["Background Worker"]
     end
 
-    subgraph P2 ["Digitize Documents Service (port 4000)"]
-        DIG["/v1/jobs<br/>/v1/documents"]
-    end
-
     PG[("PostgreSQL<br/>translate_metadata")]
     FS[("/var/cache/translate<br/>staging + results")]
     VLLM["External vLLM<br/>endpoint (OpenAI APIs)"]
@@ -399,7 +303,6 @@ graph LR
     API -->|"translation / job_id"| U
     API <--> PG
     API --> W
-    W <--> DIG
     W <--> VLLM
     API <--> VLLM
     W <--> FS
@@ -408,26 +311,25 @@ graph LR
 
 **Key interactions:**
 
-- The **sync path** never touches the digitize service or the jobs table. It validates languages, tokenizes, guards the context window, calls vLLM at `temperature=0.0`, and returns the translated text immediately.
-- The **async worker** orchestrates: stage file → (pdf/docx only) digitize via REST → fetch `.md` content → context-window guard → translate → persist result → update DB.
-- Both paths share the global vLLM connection semaphore (Section 10).
-- The service is exposed externally on **port 9000** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
-- **Standalone mode (no Digitize service):** The translation service is designed to run independently of the Digitize service. When the Digitize service is not deployed, the sync path (`POST /v1/translate`) remains fully functional. The async job path (`POST /v1/translate/jobs`) is available for `.txt` and `.md` file uploads, which do not require digitization. Jobs submitted with `.pdf` or `.docx` files will fail at the digitize step with a clear error (`DIGITIZE_UNAVAILABLE`) — no other functionality is affected. The presence or absence of the Digitize service is detected at job execution time, not at startup.
+- The **sync path** is stateless — it validates languages, runs the context-window guard, calls vLLM at `temperature=0.0`, and returns the translated text immediately. No DB write, no staging.
+- The **async worker** orchestrates: stage file → read UTF-8 text → lingua detection → chunk → context-window guard → translate (concurrent `asyncio.gather`) → `join_after`-aware assembly → write result → update DB.
+- Both paths share the global vLLM connection semaphore (§9).
+- The service is exposed externally on **port 9000** (configurable).
+- The service has **no external service dependencies** beyond the vLLM endpoint and PostgreSQL.
 
 ---
 
 ## 6. Endpoints
 
-| Method     | Endpoint                                     | Description                                                                        |
-|:-----------|:---------------------------------------------|:-----------------------------------------------------------------------------------|
-| **POST**   | `/v1/translate`                              | Synchronous translation of inline plain text. Immediate result.                    |
-| **POST**   | `/v1/translate/jobs`                         | Submit a file (`.txt`/`.md`/`.pdf`/`.docx`) for async translation. Returns `job_id`. |
-| **GET**    | `/v1/translate/jobs`                         | List translation jobs with pagination and status filter.                            |
-| **GET**    | `/v1/translate/jobs/{job_id}`                | Get detailed status and metadata of a specific job.                                |
-| **GET**    | `/v1/translate/jobs/{job_id}/result`         | Retrieve the translation result (JSON) as a sub-resource of the job.              |
-| **GET**    | `/v1/translate/jobs/{job_id}/result/pdf`     | Download the reconstructed PDF. Only available when `pdf_available == true`.      |
-| **GET**    | `/v1/translate/jobs/{job_id}/result/docx`    | Download the reconstructed DOCX. Only available when `docx_available == true`.    |
-| **GET**    | `/health`                                    | Service health check.                                                              |
+| Method     | Endpoint                                              | Description                                                                        |
+|:-----------|:------------------------------------------------------|:-----------------------------------------------------------------------------------|
+| **POST**   | `/v1/translate`                                       | Synchronous translation of inline plain text. Immediate result.                    |
+| **POST**   | `/v1/translate/jobs`                                  | Submit a `.txt` or `.md` file for async translation. Returns `job_id`.             |
+| **GET**    | `/v1/translate/jobs`                                  | List translation jobs with pagination and status filter.                            |
+| **GET**    | `/v1/translate/jobs/{job_id}`                         | Get detailed status and metadata of a specific job.                                |
+| **GET**    | `/v1/translate/jobs/{job_id}/result`                  | Retrieve the full translation result as JSON (translation string + metadata + usage). |
+| **GET**    | `/v1/translate/jobs/{job_id}/result/download`         | Download the translated content as a `.txt` or `.md` file (matches input extension). |
+| **GET**    | `/health`                                             | Service health check.                                                              |
 
 ---
 
@@ -572,18 +474,18 @@ curl -X POST http://localhost:9000/v1/translate \
 
 | Parameter         | Type   | Required | Description                                                                                                                         |
 |:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------|
-| `file`            | file   | Yes      | Exactly one `.txt`, `.md`, `.pdf`, or `.docx` file.                                                                                 |
-| `source_language` | string | No       | Source language name. Omit or pass `"auto"` to let the LLM detect the language automatically. Default: `"auto"`.                   |
+| `file`            | file   | Yes      | Exactly one `.txt` or `.md` file (UTF-8 encoded).                                                                                   |
+| `source_language` | string | No       | Source language name. Omit or pass `"auto"` to let the service detect the language automatically. Default: `"auto"`.               |
 | `target_language` | string | Yes      | Target language name. Must not be `"auto"`.                                                                                         |
 | `job_name`        | string | No       | Optional human-readable label for the job.                                                                                          |
 
 **Validation rules:**
 
 - Exactly one file per request.
-- Extension must be `.txt`, `.md`, `.pdf`, or `.docx`.
+- Extension must be `.txt` or `.md`. Other file types (`.pdf`, `.docx`, `.xlsx`, etc.) are rejected with `415 UNSUPPORTED_FILE_TYPE`.
 - If `source_language` is omitted, it defaults to `"auto"`. If provided, it must be in the allowlist or `"auto"`.
 - `target_language` is required and must be in the allowlist; `"auto"` is not permitted.
-- No word/page limit enforced at submission — the context-window guard runs after text extraction, when the true token count is known.
+- No size limit enforced at submission — the context-window guard runs during chunking, when the true token count is known.
 
 **Processing flow (request thread):**
 
@@ -597,22 +499,15 @@ curl -X POST http://localhost:9000/v1/translate \
 
 **Background worker:**
 
-1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (pdf/docx) or `'chunking'` (txt/md).
-2. **PDF/DOCX path:** submit to digitize via `httpx.AsyncClient` — `POST {DIGITIZE_BASE_URL}/v1/jobs` with `output_format=md`. Store `digitize_job_id`. Poll `GET /v1/jobs/{digitize_job_id}` every `DIGITIZE_POLL_INTERVAL_SECS` (default 3) until `completed`/`failed` or `DIGITIZE_JOB_TIMEOUT_SECS` (default 300) is reached. On `429` from digitize, apply exponential backoff (§9.4). Fetch markdown via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id`.
-   **TXT/MD path:** read the staged file directly (UTF-8 decode).
-3. **Run lingua detection** on the full text (up to 500 chars sampled) to resolve `source_language` if `"auto"` (§10.2). Update `metadata.phase='chunking'`.
+1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='chunking'`.
+2. Read the staged file as UTF-8 text.
+3. **Run lingua detection** on the full text (up to 500 chars sampled) to resolve `source_language` if `"auto"` (§10.2).
 4. **Chunk the text** (§2.3): split on `\n\n` boundaries into blocks; greedily pack blocks into `TranslationChunk` objects, calling `tokenize_with_llm(block)` per block (token count cached). Close current chunk when `running_tokens + block_tokens > CHUNK_TOKEN_BUDGET`. Apply sentence-level fallback for blocks that exceed the budget alone. Treat table blocks as atomic (§2.5). Each chunk carries `index`, `text`, and `join_after` (`"paragraph"` or `"sentence"`) (§2.6). **Run the context-window guard on each chunk** (§8.2): if `chunk_tokens + PROMPT_OVERHEAD_TOKENS > MAX_MODEL_LEN - MIN_OUTPUT_TOKENS` for any chunk → abort immediately with `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`. Store `chunk_count` and `chunk_token_budget` in `metadata.chunking`.
 5. Update `metadata.phase='translating'`. Dispatch all chunks concurrently via `asyncio.gather` (§9.3): each chunk runs as an `asyncio.Task` that acquires `chunk_semaphore` then `concurrency_limiter`, builds the two-message prompt (`system` + `user`) with resolved `source_language`, `target_language`, and `chunk.text`, and calls `query_vllm_translate` at `temperature=0.0` with `chunk_max_tokens` computed from the context-window budget (§8.2). If any chunk task fails, all sibling tasks are cancelled and the job fails.
 6. **Assemble** translated chunks using `join_after`-aware concatenation (§2.6): `"\n\n"` between block-boundary chunks, `" "` between sentence-fallback chunks → `translated_markdown` string.
-7. **Reconstruct output document** (pdf/docx input only). Update `metadata.phase='reconstructing'`.
-   - **PDF input:** `translated_markdown` → HTML → PDF via `weasyprint`. Write `results/{job_id}_translated.pdf`. Set `pdf_available=true/false`.
-   - **DOCX input:** `translated_markdown` → DOCX via `python-docx`. Write `results/{job_id}_translated.docx`. Set `docx_available=true/false`.
-   - Reconstruction failure is non-fatal (§3.3): log warning, set flag to `false`, continue. Store result in `metadata.reconstruction`.
-8. Write `/var/cache/translate/results/{job_id}_result.json`.
-9. Update row → `status='completed'`, `completed_at=now()` (or `status='failed'` + `error` on any hard failure).
-10. Delete `/var/cache/translate/staging/{job_id}/`; release `job_limiter`.
-
-> **Digitize lifecycle note:** the digitized document remains in the digitize service's cache after translation, keyed by `digitize_doc_id`. Users manage its lifecycle through the digitize service's own `DELETE /v1/documents/{id}`. The translate service does not delete upstream artifacts.
+7. Write `/var/cache/translate/results/{job_id}_result.json`.
+8. Update row → `status='completed'`, `completed_at=now()` (or `status='failed'` + `error` on any hard failure).
+9. Delete `/var/cache/translate/staging/{job_id}/`; release `job_limiter`.
 
 **Response codes:**
 
@@ -620,7 +515,7 @@ curl -X POST http://localhost:9000/v1/translate \
 |:---|:---|
 | 202 Accepted | Job created. |
 | 400 Bad Request | Missing file, missing `target_language`, invalid language value, or `target_language == "auto"`. |
-| 415 Unsupported Media Type | Not a valid `.txt`, `.md`, `.pdf`, or `.docx`. |
+| 415 Unsupported Media Type | Not a valid `.txt` or `.md` file. |
 | 429 Too Many Requests | Job concurrency at capacity. |
 | 500 Internal Server Error | Unexpected failure. |
 
@@ -629,14 +524,14 @@ curl -X POST http://localhost:9000/v1/translate \
 ```bash
 # With explicit source language
 curl -X POST http://localhost:9000/v1/translate/jobs \
-  -F "file=@bericht_q3.pdf" \
+  -F "file=@bericht_q3.md" \
   -F "source_language=German" \
   -F "target_language=English" \
   -F "job_name=Q3 Quarterly Report"
 
 # Without source language — auto-detection (default)
 curl -X POST http://localhost:9000/v1/translate/jobs \
-  -F "file=@bericht_q3.pdf" \
+  -F "file=@bericht_q3.md" \
   -F "target_language=English" \
   -F "job_name=Q3 Quarterly Report"
 ```
@@ -679,8 +574,8 @@ curl -X POST http://localhost:9000/v1/translate/jobs \
             "status": "completed",
             "source_language": "german",
             "target_language": "english",
-            "input_type": "pdf",
-            "document_name": "bericht_q3.pdf",
+            "input_type": "md",
+            "document_name": "bericht_q3.md",
             "submitted_at": "2025-10-15T09:00:00Z",
             "completed_at": "2025-10-15T09:00:42Z"
         }
@@ -698,25 +593,23 @@ curl -X POST http://localhost:9000/v1/translate/jobs \
 | 404 Not Found | No job with this ID. |
 | 500 Internal Server Error | Database failure. |
 
-**Sample response (200, in progress — PDF job being digitized):**
+**Sample response (200, in progress — MD job being chunked/translated):**
 
 ```json
 {
     "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "job_name": "Q3 Quarterly Report",
     "status": "in_progress",
-    "source_language": "german",
+    "source_language": "auto",
     "target_language": "english",
-    "input_type": "pdf",
-    "document_name": "bericht_q3.pdf",
+    "input_type": "md",
+    "document_name": "bericht_q3.md",
     "document_word_count": null,
-    "digitize_job_id": "bb11cc22-dd33-ee44-ff55-001122334455",
-    "digitize_doc_id": null,
     "submitted_at": "2025-10-15T09:00:00Z",
     "completed_at": null,
     "error": null,
     "job_metadata": {
-        "phase": "digitizing"
+        "phase": "translating"
     }
 }
 ```
@@ -730,11 +623,9 @@ curl -X POST http://localhost:9000/v1/translate/jobs \
     "status": "completed",
     "source_language": "german",
     "target_language": "english",
-    "input_type": "pdf",
-    "document_name": "bericht_q3.pdf",
+    "input_type": "md",
+    "document_name": "bericht_q3.md",
     "document_word_count": 1820,
-    "digitize_job_id": "bb11cc22-dd33-ee44-ff55-001122334455",
-    "digitize_doc_id": "dd33ee44-ff55-0011-2233-445566778899",
     "submitted_at": "2025-10-15T09:00:00Z",
     "completed_at": "2025-10-15T09:00:42Z",
     "error": null,
@@ -745,8 +636,12 @@ curl -X POST http://localhost:9000/v1/translate/jobs \
         "model": "ibm-granite/granite-3.3-8b-instruct",
         "processing_time_ms": 8200,
         "timing_in_secs": {
-            "digitizing": 28.4,
+            "chunking": 0.3,
             "translating": 8.2
+        },
+        "chunking": {
+            "chunk_count": 7,
+            "chunk_token_budget": 4096
         }
     }
 }
@@ -766,7 +661,7 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
 | 410 Gone | Job has `status='failed'`. Error details are on the job resource. |
 | 500 Internal Server Error | Failure reading result file. |
 
-**Sample response (200 — PDF job, with successful PDF reconstruction):**
+**Sample response (200 — MD job, completed):**
 
 ```json
 {
@@ -777,94 +672,14 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
         "target_language": "english",
         "original_word_count": 1820,
         "translated_word_count": 1793,
-        "input_type": "pdf",
-        "document_name": "bericht_q3.pdf",
-        "digitize_doc_id": "dd33ee44-ff55-0011-2233-445566778899",
-        "pdf_available": true,
-        "pdf_download_url": "/v1/translate/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/result/pdf",
-        "docx_available": null,
-        "docx_download_url": null
+        "input_type": "md",
+        "document_name": "bericht_q3.md"
     },
     "meta": {
         "model": "ibm-granite/granite-3.3-8b-instruct",
         "processing_time_ms": 8200,
         "timing_in_secs": {
-            "digitizing": 28.4,
-            "chunking": 0.2,
-            "translating": 8.2,
-            "reconstruction": 1.3
-        }
-    },
-    "usage": {
-        "input_tokens": 2430,
-        "output_tokens": 2190,
-        "total_tokens": 4620
-    }
-}
-```
-
-**Sample response (200 — DOCX job, with successful DOCX reconstruction):**
-
-```json
-{
-    "job_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-    "data": {
-        "translation": "# Service Agreement\n\nThis agreement is entered into...",
-        "source_language": "german",
-        "target_language": "english",
-        "original_word_count": 950,
-        "translated_word_count": 931,
-        "input_type": "docx",
-        "document_name": "vertrag.docx",
-        "digitize_doc_id": "ee44ff55-0011-2233-4455-667788990011",
-        "pdf_available": null,
-        "pdf_download_url": null,
-        "docx_available": true,
-        "docx_download_url": "/v1/translate/jobs/b2c3d4e5-f6a7-8901-bcde-f12345678901/result/docx"
-    },
-    "meta": {
-        "model": "ibm-granite/granite-3.3-8b-instruct",
-        "processing_time_ms": 5100,
-        "timing_in_secs": {
-            "digitizing": 12.1,
-            "chunking": 0.1,
-            "translating": 4.8,
-            "reconstruction": 0.4
-        }
-    },
-    "usage": {
-        "input_tokens": 1210,
-        "output_tokens": 1187,
-        "total_tokens": 2397
-    }
-}
-```
-
-**Sample response (200 — PDF job, reconstruction failed gracefully):**
-
-```json
-{
-    "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "data": {
-        "translation": "# Q3 2024 Report\n\n...",
-        "source_language": "german",
-        "target_language": "english",
-        "original_word_count": 1820,
-        "translated_word_count": 1793,
-        "input_type": "pdf",
-        "document_name": "bericht_q3.pdf",
-        "digitize_doc_id": "dd33ee44-ff55-0011-2233-445566778899",
-        "pdf_available": false,
-        "pdf_download_url": null,
-        "docx_available": null,
-        "docx_download_url": null
-    },
-    "meta": {
-        "model": "ibm-granite/granite-3.3-8b-instruct",
-        "processing_time_ms": 8200,
-        "timing_in_secs": {
-            "digitizing": 28.4,
-            "chunking": 0.2,
+            "chunking": 0.3,
             "translating": 8.2
         }
     },
@@ -902,63 +717,43 @@ Only available when `status == "completed"`. Returns `409` if still running, `41
 
 ---
 
-### 7.6 GET /v1/translate/jobs/{job_id}/result/pdf — Download Reconstructed PDF
+### 7.6 GET /v1/translate/jobs/{job_id}/result/download — Download Translated File
 
-Only available when `pdf_available == true` on the job result. Returns the reconstructed PDF as a binary file download.
+Download the translated content as a plain-text file. The file extension and MIME type match the original uploaded file (`.txt` → `text/plain`, `.md` → `text/markdown`). The `Content-Disposition` header causes browsers and HTTP clients to save the file rather than display it.
+
+This endpoint reads the `data.translation` string from the already-persisted `{job_id}_result.json` file — **no additional file is stored on disk**. It is a streaming convenience wrapper over the same data exposed by the JSON `/result` endpoint.
+
+Same preconditions as `/result`:
 
 | Status | Description |
 |:---|:---|
-| 200 OK | PDF file returned as `application/pdf`. |
-| 404 Not Found | No job with this ID, or job is not yet complete. |
+| 200 OK | Translated file download. |
+| 404 Not Found | No job with this ID. |
 | 409 Conflict | Job is still `accepted` or `in_progress`. |
-| 410 Gone | Job failed, or `pdf_available == false` (reconstruction was skipped or errored). |
-
-**Response headers (200):**
-
-```
-Content-Type: application/pdf
-Content-Disposition: attachment; filename="translated_bericht_q3.pdf"
-```
-
-The response body is the raw PDF bytes. The filename in `Content-Disposition` is derived from the original uploaded filename prefixed with `translated_`.
+| 410 Gone | Job has `status='failed'`. |
+| 500 Internal Server Error | Failure reading result file. |
 
 **Sample request:**
 
 ```bash
-curl -O -J http://localhost:9000/v1/translate/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/result/pdf
+curl -OJ http://localhost:9000/v1/translate/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/result/download
+# saves: bericht_q3_translated.md
 ```
+
+**Response headers (200 — MD job):**
+
+```
+Content-Type: text/markdown; charset=utf-8
+Content-Disposition: attachment; filename="bericht_q3_translated.md"
+```
+
+**Response body:** the raw translated markdown string (same value as `data.translation` in the JSON result).
+
+> **Design note:** The download filename is derived from the original `document_name` stored in the job record. For a job submitted with `bericht_q3.md`, the download filename is `bericht_q3_translated.md`. The extension is taken from `input_type` (`txt` → `.txt`, `md` → `.md`).
 
 ---
 
-### 7.7 GET /v1/translate/jobs/{job_id}/result/docx — Download Reconstructed DOCX
-
-Only available when `docx_available == true` on the job result. Returns the reconstructed DOCX as a binary file download.
-
-| Status | Description |
-|:---|:---|
-| 200 OK | DOCX file returned as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`. |
-| 404 Not Found | No job with this ID, or job is not yet complete. |
-| 409 Conflict | Job is still `accepted` or `in_progress`. |
-| 410 Gone | Job failed, or `docx_available == false` (reconstruction was skipped or errored). |
-
-**Response headers (200):**
-
-```
-Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
-Content-Disposition: attachment; filename="translated_vertrag.docx"
-```
-
-The response body is the raw DOCX bytes. The filename in `Content-Disposition` is derived from the original uploaded filename prefixed with `translated_`.
-
-**Sample request:**
-
-```bash
-curl -O -J http://localhost:9000/v1/translate/jobs/b2c3d4e5-f6a7-8901-bcde-f12345678901/result/docx
-```
-
----
-
-### 7.8 GET /health — Health Check
+### 7.7 GET /health — Health Check
 
 | Status | Description |
 |:---|:---|
@@ -1192,15 +987,7 @@ for i, (chunk, translation, in_tok, out_tok) in enumerate(results):
 translated_markdown = "".join(parts)
 ```
 
-This is the value stored in `result.json` as `data.translation` and passed to the reconstruction step (§3).
-
-### 9.4 Digitize Service Backpressure
-
-The digitize service applies its own semaphore and may return `429` when saturated. The translate worker handles this:
-
-- Exponential backoff on `429`: 5s, 10s, 20s (capped), up to `DIGITIZE_JOB_TIMEOUT_SECS` (default 300).
-- If the timeout is exhausted, the job fails with `DIGITIZE_TIMEOUT`.
-- Digitize `5xx` responses fail the job immediately with `DIGITIZE_FAILED` carrying the error payload.
+This is the value stored in `result.json` as `data.translation`.
 
 ---
 
@@ -1282,34 +1069,18 @@ sequenceDiagram
     participant PG as PostgreSQL (translate_metadata)
     participant FS as /var/cache/translate
     participant Worker as Background Worker
-    participant DIG as Digitize Service (:4000)
     participant vLLM as vLLM Endpoint
 
     User->>API: POST /v1/translate/jobs (file, source_language, target_language)
-    Note over API: Validate file ext, languages, job_limiter capacity
+    Note over API: Validate file ext (.txt or .md), languages, job_limiter capacity
     API->>FS: Stage file to staging/{job_id}/
     API->>PG: INSERT translate_jobs (status: accepted)
     API->>Worker: BackgroundTask(job_id)
     API-->>User: 202 Accepted {job_id}
 
     activate Worker
-
-    alt File is PDF or DOCX
-        Worker->>PG: status=in_progress, phase=digitizing
-        Worker->>DIG: POST /v1/jobs (output_format=md)
-        Note over Worker,DIG: 429 -> exponential backoff and resubmit
-        DIG-->>Worker: 202 {digitize_job_id}
-        loop Poll until terminal state
-            Worker->>DIG: GET /v1/jobs/{digitize_job_id}
-            DIG-->>Worker: status
-        end
-        Worker->>DIG: GET /v1/documents/{doc_id}/content
-        DIG-->>Worker: Digitized markdown text
-        Worker->>PG: store digitize_job_id, digitize_doc_id
-    else File is TXT or MD
-        Worker->>PG: status=in_progress, phase=chunking
-        Worker->>FS: Read staged file (UTF-8)
-    end
+    Worker->>PG: status=in_progress, phase=chunking
+    Worker->>FS: Read staged file (UTF-8)
 
     Worker->>PG: phase=chunking
     Note over Worker: Lingua detection - resolve source_language if auto
@@ -1336,20 +1107,6 @@ sequenceDiagram
         end
         Note over Worker: Assemble using join_after - paragraph boundary or sentence boundary
 
-        alt Input was PDF
-            Worker->>PG: phase=reconstructing
-            Worker->>Worker: translated markdown -> HTML -> PDF via weasyprint
-            Worker->>FS: Write results/{job_id}_translated.pdf
-            Note over Worker: Reconstruction failure is non-fatal - log and continue
-            Worker->>PG: update pdf_available=true/false
-        else Input was DOCX
-            Worker->>PG: phase=reconstructing
-            Worker->>Worker: translated markdown -> DOCX via python-docx
-            Worker->>FS: Write results/{job_id}_translated.docx
-            Note over Worker: Reconstruction failure is non-fatal - log and continue
-            Worker->>PG: update docx_available=true/false
-        end
-
         Worker->>FS: Write results/{job_id}_result.json
         Worker->>PG: status=completed, completed_at=now()
     end
@@ -1375,11 +1132,9 @@ File-based storage is retained only for:
 /var/cache/translate/
 ├── staging/
 │   └── {job_id}/
-│       └── bericht_q3.pdf
+│       └── bericht_q3.md
 └── results/
-    ├── {job_id}_result.json
-    ├── {job_id}_translated.pdf       ← reconstructed PDF (pdf input only; present when pdf_available=true)
-    └── {job_id}_translated.docx      ← reconstructed DOCX (docx input only; present when docx_available=true)
+    └── {job_id}_result.json
 ```
 
 Sync requests (`POST /v1/translate`) are **stateless** — nothing is persisted. If auditability of sync translations becomes a requirement, it is a Future Enhancement.
@@ -1401,17 +1156,9 @@ class TranslateJob(Base):
     target_language = Column(String(100), nullable=False)   # e.g. "english"
 
     # Input document info
-    input_type          = Column(String(20), nullable=False)    # "text" | "txt" | "md" | "pdf" | "docx"
+    input_type          = Column(String(20), nullable=False)    # "text" | "txt" | "md"
     document_name       = Column(String(500), nullable=True)    # original filename; NULL for sync text
     document_word_count = Column(Integer, nullable=True)        # populated during processing
-
-    # Digitize service pointers (pdf/docx path only)
-    digitize_job_id = Column(String(255), nullable=True)
-    digitize_doc_id = Column(String(255), nullable=True)
-
-    # Document reconstruction flags (each applies only to its input type; NULL = not applicable)
-    pdf_available  = Column(Boolean, nullable=True)   # True=reconstructed, False=attempted+failed, NULL=not applicable
-    docx_available = Column(Boolean, nullable=True)   # True=reconstructed, False=attempted+failed, NULL=not applicable
 
     # Job lifecycle
     status       = Column(String(50), nullable=False)
@@ -1419,7 +1166,7 @@ class TranslateJob(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     error        = Column(Text, nullable=True)
 
-    # Phase, token diagnostics, timings, pdf reconstruction status
+    # Phase, token diagnostics, timings
     job_metadata = Column(JSONB, nullable=True)
 
     updated_at = Column(DateTime(timezone=True),
@@ -1432,7 +1179,7 @@ class TranslateJob(Base):
             name='chk_translate_job_status'
         ),
         CheckConstraint(
-            "input_type IN ('text','txt','md','pdf','docx')",
+            "input_type IN ('text','txt','md')",
             name='chk_translate_input_type'
         ),
         Index('idx_translate_jobs_submitted_at_status', 'submitted_at', 'status'),
@@ -1445,26 +1192,18 @@ Populated progressively as the job advances through phases:
 
 ```json
 {
-    "phase": "digitizing | chunking | translating | reconstructing | completed | failed",
+    "phase": "chunking | translating | completed | failed",
     "input_tokens": 2430,
     "output_tokens": 2190,
     "model": "ibm-granite/granite-3.3-8b-instruct",
     "processing_time_ms": 8200,
     "timing_in_secs": {
-        "digitizing": 28.4,
         "chunking": 0.3,
-        "translating": 8.2,
-        "reconstruction": 1.3
+        "translating": 8.2
     },
     "chunking": {
         "chunk_count": 7,
         "chunk_token_budget": 4096
-    },
-    "reconstruction": {
-        "type": "pdf",
-        "attempted": true,
-        "succeeded": true,
-        "error": null
     },
     "token_diagnostics": {
         "max_model_len": 32768,
@@ -1478,7 +1217,6 @@ Populated progressively as the job advances through phases:
 ```
 
 - `chunking` is populated on all async jobs after the chunking step completes. `chunk_count` is the number of chunks the document was split into; `chunk_token_budget` is the configured value at the time of the job, useful for debugging and reproducing results without checking service config. `timing_in_secs.chunking` records the wall time spent running lingua detection and the greedy packing loop.
-- `reconstruction` is populated for `.pdf` and `.docx` input jobs only. `type` is `"pdf"` or `"docx"` indicating which pipeline ran. `succeeded: false` with a non-null `error` means reconstruction was attempted but failed — the job still completes successfully with the relevant flag set to `false`.
 - `token_diagnostics` is populated only when `CONTEXT_LIMIT_EXCEEDED`.
 
 #### 12.2.3 Index Strategy
@@ -1505,10 +1243,6 @@ CREATE TABLE IF NOT EXISTS translate_jobs (
     input_type          VARCHAR(20) NOT NULL,
     document_name       VARCHAR(500),
     document_word_count INTEGER,
-    digitize_job_id     VARCHAR(255),
-    digitize_doc_id     VARCHAR(255),
-    pdf_available       BOOLEAN,
-    docx_available      BOOLEAN,
     status              VARCHAR(50) NOT NULL,
     submitted_at        TIMESTAMP WITH TIME ZONE NOT NULL,
     completed_at        TIMESTAMP WITH TIME ZONE,
@@ -1518,7 +1252,7 @@ CREATE TABLE IF NOT EXISTS translate_jobs (
     CONSTRAINT chk_translate_job_status
         CHECK (status IN ('accepted','in_progress','completed','failed')),
     CONSTRAINT chk_translate_input_type
-        CHECK (input_type IN ('text','txt','md','pdf','docx'))
+        CHECK (input_type IN ('text','txt','md'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_translate_jobs_submitted_at_status
@@ -1541,8 +1275,6 @@ $$ language 'plpgsql';
 | `translate_jobs` row | `POST /v1/translate/jobs` (status `accepted`) | Worker updates status/phase/metadata/timestamps | Not exposed via API currently — Future Enhancement |
 | Staging file | `POST /v1/translate/jobs` | — | Worker deletes after job completes or fails |
 | Result JSON file | Worker writes on success | — | Not exposed via API currently — Future Enhancement |
-| Reconstructed PDF file | Worker writes after translation (pdf/docx only) | — | Co-deleted with result JSON — Future Enhancement |
-| Digitized doc (digitize service) | Worker-triggered digitization | — | Owned by digitize service; user-managed via its `DELETE /v1/documents/{id}` |
 
 ---
 
@@ -1561,9 +1293,6 @@ $$ language 'plpgsql';
 | `MAX_CONCURRENT_JOBS` | Async job admission semaphore | `4` |
 | `CHUNK_PARALLELISM` | Max number of chunks translated concurrently within a single job (§9.3). Each concurrent chunk holds one `concurrency_limiter` slot. Set to a fraction of `MAX_CONCURRENT_REQUESTS` so a single large job cannot monopolise the vLLM semaphore. | `4` |
 | `SUPPORTED_LANGUAGES` | Comma-separated allowlist of active language names | `english,german` (initial v1 scope; `french,italian` pending test coverage) |
-| `DIGITIZE_BASE_URL` | Digitize service endpoint | `http://digitize:4000` |
-| `DIGITIZE_POLL_INTERVAL_SECS` | Poll interval for digitize job status | `3` |
-| `DIGITIZE_JOB_TIMEOUT_SECS` | Max wait for a digitize job before failing | `300` |
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (`translate_metadata`) | — |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy connection pool | `5` / `5` |
 
@@ -1577,7 +1306,6 @@ Adapted from the digitize and summarize pattern for PostgreSQL:
 2. **Identify zombies:** any such row is a zombie — no worker can be handling it after a restart.
 3. **Mark as failed:** update to `status='failed'`, `error='System restarted during processing'`, `completed_at=now()`. Transactional, so the scan and update are atomic with respect to newly submitted jobs.
 4. **Cleanup:** delete corresponding `/var/cache/translate/staging/{job_id}/` directories.
-5. **Upstream orphans:** if a zombie job had submitted a digitization that is still running in the digitize service, that digitize job completes (or fails) independently and its output remains in the digitize cache. The stored `digitize_job_id` lets the user locate and optionally clean it via the digitize API.
 
 ---
 
@@ -1596,28 +1324,23 @@ Adapted from the digitize and summarize pattern for PostgreSQL:
 | vLLM semaphore exhausted | 32 slots busy | 429 `RATE_LIMIT_EXCEEDED` |
 | Async TXT job | `.txt` + languages | 202; completes without digitize call |
 | Async MD job | `.md` + languages | 202; read as plain text, no digitize call |
-| Async PDF job | `.pdf` + languages | 202; digitize invoked; `digitize_doc_id` in result |
-| Async DOCX job | `.docx` + languages | 202; digitize invoked; `digitize_doc_id` in result |
-| Invalid file type | `.xlsx` upload | 415 `UNSUPPORTED_FILE_TYPE` |
+| Invalid file type | `.pdf`, `.docx`, `.xlsx` upload | 415 `UNSUPPORTED_FILE_TYPE` |
 | Job semaphore exhausted | 4 jobs already running | 429 `RATE_LIMIT_EXCEEDED` |
-| Async over-limit PDF | Digitized text exceeds context | Job `failed`, `CONTEXT_LIMIT_EXCEEDED`, diagnostics in `job_metadata` |
-| Job progress phases | Poll during PDF job | `phase` transitions `digitizing` → `chunking` → `translating` → `reconstructing` → `completed` |
+| Async over-limit file | File text exceeds context | Job `failed`, `CONTEXT_LIMIT_EXCEEDED`, diagnostics in `job_metadata` |
+| Job progress phases | Poll during MD job | `phase` transitions `chunking` → `translating` → `completed` |
 | Get result, in progress | Active `job_id` | 409 `JOB_NOT_COMPLETE` |
 | Get result, completed | Completed `job_id` | 200 with translation + timings + usage |
 | Get result, failed | Failed `job_id` | 410 `JOB_FAILED` with error message |
 | Get result, not found | Unknown `job_id` | 404 `RESOURCE_NOT_FOUND` |
+| Download result, completed TXT job | Completed `.txt` job_id | 200 file download, `Content-Type: text/plain`, filename `*_translated.txt` |
+| Download result, completed MD job | Completed `.md` job_id | 200 file download, `Content-Type: text/markdown`, filename `*_translated.md` |
+| Download result, in progress | Active `job_id` | 409 `JOB_NOT_COMPLETE` |
+| Download result, failed | Failed `job_id` | 410 `JOB_FAILED` |
+| Download result, not found | Unknown `job_id` | 404 `RESOURCE_NOT_FOUND` |
 | Job listing by status | `?status=completed` | 200, only matching jobs returned |
 | Job listing, pagination | `?limit=5&offset=10` | 200, correct page slice |
-| Digitize service saturated | Digitize returns 429 repeatedly | Worker backs off; fails `DIGITIZE_TIMEOUT` past budget |
-| Digitize job fails | Corrupt PDF | Translate job `failed` with `DIGITIZE_FAILED` + error payload |
 | Recovery after crash | Kill container mid-translation | On restart, zombie marked `failed`, staging cleaned |
-| Markdown table preservation | PDF with tables | Translated `.md` output contains translated `\| pipe \|` tables |
-| PDF reconstruction — success | PDF input, `weasyprint` available | `pdf_available=true`, `pdf_download_url` non-null in result |
-| PDF reconstruction — graceful failure | PDF input, `weasyprint` raises exception | `pdf_available=false`, job still `completed`, `job_metadata.reconstruction.succeeded=false` |
-| PDF reconstruction — not attempted | `.txt` / `.md` input | `pdf_available=null`, no PDF file written |
-| PDF reconstruction timing | PDF input | `timing_in_secs.reconstruction` present in result `meta` |
-| DOCX reconstruction — success | DOCX input, `python-docx` available | `docx_available=true`, `docx_download_url` non-null in result |
-| DOCX reconstruction — graceful failure | DOCX input, `python-docx` raises exception | `docx_available=false`, job still `completed`, `job_metadata.reconstruction.succeeded=false` |
+| Markdown table preservation | MD file with GFM tables | Translated `.md` output contains translated `\| pipe \|` tables |
 
 ---
 
@@ -1636,7 +1359,7 @@ services/translate/
 ├── db_operations.py                # create_job_with_db() helper
 ├── api/
 │   └── v1/
-│       └── jobs.py                 # GET /jobs, GET /jobs/{id}, GET /jobs/{id}/result
+│       └── jobs.py                 # GET /jobs, GET /jobs/{id}, GET /jobs/{id}/result, GET /jobs/{id}/result/download
 ├── db/
 │   ├── __init__.py
 │   ├── connection.py               # SQLAlchemy engine + session + check_db_connection
@@ -1651,6 +1374,7 @@ services/translate/
         ├── test_app_endpoints.py
         ├── test_job_endpoints.py
         ├── test_translate_utils.py
+        ├── test_chunk_utils.py
         └── test_recovery_scan.py
 ```
 
@@ -1658,10 +1382,49 @@ services/translate/
 
 ## 17. Future Enhancements
 
-1. **Improved PDF fidelity:** if `weasyprint` reconstruction fidelity proves insufficient for specific document types (e.g., heavy multi-column layouts), the markdown → HTML step can be tuned with a richer CSS stylesheet without replacing the library. The pipeline step is isolated — stylesheet improvements do not require API or schema changes.
-2. **Improved PDF fidelity for multi-column layouts:** if `weasyprint` reconstruction fidelity proves insufficient for heavy multi-column documents, the markdown → HTML step can be tuned with a richer CSS stylesheet without replacing the library.
-3. **Sync request auditing:** optional persistence of sync translation requests and results for compliance or caching use cases.
-4. **Language auto-detection result surfacing:** when `source_language == "auto"`, parse the detected language from the LLM response and return it in `data.detected_source_language` for observability.
-5. **Model override per request:** allow callers to specify `model` in the request body, validated against a `SUPPORTED_MODELS` allowlist, enabling per-request selection of a higher-quality model for critical translations.
-6. **Glossary / term pinning:** allow users to supply a `glossary` of term pairs (`{"Vertrag": "contract"}`) alongside the request, injected into the prompt to enforce domain-specific translations.
-7. **Confidence / quality scoring:** a secondary lightweight LLM pass that scores the translation quality and surfaces a `quality_score` alongside the result.
+### v1 Enhancements (no scope change)
+
+1. **Sync request auditing:** optional persistence of sync translation requests and results for compliance or caching use cases.
+2. **Language auto-detection result surfacing:** when `source_language == "auto"`, expose the resolved language name in `data.detected_source_language` so callers always know what was detected.
+3. **Model override per request:** allow callers to specify `model` in the request body, validated against a `SUPPORTED_MODELS` allowlist, enabling per-request selection of a higher-quality model for critical translations.
+4. **Glossary / term pinning:** allow users to supply a `glossary` of term pairs (`{"Vertrag": "contract"}`) alongside the request, injected into the prompt to enforce domain-specific translations.
+5. **Confidence / quality scoring:** a secondary lightweight LLM pass that scores the translation quality and surfaces a `quality_score` alongside the result.
+
+### PDF and DOCX support (future release)
+
+The following features were designed in detail during v1 planning but deferred to a future release. The design decisions, rationale, and technical approach are documented in the original §2–§3 design notes preserved below.
+
+**6. PDF input support via the Digitize Documents service**
+
+- Accept `.pdf` files on `POST /v1/translate/jobs`
+- Forward to the existing **Digitize Documents** service (`POST {DIGITIZE_BASE_URL}/v1/jobs`, `output_format=md`) to extract clean markdown
+- Poll digitize job status; fetch markdown via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id` in the job record
+- Handle digitize `429` responses with exponential backoff; fail job with `DIGITIZE_TIMEOUT` / `DIGITIZE_FAILED` on error
+- Introduce `DIGITIZE_BASE_URL`, `DIGITIZE_POLL_INTERVAL_SECS`, `DIGITIZE_JOB_TIMEOUT_SECS` configuration env vars
+- Add `digitize_job_id` and `digitize_doc_id` columns to `translate_jobs` and to the job detail response
+- Add `digitizing` phase to the `job_metadata.phase` enum and `timing_in_secs`
+
+**7. DOCX input support via the Digitize Documents service**
+
+- Same pipeline as PDF — digitize service handles DOCX extraction to markdown
+- No additional service dependencies beyond what PDF support introduces
+
+**8. PDF output reconstruction**
+
+- After translation, convert the translated markdown → HTML → PDF using `weasyprint` (pure Python, ppc64le/RHEL compatible)
+- Expose via `GET /v1/translate/jobs/{job_id}/result/pdf` (`application/pdf` download)
+- Add `pdf_available` (boolean) to the job result; store reconstructed file at `results/{job_id}_translated.pdf`
+- Reconstruction is non-fatal: if `weasyprint` fails, job still completes with `pdf_available=false`
+- Add `reconstruction` object to `job_metadata` JSONB: `{ type, attempted, succeeded, error }`
+
+**9. DOCX output reconstruction**
+
+- After translation, convert translated markdown → DOCX using `python-docx` (pure Python, ppc64le/RHEL compatible)
+- Expose via `GET /v1/translate/jobs/{job_id}/result/docx`
+- Add `docx_available` (boolean) to the job result; store at `results/{job_id}_translated.docx`
+- Same non-fatal semantics as PDF reconstruction
+- Known v1 limitation: nested lists rendered as flat paragraphs; original fonts/images not preserved
+
+**10. Improved PDF reconstruction fidelity**
+
+- If `weasyprint` output quality is insufficient for multi-column or heavily styled documents, tune the markdown → HTML CSS stylesheet without replacing the library or changing the API
