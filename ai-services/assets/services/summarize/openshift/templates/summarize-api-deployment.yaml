@@ -46,7 +46,7 @@ spec:
             - "/var/venv/bin/python"
             - "-m"
             - "uvicorn"
-            - "summarize.app:app"
+            - "app:app"
             - "--host"
             - "0.0.0.0"
             - "--port"
@@ -118,3 +118,10 @@ spec:
             limits:
               cpu: {{ .Values.summarize.resources.limits.cpu | quote }}
               memory: {{ .Values.summarize.resources.limits.memory | quote }}
+          volumeMounts:
+            - mountPath: /var/cache
+              name: cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: cache
