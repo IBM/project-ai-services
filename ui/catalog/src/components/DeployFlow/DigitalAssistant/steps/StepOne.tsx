@@ -28,15 +28,17 @@ export const StepOne: React.FC<StepProps> = ({
 
   // Fetch provider parameters for all component types in a single hook call,
   // respecting Rules of Hooks (no hooks inside loops or callbacks)
-  const {
-    paramsByType,
-    errorsByType,
-  } = useMultiTypeProviderParams(providerIdsByType);
+  const { paramsByType, errorsByType } =
+    useMultiTypeProviderParams(providerIdsByType);
 
   const providerParamsByType = useMemo(() => {
     const result: Record<
       string,
-      { paramsMap: Record<string, import("@/types/api.types").ProviderSchema>; isLoading: boolean; errors: Record<string, string> }
+      {
+        paramsMap: Record<string, import("@/types/api.types").ProviderSchema>;
+        isLoading: boolean;
+        errors: Record<string, string>;
+      }
     > = {};
     Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
       result[componentType] = {

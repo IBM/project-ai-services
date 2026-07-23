@@ -300,4 +300,3 @@ export const StepOne: React.FC<StepProps> = ({
     </>
   );
 };
-

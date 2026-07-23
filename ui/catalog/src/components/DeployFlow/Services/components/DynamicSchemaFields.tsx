@@ -217,4 +217,3 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     </>
   );
 };
-

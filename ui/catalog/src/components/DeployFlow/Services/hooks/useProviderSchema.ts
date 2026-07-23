@@ -23,4 +23,3 @@ export const useProviderSchema = (
   const schema = getProviderSchema(serviceId, componentType, providerId);
   return { schema };
 };
-

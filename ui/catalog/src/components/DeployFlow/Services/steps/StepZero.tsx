@@ -88,4 +88,3 @@ export const StepZero: React.FC<StepZeroProps> = ({
     </>
   );
 };
-
