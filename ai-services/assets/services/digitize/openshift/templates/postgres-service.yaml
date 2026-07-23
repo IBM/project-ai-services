@@ -1,3 +1,4 @@
+{{- if not (lookup "apps/v1" "StatefulSet" .Release.Namespace "postgres") -}}
 ---
 # Headless service for StatefulSet pod discovery
 apiVersion: v1
@@ -12,7 +13,6 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    ai-services.io/service: {{ .Release.Name }}
     ai-services.io/component: database
   ports:
     - name: postgres-port
@@ -32,10 +32,10 @@ metadata:
     ai-services.io/component: database
 spec:
   selector:
-    ai-services.io/service: {{ .Release.Name }}
     ai-services.io/component: database
   ports:
     - name: postgres-port
       port: 5432
       targetPort: 5432
       protocol: TCP
+{{- end -}}
