@@ -68,7 +68,7 @@ The `table/` directory contains everything both tables import from:
 
 - **`table.shared.module.scss`** — Contains styles that are duplicated across both table implementations, including toast notifications, status tags, menu styling, and shared table presentation. Table-specific styles remain within their respective modules.
 
-- **`reducerUtils.ts`** — Provides handleSharedTableAction<S extends BaseTableState>(state, action): S | undefined, which owns the reducer logic for all shared table actions. Each table reducer composes it with its own reducer, handling table-specific actions and falling through to the shared reducer for common actions. This centralizes shared reducer behavior in a single action union and handler, replacing duplicated reducer cases across both tables.
+- **`reducerUtils.ts`** — Provides handleSharedTableAction`<S extends BaseTableState>`(state, action): S | undefined, which owns the reducer logic for all shared table actions. Each table reducer composes it with its own reducer, handling table-specific actions and falling through to the shared reducer for common actions. This centralizes shared reducer behavior in a single action union and handler, replacing duplicated reducer cases across both tables.
 
 - **`tableUtils.ts`** — Three utility functions: `filterRowsBySearch(rows, search, fields)` (both tables filter rows by joining field values and lowercasing — the only difference is which fields are included, which becomes a parameter), `getVisibleHeaders(headers, visibleColumns)` (identical in both files ), and `getToggleableHeaders(headers)`.
 
