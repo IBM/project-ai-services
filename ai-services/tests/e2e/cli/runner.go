@@ -14,11 +14,24 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
+)
+
+// Catalog service ID and endpoint type constants used to look up URLs via the catalog API.
+// These match the catalog_id values in the service metadata YAML files and the route
+// type field written to the database by the podman deployer.
+const (
+	catalogSvcChat       = "chat"
+	catalogSvcDigitize   = "digitize"
+	catalogSvcSimilarity = "similarity"
+	endpointTypeAPI      = "api"
+	endpointTypeUI       = "ui"
 )
 
 // Service name substrings used to identify catalog URLs in 'application info' output.
@@ -223,6 +236,71 @@ func CreateRAGAppAndValidate(
 	return output, nil
 }
 
+// AppEndpoints holds the service endpoint URLs resolved from the catalog API.
+// Keys are catalog service IDs (e.g. "chat", "digitize", "similarity").
+// Values are maps of endpoint type → URL (e.g. "api" → "https://...").
+type AppEndpoints map[string]map[string]string
+
+// ChatBackendURL returns the chat service API (backend) URL.
+func (e AppEndpoints) ChatBackendURL() string { return e[catalogSvcChat][endpointTypeAPI] }
+
+// ChatUIURL returns the chat service UI URL.
+func (e AppEndpoints) ChatUIURL() string { return e[catalogSvcChat][endpointTypeUI] }
+
+// DigitizeURL returns the digitize service API (backend) URL.
+func (e AppEndpoints) DigitizeURL() string { return e[catalogSvcDigitize][endpointTypeAPI] }
+
+// SimilarityURL returns the similarity service API URL.
+func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][endpointTypeAPI] }
+
+// CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
+func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
+	appClient, err := client.NewApplicationClient()
+	if err != nil {
+		return nil, fmt.Errorf("catalog client init: %w", err)
+	}
+
+	list, err := appClient.ListApplications(nil)
+	if err != nil {
+		return nil, fmt.Errorf("list applications: %w", err)
+	}
+
+	for _, app := range list.Data {
+		if app.Name == appName {
+			return buildAppEndpoints(app.Services), nil
+		}
+	}
+
+	return nil, fmt.Errorf("application %q not found via catalog API", appName)
+}
+
+// buildAppEndpoints converts a service list into an AppEndpoints map.
+func buildAppEndpoints(services []types.ApplicationService) AppEndpoints {
+	eps := make(AppEndpoints)
+	for _, svc := range services {
+		svcEps := collectEndpoints(svc.Endpoints)
+		if len(svcEps) > 0 {
+			eps[svc.CatalogID] = svcEps
+		}
+	}
+
+	return eps
+}
+
+// collectEndpoints extracts type→URL pairs from an endpoint list.
+func collectEndpoints(endpoints []map[string]any) map[string]string {
+	result := make(map[string]string)
+	for _, ep := range endpoints {
+		epType, _ := ep["type"].(string)
+		epURL, _ := ep["url"].(string)
+		if epType != "" && epURL != "" {
+			result[epType] = epURL
+		}
+	}
+
+	return result
+}
+
 // getRAGURLs returns backend and UI URLs for a deployed RAG application.
 // For podman, URLs come from 'application info'; for openshift from the create output.
 func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
@@ -381,8 +459,10 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
 	deadline := time.Now().Add(maxWait)
 	attempt := 0
+
 	for time.Now().Before(deadline) {
 		attempt++
+
 		infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
 		if infoErr != nil {
 			logger.Warningf("[WAIT] application info attempt %d failed: %v — retrying", attempt, infoErr)
@@ -390,6 +470,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 
 			continue
 		}
+
 		if appRuntime == "podman" {
 			backendURL, _ := extractCatalogRAGURLs(infoOutput)
 			similarityURL := ExtractSimilarityAPIURL(infoOutput)
@@ -404,9 +485,11 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 				return infoOutput, nil
 			}
 		}
+
 		logger.Infof("[WAIT] application info attempt %d: URLs not yet present (pods may still be starting), retrying in %s", attempt, pollInterval)
 		time.Sleep(pollInterval)
 	}
+
 	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
 
 	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
@@ -689,28 +772,27 @@ func CatalogInfo(ctx context.Context, cfg *config.Config, appRuntime string) (st
 	return runCLI(ctx, cfg, "catalog info", "catalog", "info", "--runtime", appRuntime)
 }
 
-// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
-func ExtractCatalogBackendURL(infoOutput string) string {
-	const backendMarker = "Catalog Backend API is available at "
-	for _, line := range strings.Split(infoOutput, "\n") {
+// extractMarkerURL scans output line-by-line for marker and returns the trimmed text after it.
+func extractMarkerURL(output, marker string) string {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if idx := strings.Index(line, backendMarker); idx >= 0 {
-			return strings.TrimSpace(line[idx+len(backendMarker):])
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(marker):]), " .,")
 		}
 	}
 
 	return ""
 }
 
+// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
+func ExtractCatalogBackendURL(infoOutput string) string {
+	return extractMarkerURL(infoOutput, "Catalog Backend API is available at ")
+}
+
 // ExtractCatalogBackendURLFromConfigureOutput extracts the Catalog Backend URL from 'catalog configure' output.
 func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string {
-	const backendMarker = "Access the Catalog Backend at "
-	for _, line := range strings.Split(configureOutput, "\n") {
-		line = strings.TrimSpace(line)
-		idx := strings.Index(line, backendMarker)
-		if idx >= 0 {
-			return strings.TrimRight(strings.TrimSpace(line[idx+len(backendMarker):]), " .,")
-		}
+	if u := extractMarkerURL(configureOutput, "Access the Catalog Backend at "); u != "" {
+		return u
 	}
 
 	return ExtractCatalogBackendURL(configureOutput)
@@ -840,4 +922,41 @@ func ExtractURLsFromOutput(output string) []string {
 	}
 
 	return urls
+}
+
+// CatalogApiServerHelp runs 'catalog apiserver --help' and returns the output.
+// The real apiserver requires a live database; we only verify its help text in e2e.
+func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog apiserver help", "catalog", "apiserver", "--help", "--runtime", appRuntime)
+}
+
+// CatalogHashpw runs 'catalog hashpw --stdin' with the provided password piped via stdin.
+func CatalogHashpw(ctx context.Context, cfg *config.Config, password, appRuntime string) (string, error) {
+	args := []string{"catalog", "hashpw", "--stdin", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString(password + "\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return output, fmt.Errorf("catalog hashpw failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogWhoami runs 'catalog whoami' and returns the combined output.
+func CatalogWhoami(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog whoami", "catalog", "whoami", "--runtime", appRuntime)
+}
+
+// CatalogLogout runs 'catalog logout' and returns the combined output.
+func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout", "--runtime", appRuntime)
+}
+
+// CatalogDbMigrateHelp runs 'catalog dbmigrate --help' and returns the output.
+// The full dbmigrate subcommands require a live database; we verify help text in e2e.
+func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
+	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
 }

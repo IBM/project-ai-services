@@ -276,30 +276,52 @@ func GetDigitizeBaseURL(port string) string {
 }
 
 // HealthCheck performs a health check on the digitize service.
+const healthCheckRetryInterval = 10 * time.Second //nolint:mnd
+
+// HealthCheck polls baseURL/health until HTTP 200 is returned or ctx is cancelled.
 func HealthCheck(ctx context.Context, baseURL string) error {
-	url := fmt.Sprintf("%s/health", baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
+	healthURL := fmt.Sprintf("%s/health", baseURL)
 	client := getHTTPClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("health check request failed: %w", err)
+	attempt := 0
+
+	for {
+		attempt++
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create health check request: %w", err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Warningf("[DIGITIZE] Health check attempt %d failed: %v — retrying in %s",
+				attempt, err, healthCheckRetryInterval)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("health check request failed: %w", err)
+			case <-time.After(healthCheckRetryInterval):
+				continue
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			drainAndClose(resp.Body)
+			logger.Warningf("[DIGITIZE] Health check attempt %d: status %d — retrying in %s",
+				attempt, resp.StatusCode, healthCheckRetryInterval)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
+			case <-time.After(healthCheckRetryInterval):
+				continue
+			}
+		}
+
+		drainAndClose(resp.Body)
+		logger.Infof("[DIGITIZE] Health check passed (attempt %d)", attempt)
+
+		return nil
 	}
-	defer drainAndClose(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	logger.Infof("[DIGITIZE] Health check passed")
-
-	return nil
 }
 
 // buildJobURL constructs the job creation URL with query parameters.

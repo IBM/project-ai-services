@@ -277,8 +277,8 @@ func ValidateStartAppOutputOpenshift(output string) (err error) {
 	return nil
 }
 
-// ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
-func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
+// scanCmdOutput iterates command output lines, calling fn(podName, status) for each data row.
+func scanCmdOutput(psOutput string, fn func(podName, status string) error) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -292,17 +292,25 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 		if len(parts) < 2 { //nolint:mnd
 			continue
 		}
-		podName := parts[len(parts)-2]
-		status := parts[len(parts)-1]
 
-		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
-			return fmt.Errorf(
-				"main pod %s not in Exited state for app %s (got: %s)",
-				podName,
-				appName,
-				status,
-			)
+		if err := fn(parts[len(parts)-2], parts[len(parts)-1]); err != nil {
+			return err
 		}
+	}
+
+	return nil
+}
+
+// ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
+func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
+		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
+			return fmt.Errorf("main pod %s not in Exited state for app %s (got: %s)", podName, appName, status)
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logger.Infof("[TEST] Main pods are in Exited state")
@@ -310,8 +318,7 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 	return nil
 }
 
-// ValidateDeleteAppOutput validates the application delete command output.
-// Success is determined by exit code and absence of pods, not specific phrases.
+// ValidateDeleteAppOutput validates the delete command output (success determined by exit code).
 func ValidateDeleteAppOutput(_, _ string) error {
 	return nil
 }
@@ -469,26 +476,14 @@ func isMainPod(pod string, appRuntime string) bool {
 
 // ValidatePodsRunningAfterStart checks that the main pods are running after application start.
 func ValidatePodsRunningAfterStart(psOutput, appName, appRuntime string) error {
-	for line := range strings.SplitSeq(psOutput, "\n") {
-		line = strings.TrimSpace(line)
-
-		if line == "" ||
-			strings.HasPrefix(line, "APPLICATION") ||
-			strings.HasPrefix(line, "──") {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		podName := parts[len(parts)-2]
-		status := parts[len(parts)-1]
-
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
 		if isMainPod(podName, appRuntime) && !strings.Contains(strings.ToLower(status), "running") {
-			return fmt.Errorf(
-				"main pod %s not running after start for app %s",
-				podName,
-				appName,
-			)
+			return fmt.Errorf("main pod %s not running after start for app %s", podName, appName)
 		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logger.Infof("[TEST] Main pods are running after start")
@@ -587,6 +582,125 @@ func ValidateCatalogUninstallOutput(output string) error {
 	return nil
 }
 
+// ValidateCatalogApiServerHelpOutput validates 'catalog apiserver --help' output.
+func ValidateCatalogApiServerHelpOutput(output string) error {
+	required := []string{
+		"apiserver",
+		"--port",
+		"--admin-password-hash",
+		"--runtime",
+	}
+
+	return checkRequiredStrings(output, "catalog apiserver help", required)
+}
+
+// ValidateCatalogConfigureOutput validates 'catalog configure' success output.
+func ValidateCatalogConfigureOutput(output string) error {
+	// configure prints either "Access the Catalog Backend at" (first run) or
+	// "Catalog Backend API is available at" (already running). Either is success.
+	const markerFirst = "Access the Catalog Backend at"
+	const markerRunning = "Catalog Backend API is available at"
+
+	switch {
+	case strings.Contains(output, markerFirst):
+		if url := extractURLAfterMarker(output, markerFirst); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerFirst, output)
+		}
+	case strings.Contains(output, markerRunning):
+		if url := extractURLAfterMarker(output, markerRunning); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerRunning, output)
+		}
+	case strings.Contains(output, "catalog service is already running"):
+		// no URL expected in this branch
+	default:
+		return fmt.Errorf("catalog configure validation failed: expected catalog backend URL in output\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogInfoOutput validates 'catalog info' output.
+func ValidateCatalogInfoOutput(output string) error {
+	const marker = "Catalog Backend API is available at"
+	if !strings.Contains(output, marker) {
+		return fmt.Errorf("catalog info validation failed: missing backend URL marker\nOutput: %s", output)
+	}
+
+	url := extractURLAfterMarker(output, marker)
+	if url == "" {
+		return fmt.Errorf("catalog info validation failed: backend URL is empty\nOutput: %s", output)
+	}
+
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("catalog info validation failed: backend URL %q is not a valid http/https URL", url)
+	}
+
+	return nil
+}
+
+// extractURLAfterMarker returns the trimmed text on the first line containing marker, after marker itself.
+func extractURLAfterMarker(output, marker string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(marker):]), " .,")
+		}
+	}
+
+	return ""
+}
+
+// ValidateCatalogLoginOutput validates a successful 'catalog login' output.
+func ValidateCatalogLoginOutput(output string) error {
+	if !strings.Contains(output, "Login successful") {
+		return fmt.Errorf("catalog login validation failed: missing 'Login successful'\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogHashpwOutput validates that 'catalog hashpw' produced a well-formed hash.
+func ValidateCatalogHashpwOutput(output string) error {
+	const hashParts = 3 // expected "iterations.salt.hash" dot-separated format
+
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return fmt.Errorf("catalog hashpw validation failed: output is empty")
+	}
+
+	parts := strings.SplitN(trimmed, ".", hashParts)
+	if len(parts) != hashParts || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("catalog hashpw validation failed: output does not match expected format 'iterations.salt.hash'\nOutput: %s", trimmed)
+	}
+
+	return nil
+}
+
+// ValidateCatalogWhoamiOutput validates 'catalog whoami' output.
+func ValidateCatalogWhoamiOutput(output string) error {
+	required := []string{"Server", "Username"}
+
+	return checkRequiredStrings(output, "catalog whoami", required)
+}
+
+// ValidateCatalogLogoutOutput validates 'catalog logout' success output.
+func ValidateCatalogLogoutOutput(output string) error {
+	if !strings.Contains(output, "Logged out successfully") {
+		return fmt.Errorf("catalog logout validation failed: missing 'Logged out successfully'\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogDbMigrateHelpOutput validates 'catalog dbmigrate --help' output.
+func ValidateCatalogDbMigrateHelpOutput(output string) error {
+	required := []string{
+		"dbmigrate",
+		"init",
+		"--db-host",
+		"--db-password",
+	}
+
+	return checkRequiredStrings(output, "catalog dbmigrate help", required)
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap failure validators
 //

@@ -78,3 +78,8 @@ func GetCatalogInsecure() bool {
 func GetGoldenDatasetFile() string {
 	return os.Getenv("GOLDEN_DATASET_FILE")
 }
+
+// GetCreateParams returns the CREATE_PARAMS environment variable.
+func GetCreateParams() string {
+	return os.Getenv("CREATE_PARAMS")
+}
