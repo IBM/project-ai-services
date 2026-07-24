@@ -33,15 +33,18 @@
      - 5.2.6 [Get Pod/Container Health Status](#526-get-podcontainer-health-status)
      - 5.2.7 [Get Application Resources](#527-get-application-resources)
    - 5.3 [Catalog Endpoints](#53-catalog-endpoints)
-     - 5.3.1 [List Available Architectures](#531-list-available-architectures)
-     - 5.3.2 [Get Architecture Details](#532-get-architecture-details)
-     - 5.3.3 [List Available Services](#533-list-available-services)
-     - 5.3.4 [Get Service Details](#534-get-service-details)
+      - 5.3.1 [List Available Architectures](#531-list-available-architectures)
+      - 5.3.2 [Get Architecture Details](#532-get-architecture-details)
+      - 5.3.3 [List Available Services](#533-list-available-services)
+      - 5.3.4 [Get Service Details](#534-get-service-details)
+      - 5.3.5 [Get Service Parameters](#535-get-service-parameters)
    - 5.4 [Deploy Options Endpoints](#54-deploy-options-endpoints)
-     - 5.4.1 [Get Architecture Deploy Options](#541-get-architecture-deploy-options)
-     - 5.4.2 [Get Service Deploy Options](#542-get-service-deploy-options)
-     - 5.4.3 [Get Component Provider Parameters](#543-get-component-provider-parameters)
-     - 5.4.4 [Get Service Parameters](#544-get-service-parameters)
+      - 5.4.1 [Get Architecture Deploy Options](#541-get-architecture-deploy-options)
+      - 5.4.2 [Get Service Deploy Options](#542-get-service-deploy-options)
+   - 5.5 [Component Catalog Endpoints](#55-component-catalog-endpoints)
+      - 5.5.1 [List Available Components](#551-list-available-components)
+      - 5.5.2 [Get Component Parameters](#552-get-component-parameters)
+      - 5.5.3 [Get Component Deploy Options](#553-get-component-deploy-options)
 6. [Error Handling](#6-error-handling)
    - 6.1 [Error Response Format](#61-error-response-format)
    - 6.2 [HTTP Status Codes](#62-http-status-codes)
@@ -159,7 +162,11 @@ Authorization: Bearer <access_token>
 - `GET /api/v1/services/{id}/deploy-options` - Get service deploy options
 - `GET /api/v1/services/{id}/params` - Get service parameters
 
-- `GET /api/v1/components/{component_type}/providers/{provider_id}/params` - Get component provider params
+#### Component Catalog Endpoints
+
+- `GET /api/v1/components` - List available component types; filter with `?category=model|db`
+- `GET /api/v1/components/{type}/params` - Get component parameters (returns `values.schema.json`)
+- `GET /api/v1/components/{type}/deploy_options` - Get component deploy options
 
 ## 5. API Endpoint Details
 
@@ -1576,6 +1583,63 @@ GET /api/v1/services/chat
 
 ---
 
+#### 5.3.5 Get Service Parameters
+
+**Endpoint:** `GET /api/v1/services/{id}/params`
+
+**Description:** Retrieves the configuration schema (JSON Schema) for service-level parameters. Used to render service-specific configuration options during deployment.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Service ID (e.g., "chat", "digitize", "similarity") |
+
+**Request Body:** None
+
+**Example Request:**
+
+```
+GET /api/v1/services/chat/params
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "chat": {
+      "type": "object",
+      "properties": {
+        "systemPrompt": {
+          "type": "string",
+          "title": "System prompt",
+          "description": "Custom system prompt for the chat service"
+        }
+      }
+    }
+  }
+}
+```
+
+Returns a JSON Schema (draft-07) object with service-level configuration properties, nested under the service ID as the top-level key.
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid service ID
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Service not found
+- `500 Internal Server Error` - Server error
+
+---
+
 ### 5.4 Deploy Options Endpoints
 
 This section describes the endpoints for retrieving deployment options, component providers, and configuration parameters for dynamic component selection during application deployment.
@@ -1794,11 +1858,81 @@ Component and Provider object schemas are the same as in [5.4.1](#541-get-archit
 
 ---
 
-#### 5.4.3 Get Component Provider Parameters
+## 5.5 Component Catalog Endpoints
 
-**Endpoint:** `GET /api/v1/components/{component_type}/providers/{provider_id}/params`
+Read-only catalog endpoints that describe the available component types and their providers. Sourced from `assets/components/` asset files — no database reads.
 
-**Description:** Retrieves the configuration schema (JSON Schema) for a specific provider within a component type. This is used when a user selects "Create New" for a component and chooses a provider.
+### 5.5.1 List Available Components
+
+**Endpoint:** `GET /api/v1/components`
+
+**Description:** Retrieves a flat list of all available component types. Use the `?category` query parameter to scope the result to model components or database components.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| category | string | No | — | `model` — returns `llm`, `embedding`, `reranker` only. `db` — returns `vector_db` only. Omit for all. |
+
+**Response (200 OK):**
+
+```json
+[
+  {
+    "type": "llm",
+    "name": "Large language model (LLM)",
+    "description": "Deploy and manage LLM inference backends across supported runtimes"
+  },
+  {
+    "type": "embedding",
+    "name": "Embedding model",
+    "description": "Deploy embedding model backends for vector generation"
+  },
+  {
+    "type": "reranker",
+    "name": "Reranker model",
+    "description": "Deploy reranker model backends for retrieval quality improvement"
+  },
+  {
+    "type": "vector_db",
+    "name": "Vector database",
+    "description": "Deploy vector store backends for semantic search"
+  }
+]
+```
+
+**Response Schema (ComponentSummary[]):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Component type identifier: `llm`, `embedding`, `reranker`, `vector_db` |
+| name | string | Display name |
+| description | string | Description of the component type |
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid `category` value
+- `401 Unauthorized` - Invalid or missing access token
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+
+- Read the top-level `assets/components/<type>/metadata.yaml` for each type
+- No database reads — purely asset-driven
+
+---
+
+### 5.5.2 Get Component Parameters
+
+**Endpoint:** `GET /api/v1/components/{type}/params`
+
+**Description:** Returns the `values.schema.json` for the given component type verbatim. This is the single source of truth for all configuration parameters, validation rules, and credential fields needed to deploy or connect a component.
 
 **Request Headers:**
 
@@ -1807,156 +1941,203 @@ Authorization: Bearer <access_token>
 ```
 
 **Path Parameters:**
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| component_type | string | Yes | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
-| provider_id | string | Yes | Provider identifier (e.g., "opensearch", "vllm", "watsonx", "milvus") |
+| type | string | Yes | Component type: `llm`, `embedding`, `reranker`, `vector_db` |
 
 **Request Body:** None
 
 **Example Request:**
 
 ```
-GET /api/v1/components/reranker/providers/vllm/params
+GET /api/v1/components/reranker/params
+```
+
+**Response (200 OK) — `reranker`:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Reranker model",
+      "description": "Reranker model",
+      "oneOf": [
+        {
+          "const": "BAAI/bge-reranker-v2-m3",
+          "title": "bge-reranker-v2-m3",
+          "description": "A multilingual, cross-encoder-based reranker model used to improve retrieval quality by scoring and ranking candidate documents."
+        }
+      ],
+      "default": "BAAI/bge-reranker-v2-m3"
+    }
+  }
+}
+```
+
+**Response (200 OK) — `llm` (watsonx provider):**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["watsonxApiKey", "watsonxProjectId", "watsonxUrl"],
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Large language model (LLM)",
+      "description": "Chat/Instruct model name for WatsonX",
+      "oneOf": [
+        { "const": "ibm/granite-4-h-small", "title": "granite-4-h-small" }
+      ],
+      "default": "ibm/granite-4-h-small"
+    },
+    "watsonxApiKey": {
+      "type": "string",
+      "title": "API key",
+      "format": "password",
+      "description": "API key for accessing watsonx",
+      "pattern": "^[A-Za-z0-9_-]{44}$",
+      "minLength": 44,
+      "maxLength": 44
+    },
+    "watsonxProjectId": {
+      "type": "string",
+      "title": "Project ID",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "watsonxUrl": {
+      "type": "string",
+      "title": "API endpoint",
+      "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
+    }
+  }
+}
+```
+
+**Response Schema:** Raw `values.schema.json` (JSON Schema draft-07). Fields with `"format": "password"` are secret credentials the UI should mask.
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Component type not found
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+
+- Read `assets/components/<type>/<provider>/<runtime>/values.schema.json` for the active provider
+- Return verbatim with `Content-Type: application/json`
+
+---
+
+### 5.5.3 Get Component Deploy Options
+
+**Endpoint:** `GET /api/v1/components/{type}/deploy_options`
+
+**Description:** Returns the full component type object — including all providers and their resource requirements — for the given type. Sourced from `metadata.yaml` files under `assets/components/<type>/` — no database reads.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| type | string | Yes | Component type: `llm`, `embedding`, `reranker`, `vector_db` |
+
+**Request Body:** None
+
+**Example Request:**
+
+```
+GET /api/v1/components/llm/deploy_options
 ```
 
 **Response (200 OK):**
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "reranker": {
-      "type": "object",
-      "properties": {
-        "model": {
-          "type": "string",
-          "title": "Reranker model",
-          "description": "Reranker model",
-          "oneOf": [
-            {
-              "const": "BAAI/bge-reranker-v2-m3",
-              "title": "bge-reranker-v2-m3",
-              "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Search result reranking, Document relevance scoring, Query-document matching refinement, RAG pipeline optimization\n\n**Strengths:** State-of-the-art reranking performance, Excellent multilingual support, Efficient inference on CPU, Improved retrieval accuracy for RAG applications"
-            }
-          ],
-          "default": "BAAI/bge-reranker-v2-m3"
-        }
+  "type": "llm",
+  "name": "Large language model (LLM)",
+  "providers": [
+    {
+      "id": "vllm-cpu",
+      "name": "AI Inference on CPU",
+      "description": "Deploy instruct models on vLLM inference engine (CPU-only)",
+      "version": "1.0.0",
+      "schema": "/api/v1/components/llm/params",
+      "resources": {
+        "cpu": 10,
+        "memory": 161061273600,
+        "storage": 53687091200
+      }
+    },
+    {
+      "id": "watsonx",
+      "name": "IBM watsonx.ai on IBM Cloud",
+      "description": "Deploy llm models using watsonx",
+      "version": "1.0.0",
+      "schema": "/api/v1/components/llm/params",
+      "resources": {
+        "cpu": 1,
+        "memory": 4294967296
+      }
+    },
+    {
+      "id": "vllm-spyre",
+      "name": "RedHat AI Inference with Spyre",
+      "description": "Deploy instruct models on vLLM inference engine with Spyre acceleration",
+      "version": "1.0.0",
+      "default": true,
+      "schema": "/api/v1/components/llm/params",
+      "resources": {
+        "cpu": 8,
+        "memory": 161061273600,
+        "accelerators": {
+          "ibm.com/spyre_pf": 4
+        },
+        "storage": 53687091200
       }
     }
-  }
+  ]
 }
 ```
 
 **Response Schema:**
 
-Returns a JSON Schema (draft-07) object that defines:
-- Provider-specific configuration parameters
-- Parameter types and validation rules (patterns, min/max, enums)
-- Default values and descriptions
-- Required fields for that provider
-- Custom extension fields:
-  - `x-model-selector`: Specifies the data source field name from the deploy-options endpoint that should populate this field's options
-    - Value: `"supported_models"` - Indicates the UI should use the `supported_models` array from the provider in the deploy-options endpoint
-    - The UI will map the `supported_models[].id` as the option value and `supported_models[].name` as the display text
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Component type identifier |
+| name | string | Display name of the component type |
+| providers | array | All available providers for this component type |
+| providers[].id | string | Provider identifier |
+| providers[].name | string | Provider display name |
+| providers[].description | string | Provider description |
+| providers[].version | string | Provider asset version |
+| providers[].default | boolean | `true` for the recommended default provider; omitted otherwise |
+| providers[].schema | string | URL to `GET /api/v1/components/{type}/params` |
+| providers[].resources | object | Resource requirements — `cpu` (cores), `memory` (bytes), `storage` (bytes, optional), `accelerators` (map, optional) |
 
 **Error Responses:**
 
-- `400 Bad Request` - Invalid component_type or provider_id
+- `400 Bad Request` - Invalid `type`
 - `401 Unauthorized` - Invalid or missing access token
-- `404 Not Found` - Component type or provider not found
-- `500 Internal Server Error` - Server error
+- `404 Not Found` - Component type not found
 
 **Implementation Notes:**
 
-1. Validate component_type and provider_id parameters
-2. Read provider metadata from component assets directory
-3. Load the values.schema.json file for the specific provider
-4. Return JSON Schema for provider-specific configuration
-5. Include `x-model-selector: "supported_models"` for model fields that should be populated from deploy-options
-6. UI uses this schema to generate dynamic configuration forms
-7. User fills in values like model, backend_id, storage, etc.
-8. Compatible with form libraries like `react-jsonschema-form`
-
-**UI Integration Flow:**
-
-1. User selects "Create New" for a component
-2. User selects a provider from available providers
-3. UI calls this endpoint to get the configuration schema
-4. UI renders a dynamic form based on the JSON Schema
-5. For fields with `x-model-selector: "supported_models"`:
-   - UI looks up the corresponding provider in the previously fetched deploy-options response
-   - UI extracts the `supported_models` array from that provider's `specifications` or direct `supported_models` field
-   - UI renders a dropdown/select field populated with these model options
-   - Each dropdown option displays `supported_models[].name` and uses `supported_models[].id` as the value
-   - Example: For vLLM provider, the UI would show "ibm-granite/granite-3.3-8b-instruct" and use "granite-3.3-8b-instruct" as the value
-6. User selects a model from the dropdown and fills in other configuration values
-7. Configuration is submitted as part of the deployment request
-
-1. Validate component_type and provider_id parameters
-2. Read provider metadata from component assets directory
-3. Load the `values.schema.json` file for the specific provider
-4. Return JSON Schema for provider-specific configuration
-5. Include `x-model-selector: "supported_models"` for model fields that should be populated from deploy-options
-6. UI uses this schema to generate dynamic configuration forms
-
----
-
-### 5.4.4 Get Service Parameters
-
-**Endpoint:** `GET /api/v1/services/{id}/params`
-
-**Description:** Retrieves the configuration schema (JSON Schema) for service-level parameters. Used to render service-specific configuration options during deployment.
-
-**Request Headers:**
-
-```
-Authorization: Bearer <access_token>
-```
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| id | string | Yes | Service ID (e.g., "chat", "digitize", "similarity") |
-
-**Request Body:** None
-
-**Example Request:**
-
-```
-GET /api/v1/services/chat/params
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "chat": {
-      "type": "object",
-      "properties": {
-        "systemPrompt": {
-          "type": "string",
-          "title": "System prompt",
-          "description": "Custom system prompt for the chat service"
-        }
-      }
-    }
-  }
-}
-```
-
-Returns a JSON Schema (draft-07) object with service-level configuration properties, nested under the service ID as the top-level key.
-
-**Error Responses:**
-
-- `400 Bad Request` - Invalid service ID
-- `401 Unauthorized` - Invalid or missing access token
-- `404 Not Found` - Service not found
-- `500 Internal Server Error` - Server error
+1. Validate `type`
+2. Read all `assets/components/<type>/<provider>/metadata.yaml` files for the given type
+3. Read `assets/components/<type>/<provider>/<runtime>/metadata.yaml` for `version` and `resources`
+4. Assemble and return the component type object in the shape above
 
 ---
 
