@@ -1,0 +1,10 @@
+linters-settings:
+  cyclop:
+    max-complexity: 15  # Allow higher complexity for test code
+  
+linters:
+  disable:
+    - cyclop  # Disable cyclomatic complexity check for test code
+    - mnd     # Disable magic number detection for test code
+
+# Made with Bob
