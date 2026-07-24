@@ -14,7 +14,7 @@ At its core, the service accepts text or a plain-text file and a target language
 The service is a first-class member of the AI-Services platform and follows the same architectural patterns established by the summarize service:
 
 - FastAPI application running as a Python service in a Podman container (ppc64le / RHEL).
-- Semaphore-based concurrency limiting: a 4-slot job admission semaphore for async jobs, and a shared 32-slot semaphore in front of the vLLM inference endpoint.
+- Semaphore-based concurrency limiting: an 8-slot job admission semaphore for async jobs, a 4-slot per-job chunk-parallelism cap, and a shared 32-slot semaphore in front of the vLLM inference endpoint.
 - PostgreSQL (`translate_metadata` database) for durable job metadata, initialized by an idempotent init container.
 - `/var/cache/translate`-backed staging and result files on a persistent volume.
 - Boot-time recovery scan that marks interrupted jobs as failed and cleans up orphaned staging directories.
@@ -108,7 +108,11 @@ else:
 When the loop ends, the remaining open chunk is emitted as the final chunk.
 
 **Step 3 — Sentence-level fallback for oversized blocks.**
-If a single block's token count exceeds `CHUNK_TOKEN_BUDGET` on its own (e.g., a very long paragraph with no sub-structure), it cannot be placed as a unit. It is split at sentence boundaries (`.`, `!`, `?` followed by whitespace) and the resulting sentences are packed greedily using the same token-counting logic above.
+If a single block's token count exceeds `CHUNK_TOKEN_BUDGET` on its own (e.g., a very long paragraph with no sub-structure), it cannot be placed as a unit. It is split into sentences using `SentenceSplitter(language=splitter_lang)` from the `sentence-splitter` library (already a project dependency). The resulting sentences are packed greedily using the same token-counting logic above.
+
+`splitter_lang` is the lowercase ISO code for the resolved source language (`"de"` or `"en"`), derived via `to_sentence_splitter_lang(resolved_source_language_code)` from `common/lang_utils.py`. When `source_language` could not be resolved before chunking (lingua fell below threshold), `splitter_lang` defaults to `"en"`.
+
+> **Why `SentenceSplitter` instead of a regex:** German documents frequently contain abbreviations (`z. B.`, `Nr.`, `Abs.`, `d. h.`, `ca.`) that end with a period but are not sentence boundaries — a regex split would break these into malformed sub-chunks. `SentenceSplitter` handles this via language-specific abbreviation dictionaries and is already used by the digitize and summarize services. No new dependency is introduced.
 
 #### Parameters
 
@@ -116,8 +120,10 @@ If a single block's token count exceeds `CHUNK_TOKEN_BUDGET` on its own (e.g., a
 |:---|:---|:---|
 | `CHUNK_TOKEN_BUDGET` | Max input tokens per chunk | Packing decision threshold in steps 2 and 3 |
 | `OPENAI_BASE_URL` (shared) | `/tokenize` endpoint | Token count per block; one call per block, result cached |
+| `splitter_lang` | Language code for sentence splitter | Passed to `SentenceSplitter(language=splitter_lang)` in step 3; derived from resolved source language |
 
-> The initial value of `CHUNK_TOKEN_BUDGET` will be determined empirically during development by testing with real German/English documents and observing translation quality and latency. A reasonable starting point is half of `MAX_MODEL_LEN` minus `PROMPT_OVERHEAD_TOKENS`, which reserves the other half for the translated output. See §13 for the env var.
+> **`CHUNK_TOKEN_BUDGET` default: 40% of `MAX_MODEL_LEN`.**
+> Setting the budget to 40% of the context window (≈ 13,107 tokens for `granite-3.3-8b-instruct` at 32,768) leaves 60% — minus prompt overhead — for the translated output. This headroom is deliberate: English→German output is typically 20–30% longer than the input in token terms, so a 50% budget risks overrunning the output half of the window. 40% ensures the output reservation (≈ 19,500 tokens after prompt overhead) comfortably absorbs the worst-case expansion. The value is configurable via the `CHUNK_TOKEN_BUDGET` env var and should be validated empirically against real documents during development. See §13 for the env var.
 
 ### 2.4 Concatenation and Coherence
 
@@ -349,19 +355,18 @@ graph LR
 
 Supported language values for `source_language` and `target_language` (case-insensitive): `English`, `German`. `source_language` additionally accepts `"auto"` (or may be omitted entirely).
 
-> **Scope note:** `French` and `Italian` are planned additions pending testing within the current release scope.
-
 **Processing logic:**
 
 1. Validate `text` is non-empty (else `400`).
 2. If `source_language` is omitted, default it to `"auto"`. If provided, validate against the allowlist (including `"auto"`); `"auto"` is never valid for `target_language` (else `400 INVALID_LANGUAGE`).
 3. Validate `target_language` is present and in the allowlist (else `400`).
-4. Check the global vLLM semaphore; if all slots are occupied, return `429`.
-4. Tokenize the input via the vLLM `/tokenize` API — exact count.
-5. Apply the **hard context-window guard** (Section 8). If it fails, return `413` with token diagnostics.
-7. Build the translation prompt (Section 11): system prompt + user prompt (auto-detect variant if `source_language == "auto"`).
-8. Call vLLM `/v1/chat/completions` with `temperature=0.0`.
-9. Return the translation with metadata and token usage.
+4. If `source_language != "auto"` and `source_language.lower() == target_language.lower()`, return `400 SAME_LANGUAGE` — source and target must differ. Skip this check when `source_language == "auto"` since the resolved language is not yet known.
+5. Check the global vLLM semaphore; if all slots are occupied, return `429`.
+6. Tokenize the input via the vLLM `/tokenize` API — exact count.
+7. Apply the **hard context-window guard** (Section 8). If it fails, return `413` with token diagnostics.
+8. Build the translation prompt (Section 11): system prompt + user prompt (auto-detect variant if `source_language == "auto"`).
+9. Call vLLM `/v1/chat/completions` with `temperature=0.0`.
+10. Return the translation with metadata and token usage.
 
 **Response codes:**
 
@@ -485,24 +490,25 @@ curl -X POST http://localhost:9000/v1/translate \
 - Extension must be `.txt` or `.md`. Other file types (`.pdf`, `.docx`, `.xlsx`, etc.) are rejected with `415 UNSUPPORTED_FILE_TYPE`.
 - If `source_language` is omitted, it defaults to `"auto"`. If provided, it must be in the allowlist or `"auto"`.
 - `target_language` is required and must be in the allowlist; `"auto"` is not permitted.
-- No size limit enforced at submission — the context-window guard runs during chunking, when the true token count is known.
+- **File size** is checked against `MAX_UPLOAD_SIZE_MB` (default: `10 MB`) **before staging**. Uploads that exceed this limit are rejected immediately with `413 FILE_TOO_LARGE`. This prevents large uploads from filling the staging volume or OOM-ing the worker before the context-window guard runs.
 
 **Processing flow (request thread):**
 
-1. Validate file and parameters.
-2. Check `job_limiter`; if all slots are occupied, return `429`.
-3. Generate `job_id` (UUID).
-4. Stage the file to `/var/cache/translate/staging/{job_id}/`.
-5. Insert a row into `translate_jobs` with `status='accepted'`.
-6. Launch background processing via FastAPI `BackgroundTasks`.
-7. Return `202 Accepted` with `{ "job_id": "..." }`.
+1. Validate file extension and parameters.
+2. Check file size against `MAX_UPLOAD_SIZE_MB`; if exceeded, return `413 FILE_TOO_LARGE`.
+3. Check `job_limiter`; if all slots are occupied, return `429`.
+4. Generate `job_id` (UUID).
+5. Stage the file to `/var/cache/translate/staging/{job_id}/`.
+6. Insert a row into `translate_jobs` with `status='accepted'`.
+7. Launch background processing via FastAPI `BackgroundTasks`.
+8. Return `202 Accepted` with `{ "job_id": "..." }`.
 
 **Background worker:**
 
 1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='chunking'`.
 2. Read the staged file as UTF-8 text.
-3. **Run lingua detection** on the full text (up to 500 chars sampled) to resolve `source_language` if `"auto"` (§10.2).
-4. **Chunk the text** (§2.3): split on `\n\n` boundaries into blocks; greedily pack blocks into `TranslationChunk` objects, calling `tokenize_with_llm(block)` per block (token count cached). Close current chunk when `running_tokens + block_tokens > CHUNK_TOKEN_BUDGET`. Apply sentence-level fallback for blocks that exceed the budget alone. Treat table blocks as atomic (§2.5). Each chunk carries `index`, `text`, and `join_after` (`"paragraph"` or `"sentence"`) (§2.6). **Run the context-window guard on each chunk** (§8.2): if `chunk_tokens + PROMPT_OVERHEAD_TOKENS > MAX_MODEL_LEN - MIN_OUTPUT_TOKENS` for any chunk → abort immediately with `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`. Store `chunk_count` and `chunk_token_budget` in `metadata.chunking`.
+3. **Run lingua detection** on the full text using three-position sampling to resolve `source_language` if `"auto"` (§10.2). The detected ISO code (e.g. `"DE"`) is passed to `chunk_document` as `source_language_code`.
+4. **Chunk the text** (§2.3): split on `\n\n` boundaries into blocks; greedily pack blocks into `TranslationChunk` objects, calling `tokenize_with_llm(block)` per block (token count cached). Close current chunk when `running_tokens + block_tokens > CHUNK_TOKEN_BUDGET`. Apply sentence-level fallback for blocks that exceed the budget alone — sentences split via `SentenceSplitter(language=splitter_lang)` where `splitter_lang = to_sentence_splitter_lang(source_language_code)` (defaults to `"en"` if unresolved). Treat table blocks as atomic (§2.5). Each chunk carries `index`, `text`, and `join_after` (`"paragraph"` or `"sentence"`) (§2.6). **Run the context-window guard on each chunk** (§8.2): if `chunk_tokens + PROMPT_OVERHEAD_TOKENS > MAX_MODEL_LEN - MIN_OUTPUT_TOKENS` for any chunk → abort immediately with `status='failed'`, `error='CONTEXT_LIMIT_EXCEEDED'`, diagnostics in `metadata`. Store `chunk_count` and `chunk_token_budget` in `metadata.chunking`.
 5. Update `metadata.phase='translating'`. Dispatch all chunks concurrently via `asyncio.gather` (§9.3): each chunk runs as an `asyncio.Task` that acquires `chunk_semaphore` then `concurrency_limiter`, builds the two-message prompt (`system` + `user`) with resolved `source_language`, `target_language`, and `chunk.text`, and calls `query_vllm_translate` at `temperature=0.0` with `chunk_max_tokens` computed from the context-window budget (§8.2). If any chunk task fails, all sibling tasks are cancelled and the job fails.
 6. **Assemble** translated chunks using `join_after`-aware concatenation (§2.6): `"\n\n"` between block-boundary chunks, `" "` between sentence-fallback chunks → `translated_markdown` string.
 7. Write `/var/cache/translate/results/{job_id}_result.json`.
@@ -515,6 +521,7 @@ curl -X POST http://localhost:9000/v1/translate \
 |:---|:---|
 | 202 Accepted | Job created. |
 | 400 Bad Request | Missing file, missing `target_language`, invalid language value, or `target_language == "auto"`. |
+| 413 Payload Too Large | File exceeds `MAX_UPLOAD_SIZE_MB`. |
 | 415 Unsupported Media Type | Not a valid `.txt` or `.md` file. |
 | 429 Too Many Requests | Job concurrency at capacity. |
 | 500 Internal Server Error | Unexpected failure. |
@@ -830,7 +837,7 @@ buffer            = max(20, int(available_output * 0.10))
 max_tokens (LLM call) = available_output - buffer
 ```
 
-`CHUNK_TOKEN_BUDGET` must satisfy: `CHUNK_TOKEN_BUDGET ≤ MAX_MODEL_LEN - PROMPT_OVERHEAD_TOKENS - MIN_OUTPUT_TOKENS`. Setting it close to that ceiling leaves almost no room for the output — a reasonable starting point is well below half of `MAX_MODEL_LEN` to give the LLM ample output space per chunk.
+`CHUNK_TOKEN_BUDGET` must satisfy: `CHUNK_TOKEN_BUDGET ≤ MAX_MODEL_LEN - PROMPT_OVERHEAD_TOKENS - MIN_OUTPUT_TOKENS`. Setting it close to that ceiling leaves almost no room for the output. The default of **40% of `MAX_MODEL_LEN`** (see §2.3) is the recommended starting point: it reserves 60% of the context window for prompt overhead and the translated output, which comfortably absorbs the worst-case 20–30% English→German token expansion.
 
 ### 8.3 Diagnostics
 
@@ -868,19 +875,21 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_siz
 A second, smaller semaphore caps how many translation **jobs** run concurrently:
 
 ```python
-job_limiter = asyncio.BoundedSemaphore(settings.translate.max_concurrent_jobs)  # default: 4
+job_limiter = asyncio.BoundedSemaphore(settings.translate.max_concurrent_jobs)  # default: 8
 ```
 
-| Semaphore            | Scope        | Limit         | Purpose                                                                                               |
-|:---------------------|:-------------|:--------------|:------------------------------------------------------------------------------------------------------|
-| `job_limiter`        | Async jobs   | 4 (configurable) | Caps background workers; bounds staging disk usage and digitize-service load.                      |
-| `concurrency_limiter`| Global       | 32            | Caps total concurrent vLLM connections across sync + async paths.                                    |
+| Semaphore            | Scope        | Limit              | Purpose                                                                                |
+|:---------------------|:-------------|:-------------------|:---------------------------------------------------------------------------------------|
+| `job_limiter`        | Async jobs   | 8 (configurable)   | Caps background workers; bounds staging disk usage.                                    |
+| `concurrency_limiter`| Global       | 32                 | Caps total concurrent vLLM connections across sync + async paths.                     |
 
-The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` per chunk LLM call, releasing it as soon as each response returns. Because the worker holds no vLLM slot while digitizing, polling, or running the chunker, async jobs consume the vLLM budget only during active inference — the sync path stays responsive even at full job concurrency.
+The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` per chunk LLM call, releasing it as soon as each response returns. Because the worker holds no vLLM slot while running lingua detection or the chunker, async jobs consume the vLLM budget only during active inference — the sync path stays responsive even at full job concurrency.
+
+**Why 8 jobs (up from 4):** The original 4-job limit was chosen partly to bound load on the digitize service dependency. Translation v1 has no digitize dependency — the only remaining constraints are staging disk usage (negligible at 8 jobs) and vLLM contention. With `CHUNK_PARALLELISM = 4` (§9.3), the theoretical worst-case vLLM load is `8 × 4 = 32 slots`, which fully saturates the shared semaphore. In practice this maximum is rarely reached — it requires all 8 jobs to be simultaneously in the translation phase with all 4 of their chunk tasks active at once. Sync requests arriving when the semaphore is full receive a `429` immediately rather than waiting, so the sync path degrades gracefully rather than silently queuing. Both knobs are independently configurable via env vars for operators who want a more conservative split.
 
 ### 9.3 LLM Call Strategy
 
-**Each chunk is translated in an independent `POST /v1/chat/completions` call.** All chunks for a given job are dispatched concurrently using `asyncio.gather`, each independently acquiring a slot on `concurrency_limiter`.
+**Each chunk is translated in an independent `POST /v1/chat/completions` call.** Chunks within a job are dispatched concurrently using `asyncio.gather`, bounded by a per-job `chunk_semaphore` (`CHUNK_PARALLELISM = 4`). All chunk tasks share the global `concurrency_limiter`.
 
 #### Call structure (per chunk)
 
@@ -1034,16 +1043,16 @@ Translation:
 
 ### 10.2 Language Detection Strategy
 
-Before constructing the prompt, the service resolves `source_language` using the following two-step strategy on **both the sync and async paths**:
+Before constructing the prompt, the service resolves `source_language` via lingua detection, with path-specific sampling:
 
-1. **Run `detect_language(text)` from `common/lang_utils.py`** (lingua library, offline, deterministic). If the returned confidence meets the configured threshold (`LANGUAGE_DETECTION_MIN_CONFIDENCE`, default `0.5`), the detected ISO code is mapped to a language name (e.g., `"DE"` → `"German"`) and the explicit-source prompt template is used.
-2. **Fall back to LLM auto-detect** (the second prompt template above) if lingua's confidence is below threshold or the detected language is outside the supported set.
+- **Async path:** samples 500 characters at three evenly-spaced positions (beginning, middle, end) and takes the majority vote across the three detections. This prevents English-language headers or reference numbers at the top of a document from incorrectly overriding the body language.
+- **Sync path:** samples the first 500 characters directly. Short inline text is inherently less reliable for lingua; LLM auto-detect is the likely fallback.
 
-The resolved `source_language` is stored in the job result (async) or response body (sync) so the caller always knows what language was detected, rather than receiving `"auto"` as the recorded value.
+In both cases, if lingua confidence meets `LANGUAGE_DETECTION_MIN_CONFIDENCE` (default `0.5`) and the detected language is in the supported set, the explicit-source prompt template is used. Otherwise, the service falls back to LLM auto-detect.
 
-> **Note on sync path reliability:** On the sync path, input text may be very short (a single sentence or phrase). Lingua's detection accuracy decreases with shorter inputs — confidence threshold acts as a safety net here, and LLM auto-detect is the more likely fallback for short texts.
+The resolved `source_language` is stored in the job result (async) or response body (sync) so the caller always knows what was detected, rather than receiving `"auto"` as the recorded value.
 
-**Supported lingua languages (v1):** English (`EN`), German (`DE`), Italian (`IT`), French (`FR`) — matching `LanguageCodes` in `common/lang_utils.py`. The detector is initialized at startup via `setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])`.
+**Supported lingua languages:** English (`EN`), German (`DE`). The detector is initialized at startup via `setup_language_detector([Language.ENGLISH, Language.GERMAN])`.
 
 ### 10.3 Notes on Prompt Design
 
@@ -1287,12 +1296,13 @@ $$ language 'plpgsql';
 | `MAX_MODEL_LEN` | Model context window (tokens) | `32768` |
 | `PROMPT_OVERHEAD_TOKENS` | System + user template token overhead | `150` |
 | `MIN_OUTPUT_TOKENS` | Minimum output buffer for context guard | `50` |
-| `CHUNK_TOKEN_BUDGET` | Maximum input tokens per translation chunk (async path). Controls greedy packing in §2.3 — a new chunk is opened when the running block token count would exceed this value. Set below `MAX_MODEL_LEN - PROMPT_OVERHEAD_TOKENS` to leave room for the translated output. | TBD — set during development via experimentation |
+| `CHUNK_TOKEN_BUDGET` | Maximum input tokens per translation chunk (async path). Controls greedy packing in §2.3 — a new chunk is opened when the running block token count would exceed this value. Set to 40% of `MAX_MODEL_LEN` to leave ≥60% of the context window for the translated output, accommodating the 20–30% token expansion of English→German translation. | `int(0.40 * MAX_MODEL_LEN)` — evaluated at startup; ≈ 13,107 for `granite-3.3-8b-instruct` |
+| `MAX_UPLOAD_SIZE_MB` | Maximum accepted file size for async job uploads, enforced at the API boundary before staging. Prevents large uploads from filling the staging volume or OOM-ing the worker. | `10` |
 | `TRANSLATION_TEMPERATURE` | LLM temperature for all translation calls | `0.0` |
 | `MAX_CONCURRENT_REQUESTS` | Global vLLM semaphore | `32` |
-| `MAX_CONCURRENT_JOBS` | Async job admission semaphore | `4` |
+| `MAX_CONCURRENT_JOBS` | Async job admission semaphore | `8` |
 | `CHUNK_PARALLELISM` | Max number of chunks translated concurrently within a single job (§9.3). Each concurrent chunk holds one `concurrency_limiter` slot. Set to a fraction of `MAX_CONCURRENT_REQUESTS` so a single large job cannot monopolise the vLLM semaphore. | `4` |
-| `SUPPORTED_LANGUAGES` | Comma-separated allowlist of active language names | `english,german` (initial v1 scope; `french,italian` pending test coverage) |
+| `SUPPORTED_LANGUAGES` | Comma-separated allowlist of active language names | `english,german` |
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (`translate_metadata`) | — |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy connection pool | `5` / `5` |
 
@@ -1319,12 +1329,15 @@ Adapted from the digitize and summarize pattern for PostgreSQL:
 | Sync translate, explicit source language | `source_language: "German"`, text | 200, LLM told source language explicitly |
 | Sync translate, unsupported language | `source_language: "Klingon"` | 400 `INVALID_LANGUAGE` with supported list |
 | Sync translate, auto as target | `target_language: "auto"` | 400 `INVALID_LANGUAGE` |
+| Sync translate, same source and target | `source_language: "English"`, `target_language: "English"` | 400 `SAME_LANGUAGE` |
+| Sync translate, same language auto source | `source_language: "auto"`, `target_language: "English"` | 200 — check skipped; auto source not yet resolved |
 | Sync translate, empty text | `text: ""` | 400 `INVALID_REQUEST` |
 | Sync translate, over context limit | Text exceeding guard | 413 `CONTEXT_LIMIT_EXCEEDED` with token diagnostics |
 | vLLM semaphore exhausted | 32 slots busy | 429 `RATE_LIMIT_EXCEEDED` |
 | Async TXT job | `.txt` + languages | 202; completes without digitize call |
 | Async MD job | `.md` + languages | 202; read as plain text, no digitize call |
 | Invalid file type | `.pdf`, `.docx`, `.xlsx` upload | 415 `UNSUPPORTED_FILE_TYPE` |
+| File too large | Upload exceeds `MAX_UPLOAD_SIZE_MB` | 413 `FILE_TOO_LARGE` before staging |
 | Job semaphore exhausted | 4 jobs already running | 429 `RATE_LIMIT_EXCEEDED` |
 | Async over-limit file | File text exceeds context | Job `failed`, `CONTEXT_LIMIT_EXCEEDED`, diagnostics in `job_metadata` |
 | Job progress phases | Poll during MD job | `phase` transitions `chunking` → `translating` → `completed` |
