@@ -30,7 +30,7 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	}
 
 	// Check if the catalog release exists
-	if installed, err := isCatalogInstalled(ctx, helmClient, catalog, namespace); err != nil || !installed {
+	if installed, err := clicommon.IsCatalogInstalled(ctx, helmClient, catalog, namespace); err != nil || !installed {
 		return err
 	}
 
@@ -71,21 +71,6 @@ func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (boo
 	}
 
 	return utils.ConfirmDeletion(ctx, pods)
-}
-
-func isCatalogInstalled(ctx context.Context, helmClient *helm.Helm, catalog, namespace string) (bool, error) {
-	exists, err := helmClient.IsReleaseExist(catalog)
-	if err != nil {
-		return false, fmt.Errorf("failed to check if catalog exists: %w", err)
-	}
-
-	if !exists {
-		logger.InfofCtx(ctx, "Catalog '%s' does not exist in namespace '%s'\n", catalog, namespace)
-
-		return false, nil
-	}
-
-	return true, nil
 }
 
 func cleanupPVCs(ctx context.Context, rt runtime.Runtime, skipCleanup bool, catalog string) error {

@@ -59,6 +59,20 @@ type Route struct {
 	TargetPort string
 }
 
+// DeploymentStatus represents the observed status of a Kubernetes/OpenShift Deployment.
+type DeploymentStatus struct {
+	// DesiredReplicas is the number of desired pod replicas specified in the spec.
+	DesiredReplicas int32
+	// ReadyReplicas is the number of pods that have passed their readiness checks.
+	ReadyReplicas int32
+	// AvailableReplicas is the number of pods available to serve requests.
+	AvailableReplicas int32
+	// UpdatedReplicas is the number of pods updated to the latest version.
+	UpdatedReplicas int32
+	// UnavailableReplicas is the number of pods that are not yet available.
+	UnavailableReplicas int32
+}
+
 // PodResources represents resource allocation and usage for a pod including accelerators.
 type PodResources struct {
 	CPU        float64  // CPU usage (e.g., 1.5 CPUs)
