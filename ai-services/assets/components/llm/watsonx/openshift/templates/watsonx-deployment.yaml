@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "instruct"
+  labels:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/component: {{ .Release.Name }}
+      ai-services.io/name: instruct
+  template:
+    metadata:
+      labels:
+        ai-services.io/component: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/name: instruct
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: litellm
+          image: "{{ .Values.instruct.image }}"
+          command:
+            - litellm
+            - --config
+            - /app/config.yaml
+            - --port
+            - "8000"
+            - --debug
+          envFrom:
+            - secretRef:
+                name: "watsonx-credentials"
+          env:
+            - name: WATSONX_PROJECT_ID
+              value: "{{ .Values.instruct.watsonxProjectId }}"
+            - name: WATSONX_URL
+              value: "{{ .Values.instruct.watsonxUrl }}"
+            - name: INSTRUCT_MODEL
+              value: "watsonx/{{ .Values.instruct.model }}"
+            - name: INSTRUCT_MODEL_NAME
+              value: "{{ .Values.instruct.model }}"
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.instruct.resources.requests.cpu | quote }}
+              memory: {{ .Values.instruct.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.instruct.resources.limits.cpu | quote }}
+              memory: {{ .Values.instruct.resources.limits.memory | quote }}
+          ports:
+            - containerPort: 8000
+              protocol: TCP

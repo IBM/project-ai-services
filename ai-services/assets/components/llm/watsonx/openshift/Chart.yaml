@@ -1,0 +1,7 @@
+apiVersion: v2
+name: llm-watsonx
+description: A Helm chart for deploying the LLM via IBM watsonx.ai on OpenShift (using LiteLLM proxy)
+type: application
+
+version: 0.0.1
+appVersion: "0.0.1"

@@ -1,0 +1,14 @@
+containers:
+  - name: "digitize-ui"
+    format: ".Status"
+    alias: DIGITIZE_UI_STATUS
+
+  - name: "digitize-api"
+    format: ".Status"
+    alias: DIGITIZE_API_STATUS
+
+hosts:
+  - fetch: DIGITIZE_UI_ROUTE
+    type: route
+  - fetch: DIGITIZE_API_ROUTE
+    type: route

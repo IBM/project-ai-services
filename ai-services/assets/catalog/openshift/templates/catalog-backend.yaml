@@ -20,7 +20,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: catalog-backend
     spec:
-      automountServiceAccountToken: false
+      automountServiceAccountToken: true
       initContainers:
         - name: db-migration
           image: "{{ .Values.backend.image }}"

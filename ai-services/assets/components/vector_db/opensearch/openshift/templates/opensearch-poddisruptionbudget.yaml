@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: "opensearch-pdb"
+  labels:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      ai-services.io/component: {{ .Release.Name }}
+      ai-services.io/name: vectordb

@@ -1,0 +1,48 @@
+ui:
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.46
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "50m"
+
+backend:
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.25
+  log_level: "INFO"
+  systemPrompt: ""
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "1"
+    limits:
+      memory: "1Gi"
+      cpu: "1"
+
+chatbot:
+  searchMode: "hybrid"
+  numChunksPostReranker: 3
+  rerank: true
+
+embedding:
+  model:
+    name: ""
+    maxModelLen: 512
+
+llm:
+  model:
+    name: ""
+    maxModelLen: 4096
+    maxBatchSize: 32
+  apiKey: ""
+
+reranker:
+  model:
+    name: ""
+
+opensearch:
+  numShards: 1
+  auth:
+    username: "admin"
+    password: ""

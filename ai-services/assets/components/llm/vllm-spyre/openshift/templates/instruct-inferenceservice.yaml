@@ -1,0 +1,48 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: instruct
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      args:
+        - '--tensor-parallel-size=4 '
+        - '--max-model-len={{ .Values.instruct.model.maxModelLen }} '
+        - '--max-num-seqs={{ .Values.instruct.model.maxBatchSize }}'
+        - --served-model-name={{ .Values.instruct.model.name }}
+      env:
+        - name: VLLM_SPYRE_USE_CB
+          value: "1"
+      {{- if .Values.instruct.apiKey }}
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-instruct-api-key
+              key: apiKey
+      {{- end }}
+      resources:
+        requests:
+          cpu: {{ .Values.instruct.resources.requests.cpu | quote }}
+          memory: {{ .Values.instruct.resources.requests.memory | quote }}
+          ibm.com/spyre_pf: {{ index .Values.instruct.resources.requests "ibm.com/spyre_pf" | quote }}
+        limits:
+          cpu: {{ .Values.instruct.resources.limits.cpu | quote }}
+          memory: {{ .Values.instruct.resources.limits.memory | quote }}
+          ibm.com/spyre_pf: {{ index .Values.instruct.resources.limits "ibm.com/spyre_pf" | quote }}
+      runtime: spyre-temp
+      storageUri: {{ .Values.instruct.storageUri }}
