@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth.store";
 import { logout, refreshAccessToken } from "@/services/auth";
-import { SESSION_CONFIG } from "@/constants/session.constants";
+import { SESSION_CONFIG } from "@/constants";
 import {
   getTimeUntilWarning,
   getTimeUntilLogout,
@@ -70,24 +70,28 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
         showWarningRef.current = false;
       }
 
+      if (logoutType === "manual") {
+        // The /logout page is responsible for calling logout(); just navigate there.
+        if (isMountedRef.current) {
+          navigate(ROUTES.LOGOUT, { replace: true });
+        }
+        return;
+      }
+
       try {
         await logout();
       } finally {
         if (isMountedRef.current) {
-          if (logoutType === "auto") {
-            sessionStorage.setItem(
-              SESSION_STORAGE_KEYS.LOGOUT_REASON,
-              LogoutReason.INACTIVITY,
-            );
-            navigate(ROUTES.LOGIN, {
-              replace: true,
-              state: {
-                logoutReason: LogoutReason.INACTIVITY,
-              } as LoginLocationState,
-            });
-          } else {
-            navigate(ROUTES.LOGOUT, { replace: true });
-          }
+          sessionStorage.setItem(
+            SESSION_STORAGE_KEYS.LOGOUT_REASON,
+            LogoutReason.INACTIVITY,
+          );
+          navigate(ROUTES.LOGIN, {
+            replace: true,
+            state: {
+              logoutReason: LogoutReason.INACTIVITY,
+            } as LoginLocationState,
+          });
         }
       }
     },
