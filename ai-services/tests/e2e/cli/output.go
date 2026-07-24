@@ -350,6 +350,7 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 			"digitize-ui",
 			"digitize-backend",
 			"summarize-api",
+			"similarity-api",
 		)
 	}
 
