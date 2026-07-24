@@ -6,7 +6,7 @@ convert → mark status → emit output file.
 """
 from common.misc_utils import *
 from pathlib import Path
-from common.misc_utils import get_utc_timestamp
+from common.misc_utils import get_utc_timestamp, generate_file_checksum
 from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.parsing.pdf import get_pdf_page_count, get_document_page_count
 from digitize.parsing.converter import convert_document_format
@@ -15,7 +15,13 @@ from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
 
-def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format: OutputFormat):
+def digitize(
+    directory_path: Path,
+    job_id: str,
+    doc_id_dict: dict,
+    output_format: OutputFormat,
+    file_checksum_dict: dict | None = None,  # filename -> "sha256:..." pre-computed at upload
+):
     """
     Digitize a single document file (PDF or DOCX) in the staging directory.
 
@@ -25,6 +31,9 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "txt"
+        file_checksum_dict: Pre-computed SHA-256 checksums keyed by filename.
+                            When provided the hash is reused rather than
+                            re-reading the file from disk to recompute it.
 
     Raises:
         Exception: If conversion fails
@@ -73,11 +82,17 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
         # Mark COMPLETED
         if status_mgr:
             logger.debug(f"Conversion Done: updating doc & job metadata for document: {doc_id}")
+            file_hash = (
+                file_checksum_dict.get(filename)
+                if file_checksum_dict
+                else generate_file_checksum(file_path.read_bytes())
+            )
             status_mgr.update_doc_metadata(doc_id, {
                 "status": DocStatus.COMPLETED,
                 "pages": page_count,
                 "completed_at": get_utc_timestamp(),
-                "timing_in_secs": {"digitizing": round(conversion_time, 2)}
+                "timing_in_secs": {"digitizing": round(conversion_time, 2)},
+                "file_hash": file_hash,
             })
             status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
 

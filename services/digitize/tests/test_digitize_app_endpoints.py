@@ -16,6 +16,8 @@ from digitize.workers.concurrency import concurrency_manager
 
 @pytest.fixture
 def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
+    import digitize.api.v1.jobs as jobs_router_module
+
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
 
@@ -48,6 +50,12 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # reset_db is now imported inside documents_router_module, not in app.py
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
+
+    # Stub out hash-based duplicate detection so tests run without a real DB.
+    # find_completed_document_by_hash returns None → every file is treated as novel.
+    mock_hash_db_manager = Mock()
+    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
     return TestClient(digitize_app.app)
 
@@ -98,7 +106,8 @@ class TestCreateJobs:
         )
 
         assert response.status_code == 202
-        assert response.json() == {"job_id": "job-123"}
+        assert response.json()["job_id"] == "job-123"
+        assert "warnings" not in response.json()
         stage_upload_files_mock.assert_awaited_once()
         initialize_job_state_mock.assert_called_once_with(
             "job-123",
@@ -106,6 +115,7 @@ class TestCreateJobs:
             OutputFormat.JSON,
             ["sample.pdf"],
             None,
+            already_exists_files=[],
         )
 
     def test_successful_ingestion_job_creation(self, digitize_test_client):
@@ -162,6 +172,7 @@ class TestCreateJobs:
             OutputFormat.MD,
             ["sample.pdf"],
             "My Job",
+            already_exists_files=[],
         )
 
     def test_successful_digitization_job_creation_with_docx(self, digitize_test_client):
@@ -178,7 +189,8 @@ class TestCreateJobs:
         )
 
         assert response.status_code == 202
-        assert response.json() == {"job_id": "job-123"}
+        assert response.json()["job_id"] == "job-123"
+        assert "warnings" not in response.json()
         stage_upload_files_mock.assert_awaited_once()
         initialize_job_state_mock.assert_called_once_with(
             "job-123",
@@ -186,6 +198,7 @@ class TestCreateJobs:
             OutputFormat.JSON,
             ["document.docx"],
             None,
+            already_exists_files=[],
         )
 
     def test_successful_ingestion_job_creation_with_docx(self, digitize_test_client):
@@ -237,6 +250,41 @@ class TestCreateJobs:
 
         assert response.status_code == 202
         assert response.json()["job_id"] == "job-123"
+
+    def test_mixed_batch_returns_202_without_warnings(self, digitize_test_client, monkeypatch):
+        """202 response for a mixed batch contains only job_id — no warnings field.
+
+        One file already exists in the DB (find_completed_document_by_hash returns a
+        match); the second is novel.  The endpoint must accept the job (202).
+        Skipped files are recorded directly on the job's document list with status
+        'already_exists'; the response body carries no warnings.
+        """
+        import digitize.api.v1.jobs as jobs_router_module
+
+        existing_doc = Mock()
+        existing_doc.doc_id = "existing-doc-id"
+        existing_doc.name = "old.pdf"
+
+        # First file already exists; second is novel.
+        mock_hash_db = Mock()
+        mock_hash_db.find_completed_document_by_hash = Mock(
+            side_effect=[existing_doc, None]
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        pdf_header = b"%PDF-1.4 test"
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("old.pdf", pdf_header, "application/pdf")),
+                ("files", ("new.pdf", pdf_header, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        body = response.json()
+        assert body["job_id"] == "job-123"
+        assert "warnings" not in body
 
 
 @pytest.mark.unit

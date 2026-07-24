@@ -47,6 +47,7 @@ class TestEnums:
             "chunked",
             "completed",
             "failed",
+            "already_exists",
         }
 
     def test_enum_string_conversion(self):

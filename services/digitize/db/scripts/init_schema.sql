@@ -27,9 +27,19 @@ CREATE TABLE IF NOT EXISTS documents (
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed')),
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed', 'already_exists')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
+);
+
+-- Checksum registry — one row per unique file content, points to the
+-- authoritative completed Document for duplicate detection.
+-- ON DELETE CASCADE ensures stale registry entries are automatically removed
+-- when the referenced document is deleted, preventing orphaned hash entries
+-- from blocking future re-ingestion of the same file.
+CREATE TABLE IF NOT EXISTS file_checksum_registry (
+    sha256        TEXT        PRIMARY KEY,
+    doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
 -- Create indexes with IF NOT EXISTS

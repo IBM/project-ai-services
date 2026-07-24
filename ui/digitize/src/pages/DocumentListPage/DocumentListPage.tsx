@@ -308,6 +308,8 @@ const getStatusIcon = (status: string) => {
     case 'processed':
     case 'chunked':
       return <InProgress size={16} className={styles.statusIconProgress} />;
+    case 'already_exists':
+      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
       return null;
   }

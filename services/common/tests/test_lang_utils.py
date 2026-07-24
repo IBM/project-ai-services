@@ -184,7 +184,11 @@ class TestGetPromptForLanguage:
 @pytest.mark.unit
 class TestGetMaxTokensMap:
     """Tests for get_max_tokens_map function."""
-    
+    def setup_method(self):
+        """Reset cached max tokens map before each test."""
+        import common.lang_utils as lang_utils
+        lang_utils._max_tokens_map = None
+
     def test_get_max_tokens_map_returns_dict(self):
         """Test returns dictionary with language codes and max tokens."""
         from common.lang_utils import get_max_tokens_map, LanguageCodes
@@ -413,12 +417,16 @@ class TestLanguageUtilsIntegration:
     
     def test_max_tokens_map_integration(self):
         """Test max tokens map integration with language detection."""
+        import common.lang_utils as lang_utils
         from common.lang_utils import (
             setup_language_detector,
             detect_language,
             get_max_tokens_map,
             LanguageCodes
         )
+
+        # Reset cached map so the patch below takes effect
+        lang_utils._max_tokens_map = None
         
         # Setup
         setup_language_detector([Language.ENGLISH, Language.GERMAN])

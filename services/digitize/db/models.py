@@ -132,7 +132,8 @@ class Document(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            "status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed')",
+            "status IN ('accepted', 'in_progress', 'digitized', 'processed',"
+            " 'chunked', 'completed', 'failed', 'already_exists')",
             name="chk_doc_status"
         ),
         CheckConstraint(
@@ -149,5 +150,30 @@ class Document(Base):
 
     def __repr__(self) -> str:
         return f"<Document(doc_id='{self.doc_id}', name='{self.name}', status='{self.status}')>"
+
+
+class FileChecksumRegistry(Base):
+    """
+    Registry table that maps a SHA-256 digest to the authoritative completed
+    Document row for that content.
+
+    Maps to the 'file_checksum_registry' table in PostgreSQL.
+
+    The FK to documents(doc_id) ON DELETE CASCADE means registry entries are
+    automatically removed when the referenced document is deleted, preventing
+    orphaned hashes from blocking future re-ingestion of the same file.
+    """
+    __tablename__ = "file_checksum_registry"
+
+    sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    doc_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("documents.doc_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<FileChecksumRegistry(sha256='{self.sha256[:20]}...', doc_id='{self.doc_id}')>"
 
 # Made with Bob

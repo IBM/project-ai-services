@@ -29,6 +29,16 @@ class DocStatus(str, Enum):
     CHUNKED = "chunked"
     COMPLETED = "completed"
     FAILED = "failed"
+    ALREADY_EXISTS = "already_exists"
+
+
+class AlreadyExistsFile(BaseModel):
+    """Describes a single file that was skipped because it already exists."""
+    filename: str = Field(..., description="Original filename of the skipped file")
+    existing_doc_id: str = Field(..., description="doc_id of the already-ingested document")
+    existing_doc_name: str = Field(..., description="Name of the already-ingested document")
+    file_hash: str = Field(..., description="SHA-256 hash that matched, e.g. 'sha256:e3b0...'")
+
 
 class PaginationInfo(BaseModel):
     total: int
@@ -81,10 +91,14 @@ class DocumentContentResponse(BaseModel):
 class JobDocumentSummary(BaseModel):
     """Compact per-document entry for job status responses."""
     model_config = ConfigDict(use_enum_values=True)
-    
+
     id: str
     name: str
     status: str
+    message: Optional[str] = Field(
+        default=None,
+        description="Human-readable message; set when status is 'already_exists'",
+    )
 
 
 class JobStats(BaseModel):

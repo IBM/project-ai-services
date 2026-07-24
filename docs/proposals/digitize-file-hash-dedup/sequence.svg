@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 920" width="1100" height="920" font-family="'Segoe UI', system-ui, sans-serif" font-size="12">
+  <!-- Background -->
+  <rect width="1100" height="920" fill="#1a1a1a"/>
+
+  <!-- Title -->
+  <text x="550" y="28" text-anchor="middle" fill="#e0e0e0" font-size="14" font-weight="bold">File-Hash Already-Exists Detection — Sequence Diagram</text>
+
+  <!-- ─────────── PARTICIPANT BOXES ─────────── -->
+  <!-- Columns: Client=110, create_job=310, PostgreSQL=590, file_checksum_registry=780 (overlay on PG), pipeline=1000 -->
+
+  <!-- BEFORE band -->
+  <rect x="20" y="44" width="1060" height="16" rx="3" fill="#333"/>
+  <text x="550" y="56" text-anchor="middle" fill="#bbb" font-size="11">BEFORE — every submission runs the full pipeline</text>
+
+  <!-- Participant headers -->
+  <rect x="50"  y="64" width="120" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="110" y="87" text-anchor="middle" fill="#ccc">Client</text>
+
+  <rect x="250" y="64" width="160" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="330" y="87" text-anchor="middle" fill="#ccc">jobs.py create_job</text>
+
+  <rect x="530" y="64" width="130" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="595" y="87" text-anchor="middle" fill="#ccc">PostgreSQL</text>
+
+  <rect x="790" y="64" width="180" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="880" y="87" text-anchor="middle" fill="#ccc">ingest / digitize pipeline</text>
+
+  <!-- Lifelines -->
+  <line x1="110" y1="100" x2="110" y2="440" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="330" y1="100" x2="330" y2="440" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="595" y1="100" x2="595" y2="440" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="880" y1="100" x2="880" y2="440" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+
+  <!-- BEFORE messages -->
+  <!-- 1. POST /v1/jobs -->
+  <line x1="110" y1="126" x2="327" y2="126" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="218" y="120" text-anchor="middle" fill="#9ac0e8" font-size="11">POST /v1/jobs (file bytes)</text>
+
+  <!-- 2. stage + launch -->
+  <line x1="330" y1="150" x2="877" y2="150" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="600" y="144" text-anchor="middle" fill="#9ac0e8" font-size="11">stage + launch</text>
+
+  <!-- 3. pipeline work (self-loop) -->
+  <path d="M880,174 C940,174 940,210 880,210" fill="none" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="950" y="188" text-anchor="start" fill="#9ac0e8" font-size="10">convert (30s) + LLM tables (25s)</text>
+  <text x="950" y="202" text-anchor="start" fill="#9ac0e8" font-size="10">+ chunk (5s) + embed+index (4s)</text>
+
+  <!-- 4. status=COMPLETED -->
+  <line x1="880" y1="234" x2="333" y2="234" stroke="#6a9fd8" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="600" y="228" text-anchor="middle" fill="#9ac0e8" font-size="11">status=COMPLETED + upsert file_checksum_registry</text>
+
+  <!-- 5. 202 Accepted -->
+  <line x1="330" y1="258" x2="113" y2="258" stroke="#6a9fd8" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="218" y="252" text-anchor="middle" fill="#9ac0e8" font-size="11">202 Accepted { job_id }</text>
+
+  <!-- ─── AFTER band ─── -->
+  <rect x="20" y="276" width="1060" height="16" rx="3" fill="#333"/>
+  <text x="550" y="288" text-anchor="middle" fill="#bbb" font-size="11">AFTER — already-existing file detected at the API boundary</text>
+
+  <!-- Participant headers (bottom set) -->
+  <rect x="50"  y="296" width="120" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="110" y="319" text-anchor="middle" fill="#ccc">Client</text>
+
+  <rect x="250" y="296" width="160" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="330" y="319" text-anchor="middle" fill="#ccc">jobs.py create_job</text>
+
+  <rect x="470" y="296" width="130" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="535" y="309" text-anchor="middle" fill="#ccc" font-size="11">PostgreSQL</text>
+  <text x="535" y="323" text-anchor="middle" fill="#888" font-size="10">documents table</text>
+
+  <rect x="640" y="296" width="170" height="36" rx="3" fill="#1e2a1e" stroke="#4a7a4a" stroke-width="1.2"/>
+  <text x="725" y="309" text-anchor="middle" fill="#8bc88b" font-size="11">file_checksum_registry</text>
+  <text x="725" y="323" text-anchor="middle" fill="#666" font-size="10">sha256 (PK) → doc_id</text>
+
+  <rect x="850" y="296" width="180" height="36" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="940" y="319" text-anchor="middle" fill="#888">ingest / digitize pipeline</text>
+
+  <!-- Lifelines AFTER -->
+  <line x1="110" y1="332" x2="110" y2="810" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="330" y1="332" x2="330" y2="810" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="535" y1="332" x2="535" y2="810" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="725" y1="332" x2="725" y2="810" stroke="#4a7a4a" stroke-width="1" stroke-dasharray="5,4"/>
+  <line x1="940" y1="332" x2="940" y2="810" stroke="#444" stroke-width="1" stroke-dasharray="5,4"/>
+
+  <!-- 6. POST /v1/jobs same file bytes -->
+  <line x1="110" y1="358" x2="327" y2="358" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="218" y="352" text-anchor="middle" fill="#9ac0e8" font-size="11">POST /v1/jobs (same file bytes)</text>
+
+  <!-- 7. asyncio.to_thread(generate_file_checksum) — self-loop on create_job -->
+  <path d="M330,382 C390,382 390,416 330,416" fill="none" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="398" y="396" text-anchor="start" fill="#9ac0e8" font-size="11">asyncio.to_thread(</text>
+  <text x="398" y="410" text-anchor="start" fill="#9ac0e8" font-size="11">  generate_file_checksum, bytes) ~40 ms</text>
+
+  <!-- 8. SELECT via registry PK -->
+  <line x1="330" y1="440" x2="722" y2="440" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="525" y="434" text-anchor="middle" fill="#9ac0e8" font-size="11">SELECT doc_id FROM file_checksum_registry WHERE sha256=? (PK, &lt;2ms)</text>
+
+  <!-- 9. doc_id found -->
+  <line x1="722" y1="464" x2="333" y2="464" stroke="#6a9fd8" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="525" y="458" text-anchor="middle" fill="#8bc88b" font-size="11">doc_id found → join Document row (status=completed)</text>
+
+  <!-- Note: also cross-checks ingestion for digitization -->
+  <rect x="340" y="476" width="374" height="34" rx="3" fill="#1e2a1e" stroke="#4a7a4a" stroke-width="1"/>
+  <text x="527" y="490" text-anchor="middle" fill="#8bc88b" font-size="10">Digitization: also checks find_completed_document_by_hash(hash, "ingestion")</text>
+  <text x="527" y="504" text-anchor="middle" fill="#666" font-size="10">if ingestion doc already exists, digitization is also blocked</text>
+
+  <!-- 10. all novel? -->
+  <!-- Scenario A: some/all already exist -->
+  <!-- Scenario B: partial → 202, skipped files recorded as ALREADY_EXISTS in job docs -->
+
+  <!-- Scenario A label -->
+  <text x="110" y="534" text-anchor="middle" fill="#888" font-size="10">Scenario A</text>
+  <text x="110" y="547" text-anchor="middle" fill="#888" font-size="10">all files</text>
+  <text x="110" y="560" text-anchor="middle" fill="#888" font-size="10">already exist</text>
+
+  <!-- 11a. 409 Conflict (all duplicates) -->
+  <line x1="330" y1="570" x2="113" y2="570" stroke="#e07070" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="218" y="563" text-anchor="middle" fill="#e07070" font-size="11">409 CONFLICT — no job created, no semaphore acquired</text>
+
+  <!-- Pipeline never runs box -->
+  <rect x="860" y="556" width="150" height="28" rx="3" fill="#2a2020" stroke="#7a3a3a" stroke-width="1.2"/>
+  <text x="935" y="574" text-anchor="middle" fill="#c07070" font-size="11">Pipeline never runs</text>
+
+  <!-- Divider -->
+  <line x1="40" y1="596" x2="1060" y2="596" stroke="#333" stroke-width="1" stroke-dasharray="3,5"/>
+  <text x="550" y="610" text-anchor="middle" fill="#666" font-size="10">— — — Scenario B: some files novel, some already-exist — — —</text>
+
+  <!-- 11b. strip already-exists from batch (self-loop on create_job) -->
+  <path d="M330,624 C390,624 390,654 330,654" fill="none" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="398" y="636" text-anchor="start" fill="#9ac0e8" font-size="11">strip already-existing files from batch</text>
+  <text x="398" y="650" text-anchor="start" fill="#9ac0e8" font-size="11">novel_filenames / novel_contents remain</text>
+
+  <!-- 12. acquire semaphore + stage + initialize_job_state -->
+  <line x1="330" y1="674" x2="532" y2="674" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="430" y="668" text-anchor="middle" fill="#9ac0e8" font-size="11">create job + novel docs (ACCEPTED)</text>
+
+  <!-- 13. create ALREADY_EXISTS doc rows -->
+  <line x1="330" y1="698" x2="532" y2="698" stroke="#8bc88b" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="430" y="692" text-anchor="middle" fill="#8bc88b" font-size="11">create already-exists docs (status=ALREADY_EXISTS, written atomically)</text>
+
+  <!-- 14. background task launched -->
+  <line x1="330" y1="722" x2="937" y2="722" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="630" y="716" text-anchor="middle" fill="#9ac0e8" font-size="11">background: ingest/digitize(file_checksum_dict) — novel files only</text>
+
+  <!-- 15. pipeline work self-loop -->
+  <path d="M940,746 C1000,746 1000,778 940,778" fill="none" stroke="#6a9fd8" stroke-width="1.4" marker-end="url(#solid)"/>
+  <text x="1006" y="758" text-anchor="start" fill="#9ac0e8" font-size="10">convert → chunk → embed → index</text>
+
+  <!-- 16. COMPLETED + upsert checksum -->
+  <line x1="940" y1="798" x2="728" y2="798" stroke="#8bc88b" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="835" y="792" text-anchor="middle" fill="#8bc88b" font-size="11">upsert file_checksum_registry (sha256 → doc_id)</text>
+
+  <!-- 17. 202 Accepted -->
+  <line x1="330" y1="822" x2="113" y2="822" stroke="#6a9fd8" stroke-width="1.4" stroke-dasharray="6,3" marker-end="url(#open)"/>
+  <text x="218" y="815" text-anchor="middle" fill="#9ac0e8" font-size="11">202 Accepted { job_id } — skipped files in GET /v1/jobs/{job_id} with message="Already ingested as &lt;filename&gt;"</text>
+
+  <!-- Footer participant boxes -->
+  <rect x="50"  y="836" width="120" height="32" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="110" y="857" text-anchor="middle" fill="#ccc">Client</text>
+
+  <rect x="250" y="836" width="160" height="32" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="330" y="857" text-anchor="middle" fill="#ccc">jobs.py create_job</text>
+
+  <rect x="470" y="836" width="130" height="32" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="535" y="857" text-anchor="middle" fill="#ccc">PostgreSQL</text>
+
+  <rect x="640" y="836" width="170" height="32" rx="3" fill="#1e2a1e" stroke="#4a7a4a" stroke-width="1.2"/>
+  <text x="725" y="857" text-anchor="middle" fill="#8bc88b">file_checksum_registry</text>
+
+  <rect x="850" y="836" width="180" height="32" rx="3" fill="#2a2a2a" stroke="#555" stroke-width="1.2"/>
+  <text x="940" y="857" text-anchor="middle" fill="#888">ingest / digitize pipeline</text>
+
+  <!-- Footer note -->
+  <text x="550" y="898" text-anchor="middle" fill="#555" font-size="10">Lookup uses file_checksum_registry PK join (O(1)) — not a JSONB expression index.  Hash computed via asyncio.to_thread().  Applies to both ingestion and digitization.</text>
+  <text x="550" y="912" text-anchor="middle" fill="#444" font-size="10">Made with IBM Bob</text>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="solid" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#6a9fd8"/>
+    </marker>
+    <marker id="open" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#6a9fd8" stroke-width="1.2"/>
+    </marker>
+  </defs>
+</svg>

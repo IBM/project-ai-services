@@ -19,6 +19,7 @@ export interface Document {
   status: string;
   submitted_at?: string;
   output_format?: string;
+  message?: string | null;
 }
 
 export interface JobStats {

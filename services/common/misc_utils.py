@@ -284,12 +284,28 @@ def setup_digitized_doc_dir():
     os.makedirs(settings.digitize.digitized_docs_dir, exist_ok=True)
     return settings.digitize.digitized_docs_dir
 
-def generate_file_checksum(file):
+def generate_file_checksum(file) -> str:
+    """Compute a prefixed SHA-256 hex digest of a file.
+
+    Accepts either a file path (str or Path) or raw bytes.  When passed bytes
+    the entire content is hashed in one shot; when passed a path the file is
+    read in chunks so arbitrarily large files can be processed without loading
+    them entirely into memory.
+
+    The ``sha256:`` prefix makes the algorithm explicit in stored values so
+    the hash algorithm can be upgraded in future without ambiguity.
+
+    Returns:
+        String in the form ``'sha256:<64-char-hex>'``.
+    """
     sha256 = hashlib.sha256()
-    with open(file, 'rb') as f:
-        for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+    if isinstance(file, (bytes, bytearray)):
+        sha256.update(file)
+    else:
+        with open(file, 'rb') as f:
+            for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
+                sha256.update(chunk)
+    return f"sha256:{sha256.hexdigest()}"
 
 def verify_checksum(file, checksum_file):
     file_sha256 = generate_file_checksum(file)

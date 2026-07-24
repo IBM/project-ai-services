@@ -7,11 +7,12 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, cast
 from sqlalchemy import select, update, delete, func, or_, and_
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
-from digitize.db.models import Job, Document
+from digitize.db.models import Job, Document, FileChecksumRegistry
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 
@@ -298,13 +299,13 @@ class DatabaseManager:
                 return document
         except IntegrityError as e:
             logger.error(f"Document {doc_id} already exists or invalid job_id: {e}")
-            return None
+            raise
         except SQLAlchemyError as e:
             logger.error(f"Database error creating document {doc_id}: {e}", exc_info=True)
-            return None
+            raise
         except Exception as e:
             logger.error(f"Unexpected error creating document {doc_id}: {e}", exc_info=True)
-            return None
+            raise
 
     @staticmethod
     def get_document_by_id(doc_id: str) -> Optional[Document]:
@@ -340,6 +341,92 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving document {doc_id}: {e}", exc_info=True)
             return None
 
+
+    @staticmethod
+    def upsert_file_checksum(sha256: str, doc_id: str) -> None:
+        """
+        Insert or ignore a (sha256, doc_id) pair into file_checksum_registry.
+
+        Called once a document reaches COMPLETED status so that subsequent
+        uploads of the same content can be detected via find_completed_document_by_hash.
+
+        Args:
+            sha256: Prefixed SHA-256 digest, e.g. 'sha256:e3b0c44...'
+            doc_id: The completed document's primary key.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    insert(FileChecksumRegistry)
+                    .values(sha256=sha256, doc_id=doc_id)
+                    .on_conflict_do_update(
+                        index_elements=["sha256"],
+                        set_={"doc_id": doc_id},
+                    )
+                )
+                session.execute(stmt)
+                logger.debug(f"Upserted checksum registry: sha256={sha256[:20]}... doc_id={doc_id}")
+        except SQLAlchemyError as e:
+            logger.error(f"DB error upserting checksum for {sha256[:20]}...: {e}", exc_info=True)
+
+    @staticmethod
+    def find_completed_document_by_hash(
+        file_hash: str,
+        operation: str = "ingestion",
+    ) -> Optional[Document]:
+        """
+        Find the completed document of the given operation type with a matching
+        file hash, using the file_checksum_registry lookup table.
+
+        Only documents with status='completed' and the specified type are considered.
+        Failed and in-progress documents are deliberately excluded so that a previous
+        failed attempt does not prevent re-processing of the same file.
+
+        Args:
+            file_hash: Prefixed SHA-256 digest, e.g. 'sha256:e3b0c44...'
+            operation: Document type to match — 'ingestion' or 'digitization'.
+
+        Returns:
+            The matching Document ORM object (attributes eagerly loaded and
+            expunged from session), or None if no completed duplicate exists.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(Document)
+                    .join(
+                        FileChecksumRegistry,
+                        FileChecksumRegistry.doc_id == Document.doc_id,
+                    )
+                    .where(
+                        FileChecksumRegistry.sha256 == file_hash,
+                        Document.type == operation,
+                        Document.status == DocStatus.COMPLETED.value,
+                    )
+                    .limit(1)
+                )
+                doc = session.scalar(stmt)
+                if doc:
+                    # Eagerly load all attributes before session closes to prevent
+                    # DetachedInstanceError in the caller.
+                    _ = (
+                        doc.doc_id, doc.job_id, doc.name, doc.type,
+                        doc.status, doc.output_format, doc.submitted_at,
+                        doc.completed_at, doc.error, doc.doc_metadata,
+                    )
+                    session.expunge(doc)
+                    logger.debug(
+                        f"Duplicate detected: file_hash={file_hash[:20]}... "
+                        f"matches doc_id={doc.doc_id}"
+                    )
+                return doc
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in hash lookup for {file_hash[:20]}...: {e}", exc_info=True)
+            # Do NOT raise — a lookup failure must not block ingestion.
+            # If the DB is unavailable the caller treats the file as novel.
+            return None
+
+
     @staticmethod
     def get_all_documents(
         status: Optional[str] = None,
@@ -363,10 +450,14 @@ class DatabaseManager:
             with get_db_session() as session:
                 # Build query with filters
                 stmt = select(Document)
-                
+
                 filters = []
                 if status:
                     filters.append(Document.status == status)
+                else:
+                    # Exclude already_exists docs from the global listing — they are
+                    # job-scoped audit records, not real ingested documents.
+                    filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 
@@ -494,9 +585,14 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
+                # Remove checksum registry entry first so the hash can be re-registered
+                # if the same file is ingested again after deletion.
+                session.execute(
+                    delete(FileChecksumRegistry).where(FileChecksumRegistry.doc_id == doc_id)
+                )
                 stmt = delete(Document).where(Document.doc_id == doc_id)
                 result = cast(CursorResult, session.execute(stmt))
-                
+
                 if result.rowcount > 0:
                     logger.info(f"Deleted document from database: {doc_id}")
                     return True
@@ -554,10 +650,13 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
+                # Wipe the checksum registry so previously-seen hashes are no longer
+                # blocked after a full reset.
+                session.execute(delete(FileChecksumRegistry))
                 stmt = delete(Document)
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
-                
+
                 logger.info(f"Deleted all documents from database: {deleted_count} documents")
                 return {
                     "deleted_count": deleted_count,

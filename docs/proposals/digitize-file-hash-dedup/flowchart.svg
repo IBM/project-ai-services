@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1180" width="900" height="1180" font-family="'Segoe UI', system-ui, sans-serif" font-size="13">
+  <!-- Background -->
+  <rect width="900" height="1180" fill="#1a1a1a"/>
+
+  <!-- Title -->
+  <text x="450" y="32" text-anchor="middle" fill="#e0e0e0" font-size="14" font-weight="bold">File-Hash Already-Exists Detection — Decision Flow</text>
+  <text x="450" y="52" text-anchor="middle" fill="#888" font-size="11">Applies to both operation=ingestion and operation=digitization</text>
+
+  <!-- ── NODE 1: POST /v1/jobs ── -->
+  <rect x="300" y="68" width="300" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="89" text-anchor="middle" fill="#e0e0e0">POST /v1/jobs</text>
+  <text x="450" y="107" text-anchor="middle" fill="#aaa" font-size="11">(file bytes already in memory)</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="120" x2="450" y2="148" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE 2: SHA-256 hash ── -->
+  <rect x="280" y="148" width="340" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="169" text-anchor="middle" fill="#e0e0e0">asyncio.to_thread(generate_file_checksum)</text>
+  <text x="450" y="187" text-anchor="middle" fill="#aaa" font-size="11">~40 ms per file — offloaded, non-blocking</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="200" x2="450" y2="228" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE 3: Registry lookup diamond ── -->
+  <!-- diamond centre 450,308 half-w=175 half-h=80 -->
+  <polygon points="450,228 625,308 450,388 275,308" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="292" text-anchor="middle" fill="#e0e0e0">lookup in</text>
+  <text x="450" y="309" text-anchor="middle" fill="#e0e0e0">file_checksum_registry</text>
+  <text x="450" y="326" text-anchor="middle" fill="#aaa" font-size="11">WHERE sha256 = ? (PK, O(1))</text>
+
+  <!-- ── Digitization cross-check note ── -->
+  <rect x="636" y="272" width="230" height="52" rx="4" fill="#1e2a1e" stroke="#4a7a4a" stroke-width="1.2"/>
+  <text x="751" y="291" text-anchor="middle" fill="#8bc88b" font-size="11">Digitization also checks</text>
+  <text x="751" y="306" text-anchor="middle" fill="#8bc88b" font-size="11">operation=ingestion registry</text>
+  <text x="751" y="321" text-anchor="middle" fill="#666" font-size="10">(no point re-digitizing indexed content)</text>
+  <line x1="636" y1="298" x2="625" y2="308" stroke="#4a7a4a" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Arrow left — No match -->
+  <line x1="275" y1="308" x2="130" y2="308" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="200" y="298" text-anchor="middle" fill="#aaa" font-size="11">No match</text>
+  <text x="200" y="313" text-anchor="middle" fill="#aaa" font-size="11">(novel file)</text>
+
+  <!-- Arrow down-right — Match completed -->
+  <line x1="450" y1="388" x2="450" y2="416" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="483" y="406" text-anchor="start" fill="#aaa" font-size="11">Match found</text>
+
+  <!-- Arrow right — status=failed/in_progress -->
+  <line x1="625" y1="308" x2="770" y2="308" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="695" y="298" text-anchor="middle" fill="#aaa" font-size="11">Match found but</text>
+  <text x="695" y="313" text-anchor="middle" fill="#aaa" font-size="11">status=failed/in_progress</text>
+
+  <!-- ── Right branch: allow re-processing ── -->
+  <rect x="770" y="282" width="106" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="823" y="303" text-anchor="middle" fill="#e0e0e0" font-size="11">allow</text>
+  <text x="823" y="318" text-anchor="middle" fill="#e0e0e0" font-size="11">re-processing</text>
+  <text x="823" y="333" text-anchor="middle" fill="#aaa" font-size="10">(treat as novel)</text>
+
+  <!-- right branch arrow down to novel -->
+  <line x1="823" y1="334" x2="823" y2="530" stroke="#555" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <line x1="823" y1="530" x2="135" y2="530" stroke="#555" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arr)"/>
+
+  <!-- ── Centre-left branch: ALREADY_EXISTS ── -->
+  <!-- diamond: match found (status=completed) -->
+  <!-- split: all already-exist? -->
+  <rect x="300" y="416" width="300" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="437" text-anchor="middle" fill="#e0e0e0">All files already exist?</text>
+  <text x="450" y="455" text-anchor="middle" fill="#aaa" font-size="11">(novel_filenames is empty)</text>
+
+  <!-- Arrow left: yes → 409 -->
+  <line x1="300" y1="442" x2="220" y2="442" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="258" y="434" text-anchor="middle" fill="#aaa" font-size="11">YES</text>
+
+  <rect x="60" y="416" width="160" height="52" rx="4" fill="#2a1a1a" stroke="#7a3a3a" stroke-width="1.5"/>
+  <text x="140" y="437" text-anchor="middle" fill="#e07070">409 Conflict</text>
+  <text x="140" y="455" text-anchor="middle" fill="#aaa" font-size="11">no job created</text>
+
+  <!-- Arrow down: no → continue with novel subset -->
+  <line x1="450" y1="468" x2="450" y2="496" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="474" y="487" text-anchor="start" fill="#aaa" font-size="11">SOME already exist</text>
+
+  <!-- ── NODE: Novel subset continues ── -->
+  <rect x="280" y="496" width="340" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="517" text-anchor="middle" fill="#e0e0e0">Strip already-existing files from batch</text>
+  <text x="450" y="535" text-anchor="middle" fill="#aaa" font-size="11">novel files continue; already-exists → status=ALREADY_EXISTS in job docs</text>
+
+  <!-- Arrow down from left (novel) to stage+create -->
+  <line x1="130" y1="308" x2="130" y2="530" stroke="#555" stroke-width="1.5"/>
+  <line x1="130" y1="530" x2="280" y2="548" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Arrow down from strip node -->
+  <line x1="450" y1="548" x2="450" y2="576" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE: stage + initialize_job_state ── -->
+  <rect x="250" y="576" width="400" height="66" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="597" text-anchor="middle" fill="#e0e0e0">stage files + initialize_job_state()</text>
+  <text x="450" y="614" text-anchor="middle" fill="#aaa" font-size="11">novel docs → status=ACCEPTED</text>
+  <text x="450" y="630" text-anchor="middle" fill="#aaa" font-size="11">already-exists docs → status=ALREADY_EXISTS (written at creation)</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="642" x2="450" y2="670" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE: background pipeline ── -->
+  <rect x="250" y="670" width="400" height="52" rx="4" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+  <text x="450" y="691" text-anchor="middle" fill="#e0e0e0">background pipeline (novel files only)</text>
+  <text x="450" y="709" text-anchor="middle" fill="#aaa" font-size="11">ingest: convert → process → chunk → embed → index</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="722" x2="450" y2="750" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE: on COMPLETED ── -->
+  <rect x="250" y="750" width="400" height="80" rx="4" fill="#1e241e" stroke="#4a7a4a" stroke-width="1.5"/>
+  <text x="450" y="772" text-anchor="middle" fill="#8bc88b">on COMPLETED:</text>
+  <text x="450" y="790" text-anchor="middle" fill="#e0e0e0" font-size="11">write file_hash to doc.metadata</text>
+  <text x="450" y="807" text-anchor="middle" fill="#e0e0e0" font-size="11">upsert into file_checksum_registry</text>
+  <text x="450" y="824" text-anchor="middle" fill="#aaa" font-size="10">(sha256 PK → future lookups hit this row)</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="830" x2="450" y2="858" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── NODE: 202 response ── -->
+  <rect x="250" y="858" width="400" height="66" rx="4" fill="#1e1e2a" stroke="#4a4a7a" stroke-width="1.5"/>
+  <text x="450" y="879" text-anchor="middle" fill="#7070e0">202 Accepted</text>
+  <text x="450" y="896" text-anchor="middle" fill="#e0e0e0" font-size="11">{ job_id: "..." }</text>
+  <text x="450" y="912" text-anchor="middle" fill="#aaa" font-size="10">skipped files visible in GET /v1/jobs/{job_id} with status=already_exists and message="Already ingested as &lt;filename&gt;"</text>
+
+  <!-- ── LEGEND ── -->
+  <rect x="30" y="960" width="840" height="180" rx="4" fill="#222" stroke="#444" stroke-width="1"/>
+  <text x="450" y="982" text-anchor="middle" fill="#888" font-size="12" font-weight="bold">Key differences from original proposal</text>
+  <line x1="30" y1="990" x2="870" y2="990" stroke="#444" stroke-width="1"/>
+
+  <text x="50" y="1012" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1012" fill="#ccc" font-size="11">Hash utility: generate_file_checksum() in common/misc_utils.py (not a separate hash.py) — also accepts file paths, reads in chunks</text>
+  <text x="50" y="1032" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1032" fill="#ccc" font-size="11">Hash is computed via asyncio.to_thread() to avoid blocking the event loop</text>
+  <text x="50" y="1052" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1052" fill="#ccc" font-size="11">Lookup uses file_checksum_registry table (PK join) — not a JSONB expression index on metadata-&gt;&gt;'file_hash'</text>
+  <text x="50" y="1072" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1072" fill="#ccc" font-size="11">Status is ALREADY_EXISTS (not DUPLICATE_SKIPPED); model is AlreadyExistsFile (not DuplicateSkippedFile)</text>
+  <text x="50" y="1092" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1092" fill="#ccc" font-size="11">Applies to both ingestion and digitization; digitization additionally cross-checks the ingestion registry</text>
+  <text x="50" y="1112" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1112" fill="#ccc" font-size="11">ALREADY_EXISTS docs written atomically at create_document() time — no intermediate ACCEPTED state</text>
+  <text x="50" y="1132" fill="#8bc88b" font-size="11">▸</text>
+  <text x="65" y="1132" fill="#ccc" font-size="11">Registry cleared on delete_document() / delete_all_documents() so re-ingestion is allowed after deletion</text>
+
+  <text x="450" y="1165" text-anchor="middle" fill="#444" font-size="10">Made with IBM Bob</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+  </defs>
+</svg>
