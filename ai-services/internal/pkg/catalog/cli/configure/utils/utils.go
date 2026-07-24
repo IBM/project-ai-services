@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -38,7 +38,7 @@ func ConfirmCatalogReset(flagName string) (bool, error) {
 
 // WaitForDeploymentReady polls GetDeploymentStatus until all desired replicas are ready
 // or the timeout is exceeded.
-func WaitForDeploymentReady(ctx context.Context, rt *openshiftruntime.OpenshiftClient, name string) error {
+func WaitForDeploymentReady(ctx context.Context, rt runtime.Runtime, name string) error {
 	logger.InfofCtx(ctx, "Waiting for deployment '%s' to become ready...", name)
 
 	deadline := time.Now().Add(deploymentPollTimeout)

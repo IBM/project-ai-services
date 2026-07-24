@@ -55,6 +55,8 @@ func ResetCatalogPassword() error {
 	s.Start(ctx)
 
 	if err := applyPasswordReset(ctx, rt, passwordSecretData); err != nil {
+		s.Fail("Password reset failed.")
+
 		return err
 	}
 

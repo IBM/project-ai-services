@@ -462,6 +462,10 @@ func (kc *OpenshiftClient) UpdateSecret(name string, data map[string][]byte) err
 	}
 
 	existing.Data = data
+	for k, v := range data {
+		existing.Data[k] = v
+	}
+	
 	_, err = secretClient.Update(kc.Ctx, existing, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update secret: %w", err)
