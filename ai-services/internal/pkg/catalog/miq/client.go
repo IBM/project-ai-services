@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -37,24 +38,22 @@ func NewHTTPClient(baseURL string, insecureSkipTLS bool) *HTTPClient {
 	return &HTTPClient{http: r}
 }
 
-// GetUserByToken calls GET /api/users with the supplied MIQ token as X-Auth-Token
-// and returns the caller's identity and group membership.
+// GetUserByToken calls GET /api?attributes=identity with the supplied MIQ token
+// as X-Auth-Token and returns the caller's identity and group membership.
+// The numeric user ID is extracted from the identity.user_href path segment.
 //
 // Validated against ManageIQ API v4.4.0-pre at https://9.20.202.144:8443.
 func (c *HTTPClient) GetUserByToken(ctx context.Context, miqToken string) (*UserInfo, error) {
-	var result miqUsersResponse
+	var result miqIdentityResponse
 	var errResp ErrorResponse
 
 	resp, err := c.http.R().
 		SetContext(ctx).
 		SetHeader("X-Auth-Token", miqToken).
-		SetQueryParams(map[string]string{
-			"expand":     "resources",
-			"attributes": "userid,name,miq_groups",
-		}).
+		SetQueryParam("attributes", "identity").
 		SetResult(&result).
 		SetError(&errResp).
-		Get("/api/users")
+		Get("/api")
 	if err != nil {
 		return nil, fmt.Errorf("miq: request failed: %w", err)
 	}
@@ -65,22 +64,17 @@ func (c *HTTPClient) GetUserByToken(ctx context.Context, miqToken string) (*User
 	if resp.IsError() {
 		return nil, fmt.Errorf("miq: unexpected status %d: %s", resp.StatusCode(), errResp.Error.Message)
 	}
-	if len(result.Resources) == 0 {
+	if result.Identity.UserID == "" {
 		return nil, ErrUnauthorized
 	}
 
-	u := result.Resources[0]
-	groups := make([]string, 0, len(u.MIQGroups))
-	for _, g := range u.MIQGroups {
-		if g.Description != "" {
-			groups = append(groups, g.Description)
-		}
-	}
+	// Extract numeric user ID from user_href, e.g. ".../api/users/1" → "1".
+	externalID := path.Base(result.Identity.UserHref)
 
 	return &UserInfo{
-		ExternalID: u.ID,
-		UserName:   u.UserID,
-		FullName:   u.Name,
-		Groups:     groups,
+		ExternalID: externalID,
+		UserName:   result.Identity.UserID,
+		FullName:   result.Identity.Name,
+		Groups:     result.Identity.Groups,
 	}, nil
 }
