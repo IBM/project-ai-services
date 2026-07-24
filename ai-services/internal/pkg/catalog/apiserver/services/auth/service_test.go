@@ -95,6 +95,7 @@ func TestLoginWithToken_MIQClientError(t *testing.T) {
 func TestLoginWithToken_UserSeededInRepo(t *testing.T) {
 	stub := &stubMIQClient{
 		info: &miq.UserInfo{
+			ExternalID: "42",
 			UserName:   "operator1",
 			FullName:   "Op User",
 			Groups:     []string{"EvmGroup-operator"},

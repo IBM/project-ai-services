@@ -87,18 +87,20 @@ func (s *service) LoginWithToken(ctx context.Context, miqToken string) (string, 
 	}
 
 	// Seed the in-memory user repo so /auth/me works after token exchange.
+	// ID must match the JWT subject (info.ExternalID) so GetByID resolves correctly.
 	if repo, ok := s.users.(*repository.InMemoryUserRepo); ok {
 		repo.Upsert(&models.User{
+			ID:       info.ExternalID,
 			UserName: info.UserName,
 			Name:     info.FullName,
 		})
 	}
 
-	access, _, err := s.tokens.GenerateAccessToken(info.UserName)
+	access, _, err := s.tokens.GenerateAccessToken(info.ExternalID)
 	if err != nil {
 		return "", "", err
 	}
-	refresh, _, err := s.tokens.GenerateRefreshToken(info.UserName)
+	refresh, _, err := s.tokens.GenerateRefreshToken(info.ExternalID)
 	if err != nil {
 		return "", "", err
 	}
