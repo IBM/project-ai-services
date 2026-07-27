@@ -1371,9 +1371,82 @@ Each connector's worker thread executes the following flow on every tick. Steps 
 
 In both cases the file's SHA is absent from `file_checksum_registry` at tick end. The next tick's scan will recompute the same SHA, find it absent from `known_hashes`, and re-add the file to `to_ingest` — giving the file a clean retry without any manual intervention.
 
-### 9.2 Tick Guard — Skipping Overlapping Ticks
+### 9.2 Tick Guard — Graceful Manual Trigger & Skipping Overlapping Ticks
 
-If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval.
+If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next **scheduled** interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval.
+
+If a **manual trigger** (`trigger_now()`, called from a `PUT /v1/connectors` handler) arrives while a tick is running, the trigger is **preserved** — a `_pending_trigger` boolean flag is set — so that, as soon as the current tick finishes naturally, the post-tick sleep is bypassed and the next tick starts immediately. The tick in progress is **never interrupted**; it always runs to completion.
+
+The only path that can interrupt a running tick is **connector deletion** (`DELETE /v1/connectors`), which sets `stop_event`. Because `stop_event` is checked at the top of the `while` loop (not inside `_run_tick`), even the DELETE path waits for the current tick to finish before the thread exits — it simply does not re-enter the loop afterwards.
+
+#### Flow A — Manual trigger arrives while tick is running
+
+```
+[API thread]                         [Worker thread]
+──────────────────────────           ─────────────────────────────────────────
+                                     while not stop_event.is_set():
+                                       _tick_running is False → guard skipped
+                                       _pending_trigger = False
+                                       _manual_trigger.clear()
+                                       _tick_running = True
+                                       ┌──────────────────────────────────┐
+PUT /v1/connectors/{id}                │  _run_tick()  ← blocking         │
+  → trigger_now() called               │  scan → dedup → batch ingest     │
+  → _pending_trigger = True  ────────▶ │  (tick NOT interrupted)          │
+  → _manual_trigger.set()              │                                  │
+  ← returns 200 OK immediately         └──────────────────────────────────┘
+     (does not wait for tick)          finally: _tick_running = False
+                                       │
+                                       ▼
+                                     if _pending_trigger:        ← True
+                                       log "skipping post-tick sleep"
+                                       _pending_trigger = False
+                                       _manual_trigger.clear()
+                                       │
+                                       ▼
+                                     while not stop_event.is_set():  ← loops immediately
+                                       → new _run_tick() starts at once
+```
+
+#### Flow B — Manual trigger arrives during post-tick sleep (no tick running)
+
+```
+[API thread]                         [Worker thread]
+──────────────────────────           ─────────────────────────────────────────
+                                     _run_tick() just finished
+                                     _tick_running = False
+                                     _pending_trigger is False → normal sleep
+                                     ┌─────────────────────────────────────┐
+PUT /v1/connectors/{id}              │ _manual_trigger.wait(interval)      │
+  → trigger_now() called             │          sleeping...                │
+  → _pending_trigger = True          │                                     │
+  → _manual_trigger.set()  ────────▶ │  ← sleep wakes immediately         │
+  ← returns 200 OK                   └─────────────────────────────────────┘
+                                     _pending_trigger = False
+                                     _manual_trigger.clear()
+                                     while loop → top → new tick starts at once
+```
+
+#### Flow C — Scheduled interval fires while previous tick still running (skip)
+
+```
+[Worker thread — single timeline]
+────────────────────────────────────────────────────────────────
+_tick_running = True
+┌────────────────────────────────────────────────────────────┐
+│  _run_tick()  ← still executing (long scan / slow ingest)  │
+│                                                            │
+│  (scheduled interval timer would have fired here)         │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+while not stop_event.is_set():
+  if _tick_running:          ← True
+    log "previous tick still running, skip"
+    stop_event.wait(interval)   ← wait a full interval then re-check
+    continue                    ← no tick run, no history row written
+```
+
+**Note:** A manual `trigger_now()` that arrives during the skip-wait is not lost — `_pending_trigger` stays `True` and is honoured after the running tick eventually finishes.
 
 ```python
 class ConnectorSyncWorker:
@@ -1382,7 +1455,8 @@ class ConnectorSyncWorker:
         self.connector_id = connector_id
         self._config = connector_config
         self._stop_event = stop_event
-        self._tick_running = False   # ← thread-local flag; guarded on the single worker thread
+        self._tick_running = False    # ← guarded on the single worker thread
+        self._pending_trigger = False # ← set by trigger_now(); read only on worker thread
 ```
 
 ### 9.3 Tmp Layout
@@ -1421,7 +1495,8 @@ No tick-level staging directory is created or maintained. The existing `cleanup_
 | SFTP connection failure (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
 | S3 credential/bucket error (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
 | Unexpected exception (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
-| Tick fired while previous tick running | Skip — log info; reset timer | (no row written) | Unchanged |
+| Tick fired while previous tick running (scheduled interval) | Skip — log info; reset timer | (no row written) | Unchanged |
+| Manual `trigger_now()` while tick running | **Preserve trigger** (`_pending_trigger = True`); current tick completes naturally; post-tick sleep skipped; next tick starts immediately | (no row written for the wait; normal row for the following tick) | Unchanged during wait |
 
 ### 9.5 Blocking Semantics of File Download & Ingest
 
@@ -1589,39 +1664,64 @@ class ConnectorSyncWorker:
         self.connector_id = connector_id
         self._config = connector_config
         self._stop_event = stop_event
-        self._tick_running = False       # guarded on the single worker thread
-        self._manual_trigger = threading.Event()  # set to interrupt the sleep for an immediate tick
+        self._tick_running = False    # guarded on the single worker thread
+        self._pending_trigger = False # set by trigger_now(); consumed on the worker thread
+        self._manual_trigger = threading.Event()  # used only for the post-tick sleep interrupt
 
     def trigger_now(self) -> None:
         """Signal the worker to start a tick immediately, bypassing the scheduled sleep.
 
-        Safe to call from any thread. Has no effect if a tick is already running
-        (the tick guard in run() will skip the queued tick and the next one will
-        fire after the normal interval).
+        Safe to call from any thread.
+
+        - If no tick is running: wakes the post-tick sleep so the next tick starts
+          at once (same as before).
+        - If a tick is currently running: sets _pending_trigger so the post-tick
+          sleep is skipped when the current tick finishes. The running tick is
+          never interrupted — it always completes naturally.
         """
-        self._manual_trigger.set()
+        self._pending_trigger = True   # visible across threads; bool assignment is atomic in CPython
+        self._manual_trigger.set()     # also wake any in-progress sleep, just in case
 
     def run(self) -> None:
         while not self._stop_event.is_set():
-            # --- TICK GUARD ---
+            # --- TICK GUARD (scheduled-interval overlap only) ---
+            # A manual trigger while a tick is running does NOT skip — it sets
+            # _pending_trigger so the sleep after this tick is bypassed instead.
             if self._tick_running:
                 logger.info(f"Connector {self.connector_id}: previous tick still running, skip")
-                # Wait for either the interval or a manual trigger, then loop.
+                # Wait for either the interval or a stop signal, then loop back.
+                # Do NOT clear _pending_trigger here — preserve it for after the tick.
                 self._stop_event.wait(self._config["sync_interval_seconds"])
-                self._manual_trigger.clear()
                 continue
 
-            self._manual_trigger.clear()  # consume any pending trigger before starting
+            # Consume any pending trigger before the tick starts so that a
+            # trigger_now() that arrived during the guard wait is not double-honoured.
+            pending = self._pending_trigger
+            self._pending_trigger = False
+            self._manual_trigger.clear()
+
             self._tick_running = True
             try:
                 self._run_tick()
             finally:
                 self._tick_running = False
 
-            # Interruptible sleep: wakes on stop_event OR manual trigger.
-            # threading.Event.wait() returns True if the event was set, False on timeout.
-            self._manual_trigger.wait(timeout=self._config["sync_interval_seconds"])
-            self._manual_trigger.clear()
+            # Post-tick sleep — skipped entirely if a manual trigger arrived
+            # while the tick was running (or just before it started).
+            if self._pending_trigger:
+                # Trigger arrived during _run_tick(); honour it immediately.
+                logger.info(
+                    f"Connector {self.connector_id}: manual trigger pending — skipping post-tick sleep"
+                )
+                self._pending_trigger = False
+                self._manual_trigger.clear()
+            else:
+                # Normal case: interruptible sleep until next scheduled tick.
+                # Wakes early if trigger_now() is called during the sleep, or
+                # if stop_event is set (DELETE path).
+                self._manual_trigger.wait(timeout=self._config["sync_interval_seconds"])
+                self._pending_trigger = False
+                self._manual_trigger.clear()
 
     def _run_tick(self) -> None:
         """Execute one sync tick (scan → diff → stage → ingest → delete)."""
@@ -2057,6 +2157,10 @@ monitor_thread.join(timeout=10)
 
 When `DELETE /v1/connectors/{connector_id}` is called, the DELETE handler must stop the sync thread as quickly as possible before beginning document cleanup. The existing cooperative-stop mechanism (`stop_event.set()` + `thread.join(timeout=30s)`) already covers this, but the interrupt semantics deserve explicit treatment here.
 
+**Relationship to `trigger_now()` / `_pending_trigger`:** The DELETE path sets `stop_event`, not `_pending_trigger`. The `stop_event` check sits at the **top of the `while` loop** — outside `_run_tick()`. This means:
+- If no tick is running: the sleep (`_manual_trigger.wait`) unblocks immediately (because `stop_event.set()` also wakes `_manual_trigger` via the existing `_manual_trigger.set()` call in `trigger_now`, and the stop is checked at the next loop iteration).
+- If a tick is running: the tick runs to its natural completion; the thread then checks `stop_event` at the top of the loop and exits. **The current tick is never aborted mid-way by DELETE**, just like with a manual trigger — the difference is that after the tick finishes the thread exits rather than running another tick.
+
 #### DELETE interrupt flow
 
 ```
@@ -2067,8 +2171,9 @@ DELETE /v1/connectors/{id}
 │  INTERRUPT SEQUENCE                                                 │
 │                                                                      │
 │  1. stop_event.set()                                                │
-│       ← worker's sleep (manual_trigger.wait) returns immediately   │
-│       ← worker checks stop_event at top of while loop and exits    │
+│       ← if worker is sleeping: sleep returns immediately            │
+│       ← if worker is in _run_tick(): tick finishes, then            │
+│            stop_event checked at top of while loop → exit           │
 │                                                                      │
 │  2. thread.join(timeout=30 s)                                       │
 │       ← waits up to 30 s for in-progress tick to finish naturally  │
@@ -2082,6 +2187,75 @@ DELETE /v1/connectors/{id}
 │       → thread will die when the pod exits (daemon=True)           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Flow D — DELETE while tick is running
+
+```
+[DELETE handler — API thread]        [Worker thread]
+──────────────────────────           ─────────────────────────────────────────
+DELETE /v1/connectors/{id}           while not stop_event.is_set():
+                                       _tick_running = True
+1. stop_event.set()                    ┌──────────────────────────────────┐
+   ────────────────────────────────▶   │  _run_tick()  ← still running    │
+                                       │  (NOT interrupted — completes    │
+2. thread.join(timeout=30 s)           │   naturally)                     │
+   ← DELETE handler blocks here        └──────────────────────────────────┘
+      waiting up to 30 s               finally: _tick_running = False
+      for the tick to finish            │
+                                        ▼
+                                      while not stop_event.is_set():
+                                        stop_event IS set → condition False
+                                        → thread exits loop cleanly
+
+   join() returns (thread exited) ◀──
+3a. thread.is_alive() == False
+    → proceed with doc cleanup (§3C)
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ OR (tick still running at 30 s) ─ ─ ─ ─ ─ ─
+
+3b. thread.is_alive() == True (timeout)
+    → log warning "thread did not stop within 30 s"
+    → proceed with doc cleanup anyway (best-effort)
+    → thread will exit when socket timeout fires (≤ 60 s); daemon=True
+```
+
+#### Flow E — DELETE while worker is sleeping (no tick running)
+
+```
+[DELETE handler — API thread]        [Worker thread]
+──────────────────────────           ─────────────────────────────────────────
+                                     _tick_running = False
+                                     ┌─────────────────────────────────────┐
+1. stop_event.set()                  │ _manual_trigger.wait(interval)      │
+   ────────────────────────────────▶ │  ← returns immediately              │
+                                     └─────────────────────────────────────┘
+2. thread.join(timeout=30 s)         while not stop_event.is_set():
+                                       stop_event IS set → condition False
+   join() returns quickly ◀──────      → thread exits
+
+3a. thread.is_alive() == False
+    → proceed with doc cleanup (§3C)
+```
+
+#### Signal comparison
+
+| Scenario | Signal | Running tick interrupted? | What happens after tick | Thread continues? |
+| --- | --- | --- | --- | --- |
+| Scheduled interval, no tick running | timer expires | N/A | — | Yes — starts next tick |
+| Scheduled interval, tick still running | timer expires | **No** — skipped | Waits another full interval | Yes — starts next tick |
+| `trigger_now()`, no tick running | `_pending_trigger` + `_manual_trigger.set()` | N/A | Sleep wakes immediately | Yes — starts next tick at once |
+| `trigger_now()`, tick currently running | `_pending_trigger = True` | **No** — completes naturally | Post-tick sleep skipped | Yes — starts next tick at once |
+| `DELETE`, no tick running | `stop_event.set()` | N/A | Sleep wakes; loop exits | **No** — thread exits |
+| `DELETE`, tick currently running | `stop_event.set()` | **No** — completes naturally | Loop condition False; thread exits | **No** — thread exits |
+
+#### Key design invariants
+
+| Invariant | How it is upheld |
+| --- | --- |
+| A running tick is **never aborted mid-way** by any signal | Neither `_pending_trigger` nor `stop_event` is checked inside `_run_tick()`; both are acted on only after `_run_tick()` returns |
+| A manual trigger is **never silently dropped** while a tick is running | `_pending_trigger = True` persists through the tick; it is checked after `finally` and bypasses the sleep |
+| DELETE always produces a **clean thread exit** | `stop_event` is checked at the top of every loop iteration; the thread exits without aborting any I/O |
+| No two ticks for the same connector run **concurrently** | The tick guard and the single-threaded loop guarantee at most one active tick per connector at any time |
 
 #### Why no `Thread.kill()`?
 
