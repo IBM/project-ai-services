@@ -524,24 +524,27 @@ func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources
 	}, nil
 }
 
-// isDeploymentReady reports whether all desired replicas of the named deployment
-// are available. It returns true when deployment.Spec.Replicas equals
-// deployment.Status.AvailableReplicas, and false while the rollout is still
-// in progress (e.g. after a restart triggered by rolloutRestartDeployment).
+// isDeploymentReady reports whether a rollout of the named deployment has fully completed.
 func (kc *OpenshiftClient) isDeploymentReady(name string) (bool, error) {
 	deployment, err := kc.KubeClient.AppsV1().Deployments(kc.Namespace).Get(kc.Ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to get deployment %q: %w", name, err)
 	}
 
-	s := deployment.Status
-
 	desired := int32(0)
 	if deployment.Spec.Replicas != nil {
 		desired = *deployment.Spec.Replicas
 	}
 
-	return desired == s.AvailableReplicas, nil
+	s := deployment.Status
+
+	if s.ObservedGeneration < deployment.Generation {
+		return false, nil
+	}
+
+	return s.UpdatedReplicas == desired &&
+		s.Replicas == desired &&
+		s.AvailableReplicas == desired, nil
 }
 
 // rolloutRestartDeployment triggers a rollout restart for the named deployment by
