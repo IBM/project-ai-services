@@ -1303,7 +1303,6 @@ Each connector's worker thread executes the following flow on every tick. Steps 
                    │  │  1. Connect & Scan                  │
                    │  │     KEK → DEK → credential          │
                    │  │     walk remote; SHA-256 per file   │
-                   │  │     close connection; zeroize creds │
                    │  └──────────────┬──────────────────────┘
                    │                 │ (to_ingest, orphan_hashes)
                    │  ┌──────────────▼──────────────────────┐
@@ -1318,13 +1317,12 @@ Each connector's worker thread executes the following flow on every tick. Steps 
                    │  │  3. Batch Ingest                    │
                    │  │     pre-write pending checksums     │
                    │  │     for each batch of 10 files:     │
-                   │  │       download → stage              │
-                   │  │       copy to tmp dir               │
+                   │  │       create batch tmp dir          │
+                   │  │       download files → tmp dir      │
                    │  │       create job + register docs    │
                    │  │       ingest() ← blocking           │
                    │  │       update registry + membership  │
                    │  │       clean up tmp dir              │
-                   │  │     clean up staging dir            │
                    │  └──────────────┬──────────────────────┘
                    │                 │
                    │  ┌──────────────▼──────────────────────┐
@@ -1335,7 +1333,13 @@ Each connector's worker thread executes the following flow on every tick. Steps 
                    │  └──────────────┬──────────────────────┘
                    │                 │
                    │  ┌──────────────▼──────────────────────┐
-                   │  │  5. Finalise                        │
+                   │  │  5. Close Connection                │
+                   │  │     scanner.close()                 │
+                   │  │     zeroize in-memory creds         │
+                   │  └──────────────┬──────────────────────┘
+                   │                 │
+                   │  ┌──────────────▼──────────────────────┐
+                   │  │  6. Finalise                        │
                    │  │     build sync_status message       │
                    │  │     update connector status         │
                    │  │     update_sync_history → done      │
@@ -1350,23 +1354,22 @@ Each connector's worker thread executes the following flow on every tick. Steps 
 
 **Fatal error path (connection failure, credential error, unexpected exception):** Any unhandled exception from steps 1–4 is caught and logged, the history row is closed with `sync_status = "failed: <error message>"`, the connector status is updated to `"failed: <error message>"`, and the worker loop continues normally to sleep the full `sync_interval_seconds` before the next tick. The `finally` block resets `_tick_running = False` unconditionally.
 
-**Step 3 — SHA cleanup invariant:** A pending checksum row (with `NULL` `doc_id`) is pre-written for every file before download begins. If download, copy-to-tmp, or ingest fails for a file, its pending SHA row is deleted immediately so the next tick re-detects the file as new and retries it cleanly.
+**Step 3 — SHA cleanup invariant:** A pending checksum row (with `NULL` `doc_id`) is pre-written for every file before download begins. If download or ingest fails for a file, its pending SHA row is deleted immediately so the next tick re-detects the file as new and retries it cleanly.
 
-**Step 5 — `sync_status` message:** `sync_status` is a free-form string, not a fixed enum. Examples: `"completed"`, `"2 files failed to ingest"`, `"failed: SFTP connection refused"`. This allows callers to display a human-readable outcome without needing a separate error field. See §9.4 for the full outcome-to-message mapping.
+**Step 6 — `sync_status` message:** `sync_status` is a free-form string, not a fixed enum. Examples: `"completed"`, `"2 files failed to ingest"`, `"failed: SFTP connection refused"`. This allows callers to display a human-readable outcome without needing a separate error field. See §9.4 for the full outcome-to-message mapping.
 
 **Ordering guarantee:** Files in `to_ingest` are sorted by `last_modified` descending before batching, so the most-recently-modified content reaches the ingestion pipeline first. The ordering is applied once after the full scan/diff and is consistent across all batches of the tick.
 
 **Job naming:** Each batch's job name is `"{connectorID}-{syncID}-{batchCount}"` — for example, a connector with `id = "abc123"` running its 7th tick will produce jobs named `"abc123-7-1"`, `"abc123-7-2"`, etc. The `sync_id` is stable per tick so it ties every batch job back to a single, auditable tick record in `connector_sync_history`.
 
-**tmp copy before pipeline (batch ingest step 3):** Each batch's files are copied from the tick staging directory to a dedicated `batch_tmp_dir` immediately before the pipeline call. This gives the ingestion pipeline an isolated, stable directory to operate on. The staging directory is kept intact throughout the tick and only torn down after all batches complete, so per-batch tmp dirs are short-lived and cleaned up immediately after `ingest()` returns for that batch.
+**tmp dir per batch (batch ingest step 3):** A dedicated `batch_tmp_dir` under `/tmp/` is created immediately before each batch is processed. Files are downloaded directly into that directory — no intermediate staging dir exists. The pipeline operates exclusively on the tmp copy. Each `batch_tmp_dir` is torn down via `shutil.rmtree()` immediately after `ingest()` returns for that batch, regardless of success or failure.
 
-**SHA cleanup invariant:** A pending checksum row (with `NULL` `doc_id`) is pre-written for every file in `needs_ingest` before any download begins. This row is the "in-flight" marker. The invariant is: **if a file does not reach a successful ingest completion, its pending SHA row must be deleted before the tick ends.** The three failure points that enforce this are:
+**SHA cleanup invariant:** A pending checksum row (with `NULL` `doc_id`) is pre-written for every file in `needs_ingest` before any download begins. This row is the "in-flight" marker. The invariant is: **if a file does not reach a successful ingest completion, its pending SHA row must be deleted before the tick ends.** The two failure points that enforce this are:
 
 - **Download failure:** `delete_checksum_registry(sha256)` called immediately on the per-file download exception.
-- **Copy-to-tmp failure:** `delete_checksum_registry(sha256)` called immediately on the per-file `shutil.copy2` exception.
 - **Ingest failure:** `delete_checksum_registry(sha256)` called for each file the pipeline marks as FAILED.
 
-In all three cases the file's SHA is absent from `file_checksum_registry` at tick end. The next tick's scan will recompute the same SHA, find it absent from `known_hashes`, and re-add the file to `to_ingest` — giving the file a clean retry without any manual intervention.
+In both cases the file's SHA is absent from `file_checksum_registry` at tick end. The next tick's scan will recompute the same SHA, find it absent from `known_hashes`, and re-add the file to `to_ingest` — giving the file a clean retry without any manual intervention.
 
 ### 9.2 Tick Guard — Skipping Overlapping Ticks
 
@@ -1382,30 +1385,35 @@ class ConnectorSyncWorker:
         self._tick_running = False   # ← thread-local flag; guarded on the single worker thread
 ```
 
-### 9.3 Staging Layout
+### 9.3 Tmp Layout
+
+There is no persistent staging directory. Files are downloaded directly into a short-lived per-batch tmp directory, created immediately before the batch job is submitted and wiped immediately after `ingest()` returns.
 
 ```
-/var/cache/staging/
-  connector-<connector_id>-<tick_timestamp>/   ← per-tick staging dir (all diff files)
+/tmp/
+  connector-<connector_id>-<sync_id>-batch1/  ← created just before batch 1 job; wiped after ingest()
     subdir/
       report.pdf
-    summary.docx
-
-/tmp/
-  connector-<connector_id>-<sync_id>-batch1/  ← tmp copy for batch 1 pipeline
-    report.pdf
-  connector-<connector_id>-<sync_id>-batch2/  ← tmp copy for batch 2 pipeline
+  connector-<connector_id>-<sync_id>-batch2/  ← created just before batch 2 job; wiped after ingest()
     summary.docx
 ```
 
-The staging dir is created fresh each tick and persists until all batches complete, then removed via `shutil.rmtree()`. Before each batch enters the ingestion pipeline, its files are copied from the staging dir into a dedicated `batch_tmp_dir` under `/tmp/`. The pipeline operates exclusively on the tmp copy. Each `batch_tmp_dir` is torn down via `shutil.rmtree()` immediately after `ingest()` returns for that batch. Files are placed in sub-paths that mirror the remote structure for traceability. The existing `cleanup_staging_directory` utility in `common.misc_utils` can be reused for both the per-batch tmp dirs and the final staging dir cleanup.
+**Lifecycle per batch:**
+
+1. `batch_tmp_dir` created under `/tmp/`.
+2. Files for this batch downloaded directly into `batch_tmp_dir`, preserving remote sub-path structure for traceability.
+3. Job created and documents registered against `batch_tmp_dir`.
+4. `ingest()` called — blocking.
+5. `shutil.rmtree(batch_tmp_dir)` — unconditional, in a `finally` block, so the dir is always removed whether ingest succeeds or fails.
+
+No tick-level staging directory is created or maintained. The existing `cleanup_staging_directory` utility in `common.misc_utils` can be reused for the per-batch tmp dir teardown.
 
 ### 9.4 Error Handling Matrix
 
 | Scenario | Action | `sync_status` message | Checksum record |
 | --- | --- | --- | --- |
 | Download of new/modified file fails | Log + skip file; file not staged; `delete_checksum_registry(sha256)` called | `"N files failed to ingest"` (if any failures) | **Removed** — next tick re-detects the file |
-| Copy to tmp fails (`shutil.copy2` I/O error) | Log + skip file; file not passed to pipeline; `delete_checksum_registry(sha256)` called | `"N files failed to ingest"` (if any failures) | **Removed** — next tick re-detects the file |
+| Download to tmp fails (I/O error writing to `batch_tmp_dir`) | Log + skip file; file not passed to pipeline; `delete_checksum_registry(sha256)` called | `"N files failed to ingest"` (if any failures) | **Removed** — next tick re-detects the file |
 | Ingest of staged file fails | `pipeline.ingest` marks doc as FAILED in Job; log; `delete_checksum_registry(sha256)` called | `"N files failed to ingest"` | **Removed** — next tick re-detects and retries the file |
 | Modified file: delete old doc fails (already absent) | Treat as success; proceed with ingest | `"completed"` | Updated after ingest |
 | Deleted file: VDB delete → doc already absent | Treat as success | `"completed"` | Deleted |
@@ -1439,9 +1447,9 @@ This section enumerates precisely when a `connector_sync_history` row is created
 | Phase | DB call | What is written |
 | --- | --- | --- |
 | **Tick start** (step 0, before any scan) | `insert_sync_history(connector_id, started_at)` | New row: `sync_status='syncing'`, `files_*=0`, `finished_at=NULL`. `sync_id = MAX(sync_id)+1` for this connector. |
-| **After scan** (step 1, after `scanner.close()`) | `update_sync_history_files_syncing(connector_id, sync_id, len(to_ingest))` | Live `files_syncing` snapshot showing how many files need processing. |
+| **After scan** (step 1) | `update_sync_history_files_syncing(connector_id, sync_id, len(to_ingest))` | Live `files_syncing` snapshot showing how many files need processing. |
 | **Dedup/ingest progress** (steps 2–3) | `update_sync_history_files_syncing(…, remaining_to_process)` | Decrements `files_syncing` as each file is resolved (deduped or downloaded). |
-| **Tick end** (step 5) | `update_sync_history(connector_id, sync_id, finished_at=now(), files_found, files_syncing=0, files_completed, files_failed, sync_status)` | Final state. `files_syncing` forced to `0`. `sync_status` set to `'completed'`, `'N files failed to ingest'`, or `'failed: <error>'`. |
+| **Tick end** (step 6) | `update_sync_history(connector_id, sync_id, finished_at=now(), files_found, files_syncing=0, files_completed, files_failed, sync_status)` | Final state. `files_syncing` forced to `0`. `sync_status` set to `'completed'`, `'N files failed to ingest'`, or `'failed: <error>'`. |
 
 #### Corner cases
 
