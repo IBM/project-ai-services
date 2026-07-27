@@ -89,17 +89,16 @@ func (s *service) LoginWithToken(ctx context.Context, miqToken string) (string, 
 	// Seed the in-memory user repo so /auth/me works after token exchange.
 	if repo, ok := s.users.(*repository.InMemoryUserRepo); ok {
 		repo.Upsert(&models.User{
-			ID:       info.ExternalID,
 			UserName: info.UserName,
 			Name:     info.FullName,
 		})
 	}
 
-	access, _, err := s.tokens.GenerateAccessToken(info.ExternalID)
+	access, _, err := s.tokens.GenerateAccessToken(info.UserName)
 	if err != nil {
 		return "", "", err
 	}
-	refresh, _, err := s.tokens.GenerateRefreshToken(info.ExternalID)
+	refresh, _, err := s.tokens.GenerateRefreshToken(info.UserName)
 	if err != nil {
 		return "", "", err
 	}

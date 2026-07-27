@@ -102,12 +102,10 @@ func TestIntegration_GetUserByToken_ValidToken(t *testing.T) {
 	info, err := client.GetUserByToken(context.Background(), token)
 
 	require.NoError(t, err)
-	t.Logf("ExternalID : %s", info.ExternalID)
 	t.Logf("UserName   : %s", info.UserName)
 	t.Logf("FullName   : %s", info.FullName)
 	t.Logf("Groups     : %v", info.Groups)
 
-	assert.NotEmpty(t, info.ExternalID)
 	assert.NotEmpty(t, info.UserName)
 	assert.NotEmpty(t, info.FullName)
 	assert.NotEmpty(t, info.Groups)

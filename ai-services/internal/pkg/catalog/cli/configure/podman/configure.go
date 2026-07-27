@@ -26,11 +26,15 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Collect and hash password
-	// If secret exist passwordHash will be empty
-	passwordHash, err := catalogUtils.CollectAndHashPassword(deployCtx.Runtime)
-	if err != nil {
-		return err
+	// Collect and hash password.
+	// Skipped when ManageIQ is configured (external AuthN/AuthZ handles auth).
+	// Also skipped when the secret already exists (CollectAndHashPassword returns "").
+	var passwordHash string
+	if opts.ManageiqURL == "" {
+		passwordHash, err = catalogUtils.CollectAndHashPassword(deployCtx.Runtime)
+		if err != nil {
+			return err
+		}
 	}
 
 	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)

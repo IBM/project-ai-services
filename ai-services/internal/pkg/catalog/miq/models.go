@@ -6,29 +6,34 @@ type AuthResponse struct {
 	TokenTTL int    `json:"token_ttl"`
 }
 
+// Group represents one entry in the miq_groups array on a user resource.
+// type Group struct {
+// 	Description string `json:"description"`
+// }
+
 // UserInfo carries the identity fields the Catalog API needs from ManageIQ.
 type UserInfo struct {
-	// ExternalID is the ManageIQ numeric user ID extracted from identity.user_href.
-	ExternalID string
+	// ExternalID is the ManageIQ numeric user ID (string form of the "id" field).
+	//ExternalID string
 	// UserName is the ManageIQ userid field.
 	UserName string
 	// FullName is the ManageIQ name field.
 	FullName string
-	// Groups is the list of group descriptions for this user.
+	// Groups is the list of miq_groups descriptions for this user.
 	Groups []string
 }
 
-// miqIdentity is the "identity" block returned by GET /api?attributes=identity.
-type miqIdentity struct {
-	UserID   string   `json:"userid"`
-	Name     string   `json:"name"`
-	UserHref string   `json:"user_href"`
-	Groups   []string `json:"groups"`
+// miqIdentityResource is the JSON shape returned by GET /api with attributes=identity.
+type miqIdentityResource struct {
+	//ID       string     `json:"id"`
+	UserID   string     `json:"userid"`
+	Name     string     `json:"name"`
+	Groups   []string    `json:"groups"`
 }
 
-// miqIdentityResponse is the top-level JSON shape for GET /api?attributes=identity.
+// miqIdentityResponse is the top-level JSON shape for GET /api.
 type miqIdentityResponse struct {
-	Identity miqIdentity `json:"identity"`
+	Identity miqIdentityResource `json:"identity"`
 }
 
 // ErrorResponse is the JSON error body returned by ManageIQ on failure.
