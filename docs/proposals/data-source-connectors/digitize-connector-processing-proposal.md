@@ -12,14 +12,15 @@
 4. [Connector Runtime API](#4-connector-runtime-api)
 5. [Database Schema](#5-database-schema) — 5.1 `active_connectors` · 5.2 `file_checksum_registry` & `connector_file_membership` · 5.3 SQLAlchemy ORM Models · **5.4 `connector_sync_history`**
 6. [Database Operations Layer](#6-database-operations-layer)
-7. [SFTP Scanner](#7-sftp-scanner)
-8. [Sync Worker](#8-sync-worker) — 8.1 Per-tick Flow · 8.2 Tick Guard · 8.3 Staging Layout · 8.4 Error Handling Matrix · 8.5 Blocking Semantics of File Download & Ingest · **8.6 Sync History**
-9. [Worker Manager](#9-worker-manager)
-10. [Startup Recovery](#10-startup-recovery)
-11. [Settings Changes](#11-settings-changes)
-12. [File & Module Map](#12-file--module-map)
-13. [Decision Log](#13-decision-log)
-14. [Thread Lifecycle & Resilience](#14-thread-lifecycle--resilience) — 14.1 Threading Model · 14.2 Thread Crash & Status · 14.3 Respawn Logic · 14.4 Generic Thread Monitor · 14.5 Interrupt on DELETE · 14.6 FastAPI Lifespan Recovery
+7. [Scanner Interface](#7-scanner-interface) — 7.1 Design Rationale · 7.2 Class Hierarchy · 7.3 BaseScanner Contract · 7.4 Shared vs Per-Implementation · 7.5 Per-Tick Sequence · 7.6 Credential Decryption Flow · 7.7 Factory
+8. [SFTP Scanner](#8-sftp-scanner)
+9. [Sync Worker](#9-sync-worker) — 9.1 Per-tick Flow · 9.2 Tick Guard · 9.3 Staging Layout · 9.4 Error Handling Matrix · 9.5 Blocking Semantics of File Download & Ingest · **9.6 Sync History**
+10. [Worker Manager](#10-worker-manager)
+11. [Startup Recovery](#11-startup-recovery)
+12. [Settings Changes](#12-settings-changes)
+13. [File & Module Map](#13-file--module-map)
+14. [Decision Log](#14-decision-log)
+15. [Thread Lifecycle & Resilience](#15-thread-lifecycle--resilience) — 15.1 Threading Model · 15.2 Thread Crash & Status · 15.3 Respawn Logic · 15.4 Generic Thread Monitor · 15.5 Interrupt on DELETE · 15.6 FastAPI Lifespan Recovery
 
 ---
 
@@ -126,7 +127,7 @@ This section documents every HTTP endpoint that catalog calls on the digitize po
 
 **Thread spawning on POST:** The handler registers a FastAPI `BackgroundTask` that calls `connector_worker_manager.start_worker(config)` *after* the 202 response is flushed to the client — the HTTP response is therefore never blocked by thread creation. Inside `start_worker()`, under `self._lock`, a `threading.Event` (the stop signal) is created, a `ConnectorSyncWorker` is constructed, a `daemon=True` `threading.Thread` is created with `target=worker.run`, and `thread.start()` is called. From that point the OS thread is live and the triple `(thread, worker, stop_event)` is registered in the `_workers` dict. There is **no dedicated spawner thread** — the Uvicorn process itself is the spawner, via the BackgroundTask mechanism.
 
-**Manual sync on POST:** After `insert_active_connector` writes the row and `connector_worker_manager.start_worker()` starts the background thread, the handler enqueues an **immediate manual tick** by calling `worker.trigger_now()` (see §9.2). This sets a `threading.Event` on the worker so that the sleep at the bottom of the tick loop is interrupted and the next tick starts at once rather than waiting `sync_interval_seconds`.
+**Manual sync on POST:** After `insert_active_connector` writes the row and `connector_worker_manager.start_worker()` starts the background thread, the handler enqueues an **immediate manual tick** by calling `worker.trigger_now()` (see §10.2). This sets a `threading.Event` on the worker so that the sleep at the bottom of the tick loop is interrupted and the next tick starts at once rather than waiting `sync_interval_seconds`.
 
 **Request body (`application/json`):**
 
@@ -886,13 +887,264 @@ The `connection_details` JSONB column is written and read as a plain Python `dic
 
 ---
 
-## 7. SFTP Scanner
+## 7. Scanner Interface
+
+**New file:** `services/digitize/connector/base_scanner.py`
+
+Both `SFTPScanner` and `S3Scanner` share an identical logical contract with `ConnectorSyncWorker`: decrypt credentials, walk a remote source, compute SHA-256 per file, produce a diff list, and stream files to a local staging path. Only the transport layer (paramiko vs boto3) and the credential shape differ. The `BaseScanner` ABC codifies this contract so that `ConnectorSyncWorker` is completely unaware of the underlying transport type.
+
+### 7.1 Design Rationale
+
+**Key principle:** `ConnectorSyncWorker` calls only `scanner.connect()`, `scanner.scan()`, `scanner.download_to()`, and `scanner.close()`. All transport logic is fully encapsulated inside the concrete subclass. The `_decrypt_dek()` helper is the one piece of shared *implementation* — the KEK→DEK AES-256-GCM step is byte-for-byte identical for both connector types; only what is done with the DEK afterwards differs.
+
+Adding a third connector type (e.g. `sharepoint`) requires only: a new `SharePointScanner(BaseScanner)` file and a single dict entry in `scanner.py`'s `_REGISTRY`. No changes to `sync_worker.py` or any other file.
+
+### 7.2 Class Hierarchy
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  connector/                                                                  │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │  base_scanner.py                                                       │  │
+│  │                                                                        │  │
+│  │  @dataclass RemoteFile                                                 │  │
+│  │    checksum: str          # hex SHA-256                                │  │
+│  │    last_modified: float   # POSIX timestamp; used to sort diff list    │  │
+│  │                                                                        │  │
+│  │  class BaseScanner(ABC)                        «abstract»              │  │
+│  │    ├── @abstractmethod  connect() → None                               │  │
+│  │    ├── @abstractmethod  close() → None                                 │  │
+│  │    ├── @abstractmethod  scan(known_hashes) → tuple[list, set]          │  │
+│  │    ├── @abstractmethod  download_to(remote_path, local_path) → None    │  │
+│  │    └── _decrypt_dek(conn_details) → bytes      # shared, not abstract  │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                  ▲ inherits                            ▲ inherits            │
+│  ┌───────────────┴────────────────┐    ┌──────────────┴─────────────────┐   │
+│  │  sftp_scanner.py               │    │  s3_scanner.py                  │   │
+│  │                                │    │                                  │   │
+│  │  SFTPScanner(BaseScanner)      │    │  S3Scanner(BaseScanner)          │   │
+│  │    connect() → paramiko SFTP   │    │    connect() → boto3 S3 client   │   │
+│  │    close()   → sftp + ssh      │    │    close()   → set _s3 = None    │   │
+│  │    scan()    → DFS listdir_attr│    │    scan()    → list_objects_v2   │   │
+│  │    download_to() → sftp.open() │    │    download_to() → download_obj  │   │
+│  └────────────────────────────────┘    └─────────────────────────────────┘   │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │  scanner.py                                                             │ │
+│  │                                                                         │ │
+│  │  _REGISTRY = { "ssh_sftp": SFTPScanner, "s3": S3Scanner }              │ │
+│  │  build_scanner(config: dict) → BaseScanner                             │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                │ dispatches to                                               │
+│  ┌─────────────▼───────────────────────────────────────────────────────────┐ │
+│  │  sync_worker.py   ConnectorSyncWorker                                   │ │
+│  │    scanner = build_scanner(config)    # type: BaseScanner only          │ │
+│  │    scanner.connect()                                                    │ │
+│  │    to_ingest, orphans = scanner.scan(known_hashes)                      │ │
+│  │    scanner.download_to(f.path, staging_path)                            │ │
+│  │    scanner.close()                                                      │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 7.3 BaseScanner Contract
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class RemoteFile:
+    checksum: str         # hex SHA-256
+    last_modified: float  # POSIX timestamp; used to sort the diff list
+
+
+class BaseScanner(ABC):
+    """
+    Abstract contract every connector scanner must implement.
+    ConnectorSyncWorker only ever talks to this interface.
+    """
+
+    def __init__(self, config: dict) -> None:
+        self._config = config
+        self._allowed_extensions: set[str] = set(config["allowed_extensions"])
+
+    # ── ABSTRACT (transport-specific) ─────────────────────────────────────
+
+    @abstractmethod
+    def connect(self) -> None:
+        """Open session; decrypt credentials fresh on each call (D-6)."""
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close session; zeroize any in-memory credential bytes."""
+
+    @abstractmethod
+    def scan(
+        self, known_hashes: set[str]
+    ) -> tuple[list[RemoteFile], set[str]]:
+        """
+        Walk the remote source, filter by allowed_extensions, compute SHA-256.
+
+        Returns:
+            to_ingest:     files whose hash is new to this connector.
+            orphan_hashes: hashes present in known_hashes but absent from the walk.
+        """
+
+    @abstractmethod
+    def download_to(self, remote_path: str, local_path: Path) -> None:
+        """Stream a single remote file to a local staging path."""
+
+    # ── SHARED (concrete implementation, not overridden) ──────────────────
+
+    def _decrypt_dek(self, conn_details: dict) -> bytes:
+        """
+        Shared KEK → DEK decryption (AES-256-GCM).
+        Reads the KEK fresh from /run/secrets/connector_kek each call (D-6).
+        Returns the 32-byte DEK; caller is responsible for zeroizing.
+        """
+        kek_path = self._config.get("kek_path", "/run/secrets/connector_kek")
+        with open(kek_path, "rb") as fh:
+            kek = fh.read()
+        return _aes_gcm_decrypt(kek, conn_details["encrypted_dek"])  # shared util
+
+    # ── Optional context manager protocol ─────────────────────────────────
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+```
+
+`__enter__`/`__exit__` are concrete on `BaseScanner` so `sync_worker.py` can use a `with build_scanner(config) as scanner:` block, guaranteeing `close()` is called even if an exception escapes mid-tick. `close()` remains callable standalone as well for callers that manage the lifecycle explicitly.
+
+### 7.4 Shared vs Per-Implementation
+
+| Piece | Lives in | Shared? | Notes |
+| --- | --- | --- | --- |
+| `RemoteFile` dataclass | `base_scanner.py` | **Shared** | One definition; both scanners produce it |
+| KEK → DEK decryption (`_decrypt_dek`) | `base_scanner.py` | **Shared** | Identical AES-256-GCM logic regardless of connector type |
+| `allowed_extensions` set construction | `BaseScanner.__init__` | **Shared** | Both scanners filter on the same list from config |
+| Context manager (`__enter__`/`__exit__`) | `base_scanner.py` | **Shared** | Guarantees `close()` is called even on tick exceptions |
+| Membership diff (orphan detection) | `sync_worker.py` | **Shared** | `scan(known_hashes)` returns `(to_ingest, orphan_hashes)`; worker does the diff — identical for both types |
+| Sort by `last_modified` DESC, batch into 10s | `sync_worker.py` | **Shared** | Pure Python list logic on `RemoteFile` |
+| Staging dir layout / cleanup | `sync_worker.py` | **Shared** | `shutil.rmtree` on the same staging path pattern |
+| DB dedup + membership writes | `utils/db.py` + worker | **Shared** | Same `file_checksum_registry` + `connector_file_membership` calls |
+| Tick guard, sync history write | `sync_worker.py` | **Shared** | Independent of transport |
+| `connect()` — session open + full credential chain | `SFTPScanner` / `S3Scanner` | **Per-impl** | SFTP: `DEK → privkey_pem → paramiko`; S3: `DEK → secret_key → boto3` |
+| `close()` — session teardown + credential zeroization | `SFTPScanner` / `S3Scanner` | **Per-impl** | SFTP: `sftp.close()` + `ssh.close()`; S3: set `_s3 = None` |
+| `scan()` — remote walk + streaming SHA-256 | `SFTPScanner` / `S3Scanner` | **Per-impl** | SFTP: `listdir_attr` recursive DFS; S3: `list_objects_v2` paginator |
+| `download_to()` — file streaming to staging | `SFTPScanner` / `S3Scanner` | **Per-impl** | SFTP: `sftp.open().read(65536)`; S3: `s3.download_fileobj()` |
+| Scanner instantiation | `scanner.py` factory | **Factory only** | `build_scanner(config)` dispatches on `config["type"]` |
+
+### 7.5 Per-Tick Sequence
+
+The sequence below shows a single tick from `ConnectorSyncWorker`'s perspective. The worker calls only the four abstract methods; it never branches on connector type.
+
+```
+ConnectorSyncWorker          BaseScanner           SFTPScanner / S3Scanner
+─────────────────────────    ──────────────────    ──────────────────────────
+STEP 0: insert_sync_history()
+        │
+STEP 1: build_scanner(config) ──────────────────► factory dispatches:
+        │                                          type=ssh_sftp → SFTPScanner(config)
+        │                                          type=s3       → S3Scanner(config)
+        │                     ◄── : BaseScanner ──
+        │
+        scanner.connect() ───────────────────────► _decrypt_dek()          [shared]
+        │                                          then:
+        │                                          ssh_sftp → DEK→privkey→paramiko
+        │                                          s3       → DEK→secret_key→boto3
+        │
+STEP 2: scanner.scan(known_hashes) ──────────────► ssh_sftp → DFS listdir_attr + SHA-256
+        │                     ◄── (to_ingest,      s3       → list_objects_v2 + SHA-256
+        │                          orphan_hashes)
+        │
+        [dedup pass — worker, no scanner call]
+        │
+STEP 3: loop over to_ingest batches:
+        │  scanner.download_to(path, staging) ───► ssh_sftp → sftp.open().read(65536)
+        │                                          s3       → s3.download_fileobj()
+        │  [ingest + membership writes — worker]
+        │
+STEP 4: [orphan deletes — worker, no scanner call]
+        │
+STEP 5: scanner.close() ─────────────────────────► ssh_sftp → sftp.close() + ssh.close()
+        │                                          s3       → _s3 = None
+        update_sync_history(done)
+```
+
+### 7.6 Credential Decryption Flow
+
+Both connector types share the first step (KEK→DEK). They diverge only in the second step, which is what `connect()` is responsible for per-implementation.
+
+```
+/run/secrets/connector_kek   (32-byte KEK, Podman secret mount)
+     │
+     │  _decrypt_dek()  ←  shared method on BaseScanner
+     │  AES-256-GCM decrypt(connection_details["encrypted_dek"], KEK)
+     ▼
+DEK  (32 bytes, in-memory, not retained between ticks)
+     │
+     ├─── ssh_sftp path (SFTPScanner.connect) ──────────────────────────────────┐
+     │    AES-256-GCM decrypt(connection_details["private_key_ciphertext"], DEK) │
+     │    → privkey_pem (Ed25519 PEM string, in-memory only)                     │
+     │    → paramiko.Ed25519Key.from_private_key(io.StringIO(privkey_pem))       │
+     │    → privkey_pem overwritten with "\x00" * len(privkey_pem)  (zeroized)   │
+     │    → paramiko SSHClient → open SFTP session                               │
+     └───────────────────────────────────────────────────────────────────────────┘
+     │
+     └─── s3 path (S3Scanner.connect) ─────────────────────────────────────────┐
+          AES-256-GCM decrypt(connection_details["secret_access_key_ciphertext"],│
+                              DEK)                                               │
+          → secret_access_key (bytes, in-memory only)                           │
+          → boto3.client("s3", aws_access_key_id=...,                           │
+                         aws_secret_access_key=secret_access_key, ...)          │
+          → secret_access_key overwritten with "\x00" * len(...)  (zeroized)    │
+          → boto3 S3 client (no persistent TCP session held)                    │
+          └────────────────────────────────────────────────────────────────────┘
+```
+
+**DEK lifetime:** The DEK is never stored on `self`. It is a local variable inside `connect()` and falls out of scope immediately after `close()` is called. The KEK itself is read fresh from the secret mount on every call to `_decrypt_dek()`, keeping KEK residence time in memory minimal (Decision D-6).
+
+### 7.7 Factory — scanner.py
+
+`connector/scanner.py` is the only file that knows the concrete class names. All other modules import only `BaseScanner` or call `build_scanner()`.
+
+```python
+from .base_scanner import BaseScanner
+from .sftp_scanner import SFTPScanner
+from .s3_scanner   import S3Scanner
+
+_REGISTRY: dict[str, type[BaseScanner]] = {
+    "ssh_sftp": SFTPScanner,
+    "s3":       S3Scanner,
+}
+
+def build_scanner(config: dict) -> BaseScanner:
+    connector_type = config["type"]
+    cls = _REGISTRY.get(connector_type)
+    if cls is None:
+        raise ValueError(f"Unknown connector type: {connector_type!r}")
+    return cls(config)
+```
+
+`ConnectorSyncWorker` calls `build_scanner(self._config)` at the start of each tick (step 1 in §9.1). The returned object is typed as `BaseScanner` — the worker never inspects the concrete type again.
+
+---
+
+## 8. SFTP Scanner
 
 **New file:** `services/digitize/connector/sftp_scanner.py`
 
 Handles all in-memory cryptographic operations and the paramiko SFTP session for `ssh_sftp` connectors. This is one of two components in digitize that reads `/run/secrets/connector_kek` (the other being `S3Scanner`).
 
-### 7.1 Decryption Chain (per tick, not cached)
+### 8.1 Decryption Chain (per tick, not cached)
 
 All credential fields are read from `connection_details` (the JSONB column), not from top-level columns.
 
@@ -919,7 +1171,7 @@ paramiko SSHClient  →  open SFTP session
 
 **KEK load timing (Decision D-6 — recommended):** The KEK is read fresh inside `SFTPScanner.connect()` on every tick. This keeps KEK residence time in memory minimal and allows future KEK rotation without a pod restart.
 
-### 7.2 File Scanning — Streaming SHA-256, Filtered by Extension
+### 8.2 File Scanning — Streaming SHA-256, Filtered by Extension
 
 File type filtering is applied at scan time using `allowed_extensions` from the connector config. This avoids SFTP transfers for files the ingest pipeline would reject. The extension list is populated by catalog (Decision D-8).
 
@@ -930,15 +1182,13 @@ File type filtering is applied at scan time using `allowed_extensions` from the 
 3. **Membership diff** — compare each computed hash against `known_hashes` (the set of `sha256` values this connector held at the start of the tick, from `list_connector_hashes`):
    - **Hash in `known_hashes`** → file is unchanged; skip it entirely.
    - **Hash not in `known_hashes`** → file is new to this connector; add it to `to_ingest`.
-4. **Orphan detection** — any hash in `known_hashes` that was *not* seen in the walk (the file was deleted or renamed on the remote) is added to `orphan_hashes`. These are handled by the sync worker after the scan returns (§8.1 step 4).
+4. **Orphan detection** — any hash in `known_hashes` that was *not* seen in the walk (the file was deleted or renamed on the remote) is added to `orphan_hashes`. These are handled by the sync worker after the scan returns (§9.1 step 4).
 
 Returns `(to_ingest, orphan_hashes)`.
 
 ```python
 @dataclass
 class RemoteFile:
-    path: str
-    size: int
     checksum: str        # hex SHA-256
     last_modified: float # POSIX timestamp from st_mtime; used to sort the diff list
 
@@ -993,8 +1243,6 @@ def _walk(
                 continue
 
             to_ingest.append(RemoteFile(
-                path=full_path,
-                size=entry.st_size,
                 checksum=checksum,
                 last_modified=float(entry.st_mtime or 0),
                 # st_mtime is always set for regular SFTP files; guard with 0 for
@@ -1011,7 +1259,7 @@ to_ingest, orphan_hashes = scanner.scan(known_hashes)
 
 This keeps the scanner free of direct DB imports. The `digitize_base_url` (e.g. `http://localhost:8000`) is injected into `SFTPScanner.__init__` from settings so that the worker can reach the documents endpoint for orphan cleanup.
 
-### 7.3 File Download for Staging
+### 8.3 File Download for Staging
 
 ```python
 def download_to(self, remote_path: str, local_path: Path) -> None:
@@ -1024,13 +1272,13 @@ def download_to(self, remote_path: str, local_path: Path) -> None:
 
 ---
 
-## 8. Sync Worker
+## 9. Sync Worker
 
 **New file:** `services/digitize/connector/sync_worker.py`
 
 A `threading.Thread` per connector. Each worker is fully isolated — one connector's failure never affects another's loop.
 
-### 8.1 Per-tick Flow
+### 9.1 Per-tick Flow
 
 Each connector's worker thread executes the following flow on every tick. Steps are sequential and blocking on the worker thread.
 
@@ -1104,7 +1352,7 @@ Each connector's worker thread executes the following flow on every tick. Steps 
 
 **Step 3 — SHA cleanup invariant:** A pending checksum row (with `NULL` `doc_id`) is pre-written for every file before download begins. If download, copy-to-tmp, or ingest fails for a file, its pending SHA row is deleted immediately so the next tick re-detects the file as new and retries it cleanly.
 
-**Step 5 — `sync_status` message:** `sync_status` is a free-form string, not a fixed enum. Examples: `"completed"`, `"2 files failed to ingest"`, `"failed: SFTP connection refused"`. This allows callers to display a human-readable outcome without needing a separate error field. See §8.4 for the full outcome-to-message mapping.
+**Step 5 — `sync_status` message:** `sync_status` is a free-form string, not a fixed enum. Examples: `"completed"`, `"2 files failed to ingest"`, `"failed: SFTP connection refused"`. This allows callers to display a human-readable outcome without needing a separate error field. See §9.4 for the full outcome-to-message mapping.
 
 **Ordering guarantee:** Files in `to_ingest` are sorted by `last_modified` descending before batching, so the most-recently-modified content reaches the ingestion pipeline first. The ordering is applied once after the full scan/diff and is consistent across all batches of the tick.
 
@@ -1120,7 +1368,7 @@ Each connector's worker thread executes the following flow on every tick. Steps 
 
 In all three cases the file's SHA is absent from `file_checksum_registry` at tick end. The next tick's scan will recompute the same SHA, find it absent from `known_hashes`, and re-add the file to `to_ingest` — giving the file a clean retry without any manual intervention.
 
-### 8.2 Tick Guard — Skipping Overlapping Ticks
+### 9.2 Tick Guard — Skipping Overlapping Ticks
 
 If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval.
 
@@ -1134,7 +1382,7 @@ class ConnectorSyncWorker:
         self._tick_running = False   # ← thread-local flag; guarded on the single worker thread
 ```
 
-### 8.3 Staging Layout
+### 9.3 Staging Layout
 
 ```
 /var/cache/staging/
@@ -1152,7 +1400,7 @@ class ConnectorSyncWorker:
 
 The staging dir is created fresh each tick and persists until all batches complete, then removed via `shutil.rmtree()`. Before each batch enters the ingestion pipeline, its files are copied from the staging dir into a dedicated `batch_tmp_dir` under `/tmp/`. The pipeline operates exclusively on the tmp copy. Each `batch_tmp_dir` is torn down via `shutil.rmtree()` immediately after `ingest()` returns for that batch. Files are placed in sub-paths that mirror the remote structure for traceability. The existing `cleanup_staging_directory` utility in `common.misc_utils` can be reused for both the per-batch tmp dirs and the final staging dir cleanup.
 
-### 8.4 Error Handling Matrix
+### 9.4 Error Handling Matrix
 
 | Scenario | Action | `sync_status` message | Checksum record |
 | --- | --- | --- | --- |
@@ -1167,7 +1415,7 @@ The staging dir is created fresh each tick and persists until all batches comple
 | Unexpected exception (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
 | Tick fired while previous tick running | Skip — log info; reset timer | (no row written) | Unchanged |
 
-### 8.5 Blocking Semantics of File Download & Ingest
+### 9.5 Blocking Semantics of File Download & Ingest
 
 All work inside a single tick — including file downloads and the `ingest()` call (both sub-steps of step 3, Batch Ingest) — executes **synchronously and sequentially on the connector's dedicated worker thread**. There is no internal thread pool spawned for downloads, and `ingest()` is called as a blocking function, not scheduled as a background coroutine.
 
@@ -1177,12 +1425,12 @@ All work inside a single tick — including file downloads and the `ingest()` ca
 - **Each connector already has its own thread.** That thread's time is entirely dedicated to one connector. There is no other useful work it could be doing concurrently for the same connector; blocking is the correct model.
 - **The GIL is not a factor during I/O.** Although downloads and ingest run on the thread synchronously, the Python GIL is released during every network call: paramiko socket reads/writes (SFTP), boto3 HTTP calls (S3), and psycopg2 queries (Postgres). This means all other connector worker threads and the Uvicorn API handler threads continue running concurrently in the OS while a download or ingest is in progress — the blocking is local to that one worker thread, not to the whole process.
 
-**Is a process better for blocking I/O?** No. A `multiprocessing.Process` would move the blocking work to a separate OS process, but the GIL is already irrelevant for I/O — the process boundary adds memory overhead and IPC complexity without enabling any parallelism that threads don't already provide. See §9.1 for the full analysis.
+**Is a process better for blocking I/O?** No. A `multiprocessing.Process` would move the blocking work to a separate OS process, but the GIL is already irrelevant for I/O — the process boundary adds memory overhead and IPC complexity without enabling any parallelism that threads don't already provide. See §10.1 for the full analysis.
 
-**Stuck-download edge case:** If an SFTP or S3 download hangs indefinitely (network partition, remote server stall), the worker thread will remain blocked on the socket read. The tick guard prevents a second tick from starting. The `paramiko` and `boto3` clients both honour socket-level timeouts configurable at construction time — these should be set to a reasonable value (e.g. 60 s) in `SFTPScanner` and `S3Scanner` to bound the maximum tick duration and ensure `stop_event` is eventually checked. See §8.4 (Error Handling Matrix) for the per-scenario recovery policy.
+**Stuck-download edge case:** If an SFTP or S3 download hangs indefinitely (network partition, remote server stall), the worker thread will remain blocked on the socket read. The tick guard prevents a second tick from starting. The `paramiko` and `boto3` clients both honour socket-level timeouts configurable at construction time — these should be set to a reasonable value (e.g. 60 s) in `SFTPScanner` and `S3Scanner` to bound the maximum tick duration and ensure `stop_event` is eventually checked. See §9.4 (Error Handling Matrix) for the per-scenario recovery policy.
 
 
-### 8.6 Sync History — Insert/Update Logic and Corner Cases
+### 9.6 Sync History — Insert/Update Logic and Corner Cases
 
 This section enumerates precisely when a `connector_sync_history` row is created or mutated, and how every edge case is handled.
 
@@ -1217,7 +1465,7 @@ If the process is killed between the `insert_sync_history` INSERT and the final 
 
 **4. Tick skipped by tick guard**
 
-When `_tick_running` is `True` and the guard fires (§8.2), the tick body is not entered at all. No `insert_sync_history` call is made. Skipped ticks produce **no history row** — a gap in `sync_id` values is not possible, and the sequence remains contiguous. Only actually-started ticks appear in the history.
+When `_tick_running` is `True` and the guard fires (§9.2), the tick body is not entered at all. No `insert_sync_history` call is made. Skipped ticks produce **no history row** — a gap in `sync_id` values is not possible, and the sequence remains contiguous. Only actually-started ticks appear in the history.
 
 **5. `sync_id` sequence continuity across pod restarts**
 
@@ -1238,13 +1486,13 @@ If catalog calls `POST /v1/connectors` with the same `connector_id` as a previou
 
 ---
 
-## 9. Worker Manager
+## 10. Worker Manager
 
 **New file:** `services/digitize/connector/worker_manager.py`
 
 A module-level singleton, following the same pattern as the existing [`workers/concurrency.py`](../../services/digitize/workers/concurrency.py) `ConcurrencyManager`.
 
-### 9.1 Background Thread vs Background Process — Analysis
+### 10.1 Background Thread vs Background Process — Analysis
 
 Before presenting the implementation, this section works through the trade-offs between the two primary options for running long-lived sync workers in a Python service, and explains why threads are chosen here.
 
@@ -1318,7 +1566,7 @@ Processes would be the correct model if any of these conditions held:
 
 None of these conditions hold for the connector sync workload. The decision remains threads.
 
-### 9.2 Implementation
+### 10.2 Implementation
 
 ```python
 import threading
@@ -1369,7 +1617,7 @@ class ConnectorSyncWorker:
 
     def _run_tick(self) -> None:
         """Execute one sync tick (scan → diff → stage → ingest → delete)."""
-        # ... (full tick logic as documented in §8.1) ...
+        # ... (full tick logic as documented in §9.1) ...
         pass
 
 
@@ -1439,7 +1687,7 @@ connector_worker_manager = ConnectorWorkerManager()
 
 ---
 
-## 10. Startup Recovery
+## 11. Startup Recovery
 
 **Modified file:** `services/digitize/app.py`
 
@@ -1470,7 +1718,7 @@ except Exception as exc:
 
 ---
 
-## 11. Settings Changes
+## 12. Settings Changes
 
 **Modified file:** `services/digitize/settings.py`
 
@@ -1504,15 +1752,16 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 
 ---
 
-## 12. File & Module Map
+## 13. File & Module Map
 
 | File | Status | Responsibility |
 | --- | --- | --- |
 | `api/v1/connectors.py` | **NEW** | POST/PUT/DELETE/GET /v1/connectors; bearer-token dependency; 202 + BackgroundTask worker start/restart; manual sync trigger on POST and PUT; stop-sync document-cleanup sequence on DELETE |
 | `connector/__init__.py` | **NEW** | Makes `connector/` a Python sub-package |
-| `connector/sftp_scanner.py` | **NEW** | KEK→DEK→privkey decryption per tick; paramiko SFTP; streaming SHA-256; `download_to()` |
-| `connector/s3_scanner.py` | **NEW** | KEK→DEK→secret_access_key decryption per tick; boto3 `list_objects_v2` walk; streaming SHA-256; `S3ScannerError`; `download_to()` |
-| `connector/scanner.py` | **NEW** | `build_scanner(config)` factory — dispatches on `config["type"]` to return the appropriate scanner instance |
+| `connector/base_scanner.py` | **NEW** | `RemoteFile` dataclass; `BaseScanner` ABC with four abstract methods (`connect`, `close`, `scan`, `download_to`); shared `_decrypt_dek()` implementation; context manager (`__enter__`/`__exit__`) |
+| `connector/sftp_scanner.py` | **NEW** | `SFTPScanner(BaseScanner)` — `connect()` does KEK→DEK→privkey→paramiko; `scan()` does DFS `listdir_attr` + streaming SHA-256; `download_to()` streams via `sftp.open()` |
+| `connector/s3_scanner.py` | **NEW** | `S3Scanner(BaseScanner)` — `connect()` does KEK→DEK→secret_key→boto3; `scan()` uses `list_objects_v2` paginator + streaming SHA-256; `download_to()` uses `s3.download_fileobj()`; `S3ScannerError` |
+| `connector/scanner.py` | **NEW** | `build_scanner(config)` factory — `_REGISTRY` dict dispatches on `config["type"]` to return the appropriate `BaseScanner` subclass instance |
 | `connector/sync_worker.py` | **NEW** | Per-connector tick loop; tick guard; `build_scanner()` dispatch; diff → sort by `last_modified` DESC; dedup pass; store checksums in DB; batch into groups of 10 (most-recent-first); per-batch: download → copy to tmp → create job (`{connectorID}-{syncID}-{batchCount}`) → register docs → ingest from tmp → cleanup; orphan deletes after all batches; message-based `sync_status` finalisation; error handling |
 | `connector/worker_manager.py` | **NEW** | Daemon thread pool singleton (`connector_worker_manager`); start/stop/list; `threading.Lock` |
 | `db/scripts/init_schema.sql` | **MODIFIED** | Add `active_connectors` (with `connection_details` JSONB), `file_checksum_registry`, `connector_file_membership`, and `connector_sync_history` tables |
@@ -1525,7 +1774,7 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 
 ---
 
-## 13. Decision Log
+## 14. Decision Log
 
 | ID | Decision | Choice Made | Notes |
 | --- | --- | --- | --- |
@@ -1540,7 +1789,7 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 | D-9 | Job tracking for connector syncs | **Create a `Job` row per batch of 10 files** | Connector syncs visible in `GET /v1/jobs`; `operation = "ingestion"`, `job_name = "{connectorID}-{syncID}-{batchCount}"` (e.g. `"abc123-7-2"`). Multiple Job rows are created per tick — one per 10-file batch. Each job name encodes the connector, the tick (`sync_id`), and the batch sequence number, making per-batch traceability straightforward. |
 | D-10 | Staging strategy | **Option B extended: per-tick staging dir + per-batch tmp copy before pipeline** | All diff files are downloaded into a single per-tick staging dir ordered by `last_modified` DESC. The list is then sliced into batches of 10. Each batch is copied to a dedicated `batch_tmp_dir` under `/tmp/` immediately before `ingest()` is called — the pipeline operates on the tmp copy, not the staging dir. The `batch_tmp_dir` is torn down after each batch completes. The staging dir is torn down after all batches complete. This gives each pipeline call an isolated, stable input directory and avoids the pipeline observing partial downloads from concurrent batch operations. |
 | D-11 | Change detection | **SHA-256 only** | Content-accurate; immune to mtime precision / server clock skew |
-| D-12 | Threading model — Thread vs Process | **`daemon=True` `threading.Thread` per connector** | Workload is I/O-bound (GIL released during all network/DB calls); threads are 8 KB vs 15–50 MB per process; shared DB pool + state is an asset; fork-safety issues make `multiprocessing` with SQLAlchemy/asyncio complex; crash isolation and forceful-kill advantages of processes do not apply to this pure-Python I/O workload; socket-level timeouts in scanners bound maximum tick duration making stuck threads recoverable at pod restart. Full analysis in §9.1. |
+| D-12 | Threading model — Thread vs Process | **`daemon=True` `threading.Thread` per connector** | Workload is I/O-bound (GIL released during all network/DB calls); threads are 8 KB vs 15–50 MB per process; shared DB pool + state is an asset; fork-safety issues make `multiprocessing` with SQLAlchemy/asyncio complex; crash isolation and forceful-kill advantages of processes do not apply to this pure-Python I/O workload; socket-level timeouts in scanners bound maximum tick duration making stuck threads recoverable at pod restart. Full analysis in §10.1. |
 | D-13 | Recovery failure policy | **Log and continue** | Matches existing zombie-job recovery behaviour; pod health check not blocked |
 | D-14 | Manual sync on POST/PUT | **`trigger_now()` on `ConnectorSyncWorker` — sets `_manual_trigger` event to interrupt the sleep** | Fires the first tick immediately without waiting `sync_interval_seconds`; safe to call from the API handler thread; no-op if a tick is already running (tick guard skips it and the next tick fires after the normal interval) |
 | D-15 | Document cleanup on DELETE | **Best-effort per-hash loop over `connector_file_membership` with reference-counted deletion** | Reads membership snapshot once via `list_connector_hashes`; for each hash calls `delete_connector_membership_atomic` (removes membership row + counts remaining refs in a single transaction); only calls `DELETE /v1/documents/{doc_id}` and `delete_checksum_registry` when remaining count == 0 (last connector to hold that content); treats 404 as success; logs but does not abort on 5xx; `ON DELETE CASCADE` on `connector_id` removes any remaining membership rows after the loop so the connector row delete is not held hostage by per-hash failures. |
@@ -1555,12 +1804,13 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 | D-24 | Crash-count reset trigger | **Reset on first successful tick after respawn** — cumulative crash count does not accumulate across healthy intervals. |
 | D-25 | Monitor stop on pod shutdown | **`_monitor_stop.set()` + `join(10 s)` in lifespan shutdown** — monitor exits cleanly; no orphaned polling after pod stop. |
 | D-26 | DELETE interrupt when tick in progress | **Cooperative stop only: `stop_event.set()` + `join(30 s)`; proceed with cleanup on timeout** — consistent with D-12 (no `Thread.kill()`); worst-case thread exits after socket timeout (~60 s). Document cleanup proceeds regardless. |
+| D-27 | Scanner abstraction — ABC vs Protocol vs duck typing | **`BaseScanner` ABC with four `@abstractmethod` methods** | An ABC gives a hard instantiation guard at import time — attempting to instantiate a partial subclass raises `TypeError` before the first tick runs, not silently at call time. A `typing.Protocol` would be structurally typed (no guard) and provides no place to put the shared `_decrypt_dek()` implementation. Duck typing gives neither guard nor reuse. The ABC approach groups `RemoteFile`, `_decrypt_dek()`, and the context manager protocol in a single file, keeping the shared surface explicit. |
 
 ---
 
-## 14. Thread Lifecycle & Resilience
+## 15. Thread Lifecycle & Resilience
 
-### 14.1 Threading Model — Where `ConnectorWorkerManager` Lives
+### 15.1 Threading Model — Where `ConnectorWorkerManager` Lives
 
 `ConnectorWorkerManager` is **not a separate OS process, a separate Python interpreter, or a Uvicorn worker**. It is a module-level singleton that lives inside the single Uvicorn process, on the main Python interpreter. Every sync thread it spawns is a `daemon=True` `threading.Thread` within that same process.
 
@@ -1586,11 +1836,11 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Consequence: a sync thread crash (unhandled exception that escapes `worker.run()`) affects only that one thread. The asyncio event loop on the main thread keeps accepting HTTP requests; other connector threads keep running. The dead thread's slot in `_workers` remains, pointing at a thread that is no longer alive — this is the crash state that §14.2 and §14.4 must detect and handle.
+Consequence: a sync thread crash (unhandled exception that escapes `worker.run()`) affects only that one thread. The asyncio event loop on the main thread keeps accepting HTTP requests; other connector threads keep running. The dead thread's slot in `_workers` remains, pointing at a thread that is no longer alive — this is the crash state that §15.2 and §15.4 must detect and handle.
 
 ---
 
-### 14.2 Thread Crash & Status
+### 15.2 Thread Crash & Status
 
 A "crash" is defined as: the `Thread` object is no longer alive (`thread.is_alive() == False`) but `stop_event` was never set — i.e. the thread exited without being asked to stop. This can only happen if an exception escaped the outer `while` loop in `ConnectorSyncWorker.run()`.
 
@@ -1616,7 +1866,7 @@ A "crash" is defined as: the `Thread` object is no longer alive (`thread.is_aliv
 
 #### Status fields written on crash
 
-The outermost `try/except` in `ConnectorSyncWorker.run()` must catch the escape. The current design (§9.2) only catches exceptions inside `_run_tick()`, then continues the loop. The crash guard lives **outside** the loop:
+The outermost `try/except` in `ConnectorSyncWorker.run()` must catch the escape. The current design (§10.2) only catches exceptions inside `_run_tick()`, then continues the loop. The crash guard lives **outside** the loop:
 
 ```
 ConnectorSyncWorker.run()
@@ -1661,9 +1911,9 @@ If an exception escapes the `while` loop, two things must happen before the thre
 
 ---
 
-### 14.3 Respawn Logic
+### 15.3 Respawn Logic
 
-When the thread monitor (§14.4) detects a crashed thread it attempts to respawn the worker using the config already in the DB. Respawn is cooperative and bounded — it does not loop forever.
+When the thread monitor (§15.4) detects a crashed thread it attempts to respawn the worker using the config already in the DB. Respawn is cooperative and bounded — it does not loop forever.
 
 #### Respawn flow
 
@@ -1721,9 +1971,9 @@ ConnectorSyncWorker._run_tick()
 
 ---
 
-### 14.4 Generic Thread Monitor
+### 15.4 Generic Thread Monitor
 
-The monitor is a single long-lived daemon thread started during `lifespan()` startup. It is **not** per-connector — one monitor watches all workers. It polls the `_workers` dict on a fixed cadence and drives the respawn logic from §14.3.
+The monitor is a single long-lived daemon thread started during `lifespan()` startup. It is **not** per-connector — one monitor watches all workers. It polls the `_workers` dict on a fixed cadence and drives the respawn logic from §15.3.
 
 #### Monitor thread state machine
 
@@ -1795,7 +2045,7 @@ monitor_thread.join(timeout=10)
 
 ---
 
-### 14.5 Interrupt Thread on DELETE
+### 15.5 Interrupt Thread on DELETE
 
 When `DELETE /v1/connectors/{connector_id}` is called, the DELETE handler must stop the sync thread as quickly as possible before beginning document cleanup. The existing cooperative-stop mechanism (`stop_event.set()` + `thread.join(timeout=30s)`) already covers this, but the interrupt semantics deserve explicit treatment here.
 
@@ -1831,7 +2081,7 @@ Python provides no `Thread.kill()`. The cooperative stop (`stop_event`) is the o
 
 #### Interaction with the monitor during DELETE
 
-The monitor must not respawn a thread that is being intentionally stopped. The check `if stop_event.is_set(): skip` (§14.4) covers this exactly — once the DELETE handler sets `stop_event`, the monitor will see it and skip respawn for that connector.
+The monitor must not respawn a thread that is being intentionally stopped. The check `if stop_event.is_set(): skip` (§15.4) covers this exactly — once the DELETE handler sets `stop_event`, the monitor will see it and skip respawn for that connector.
 
 ```
 Timeline:
@@ -1846,11 +2096,11 @@ Timeline:
 
 ---
 
-### 14.6 FastAPI Lifespan Recovery
+### 15.6 FastAPI Lifespan Recovery
 
 The `lifespan()` context manager in [`app.py`](../../services/digitize/app.py) is the single recovery entry point on pod start. The existing recovery block (§10) restarts workers for all connectors in the DB. The additions in this section cover:
 
-1. Starting the monitor thread (§14.4).
+1. Starting the monitor thread (§15.4).
 2. Graceful shutdown of all workers and the monitor on pod stop.
 
 #### Full lifespan recovery sequence
