@@ -27,7 +27,7 @@ type Runtime interface {
 	ListSecrets(filters map[string][]string) ([]string, error)
 	DeleteSecret(name string) error
 	SecretExists(nameOrID string) (bool, error)
-	UpdateSecret(name string, data map[string][]byte) error
+	UpdateSecret(name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations
 	DeleteVolume(name string) error
@@ -41,10 +41,6 @@ type Runtime interface {
 
 	// Network operations
 	ListRoutes() ([]types.Route, error)
-
-	// Deployment operations
-	RolloutRestartDeployment(name string) error
-	GetDeploymentStatus(name string) (*types.DeploymentStatus, error)
 
 	// PVC operations
 	DeletePVCs(appLabel string) error

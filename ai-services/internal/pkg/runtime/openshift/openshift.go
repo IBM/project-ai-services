@@ -453,7 +453,7 @@ func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
 	return true, nil
 }
 
-func (kc *OpenshiftClient) UpdateSecret(name string, data map[string][]byte) error {
+func (kc *OpenshiftClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
 	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
 
 	existing, err := secretClient.Get(kc.Ctx, name, metav1.GetOptions{})
@@ -461,7 +461,6 @@ func (kc *OpenshiftClient) UpdateSecret(name string, data map[string][]byte) err
 		return fmt.Errorf("failed to get existing secret: %w", err)
 	}
 
-	existing.Data = data
 	for k, v := range data {
 		existing.Data[k] = v
 	}
@@ -471,7 +470,28 @@ func (kc *OpenshiftClient) UpdateSecret(name string, data map[string][]byte) err
 		return fmt.Errorf("failed to update secret: %w", err)
 	}
 
-	return nil
+	if err := kc.rolloutRestartDeployment(deploymentName); err != nil {
+		return fmt.Errorf("failed to restart deployment after secret update: %w", err)
+	}
+
+	const (
+		pollInterval = 5 * time.Second
+		pollTimeout  = 5 * time.Minute
+	)
+
+	deadline := time.Now().Add(pollTimeout)
+	for time.Now().Before(deadline) {
+		ready, err := kc.isDeploymentReady(deploymentName)
+		if err != nil {
+			return fmt.Errorf("failed to check deployment readiness: %w", err)
+		}
+		if ready {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timed out waiting for deployment %q to become ready after secret update", deploymentName)
 }
 
 func (kc *OpenshiftClient) DeleteVolume(name string) error {
@@ -504,11 +524,14 @@ func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources
 	}, nil
 }
 
-// GetDeploymentStatus returns the observed replica counts for the named deployment.
-func (kc *OpenshiftClient) GetDeploymentStatus(name string) (*types.DeploymentStatus, error) {
+// isDeploymentReady reports whether all desired replicas of the named deployment
+// are available. It returns true when deployment.Spec.Replicas equals
+// deployment.Status.AvailableReplicas, and false while the rollout is still
+// in progress (e.g. after a restart triggered by rolloutRestartDeployment).
+func (kc *OpenshiftClient) isDeploymentReady(name string) (bool, error) {
 	deployment, err := kc.KubeClient.AppsV1().Deployments(kc.Namespace).Get(kc.Ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get deployment %q: %w", name, err)
+		return false, fmt.Errorf("failed to get deployment %q: %w", name, err)
 	}
 
 	s := deployment.Status
@@ -518,19 +541,13 @@ func (kc *OpenshiftClient) GetDeploymentStatus(name string) (*types.DeploymentSt
 		desired = *deployment.Spec.Replicas
 	}
 
-	return &types.DeploymentStatus{
-		DesiredReplicas:     desired,
-		ReadyReplicas:       s.ReadyReplicas,
-		AvailableReplicas:   s.AvailableReplicas,
-		UpdatedReplicas:     s.UpdatedReplicas,
-		UnavailableReplicas: s.UnavailableReplicas,
-	}, nil
+	return desired == s.AvailableReplicas, nil
 }
 
-// RolloutRestartDeployment triggers a rollout restart for the named deployment by
+// rolloutRestartDeployment triggers a rollout restart for the named deployment by
 // patching the pod template annotation "kubectl.kubernetes.io/restartedAt", which is
 // the same mechanism used by `kubectl rollout restart deployment <name>`.
-func (kc *OpenshiftClient) RolloutRestartDeployment(name string) error {
+func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"template": map[string]interface{}{
