@@ -68,6 +68,7 @@ const DeploymentDetails = ({
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional controlled-input reset
     setEditedName(deployment.name);
     setSaveError("");
   }, [deployment.name]);

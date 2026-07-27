@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useAuthStore } from "@/store/auth.store";
 import { logout, refreshAccessToken } from "@/services/auth";
 import { SESSION_CONFIG } from "@/constants/session.constants";
@@ -115,8 +115,9 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
 
   useEffect(() => {
     if (showWarning) {
-      updateCountdown();
-      countdownTimerRef.current = setInterval(updateCountdown, 1000);
+      const tick = () => updateCountdown();
+      tick();
+      countdownTimerRef.current = setInterval(tick, 1000);
 
       return () => {
         if (countdownTimerRef.current) {
@@ -169,13 +170,14 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
       return;
     }
 
-    resetActivity();
+    const timer = setTimeout(() => resetActivity(), 0);
 
     SESSION_CONFIG.ACTIVITY_EVENTS.forEach((event) => {
       window.addEventListener(event, handleActivity);
     });
 
     return () => {
+      clearTimeout(timer);
       SESSION_CONFIG.ACTIVITY_EVENTS.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });

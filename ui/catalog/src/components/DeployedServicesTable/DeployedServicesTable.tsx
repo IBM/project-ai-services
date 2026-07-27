@@ -141,6 +141,11 @@ const DeployedServicesTable = ({
     });
   };
 
+  // Stable ref so fetchDeployedServices can call itself recursively without stale closure
+  const fetchDeployedServicesRef = useRef<
+    (page?: number, pageSize?: number, selectedServices?: string[]) => void
+  >(() => {});
+
   // Fetch deployed services data
   const fetchDeployedServices = useCallback(
     async (
@@ -181,7 +186,7 @@ const DeployedServicesTable = ({
             type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
             payload: false,
           });
-          fetchDeployedServices(totalPages, pageSize);
+          fetchDeployedServicesRef.current(totalPages, pageSize);
           return;
         }
 
@@ -222,6 +227,11 @@ const DeployedServicesTable = ({
       setDeployedServicesLoading,
     ],
   );
+
+  // Keep ref in sync with latest callback — done in effect to avoid ref access during render
+  useEffect(() => {
+    fetchDeployedServicesRef.current = fetchDeployedServices;
+  });
 
   // Track if initial fetch has been done
   const hasFetchedRef = useRef(false);
