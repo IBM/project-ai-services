@@ -112,7 +112,13 @@ CREATE TABLE conversion_tasks (
 );
 
 CREATE INDEX idx_ct_status_op_queued ON conversion_tasks (status, operation, queued_at);
+CREATE INDEX idx_ct_job_id            ON conversion_tasks (job_id);
 ```
+
+`idx_ct_job_id` supports `get_conversion_task_by_job_id` — called by both
+`pipeline/digitize.py` and `processing/orchestrator.py` to look up and poll the task
+for a given job.  Without this index every poll fires a sequential scan of the full
+`conversion_tasks` table.
 
 `is_large` is derived from `page_count >= heavy_doc_page_threshold` at enqueue time and
 stored so the dispatcher can make a semaphore-weight decision from a single DB read.
@@ -424,6 +430,7 @@ immediately refills both vacated queue slots.
 ```python
 # workers/conversion_dispatcher.py
 from concurrent.futures import ProcessPoolExecutor
+from parsing.converter import convert_document
 
 _rr_turn: str = "ingestion"  # module-level state; alternates each tick
 
@@ -515,30 +522,24 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
 
         db_manager.update_task_status(task.task_id, "running")
 
-        out_dir   = Path(task.cached_file).parent
-        chunk_dir = out_dir / "chunks"
+        out_dir = Path(task.cached_file).parent
 
-        # convert_doc is CPU-bound Docling work that does not release the GIL.
-        # asyncio.to_thread would run it on a thread and cause GIL contention
-        # between concurrent conversions — they would not actually run in
-        # parallel.  run_in_executor with a ProcessPoolExecutor spawns a child
-        # process for each conversion, giving true CPU parallelism exactly as
-        # the existing pipeline/digitize.py and processing/orchestrator.py do.
-        # convert_doc must be a top-level importable function (picklable) —
-        # it already satisfies this requirement.
+        # convert_document is CPU-bound (no GIL release) — run it in a child
+        # process for true parallelism.  It exports the result to disk inside
+        # the child and returns only (result_path: str, conversion_time: float),
+        # so the DoclingDocument never crosses the IPC pipe.
         loop = asyncio.get_running_loop()
-        doc: DoclingDocument = await loop.run_in_executor(
+        result_path, _ = await loop.run_in_executor(
             _process_pool,
-            convert_doc,
+            convert_document,
             task.cached_file,
-            chunk_dir,
+            out_dir,
+            "output",
+            task.output_format,
         )
 
-        result_path = out_dir / f"output.{task.output_format}"
-        _export(doc, result_path, task.output_format)   # json / md / txt
-
         db_manager.update_task_status(
-            task.task_id, "completed", result_path=str(result_path)
+            task.task_id, "completed", result_path=result_path
         )
     except Exception as exc:
         db_manager.update_task_status(task.task_id, "failed", error=str(exc))
@@ -677,6 +678,8 @@ def recover_conversion_tasks() -> None:
       - running  → failed  (process died mid-conversion; chunk state unknown)
       - queued   → keep    (cached file verified; dispatcher will pick them up)
                → failed  (cached file missing; nothing to run)
+      - pending  → keep    (cached file verified; dispatcher will promote when slot opens)
+               → failed  (cached file missing; nothing to run)
     """
     # 1. running → failed
     running_tasks = db_manager.get_conversion_tasks(status="running")
@@ -699,6 +702,19 @@ def recover_conversion_tasks() -> None:
             logger.warning(f"Recovery: task {task.task_id} queued→failed (file lost)")
         else:
             logger.info(f"Recovery: task {task.task_id} re-queued (file intact)")
+
+    # 3. pending — verify cached file (same rationale as queued; file may have been
+    #    lost during restart before the dispatcher ever promoted the task)
+    pending_tasks = db_manager.get_conversion_tasks(status="pending")
+    for task in pending_tasks:
+        if not Path(task.cached_file).exists():
+            db_manager.update_task_status(
+                task.task_id, "failed",
+                error="Cached input file lost during restart"
+            )
+            logger.warning(f"Recovery: task {task.task_id} pending→failed (file lost)")
+        else:
+            logger.info(f"Recovery: task {task.task_id} stays pending (file intact)")
 ```
 
 #### Why running tasks cannot be resumed
@@ -717,7 +733,9 @@ Re-running is safe because `convert_doc` is deterministic for the same input.
 | Task fails | Deleted | N/A |
 | Startup: `running` → `failed` | `chunks/` dir deleted; input deleted | N/A |
 | Startup: `queued`, file present | Kept (job will run) | N/A |
-| Startup: `queued`, file missing | N/A | N/A |
+| Startup: `queued`, file missing | Deleted (task → `failed`) | N/A |
+| Startup: `pending`, file present | Kept (dispatcher will promote when slot opens) | N/A |
+| Startup: `pending`, file missing | Deleted (task → `failed`) | N/A |
 
 Output files are **not** auto-deleted. They persist until the user explicitly deletes or
 exports the result. There is no background TTL reaper for completed output files.
@@ -1246,7 +1264,6 @@ stateDiagram-v2
 |---|---|
 | Dispatcher claims the same task twice on concurrent invocations | `SELECT … FOR UPDATE SKIP LOCKED` is atomic; only one claim succeeds |
 | Semaphore drifts if `_run_conversion` crashes before `release` | `finally: await semaphore.release(weight)` — release always runs |
-| Race between admission check and INSERT (two jobs admitted simultaneously) | Both checks happen inside one `SELECT … FOR UPDATE` transaction; only one wins the race |
 | Digitization task queues behind a large ingestion job's overflow | Queue is FIFO by `queued_at`; tasks from all jobs interleave naturally — a digitization task submitted after an ingestion job's overflow tasks will wait its fair turn |
 | Two concurrent ingestion jobs interleaving chunks into the vector DB | Each doc has a unique `doc_id` keying its chunks; concurrent ingestion jobs write independent document sets with no overlap |
 | `page_count` unavailable before enqueue (e.g. DOCX) | `get_document_page_count()` returns 0 for DOCX; treat 0 as `is_large=False` (weight 1) |
@@ -1257,7 +1274,7 @@ stateDiagram-v2
 
 1. **ORM + migration** — add `ConversionTask` to `db/models.py`; `Base.metadata.create_all` creates the table on next startup.
 2. **`WeightedSemaphore`** — implement and unit-test in isolation (`workers/conversion_semaphore.py`).
-3. **`db/manager.py` CRUD** — `create_task`, `claim_queued_tasks`, `update_task_status`, `get_conversion_tasks`, `get_running_weight`, `get_queued_count`.
+3. **`db/manager.py` CRUD** — `create_task`, `claim_queued_tasks`, `update_task_status`, `get_conversion_tasks`, `get_queued_count`.
 4. **Settings** — add `ingestion_queue_quota`, `digitization_queue_quota`, `conversion_poll_interval` to `DigitizeConfig`.
 5. **Dispatcher** — implement `conversion_dispatcher.py`; write integration test using a stub `convert_doc`.
 6. **Recovery** — `recover_conversion_tasks()` in `utils/recovery.py`; add call to `app.py` lifespan alongside existing `recover_zombie_jobs()`.
