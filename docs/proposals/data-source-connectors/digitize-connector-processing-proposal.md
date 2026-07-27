@@ -326,12 +326,25 @@ DELETE /v1/connectors/{connector_id}
 1. STOP WORKER
    connector_worker_manager.stop_worker(connector_id, timeout=30.0)
    ← signals stop_event; joins thread with 30 s timeout
-   ← if thread is still alive after timeout → log warning and continue
-      (thread will be reaped when the pod exits; stop proceeding with cleanup)
+   ← if a tick is running: _cancel_if_requested() fires at the next
+     inter-phase boundary inside _run_tick() — the thread self-cleans:
+       • scanner.close()  (all active connections closed)
+       • delete_checksum_registry() for each in-flight pending-SHA row
+       • delete_connector_membership_atomic() + DELETE /v1/documents/{doc_id}
+         for every file that completed ingest during this tick
+       • update_sync_history → "interrupted: connector deleted"
+     then _run_tick() returns early and the thread exits cleanly.
+     join() returns in seconds (not the full tick duration).
+   ← if thread is still alive after timeout (tick blocked inside ingest()):
+     log warning and continue — thread exits when ingest() unblocks;
+     daemon=True ensures it is reaped at pod exit.
 
 2. LOAD MEMBERSHIP SNAPSHOT
    known_hashes = list_connector_hashes(connector_id)
-   ← returns set of sha256 values this connector holds
+   ← returns set of sha256 values this connector holds from all previous ticks
+   ← docs ingested during the interrupted tick have already been deleted by
+     the thread's self-cleanup in step 1; their membership rows are gone.
+     list_connector_hashes() therefore returns only pre-existing content.
    ← read once, before any deletions, to avoid a partially-mutated cursor
 
 3. DELETE INGESTED DOCUMENTS (per-hash loop, reference-counted)
@@ -349,6 +362,8 @@ DELETE /v1/connectors/{connector_id}
            # when DELETE /v1/documents/{doc_id} deletes the documents row — no explicit
            # DELETE FROM file_checksum_registry is needed.
       # if remaining > 0: another connector still holds this content — leave doc intact
+      # This loop is idempotent with the thread's self-cleanup: any rows already
+      # deleted in step 1 will be absent from known_hashes or produce remaining > 0.
 
 4. DELETE active_connectors ROW
    delete_active_connector(connector_id)
@@ -1296,7 +1311,6 @@ Each connector's worker thread executes the following flow on every tick. Steps 
                    │  ┌─────────────────────────────────────┐
                    │  │  0. Record tick start               │
                    │  │     insert_sync_history → syncing   │
-                   │  │     update connector → running      │
                    │  └──────────────┬──────────────────────┘
                    │                 │
                    │  ┌──────────────▼──────────────────────┐
@@ -1341,7 +1355,6 @@ Each connector's worker thread executes the following flow on every tick. Steps 
                    │  ┌──────────────▼──────────────────────┐
                    │  │  6. Finalise                        │
                    │  │     build sync_status message       │
-                   │  │     update connector status         │
                    │  │     update_sync_history → done      │
                    │  └──────────────┬──────────────────────┘
                    │                 │
@@ -1375,9 +1388,9 @@ In both cases the file's SHA is absent from `file_checksum_registry` at tick end
 
 If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next **scheduled** interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval.
 
-If a **manual trigger** (`trigger_now()`, called from a `PUT /v1/connectors` handler) arrives while a tick is running, the trigger is **preserved** — a `_pending_trigger` boolean flag is set — so that, as soon as the current tick finishes naturally, the post-tick sleep is bypassed and the next tick starts immediately. The tick in progress is **never interrupted**; it always runs to completion.
+If a **manual trigger** (`trigger_now()`, called from a `PUT /v1/connectors` handler) arrives while a tick is running, the trigger is **preserved** — a `_pending_trigger` boolean flag is set — so that, as soon as the current tick finishes naturally, the post-tick sleep is bypassed and the next tick starts immediately. The tick in progress is **never interrupted** by a manual trigger; it always runs to completion.
 
-The only path that can interrupt a running tick is **connector deletion** (`DELETE /v1/connectors`), which sets `stop_event`. Because `stop_event` is checked at the top of the `while` loop (not inside `_run_tick`), even the DELETE path waits for the current tick to finish before the thread exits — it simply does not re-enter the loop afterwards.
+**Connector deletion** (`DELETE /v1/connectors`) is the only path that can interrupt a running tick. It sets `stop_event`, which `_run_tick()` checks via `_cancel_if_requested()` at each **inter-phase boundary** (post-scan, post-dedup, post-each-batch, post-orphans). When the event is detected, the tick self-cleans — closes connections, purges in-flight SHA rows, deletes OpenSearch documents for already-ingested files — then returns early, allowing the thread to exit without completing the remainder of the tick. See §15.5 for the full interrupt protocol.
 
 #### Flow A — Manual trigger arrives while tick is running
 
@@ -1556,12 +1569,18 @@ When `_tick_running` is `True` and the guard fires (§9.2), the tick body is not
 
 **6. Connector deleted while a tick is in progress**
 
-If `DELETE /v1/connectors/{id}` is called while a tick is actively running for that connector, the DELETE handler signals `stop_event` and waits for the worker thread to exit (per §3C stop-sync sequence). Once the thread exits — completing or aborting the tick — the tick's final `update_sync_history` call will attempt to UPDATE a history row for a connector that is about to be (or has just been) cascade-deleted. Two outcomes are possible:
+If `DELETE /v1/connectors/{id}` is called while a tick is actively running for that connector, the DELETE handler signals `stop_event` and waits for the worker thread to exit (per §3C and §15.5). The tick detects the event at its next inter-phase boundary via `_cancel_if_requested()`, which:
 
-- **Thread exits before the connector row is deleted:** The final UPDATE succeeds normally; the history row is then removed by `ON DELETE CASCADE` when `delete_active_connector()` runs.
-- **Connector row deleted before the thread's final UPDATE:** The FK cascade removes all history rows first. The subsequent UPDATE finds no matching `(connector_id, sync_id)` row and is a no-op (zero rows updated). No error is raised; the worker thread exits cleanly.
+1. Closes all active connections.
+2. Deletes any in-flight pending-SHA rows (pre-written `NULL doc_id` entries).
+3. Issues `DELETE /v1/documents/{doc_id}` for every file that completed ingest during this tick, and removes their membership rows via `delete_connector_membership_atomic`.
+4. Writes a final `update_sync_history` with `sync_status = "interrupted: connector deleted"`.
 
-Either outcome is safe. No orphaned history rows are left behind.
+After this self-cleanup, `_run_tick()` returns early. The `finally` block resets `_tick_running = False`; the `while not stop_event.is_set()` condition is `False`; the thread exits cleanly.
+
+The DELETE handler's `thread.join()` returns (in seconds, not the full tick duration). The §3C step 3 membership loop then runs for any content ingested in **previous ticks** — those rows are still in `connector_file_membership` and require the same reference-counted document-deletion treatment. The in-tick cleanup and the §3C loop are idempotent: `delete_connector_membership_atomic` is transactional, and the handler loop's `remaining > 0` / `404` checks treat already-deleted rows as no-ops.
+
+The sync-history row is closed by `_cancel_if_requested()` before the thread exits. The subsequent `ON DELETE CASCADE` triggered by `delete_active_connector()` (§3C step 4) removes it along with all remaining history rows — whether the thread wrote the row first or the cascade fires first, the result is the same: no orphaned history rows.
 
 **7. Connector re-registered after deletion (re-push from catalog)**
 
@@ -2155,11 +2174,113 @@ monitor_thread.join(timeout=10)
 
 ### 15.5 Interrupt Thread on DELETE
 
-When `DELETE /v1/connectors/{connector_id}` is called, the DELETE handler must stop the sync thread as quickly as possible before beginning document cleanup. The existing cooperative-stop mechanism (`stop_event.set()` + `thread.join(timeout=30s)`) already covers this, but the interrupt semantics deserve explicit treatment here.
+When `DELETE /v1/connectors/{connector_id}` is called, the DELETE handler stops the sync thread as quickly as possible before proceeding with document cleanup. Rather than waiting for a running tick to finish naturally, `_run_tick()` checks `stop_event` at each **inter-phase boundary** — between scan, dedup, each ingest batch, and orphan deletes. When the event is set mid-tick, the thread performs an **immediate cooperative self-cleanup**: it closes all active connections, removes any in-flight pending-SHA rows, deletes OpenSearch documents (and their membership rows) for every file that already completed ingest during the current tick, closes the sync-history row, and then returns — exiting the loop and the thread.
 
-**Relationship to `trigger_now()` / `_pending_trigger`:** The DELETE path sets `stop_event`, not `_pending_trigger`. The `stop_event` check sits at the **top of the `while` loop** — outside `_run_tick()`. This means:
-- If no tick is running: the sleep (`_manual_trigger.wait`) unblocks immediately (because `stop_event.set()` also wakes `_manual_trigger` via the existing `_manual_trigger.set()` call in `trigger_now`, and the stop is checked at the next loop iteration).
-- If a tick is running: the tick runs to its natural completion; the thread then checks `stop_event` at the top of the loop and exits. **The current tick is never aborted mid-way by DELETE**, just like with a manual trigger — the difference is that after the tick finishes the thread exits rather than running another tick.
+**Relationship to `trigger_now()` / `_pending_trigger`:** The DELETE path sets `stop_event`, not `_pending_trigger`. When no tick is running, `stop_event.set()` wakes the `_manual_trigger.wait()` sleep immediately and the thread exits on the next loop iteration. When a tick is running, the tick detects the event at the next inter-phase boundary and self-cleans before returning, so the thread exits well within the 30 s join timeout rather than running to natural completion.
+
+#### Cancellation check helper — `_cancel_if_requested()`
+
+`_run_tick()` calls this helper after each phase. It is a no-op when `stop_event` is clear.
+
+```python
+def _cancel_if_requested(
+    self,
+    scanner,
+    pending_shas: list[str],
+    ingested_this_tick: list[tuple[str, str]],  # (sha256, doc_id)
+    sync_id: int,
+) -> bool:
+    """
+    Returns True if stop_event is set (caller must return immediately).
+    Performs full self-cleanup before returning True:
+      1. Close all active connections
+      2. Delete pending (in-flight) SHA rows
+      3. Delete membership rows + OpenSearch docs for already-ingested files
+      4. Close the sync-history row as "interrupted: connector deleted"
+    """
+    if not self._stop_event.is_set():
+        return False
+
+    logger.info(
+        f"Connector {self.connector_id}: stop event received mid-tick — interrupting"
+    )
+
+    # 1. Close active connections (same as normal step 5)
+    try:
+        scanner.close()
+    except Exception:
+        pass  # best-effort; connection may already be gone
+
+    # 2. Delete pending SHA rows (pre-written NULLs for in-flight files)
+    for sha256 in pending_shas:
+        try:
+            delete_checksum_registry(sha256)
+        except Exception as exc:
+            logger.warning(
+                f"Connector {self.connector_id}: "
+                f"failed to remove pending SHA {sha256} during interrupt: {exc}"
+            )
+
+    # 3. Delete membership rows + OpenSearch docs for files ingested this tick
+    for sha256, doc_id in ingested_this_tick:
+        try:
+            remaining = delete_connector_membership_atomic(self.connector_id, sha256)
+            if remaining == 0 and doc_id is not None:
+                resp = requests.delete(f"{settings.ingest_url}/v1/documents/{doc_id}",
+                                       headers={"Authorization": f"Bearer {token}"})
+                if resp.status_code not in (200, 204, 404):
+                    logger.warning(
+                        f"Connector {self.connector_id}: interrupt cleanup — "
+                        f"failed to delete doc {doc_id}: HTTP {resp.status_code}"
+                    )
+        except Exception as exc:
+            logger.warning(
+                f"Connector {self.connector_id}: "
+                f"interrupt cleanup failed for sha={sha256}: {exc}"
+            )
+
+    # 4. Close sync-history row
+    update_sync_history(
+        self.connector_id, sync_id,
+        finished_at=datetime.utcnow(),
+        files_found=0, files_syncing=0, files_completed=0, files_failed=0,
+        sync_status="interrupted: connector deleted",
+    )
+
+    return True
+```
+
+#### Cancellation check points inside `_run_tick()`
+
+```
+_run_tick():
+  step 0 — record tick start (insert_sync_history)
+  step 1 — connect & scan
+  ← _cancel_if_requested() ──── if set: close conn + purge in-flight + exit ──▶ return
+  step 2 — dedup pass
+  ← _cancel_if_requested() ──── if set: close conn + purge in-flight + exit ──▶ return
+  step 3 — batch ingest loop
+    for each batch:
+      download files
+      ingest()
+      update registry + membership  ← batch added to ingested_this_tick
+      ← _cancel_if_requested() ─── if set: close conn + purge in-flight
+                                            + delete docs ingested so far
+                                            + exit ─────────────────────────▶ return
+  step 4 — orphan deletes
+  ← _cancel_if_requested() ──── if set: close conn + purge in-flight + exit ──▶ return
+  step 5 — close connection (normal path)
+  step 6 — finalise
+```
+
+**Tracking state for the helper — two in-tick collections (local variables in `_run_tick()`):**
+
+| Variable | Type | What it holds | When populated |
+| --- | --- | --- | --- |
+| `pending_shas` | `list[str]` | SHA-256 values pre-written with `NULL doc_id` (in-flight) | Added just before each file's download begins; removed on successful ingest |
+| `ingested_this_tick` | `list[tuple[str, str]]` | `(sha256, doc_id)` pairs that completed ingest within this tick | Appended after each successful `ingest()` + registry update per batch |
+
+These collections mirror state that the existing SHA-cleanup invariant already tracks implicitly; making them explicit allows the cancel helper to act on them without re-querying the DB.
 
 #### DELETE interrupt flow
 
@@ -2172,19 +2293,21 @@ DELETE /v1/connectors/{id}
 │                                                                      │
 │  1. stop_event.set()                                                │
 │       ← if worker is sleeping: sleep returns immediately            │
-│       ← if worker is in _run_tick(): tick finishes, then            │
-│            stop_event checked at top of while loop → exit           │
+│       ← if worker is in _run_tick(): next inter-phase boundary      │
+│            fires _cancel_if_requested() → self-cleanup → return     │
 │                                                                      │
 │  2. thread.join(timeout=30 s)                                       │
-│       ← waits up to 30 s for in-progress tick to finish naturally  │
+│       ← in practice returns in seconds (boundary hit quickly)      │
 │                                                                      │
 │  3a. thread.is_alive() == False  ← clean stop                      │
-│       → proceed with document cleanup (§3C)                        │
+│       → proceed with §3C steps 2–5                                 │
+│         (step 3 loop is idempotent — already-cleaned rows are       │
+│          no-ops; pre-existing ticks' rows are still cleaned here)  │
 │                                                                      │
-│  3b. thread.is_alive() == True   ← timeout (tick still running)    │
+│  3b. thread.is_alive() == True   ← timeout (tick blocked in I/O)   │
 │       → log warning: "thread did not stop within 30 s"             │
-│       → proceed with document cleanup anyway (best-effort)         │
-│       → thread will die when the pod exits (daemon=True)           │
+│       → proceed with §3C cleanup anyway (best-effort)              │
+│       → thread exits when socket timeout fires (≤ 60 s); daemon    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -2196,12 +2319,19 @@ DELETE /v1/connectors/{id}
 DELETE /v1/connectors/{id}           while not stop_event.is_set():
                                        _tick_running = True
 1. stop_event.set()                    ┌──────────────────────────────────┐
-   ────────────────────────────────▶   │  _run_tick()  ← still running    │
-                                       │  (NOT interrupted — completes    │
-2. thread.join(timeout=30 s)           │   naturally)                     │
-   ← DELETE handler blocks here        └──────────────────────────────────┘
-      waiting up to 30 s               finally: _tick_running = False
-      for the tick to finish            │
+   ────────────────────────────────▶   │  _run_tick()  ← running          │
+                                       │                                  │
+2. thread.join(timeout=30 s)           │  ... phase N completes ...       │
+   ← DELETE handler blocks here        │  _cancel_if_requested() fires:   │
+      (returns quickly in practice     │    scanner.close()               │
+       once a phase boundary hits)     │    delete pending SHA rows       │
+                                       │    delete docs ingested this tick│
+                                       │    close sync-history row        │
+                                       │    ← returns True                │
+                                       │  _run_tick() returns early       │
+                                       └──────────────────────────────────┘
+                                       finally: _tick_running = False
+                                        │
                                         ▼
                                       while not stop_event.is_set():
                                         stop_event IS set → condition False
@@ -2209,14 +2339,16 @@ DELETE /v1/connectors/{id}           while not stop_event.is_set():
 
    join() returns (thread exited) ◀──
 3a. thread.is_alive() == False
-    → proceed with doc cleanup (§3C)
+    → proceed with §3C steps 2–5
+      (step 3 loop handles pre-existing ticks' content;
+       content from this tick already cleaned by the thread)
 
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ OR (tick still running at 30 s) ─ ─ ─ ─ ─ ─
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ OR (I/O blocked at 30 s boundary) ─ ─ ─ ─ ─ ─
 
 3b. thread.is_alive() == True (timeout)
     → log warning "thread did not stop within 30 s"
-    → proceed with doc cleanup anyway (best-effort)
-    → thread will exit when socket timeout fires (≤ 60 s); daemon=True
+    → proceed with §3C cleanup anyway (best-effort)
+    → thread exits when socket timeout fires (≤ 60 s); daemon=True
 ```
 
 #### Flow E — DELETE while worker is sleeping (no tick running)
@@ -2246,33 +2378,47 @@ DELETE /v1/connectors/{id}           while not stop_event.is_set():
 | `trigger_now()`, no tick running | `_pending_trigger` + `_manual_trigger.set()` | N/A | Sleep wakes immediately | Yes — starts next tick at once |
 | `trigger_now()`, tick currently running | `_pending_trigger = True` | **No** — completes naturally | Post-tick sleep skipped | Yes — starts next tick at once |
 | `DELETE`, no tick running | `stop_event.set()` | N/A | Sleep wakes; loop exits | **No** — thread exits |
-| `DELETE`, tick currently running | `stop_event.set()` | **No** — completes naturally | Loop condition False; thread exits | **No** — thread exits |
+| `DELETE`, tick currently running | `stop_event.set()` | **Yes** — at next inter-phase boundary | Thread self-cleans; loop condition False; thread exits | **No** — thread exits |
 
 #### Key design invariants
 
 | Invariant | How it is upheld |
 | --- | --- |
-| A running tick is **never aborted mid-way** by any signal | Neither `_pending_trigger` nor `stop_event` is checked inside `_run_tick()`; both are acted on only after `_run_tick()` returns |
+| A running tick is **never interrupted by a manual trigger or scheduled interval** | Neither `_pending_trigger` nor the scheduled timer is checked inside `_run_tick()`; both are acted on only after `_run_tick()` returns |
+| A DELETE **cooperatively interrupts** a running tick at the next inter-phase boundary | `stop_event` is checked by `_cancel_if_requested()` after each phase; the tick self-cleans and returns early rather than running to completion |
 | A manual trigger is **never silently dropped** while a tick is running | `_pending_trigger = True` persists through the tick; it is checked after `finally` and bypasses the sleep |
-| DELETE always produces a **clean thread exit** | `stop_event` is checked at the top of every loop iteration; the thread exits without aborting any I/O |
+| DELETE always produces a **clean thread exit** | `_cancel_if_requested()` closes connections, purges in-flight state, and closes the history row before returning; `stop_event` at the loop boundary guarantees no re-entry |
 | No two ticks for the same connector run **concurrently** | The tick guard and the single-threaded loop guarantee at most one active tick per connector at any time |
+| In-tick cleanup is **idempotent with §3C step 3** | `delete_connector_membership_atomic` is transactional; the DELETE handler's membership loop treats already-deleted rows as no-ops via `remaining > 0` / `404` checks |
 
 #### Why no `Thread.kill()`?
 
-Python provides no `Thread.kill()`. The cooperative stop (`stop_event`) is the only safe mechanism. A stuck thread (e.g. hung SFTP read) will exit at the next `stop_event` check after the blocking I/O is released by the socket-level timeout. With scanner timeouts set to 60 s, the worst-case latency before the thread exits is 60 s — the 30 s join timeout means the DELETE handler proceeds without waiting for the full timeout, and the thread exits on its own shortly after.
+Python provides no `Thread.kill()`. The cooperative stop (`stop_event`) is the only safe mechanism. With `_cancel_if_requested()` now checking `stop_event` at every inter-phase boundary, the thread exits seconds after the signal is set in the common case. The 30 s join timeout is a safety net for the rare scenario where `stop_event` is set while `ingest()` — the longest-running blocking call — is in progress mid-batch; the thread will exit at the batch boundary immediately after `ingest()` returns.
 
 #### Interaction with the monitor during DELETE
 
 The monitor must not respawn a thread that is being intentionally stopped. The check `if stop_event.is_set(): skip` (§15.4) covers this exactly — once the DELETE handler sets `stop_event`, the monitor will see it and skip respawn for that connector.
 
 ```
-Timeline:
+Timeline (tick running at t=0, phase boundary hit quickly):
   t=0   DELETE handler calls stop_event.set()
   t=0   thread.join(30s) starts
-  t=30  join returns (timeout)
+  t=~2  _cancel_if_requested() fires at next boundary:
+          scanner.close() → delete pending SHAs → delete ingested docs
+          → history row closed as "interrupted: connector deleted"
+          → _run_tick() returns; finally: _tick_running = False
+          → while condition False → thread exits
+  t=~2  join() returns (thread already dead)
+  t=~2  §3C continues: steps 2–5 (pre-existing tick content cleaned)
+  t=30  monitor next poll: stop_event.is_set() == True → skip (no respawn)
+
+Timeline (I/O blocked — ingest() mid-batch at t=0):
+  t=0   DELETE handler calls stop_event.set()
+  t=0   thread.join(30s) starts
+  t=30  join returns (timeout — ingest() still running)
+  t=30  §3C cleanup proceeds (best-effort; thread still alive)
   t=30  monitor next poll: sees stop_event.is_set() == True → skip
-  t=45  socket timeout fires inside stuck thread → thread exits
-  t=60  monitor next poll: stop_event still set → skip (no respawn)
+  t=~X  ingest() returns; _cancel_if_requested() fires → thread exits
   (connector row already deleted → no longer in _workers)
 ```
 
