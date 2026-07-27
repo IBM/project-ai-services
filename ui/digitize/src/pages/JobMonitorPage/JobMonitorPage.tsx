@@ -32,7 +32,7 @@ import { getAllJobs, getJobById, uploadDocuments, deleteJob, Job } from '../../s
 import IngestSidePanel from '../../components/IngestSidePanel';
 import { calculateDuration } from '../../utils/dateUtils';
 import { exportToCSV, validateFilename } from '../../utils/csvExport';
-import { JOB_STATUS, DISPLAY_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
+import { JOB_STATUS, DISPLAY_STATUS, DOC_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
 import styles from './JobMonitorPage.module.scss';
 
 interface NotificationStatus {
@@ -294,7 +294,7 @@ const getStatusIcon = (status: string) => {
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
-    case DISPLAY_STATUS.ALREADY_EXISTS:
+    case DOC_STATUS.ALREADY_EXISTS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
       return null;

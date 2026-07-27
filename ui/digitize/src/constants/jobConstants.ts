@@ -15,6 +15,10 @@ export const DISPLAY_STATUS = {
   DIGITIZATION_ERROR: 'Digitization error',
   INGESTING: 'Ingesting...',
   DIGITIZING: 'Digitizing...',
+} as const;
+
+// Document status constants (matching backend DocStatus enum values)
+export const DOC_STATUS = {
   ALREADY_EXISTS: 'already_exists',
 } as const;
 
