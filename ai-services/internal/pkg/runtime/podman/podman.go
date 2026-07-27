@@ -378,6 +378,18 @@ func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
 	return nil, fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) RolloutRestartDeployment(name string) error {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) GetDeploymentStatus(name string) (*types.DeploymentStatus, error) {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return nil, fmt.Errorf("unsupported method")
+}
+
 func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	logger.Errorf("unsupported method called!")
 
@@ -427,6 +439,12 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 
 func (pc *PodmanClient) SecretExists(nameOrID string) (bool, error) {
 	return secrets.Exists(pc.Context, nameOrID)
+}
+
+func (pc *PodmanClient) UpdateSecret(name string, data map[string][]byte) error {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
 }
 
 // Type returns the runtime type for PodmanClient.
