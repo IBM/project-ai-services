@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: instruct
+  name: llm
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -20,7 +20,15 @@ spec:
     model:
       modelFormat:
         name: vLLM
+      args:
+        - --served-model-name={{ .Values.instruct.model.name }}
+        - --max-model-len={{ .Values.instruct.model.maxModelLen }}
+        - --max-num-seqs={{ .Values.instruct.model.maxBatchSize }}
       env:
+        - name: VLLM_CPU_OMP_THREADS_BIND
+          value: "auto"
+        - name: VLLM_CPU_KVCACHE_SPACE
+          value: "32"
       {{- if .Values.instruct.apiKey }}
         - name: VLLM_API_KEY
           valueFrom:
@@ -37,7 +45,3 @@ spec:
           memory: {{ .Values.instruct.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: {{ .Values.instruct.storageUri }}
-      args:
-        - --served-model-name={{ .Values.instruct.model.name }}
-        - --max-model-len={{ .Values.instruct.model.maxModelLen }}
-        - --max-num-seqs={{ .Values.instruct.model.maxBatchSize }}
