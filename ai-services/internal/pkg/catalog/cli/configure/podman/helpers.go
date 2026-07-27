@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const certsDirName = "certs"
@@ -143,27 +143,6 @@ func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
 	return true, nil
 }
 
-// ConfirmCatalogReset displays a warning about catalog service unavailability and prompts for user confirmation.
-// The flagName parameter is used to customize the warning and confirmation messages.
-// Returns true if user confirms, false if cancelled, or an error if confirmation fails.
-func ConfirmCatalogReset(flagName string) (bool, error) {
-	logger.WarningfCtx(context.Background(), "Resetting %s will reload the catalog pod, catalog service will be temporarily unavailable during this time!", flagName)
-
-	// Confirm action
-	confirmed, err := utils.ConfirmAction(fmt.Sprintf("\nDo you want to continue, with %s reset?", flagName))
-	if err != nil {
-		return false, fmt.Errorf("failed to get confirmation: %w", err)
-	}
-
-	if !confirmed {
-		logger.InfofCtx(context.Background(), "Catalog %s reset cancelled", flagName)
-
-		return false, nil
-	}
-
-	return true, nil
-}
-
 // validateCatalogServiceAndConfirmReset validates that the catalog service is running
 // and confirms the reset action with the user. Returns true if the operation should proceed.
 func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string) (bool, error) {
@@ -178,7 +157,7 @@ func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string)
 	}
 
 	// Confirm reset action
-	confirmed, err := ConfirmCatalogReset(resetType)
+	confirmed, err := cliutils.ConfirmCatalogReset(resetType)
 	if err != nil {
 		return false, err
 	}

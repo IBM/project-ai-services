@@ -1,0 +1,7 @@
+apiVersion: v2
+name: llm-vllm-cpu
+description: A Helm chart for deploying the LLM instruct model using vLLM CPU inference on OpenShift (via KServe InferenceService)
+type: application
+
+version: 0.0.1
+appVersion: "0.0.1"

@@ -1,0 +1,8 @@
+containers:
+  - name: "similarity-api"
+    format: ".Status"
+    alias: API_STATUS
+
+hosts:
+  - fetch: API_ROUTE
+    type: route
