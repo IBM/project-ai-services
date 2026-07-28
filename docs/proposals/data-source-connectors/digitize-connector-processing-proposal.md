@@ -764,39 +764,129 @@ Key invariants:
 
 On FastAPI startup: load `active_connectors`, recreate workers, start the monitor. No catalog re-push needed.
 
----
-
-## 11. Settings and Module Changes
-
-### 11.1 Settings
-
-Add connector-related settings for:
-
-- staging directory
-- worker stop timeout
-- monitoring / respawn back-off values
-
-### 11.2 Files
-
-- `services/digitize/db/scripts/init_schema.sql`
-- `services/digitize/db/models.py`
-- `services/digitize/utils/db.py`
-- `services/digitize/connector/base_scanner.py`
-- `services/digitize/connector/scanner.py`
-- `services/digitize/connector/sftp_scanner.py`
-- `services/digitize/connector/s3_scanner.py`
-- `services/digitize/connector/sync_worker.py`
-- `services/digitize/connector/worker_manager.py`
 
 ---
 
-## 12. Key Invariants
+## 11. Implementation Plan — Digitize Connector PRs
 
-- Secrets are accepted over TLS, encrypted at rest, and never returned by the API.
-- One worker thread exists per active connector.
-- A worker runs its first tick immediately after start.
-- At most one tick per connector runs at a time.
-- The worker re-reads connector config from the DB before each tick.
-- Content deduplication is global by SHA-256.
-- Document deletion happens only when the last connector releases a hash.
-- Sync history is persistent and ordered newest first.
+Each PR is independently testable — no PR leaves things in a broken or untestable state.
+
+---
+
+### PR 1 — DB Schema + ORM Models + Settings
+
+**Files touched:** `init_schema.sql`, `db/models.py`, `config/settings.py`
+
+**What's built:**
+- 4 new tables: `active_connectors`, `file_checksum_registry`, `connector_file_membership`, `connector_sync_history`
+- ORM models: `ActiveConnector`, `FileChecksumRegistry`, `ConnectorFileMembership`, `ConnectorSyncHistory`
+- Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap
+
+**How to test:**
+- Run `init_schema.sql` against a local/test DB and assert all 4 tables exist with correct columns, constraints, and indexes
+- Unit test: instantiate ORM models and map them against the schema
+
+---
+
+### PR 2 — DB Operations Layer
+
+**Files touched:** `services/digitize/utils/db.py`
+
+**What's built:**
+All DB functions from §5.1:
+`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_content_by_sha256`, `insert_checksum_registry`, `delete_checksum_registry`, `list_connector_hashes`, `insert_connector_membership`, `delete_connector_membership_atomic`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`
+
+**How to test:**
+- Unit tests per function against a test DB (real or in-memory with pg_testcontainer / SQLite shim)
+- Assert `delete_connector_membership_atomic` returns correct remaining ref counts
+- Assert `merge_connection_details` correctly merges keys without clobbering untouched fields
+
+---
+
+### PR 3 — REST API Endpoints
+
+**Files touched:** connector router/handler file(s)
+
+**What's built:**
+- `POST /v1/connectors` — validate body, encrypt secrets, call `insert_active_connector`, return `202`
+- `PUT /v1/connectors/{id}` — partial update, re-encrypt if credentials included, `merge_connection_details`, return `200`
+- `DELETE /v1/connectors/{id}` — stub only (stops at "would stop worker" + calls DB delete), no worker logic yet
+- `GET /v1/connectors` and `GET /v1/connectors/{id}` — read from DB, strip secret fields
+- `GET /v1/connectors/{id}/sync-history` — paginated query with `limit`/`offset`
+
+**How to test:**
+- Integration tests using `httpx.AsyncClient` + test DB
+- Assert secrets are never returned in GET responses
+- Assert `PUT` with partial `connection_details` only overwrites provided keys
+- Assert correct HTTP status codes for 404/409/401 paths
+
+---
+
+### PR 4 — Scanner Abstraction + SFTP Scanner
+
+**Files touched:** `connector/base_scanner.py`, `connector/scanner.py`, `connector/sftp_scanner.py`
+
+**What's built:**
+- `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
+- `build_scanner()` factory — dispatches on `type`
+- `SFTPScanner` — decrypts private key, Paramiko connection, recursive walk, extension filter, streaming SHA-256, staged download
+
+**How to test:**
+- Unit test `SFTPScanner` against a local mock SFTP server (e.g. `pytest-sftpserver` or `paramiko.SFTPServer` in a thread)
+- Assert extension filtering works correctly
+- Assert SHA-256 is correctly computed from streamed content
+- Assert `build_scanner("ssh", config)` returns an `SFTPScanner` instance
+
+---
+
+### PR 5 — S3 Scanner
+
+**Files touched:** `connector/s3_scanner.py`
+
+**What's built:**
+- `S3Scanner` — decrypts secret key, boto3 list-objects, extension filter, streaming SHA-256, staged download
+
+**How to test:**
+- Unit test with `moto` (mock AWS) — assert listing, filtering, hash computation, and download
+- Assert `build_scanner("s3", config)` returns an `S3Scanner` instance
+- Reuse same test interface as PR 4 to verify factory dispatch covers both types
+
+---
+
+### PR 6 — Sync Worker
+
+**Files touched:** `connector/sync_worker.py`
+
+**What's built:**
+- `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, dedup diff, ingest new files, orphan deletion, tick finalize
+- Tick guard to prevent overlapping ticks
+- Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
+- `_cancel_if_requested()` check points at each phase boundary
+- `pending_shas` / `ingested_this_tick` rollback tracking for mid-tick DELETE interruption
+
+**How to test:**
+- Unit tests with mocked scanner and mocked DB layer
+- Assert tick guard skips when a tick is already running
+- Assert crash guard writes `"crashed: <error>"` to DB on unhandled exception
+- Assert `stop_event.set()` before a tick results in no DB writes
+- Assert mid-tick cancellation cleans up `pending_shas` and `ingested_this_tick`
+
+---
+
+### PR 7 — Worker Manager + Lifespan Recovery + Monitor
+
+**Files touched:** `connector/worker_manager.py`, `main.py` (lifespan hook)
+
+**What's built:**
+- `ConnectorWorkerManager` singleton: `start_worker()`, `stop_worker()`, `_workers` map
+- `connector-monitor` daemon thread: 30s poll, crash detection, `schedule_respawn()` with exponential back-off up to 5 attempts
+- Lifespan recovery: on startup load all `active_connectors`, recreate workers, start monitor; on shutdown stop monitor
+- Wire `DELETE /v1/connectors` to call `stop_worker()` (completing the stub from PR 3)
+
+**How to test:**
+- Unit test `start_worker()` / `stop_worker()` with a no-op worker
+- Assert `stop_event.set()` + `thread.join()` is called on DELETE
+- Test monitor: inject a dead thread with `stop_event` unset, assert `schedule_respawn()` is called
+- Assert back-off delays are computed correctly per crash count
+- Assert crash counter resets after first clean tick post-respawn
+- Integration test: start the full app with a test connector, confirm the worker starts and the lifespan hook restores it on simulated restart
