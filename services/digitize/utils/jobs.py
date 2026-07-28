@@ -154,9 +154,6 @@ def initialize_job_state(
     # Written directly as ALREADY_EXISTS in a single DB insert — there is no
     # "accepted" window and no follow-up update_doc_metadata call needed.
     if already_exists_files:
-        from digitize.utils.db import get_status_manager
-        from digitize.models import JobStatus as _JobStatus
-        status_mgr = get_status_manager(job_id)
         for skipped in already_exists_files:
             skipped_doc_id = generate_uuid()
             doc_id_dict[skipped.filename] = skipped_doc_id
@@ -178,13 +175,6 @@ def initialize_job_state(
                     "existing_doc_name": skipped.existing_doc_name,
                     "file_hash": skipped.file_hash,
                 },
-            )
-            # Update job stats to include this resolved doc — no doc-level status
-            # write needed because it was already set correctly in create_document.
-            status_mgr.update_job_progress(
-                "",
-                DocStatus.ALREADY_EXISTS,
-                _JobStatus.IN_PROGRESS,
             )
 
     return doc_id_dict
