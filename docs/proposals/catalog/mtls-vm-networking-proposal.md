@@ -1,4 +1,4 @@
-# mTLS VM Networking with Caddy — Design Proposal
+# Cross-VM Service Mesh with mTLS and Caddy — Design Proposal
 
 **Version:** 1.0  
 **Date:** July 2026  
