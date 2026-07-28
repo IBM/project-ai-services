@@ -1,0 +1,23 @@
+summarize:
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.16
+  log_level: "INFO"
+  database: "summarize_metadata"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+postgres:
+  image: icr.io/ai-services-cicd/postgres:18-4
+  storage: 5Gi
+  password: "Aiservicesdb@1234"
+
+llm:
+  model:
+    name: ""
+    maxModelLen: 4096
+    maxBatchSize: 32
+  apiKey: ""

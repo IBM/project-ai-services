@@ -65,7 +65,7 @@ const judgeSystemPrompt = "YOU ARE AN AUTOMATED ANSWER VERIFIER.\n" +
 	"REASON: one short sentence stating the missing or incorrect required fact, or confirming full coverage\n"
 
 // judgeFormatRetryTimeout is the per-call deadline inside AskJudgeWithFormatRetry; shorter than the parent deadline so retries always have remaining budget.
-const judgeFormatRetryTimeout = 7 * time.Minute
+const judgeFormatRetryTimeout = 18 * time.Minute
 
 // AskJudgeWithFormatRetry calls the Judge LLM and retries once on invalid response format; infrastructure errors are surfaced immediately.
 func AskJudgeWithFormatRetry(

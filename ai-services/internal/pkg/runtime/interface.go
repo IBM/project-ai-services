@@ -27,6 +27,7 @@ type Runtime interface {
 	ListSecrets(filters map[string][]string) ([]string, error)
 	DeleteSecret(name string) error
 	SecretExists(nameOrID string) (bool, error)
+	UpdateSecret(name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations
 	DeleteVolume(name string) error
