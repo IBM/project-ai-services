@@ -36,14 +36,12 @@ export const StepOne: React.FC<StepProps> = ({
       string,
       {
         paramsMap: Record<string, import("@/types/api.types").ProviderSchema>;
-        isLoading: boolean;
         errors: Record<string, string>;
       }
     > = {};
     Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
       result[componentType] = {
         paramsMap,
-        isLoading: false,
         errors: errorsByType[componentType] || {},
       };
     });

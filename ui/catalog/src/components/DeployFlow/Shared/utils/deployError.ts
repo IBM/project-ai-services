@@ -9,7 +9,7 @@ export function extractDeployError(error: unknown): string {
     if (err.response?.data?.detail) return err.response.data.detail;
     if (err.response?.data?.message) return err.response.data.message;
     if (err.response?.data?.error) return err.response.data.error;
-    if (err.message) return err.message;
+    if (error instanceof Error) return error.message;
   }
   return "Failed to deploy application";
 }

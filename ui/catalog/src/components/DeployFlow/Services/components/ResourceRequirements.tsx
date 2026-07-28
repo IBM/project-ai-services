@@ -13,11 +13,8 @@ import type {
   ResourcesResponse,
   ServiceDeployOptions,
 } from "@/types/api.types";
-import type { ResourceItem } from "../../DigitalAssistant/types/StepTwo.types";
-import {
-  bytesToGB,
-  getResourceStatus,
-} from "../../DigitalAssistant/utils/StepTwo.utils";
+import type { ResourceItem } from "../../Shared/types";
+import { bytesToGB, getResourceStatus } from "../../Shared/utils/resources";
 import type { DeployFormData } from "../types";
 import styles from "../ServicesDeployFlow.module.scss";
 
