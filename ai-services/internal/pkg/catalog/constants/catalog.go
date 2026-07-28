@@ -40,6 +40,8 @@ const (
 	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogPodmanAuthSecretName represent the podman auth secret name.
 	CatalogPodmanAuthSecretName = "podman-auth-secret"
+	// CatalogDeploymentName represent the catalog deployment name.
+	CatalogDeploymentName = "catalog-backend"
 )
 
 // Pagination constants.

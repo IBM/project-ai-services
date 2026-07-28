@@ -9,6 +9,7 @@ Exposes one router:
 """
 
 import asyncio
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
@@ -188,11 +189,18 @@ async def create_job(
                 f"Too many concurrent {operation} requests.",
             )
 
-        # 5. Read & validate files.
+        # 5. Read files and normalize extensions to lowercase before any
+        #    further processing so that filenames used as keys (job state,
+        #    doc-ID mapping, staging globs) are always consistent.
         job_id = dg_util.generate_uuid()
         file_contents_raw = await asyncio.gather(
             *[f.read() for f in files], return_exceptions=True
         )
+        for f in files:
+            if f.filename:
+                p = Path(f.filename)
+                f.filename = p.stem + p.suffix.lower()
+
         filenames, file_contents = await _validate_files(files, file_contents_raw)
 
         # 6. Acquire semaphore slot.

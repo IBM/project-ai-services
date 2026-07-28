@@ -1,0 +1,12 @@
+embedding:
+  storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+  model:
+    name: ibm-granite/granite-embedding-278m-multilingual
+    maxModelLen: 512
+  resources:
+    requests:
+      cpu: "8"
+      memory: "4Gi"
+    limits:
+      cpu: "8"
+      memory: "4Gi"

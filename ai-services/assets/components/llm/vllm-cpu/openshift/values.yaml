@@ -1,0 +1,14 @@
+instruct:
+  storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+  apiKey: ""
+  model:
+    name: ibm-granite/granite-3.3-8b-instruct
+    maxModelLen: 32768
+    maxBatchSize: 32
+  resources:
+    requests:
+      cpu: "12"
+      memory: "150Gi"
+    limits:
+      cpu: "12"
+      memory: "150Gi"

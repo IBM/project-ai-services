@@ -1,4 +1,4 @@
-package repository
+package applicationservice
 
 // Error message constants for application operations.
 const (
@@ -14,5 +14,3 @@ const (
 	// ErrMsgApplicationNameExists is returned when an application with the given name already exists.
 	ErrMsgApplicationNameExists = "application with name '%s' already exists"
 )
-
-// Made with Bob
