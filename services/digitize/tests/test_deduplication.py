@@ -647,8 +647,8 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     """Thin test-client fixture focused on the de-duplication code paths."""
     import digitize.app as digitize_app
     import digitize.api.v1.documents as documents_router_module
+    import digitize.api.v1.jobs as jobs_router_module
     from fastapi.testclient import TestClient
-    from digitize.workers.concurrency import concurrency_manager
 
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
@@ -660,18 +660,20 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
         digitize=SimpleNamespace(
             digitized_docs_dir=digitized_dir,
             staging_dir=staging_dir,
-            digitization_concurrency_limit=2,
-            ingestion_concurrency_limit=1,
+            ingestion_queue_quota=10,
+            digitization_queue_quota=5,
+            heavy_doc_page_threshold=500,
+            conversion_poll_interval=2.0,
         ),
     )
     monkeypatch.setattr(digitize_app, "settings", fake_settings, raising=False)
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
-    monkeypatch.setattr(concurrency_manager, "is_locked", Mock(return_value=False))
-    monkeypatch.setattr(concurrency_manager, "acquire", AsyncMock())
-    monkeypatch.setattr(concurrency_manager, "release", Mock())
-    monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+    # Stub queue-quota gate so all submissions are admitted.
+    monkeypatch.setattr(jobs_router_module.db_manager, "get_queued_counts",
+                        Mock(return_value={"ingestion": 0, "digitization": 0}))
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-x"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
+    monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
     monkeypatch.setattr(
         digitize_app.dg_util, "initialize_job_state", Mock(return_value={"novel.pdf": "doc-1"})
     )
@@ -696,6 +698,7 @@ class TestDuplicateDetectionEndpoint:
         existing.name = "sample.pdf"
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(return_value=existing)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -714,6 +717,7 @@ class TestDuplicateDetectionEndpoint:
         existing.name = "sample.pdf"
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(return_value=existing)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -732,6 +736,7 @@ class TestDuplicateDetectionEndpoint:
         existing.name = "old.pdf"
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         # first file matches, second is novel
         mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
@@ -751,6 +756,7 @@ class TestDuplicateDetectionEndpoint:
         existing.name = "old.pdf"
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -770,6 +776,7 @@ class TestDuplicateDetectionEndpoint:
         existing.name = "old.pdf"
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -789,6 +796,7 @@ class TestDuplicateDetectionEndpoint:
         import digitize.app as digitize_app
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(return_value=None)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -811,6 +819,7 @@ class TestDuplicateDetectionEndpoint:
 
         # digitization-type lookup returns None; ingestion fallback returns a match
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(
             side_effect=[None, ingested_doc]
         )
@@ -827,6 +836,7 @@ class TestDuplicateDetectionEndpoint:
         import digitize.api.v1.jobs as jobs_router_module
 
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(return_value=None)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 

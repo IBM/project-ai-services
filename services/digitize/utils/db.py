@@ -330,7 +330,6 @@ def get_all_jobs(
             )
             job_dicts.append(job_state.to_dict())
 
-        logger.debug(f"Retrieved {len(job_dicts)} jobs from database (total: {total})")
         return job_dicts, total
     except Exception as e:
         logger.error(f"Failed to get jobs from database: {e}", exc_info=True)

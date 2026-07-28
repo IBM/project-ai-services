@@ -2,104 +2,76 @@
 Digitization pipeline entry-point.
 
 Drives the single-document digitization job lifecycle:
-convert → mark status → emit output file.
+poll conversion_tasks → mark status.
+
+The conversion itself is now owned entirely by the dispatcher
+(workers/conversion_dispatcher.py).  This function just waits for the
+dispatcher to mark the task as completed or failed, then surfaces the
+result through the standard job/doc status updates.
 """
-from common.misc_utils import *
+import time
 from pathlib import Path
-from common.misc_utils import get_utc_timestamp, generate_file_checksum
-from digitize.models import JobStatus, DocStatus, OutputFormat
-from digitize.parsing.pdf import get_pdf_page_count, get_document_page_count
-from digitize.parsing.converter import convert_document_format
+
+from common.misc_utils import get_logger
+from digitize.db.manager import db_manager
+from digitize.models import JobStatus, DocStatus
+from digitize.settings import settings
 from digitize.utils.db import get_status_manager
-from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
+
 
 def digitize(
     directory_path: Path,
     job_id: str,
     doc_id_dict: dict,
-    output_format: OutputFormat,
-    file_checksum_dict: dict | None = None,  # filename -> md5 hex pre-computed at upload
+    output_format,
+    file_checksum_dict: dict | None = None,  # filename -> checksum pre-computed at upload
 ):
     """
-    Digitize a single document file (PDF or DOCX) in the staging directory.
+    Poll the conversion_tasks row inserted by ``POST /v1/jobs`` until the
+    dispatcher marks it terminal (completed or failed).
+
+    The dispatcher handles conversion, semaphore management, and writes
+    the result_path when it succeeds.  This function's only job is to
+    wait and propagate the final status.
 
     Args:
-        directory_path: Path to staging directory containing exactly one document
-                        (pre-validated and staged by app.py)
-        job_id: Job identifier for StatusManager
-        doc_id_dict: Mapping from filename to document ID
-        output_format: "json", "md", or "txt"
-        file_checksum_dict: Pre-computed MD5 hex digests keyed by filename.
-                            When provided the hash is reused rather than
-                            re-reading the file from disk to recompute it.
-
-    Raises:
-        Exception: If conversion fails
-
-    Returns:
-        None
+        directory_path:    Staging directory (kept for call-site compatibility).
+        job_id:            Job identifier.
+        doc_id_dict:       Mapping from filename to document ID.
+        output_format:     Output format (unused — task row already carries it).
+        file_checksum_dict: Pre-computed checksums keyed by filename.
+                            Passed through for API symmetry; currently unused
+                            by this function since the dispatcher writes all
+                            status directly.
     """
-    # All validations are done at API level in app.py
-    # Files are pre-staged and doc_id_dict is pre-created
+    status_mgr = get_status_manager(job_id)
 
-    # Initialize database-first status manager
-    status_mgr = get_status_manager(job_id) if job_id else None
+    task = db_manager.get_conversion_task_by_job_id(job_id)
+    if task is None:
+        error = f"No conversion task found for job {job_id}"
+        logger.error(error)
+        doc_id = next(iter(doc_id_dict.values()), "")
+        if doc_id:
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error)
+        status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=error)
+        return
 
-    # Prepare output/cache path
-    out_path = setup_digitized_doc_dir()
+    # Poll until the dispatcher marks the task terminal.
+    while task.status not in ("completed", "failed"):
+        time.sleep(settings.digitize.conversion_poll_interval)
+        task = db_manager.get_conversion_task_by_job_id(job_id)
+        if task is None:
+            logger.warning(f"Task for job {job_id} disappeared during polling")
+            break
 
-    # Get the single document file from staging directory (PDF or DOCX)
-    documents = list(directory_path.glob("*.pdf")) + list(directory_path.glob("*.docx"))
-    file_path = documents[0]
-    filename = file_path.name
-    doc_id = doc_id_dict[filename]
+    if task is None or task.status == "failed":
+        error = (task.error or "Conversion failed") if task else "Task row missing"
+        logger.error(f"Digitization task for job {job_id} failed: {error}")
+        # The dispatcher already updated job/doc status on failure; nothing more to do.
+        return
 
-    try:
-        # Mark document/job as IN_PROGRESS
-        if status_mgr:
-            logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
-            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
-            status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
-
-        # Convert document
-        # Run conversion inside a single process worker
-        with ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                convert_document_format,
-                str(file_path),
-                out_path,
-                doc_id,
-                output_format
-            )
-
-            output_file, conversion_time = future.result()
-
-        # Collect metadata (page count may be 0 for DOCX)
-        page_count = get_document_page_count(str(file_path))
-
-        # Mark COMPLETED
-        if status_mgr:
-            logger.debug(f"Conversion Done: updating doc & job metadata for document: {doc_id}")
-            file_hash = (
-                file_checksum_dict.get(filename)
-                if file_checksum_dict
-                else generate_file_checksum(file_path.read_bytes())
-            )
-            status_mgr.update_doc_metadata(doc_id, {
-                "status": DocStatus.COMPLETED,
-                "pages": page_count,
-                "completed_at": get_utc_timestamp(),
-                "timing_in_secs": {"digitizing": round(conversion_time, 2)},
-                "file_hash": file_hash,
-            })
-            status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
-
-    except Exception as e:
-        # Mark FAILED
-        logger.error(f"Conversion failed for {filename}: {str(e)}", exc_info=True)
-        if status_mgr:
-            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to convert document: {str(e)}")
-            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Digitization failed: {str(e)}")
-        raise
+    # task.status == "completed"
+    # The dispatcher already set job/doc to COMPLETED for digitization tasks.
+    logger.info(f"Digitization task for job {job_id} completed → {task.result_path}")

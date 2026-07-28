@@ -12,7 +12,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses
@@ -20,74 +20,77 @@ import digitize.utils.jobs as dg_util
 import digitize.models as models
 from digitize.utils.db import get_status_manager
 import digitize.utils.db as db_ops
-from digitize.pipeline.digitize import digitize
-from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
-from digitize.workers.concurrency import concurrency_manager
 from digitize.db.manager import db_manager
 
 router = APIRouter()
 logger = get_logger("jobs_router")
 
-
 # ------------------------------------------------------------------ #
-# Background task helpers                                             #
+# Background pipeline helpers                                         #
 # ------------------------------------------------------------------ #
 
-async def _run_digitize(
+def _run_digitize(
     job_id: str,
     doc_id_dict: dict,
     output_format: models.OutputFormat,
     file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ) -> None:
-    """Run the digitization pipeline and release the semaphore slot."""
-    status_mgr = get_status_manager(job_id)
-    job_staging_path = settings.digitize.staging_dir / job_id
+    """
+    Poll the conversion_tasks row for this digitization job until the
+    dispatcher marks it terminal, then surface the result.
 
+    Plain (non-async) so Starlette's BackgroundTasks runs it in a thread-pool
+    worker rather than on the event loop.
+    """
+    job_staging_path = settings.digitize.staging_dir / job_id
     try:
-        logger.info(f"🚀 Digitization started for job: {job_id}")
-        await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format, file_checksum_dict)
-        logger.info(f"Digitization for job {job_id} completed successfully")
+        logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
+        from digitize.pipeline.digitize import digitize
+        digitize(job_staging_path, job_id, doc_id_dict, output_format, file_checksum_dict)
+        logger.info(f"Digitization pipeline for job {job_id} finished")
     except Exception as exc:
-        logger.error(f"Error in digitization job {job_id}: {exc}")
+        logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
             models.JobStatus.FAILED,
-            error=f"Error occurred while processing digitization pipeline: {exc}",
+            error=f"Digitization pipeline error: {exc}",
         )
     finally:
         cleanup_staging_directory(job_id, settings.digitize.staging_dir)
-        concurrency_manager.release("digitization")
-        logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
 
-async def _run_ingest(
+def _run_ingest(
     job_id: str,
-    filenames: List[str],
     doc_id_dict: dict,
     file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ) -> None:
-    """Run the ingestion pipeline and release the semaphore slot."""
-    status_mgr = get_status_manager(job_id)
-    job_staging_path = settings.digitize.staging_dir / job_id
+    """
+    Run the ingestion pipeline for this job.  Polls conversion_tasks rows
+    reactively and drives process → chunk → index for each completed file.
 
+    Plain (non-async) so Starlette's BackgroundTasks runs it in a thread-pool
+    worker rather than on the event loop.
+    """
+    job_staging_path = settings.digitize.staging_dir / job_id
     try:
-        logger.info(f"🚀 Ingestion started for job: {job_id}")
-        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
-        logger.info(f"Ingestion for job {job_id} completed successfully")
+        logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
+        from digitize.pipeline.ingest import ingest
+        ingest(job_staging_path, job_id, doc_id_dict, file_checksum_dict)
+        logger.info(f"Ingestion pipeline for job {job_id} finished")
     except Exception as exc:
-        logger.error(f"Error in ingestion job {job_id}: {exc}")
+        logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
             models.JobStatus.FAILED,
-            error=f"Error occurred while processing ingestion pipeline: {exc}",
+            error=f"Ingestion pipeline error: {exc}",
         )
     finally:
         cleanup_staging_directory(job_id, settings.digitize.staging_dir)
-        concurrency_manager.release("ingestion")
-        logger.debug(f"✅ Job {job_id} done. Semaphore released.")
 
 
 # ------------------------------------------------------------------ #
@@ -116,7 +119,6 @@ async def _validate_files(
         file_contents.append(content)
 
     return filenames, file_contents
-
 
 # ------------------------------------------------------------------ #
 # Endpoints                                                           #
@@ -159,6 +161,7 @@ async def create_job(
         description="Output format for digitization: 'json', 'md', or 'txt'",
     ),
     job_name: Optional[str] = Query(None, description="Optional human-readable name for the job"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     try:
         # 1. Block new jobs while an import/export is running.
@@ -181,27 +184,25 @@ async def create_job(
                 "Only 1 file allowed for digitization.",
             )
 
-        # 3. Cross-process active-job check for ingestion.
-        if operation == models.OperationType.INGESTION:
-            has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
-            if has_active:
-                error_msg = "An ingestion job is already running"
-                if active_job_ids:
-                    error_msg += f" (job_id: {active_job_ids[0]})"
-                logger.error(f"Rejected ingestion request: {error_msg}")
-                APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, error_msg)
-
-        # 4. Semaphore availability check.
+        # 3. Per-operation queue quota gate (SELECT FOR UPDATE to prevent races).
+        #    The gate requires at least one free slot — it does NOT require all N
+        #    new tasks to fit.
         op_key = operation.value  # "ingestion" | "digitization"
-        if concurrency_manager.is_locked(op_key):
+        if op_key == "ingestion":
+            quota = settings.digitize.ingestion_queue_quota
+        else:
+            quota = settings.digitize.digitization_queue_quota
+
+        queued_counts = db_manager.get_queued_counts()
+        queued_for_op = queued_counts.get(op_key, 0)
+        if queued_for_op >= quota:
             APIError.raise_error(
                 ErrorCode.RATE_LIMIT_EXCEEDED,
-                f"Too many concurrent {operation} requests.",
+                f"The {operation.value} conversion queue is full "
+                f"({queued_for_op}/{quota} slots used). Please retry later.",
             )
 
-        # 5. Read files and normalize extensions to lowercase before any
-        #    further processing so that filenames used as keys (job state,
-        #    doc-ID mapping, staging globs) are always consistent.
+        # 4. Read files and normalise extensions to lowercase.
         job_id = dg_util.generate_uuid()
         file_contents_raw = await asyncio.gather(
             *[f.read() for f in files], return_exceptions=True
@@ -213,7 +214,7 @@ async def create_job(
 
         filenames, file_contents = await _validate_files(files, file_contents_raw)
 
-        # 5b. File-hash already-exists detection.
+        # 5. File-hash already-exists detection.
         #
         # Each file is hashed and checked against completed documents of the same
         # operation type. Files that already exist are removed from the batch; novel
@@ -283,39 +284,49 @@ async def create_job(
         filenames     = novel_filenames
         file_contents = novel_contents
 
-        # 6. Acquire semaphore slot.
-        await concurrency_manager.acquire(op_key)
+        # 6. Stage files to disk.
+        await dg_util.stage_upload_files(
+            job_id,
+            filenames,
+            str(settings.digitize.staging_dir / job_id),
+            file_contents,
+        )
 
-        # 7. Stage files and dispatch async task.
-        try:
-            await dg_util.stage_upload_files(
-                job_id,
-                filenames,
-                str(settings.digitize.staging_dir / job_id),
-                file_contents,
-            )
-            doc_id_dict = dg_util.initialize_job_state(
-                job_id, operation, output_format, filenames, job_name,
-                already_exists_files=already_exists_files,
-            )
-            if operation == models.OperationType.INGESTION:
-                asyncio.create_task(_run_ingest(job_id, filenames, doc_id_dict, file_checksum_dict))
-            else:
-                asyncio.create_task(_run_digitize(job_id, doc_id_dict, output_format, file_checksum_dict))
-        except Exception as exc:
-            concurrency_manager.release(op_key)
-            logger.error(
-                f"Failed to dispatch task for job {job_id}, "
-                f"semaphore released: {exc}"
-            )
-            APIError.raise_error("INTERNAL_SERVER_ERROR", str(exc))
+        # 7. Create job + document DB rows.
+        doc_id_dict = dg_util.initialize_job_state(
+            job_id, operation, output_format, filenames, job_name,
+            already_exists_files=already_exists_files,
+        )
 
+        # 8. Insert conversion_tasks rows.
+        await dg_util.enqueue_conversion_tasks(
+            job_id=job_id,
+            op_key=op_key,
+            filenames=filenames,
+            doc_id_dict=doc_id_dict,
+            staging_dir=settings.digitize.staging_dir / job_id,
+            output_format=output_format,
+            quota=quota,
+            queued_for_op=queued_for_op,
+        )
+
+        # 9. Launch the pipeline as a background task.
+        #    The pipeline polls conversion_tasks and drives post-conversion work.
+        if operation == models.OperationType.DIGITIZATION:
+            background_tasks.add_task(_run_digitize, job_id, doc_id_dict, output_format, file_checksum_dict)
+        else:
+            background_tasks.add_task(_run_ingest, job_id, doc_id_dict, file_checksum_dict)
+
+        logger.info(
+            f"Job {job_id} accepted — {len(filenames)} file(s), "
+            f"op={op_key}, format={output_format.value}"
+        )
         return {"job_id": job_id}
 
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Unexpected error in create_job: {exc}")
+        logger.error(f"Unexpected error in create_job: {exc}", exc_info=True)
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(exc))
 
 
@@ -417,7 +428,6 @@ async def delete_job(job_id: str):
     """Deletes a job record from database. Does not touch associated document metadata."""
     try:
         from digitize.utils.db import get_job as _get_job
-        from digitize.db.manager import db_manager
 
         job_data = _get_job(job_id)
 
@@ -450,5 +460,3 @@ async def delete_job(job_id: str):
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"Failed to delete job '{job_id}'",
         )
-
-
