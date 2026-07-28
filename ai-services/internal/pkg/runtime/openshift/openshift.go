@@ -629,7 +629,7 @@ func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
 // sumSpyreInUse queries Thanos for the total number of ibm.com/spyre_pf units
 // currently requested by all non-infra containers cluster-wide.
 //
-// PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})
+// PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""}).
 func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
 	used, err := queryThanos(`sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
 	if err != nil {
