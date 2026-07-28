@@ -8,8 +8,8 @@ export type {
   ResourceItem,
   SHARED_ACTION_TYPES,
   SharedDeployFlowAction,
-} from "../shared/types";
-import type { DeployFormData, BaseStepProps } from "../shared/types";
+} from "../Shared/types";
+import type { DeployFormData, BaseStepProps } from "../Shared/types";
 
 export interface ServicesDeployFlowProps {
   open: boolean;

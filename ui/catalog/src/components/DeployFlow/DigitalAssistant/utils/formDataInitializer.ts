@@ -8,7 +8,7 @@ import type {
   DeployFormData,
   ComponentConfig,
   ServiceConfig,
-} from "@/components/DeployFlow/shared/types";
+} from "@/components/DeployFlow/Shared/types";
 import { getDefaultInferenceBackendProviderId } from "@/utils/inferenceComponentHelper";
 
 // Initializes form data structure from deploy options with default values

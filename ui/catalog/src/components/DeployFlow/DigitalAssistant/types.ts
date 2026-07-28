@@ -7,12 +7,12 @@ export type {
   ResourceItem,
   SHARED_ACTION_TYPES,
   SharedDeployFlowAction,
-} from "../shared/types";
+} from "../Shared/types";
 import type {
   DeployFormData,
   ServiceConfig as BaseServiceConfig,
   BaseStepProps,
-} from "../shared/types";
+} from "../Shared/types";
 
 // DA-only extension of ServiceConfig — inferenceBackend removed in PR 9.
 export interface ServiceConfig extends BaseServiceConfig {
