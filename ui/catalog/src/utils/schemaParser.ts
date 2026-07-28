@@ -4,13 +4,13 @@
  */
 
 export interface SchemaProperty {
-  type: string;
+  type?: string;
   title?: string;
   description?: string;
   default?: unknown;
   format?: string;
   enum?: string[];
-  oneOf?: Array<{ const: string; title: string; description?: string }>;
+  oneOf?: Array<{ const: string; title?: string; description?: string }>;
   pattern?: string;
   minLength?: number;
   maxLength?: number;
@@ -19,9 +19,8 @@ export interface SchemaProperty {
   "x-ui-only"?: boolean;
   "x-ui-controls"?: string;
   "x-ui-controlled-by"?: string;
-  properties?: Record<string, SchemaProperty>;
+  properties?: Record<string, SchemaProperty | undefined>;
   required?: string[];
-  [key: string]: unknown;
 }
 
 export interface ParsedField {
@@ -47,7 +46,7 @@ export interface ParsedField {
 export interface JSONSchema {
   $schema?: string;
   type: string;
-  properties?: Record<string, SchemaProperty>;
+  properties?: Record<string, SchemaProperty | undefined>;
   required?: string[];
   [key: string]: unknown;
 }
@@ -65,12 +64,12 @@ export function parseSchema(schema: JSONSchema): ParsedField[] {
   const requiredFields = new Set(schema.required || []);
 
   for (const [key, property] of Object.entries(schema.properties)) {
-    // Check if this is a nested object with properties
+    if (property === undefined) continue;
     if (property.type === "object" && property.properties) {
       // Recursively parse nested properties
       const nestedSchema: JSONSchema = {
         type: "object",
-        properties: property.properties as Record<string, SchemaProperty>,
+        properties: property.properties,
         required: property.required as string[] | undefined,
       };
       const nestedFields = parseSchema(nestedSchema);

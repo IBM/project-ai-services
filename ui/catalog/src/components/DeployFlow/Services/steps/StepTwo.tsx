@@ -1,5 +1,9 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { parseSchema, validateField } from "@/utils/schemaParser";
+import {
+  parseSchema,
+  validateField,
+  type JSONSchema,
+} from "@/utils/schemaParser";
 import {
   Button,
   Dropdown,
@@ -17,7 +21,7 @@ import { Checkmark, Edit } from "@carbon/icons-react";
 import styles from "../ServicesDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import { ResourceRequirements } from "../components/ResourceRequirements";
-import { DynamicSchemaFields } from "../components/DynamicSchemaFields";
+import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import { ServiceCredentialDisplay } from "../components/ServiceCredentialDisplay";
 
 export const StepTwo: React.FC<StepProps> = ({
@@ -53,7 +57,6 @@ export const StepTwo: React.FC<StepProps> = ({
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -158,17 +161,14 @@ export const StepTwo: React.FC<StepProps> = ({
       setTempConfig({ ...selectedServiceConfig });
       setEditingService(selectedServiceId);
       setShowValidationError(false);
-      setFieldErrors({});
       onEditingChange?.(true);
     }
   };
 
   const handleApply = () => {
-    // Validate all fields including pattern, minLength, maxLength
-    const { isValid, errors } = validateAllFields();
+    const { isValid } = validateAllFields();
     if (!isValid) {
       setShowValidationError(true);
-      setFieldErrors(errors);
       return; // Stay in edit mode
     }
 
@@ -183,7 +183,6 @@ export const StepTwo: React.FC<StepProps> = ({
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
-    setFieldErrors({});
     onEditingChange?.(false);
   };
 
@@ -191,7 +190,6 @@ export const StepTwo: React.FC<StepProps> = ({
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
-    setFieldErrors({});
     onEditingChange?.(false);
   };
 
@@ -207,22 +205,17 @@ export const StepTwo: React.FC<StepProps> = ({
     errors: Record<string, string>;
   } => {
     if (!providerSchema || !tempConfig?.components?.llm) {
-      return { isValid: true, errors: {} }; // If no schema or no LLM component, allow proceeding
+      return { isValid: true, errors: {} };
     }
 
     const llmParams = tempConfig.components.llm.params || {};
     const errors: Record<string, string> = {};
 
-    // Parse schema to get all fields with their validation rules
-    const fields = parseSchema(
-      providerSchema as import("@/utils/schemaParser").JSONSchema,
-    );
+    const fields = parseSchema(providerSchema as JSONSchema);
 
-    // Validate each field
     fields.forEach((field) => {
-      const value = llmParams[field.key];
-      const error = validateField(value, field);
-
+      if (field.key === "model") return;
+      const error = validateField(llmParams[field.key], field);
       if (error) {
         errors[field.key] = error;
       }
@@ -233,6 +226,8 @@ export const StepTwo: React.FC<StepProps> = ({
       errors,
     };
   };
+
+  const fieldErrors = showValidationError ? validateAllFields().errors : {};
 
   // Helper function to get display name from ID
   const getDisplayName = (

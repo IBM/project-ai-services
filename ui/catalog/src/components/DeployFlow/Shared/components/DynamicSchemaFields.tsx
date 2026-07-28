@@ -12,12 +12,11 @@ import {
 import { Information } from "@carbon/icons-react";
 import {
   parseSchema,
-  validateField,
   type ParsedField,
   type JSONSchema,
 } from "@/utils/schemaParser";
 import { parseMarkdownLinks } from "@/utils/string";
-import styles from "../DigitalAssistantDeployFlow.module.scss";
+import styles from "../deployFlow.shared.module.scss";
 
 interface DynamicSchemaFieldsProps {
   componentType: string;
@@ -26,6 +25,7 @@ interface DynamicSchemaFieldsProps {
   onChange: (updates: Record<string, unknown>) => void;
   providerParamsMap: Record<string, JSONSchema>;
   hasValidationError?: boolean;
+  fieldErrors?: Record<string, string>;
 }
 
 export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
@@ -35,56 +35,41 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   onChange,
   providerParamsMap,
   hasValidationError = false,
+  fieldErrors = {},
 }) => {
-  // Parse schema to get field definitions
   const fields = useMemo(() => {
     const schema = providerParamsMap[providerId];
     if (!schema) return [];
-
-    const parsedFields = parseSchema(schema);
-
-    // Filter out the 'model' field as it's handled separately
-    return parsedFields.filter((field) => field.key !== "model");
+    return parseSchema(schema).filter((field) => field.key !== "model");
   }, [providerParamsMap, providerId]);
 
-  // State to track UI-only field values (checkboxes that control other fields)
   const [uiOnlyValues, setUiOnlyValues] = useState<Record<string, boolean>>({});
 
-  // Compute UI-only values based on current values
   const computedUiOnlyValues = useMemo(() => {
     const computed: Record<string, boolean> = {};
-
     fields.forEach((field) => {
       if (field.uiOnly && field.controls) {
-        // Check if the controlled field has a non-default value
         const controlledField = fields.find((f) => f.key === field.controls);
         const currentValue = values[field.controls];
         const isCustomized =
           currentValue !== undefined &&
           currentValue !== null &&
           currentValue !== controlledField?.defaultValue;
-
-        // Use explicit state if set, otherwise use computed value
         computed[field.key] =
           uiOnlyValues[field.key] !== undefined
             ? uiOnlyValues[field.key]
             : isCustomized;
       }
     });
-
     return computed;
   }, [fields, values, uiOnlyValues]);
 
-  // If no additional fields, don't render anything
   if (fields.length === 0) {
     return null;
   }
 
   const handleFieldChange = (key: string, value: unknown) => {
-    // Filter out UI-only fields from the onChange callback
     const updatedValues = { ...values, [key]: value };
-
-    // Remove UI-only fields before calling onChange
     const filteredValues: Record<string, unknown> = {};
     Object.entries(updatedValues).forEach(([k, v]) => {
       const field = fields.find((f) => f.key === k);
@@ -92,7 +77,6 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
         filteredValues[k] = v;
       }
     });
-
     onChange(filteredValues);
   };
 
@@ -104,51 +88,42 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     setUiOnlyValues((prev) => ({ ...prev, [key]: checked }));
 
     if (controlledFieldKey) {
-      const controlledField = fields.find((f) => f.key === controlledFieldKey);
-
       if (checked) {
-        // Checkbox checked: populate controlled field with default value
-        const defaultValue = controlledField?.defaultValue || "";
-        handleFieldChange(controlledFieldKey, defaultValue);
+        const controlledField = fields.find(
+          (f) => f.key === controlledFieldKey,
+        );
+        handleFieldChange(
+          controlledFieldKey,
+          controlledField?.defaultValue || "",
+        );
       } else {
-        // Checkbox unchecked: remove controlled field value (will use default)
         const updatedValues = { ...values };
         delete updatedValues[controlledFieldKey];
-
-        // Filter out UI-only fields
         const filteredValues: Record<string, unknown> = {};
         Object.entries(updatedValues).forEach(([k, v]) => {
-          const field = fields.find((f) => f.key === k);
-          if (!field?.uiOnly) {
+          if (!fields.find((f) => f.key === k)?.uiOnly) {
             filteredValues[k] = v;
           }
         });
-
         onChange(filteredValues);
       }
     }
   };
 
   const renderField = (field: ParsedField) => {
-    // Skip controlled fields if their controlling checkbox is unchecked
     if (field.controlledBy) {
       const controllingField = fields.find((f) => f.key === field.controlledBy);
       if (controllingField && !computedUiOnlyValues[field.controlledBy]) {
-        return null; // Don't render if controlling checkbox is unchecked
+        return null;
       }
     }
 
     const fieldId = `${componentType}-${providerId}-${field.key}`;
     const value = values[field.key];
+    const fieldError = fieldErrors[field.key];
+    const isInvalid = hasValidationError && !!fieldError;
+    const invalidText = fieldError || `Provide a valid ${field.label}`;
 
-    // Use validateField to check pattern, minLength, maxLength, and required
-    const validationError = hasValidationError
-      ? validateField(value, field)
-      : null;
-    const isInvalid = !!validationError;
-    const invalidText = validationError || `Provide a valid ${field.label}`;
-
-    // Label with optional info tooltip
     const labelWithInfo =
       field.description && field.key === "watsonxProjectId" ? (
         <div className={styles.labelWithInfo}>
@@ -166,7 +141,6 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
         field.label
       );
 
-    // Handle UI-only checkboxes (that control other fields)
     if (field.uiOnly && field.type === "boolean") {
       return (
         <Checkbox
@@ -198,7 +172,6 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
         );
 
       case "textarea":
-        // Controlled textareas should span full width
         if (field.controlledBy) {
           return (
             <div
@@ -220,7 +193,6 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             </div>
           );
         }
-        // Regular textareas
         return (
           <TextArea
             key={fieldId}
@@ -285,12 +257,13 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             selectedItem={selectedItem}
             invalid={isInvalid}
             invalidText={invalidText}
-            onChange={({ selectedItem }) =>
-              handleFieldChange(field.key, selectedItem?.id || "")
+            onChange={({ selectedItem: item }) =>
+              handleFieldChange(field.key, item?.id || "")
             }
           />
         );
       }
+
       case "text":
       default:
         return (

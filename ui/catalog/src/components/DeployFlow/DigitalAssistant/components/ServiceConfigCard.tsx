@@ -13,9 +13,13 @@ import type { ServiceConfig } from "../types";
 import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../utils/StepTwo.utils";
 import type { useBatchProviderParams } from "../hooks/useProviderParams";
-import { DynamicSchemaFields } from "./DynamicSchemaFields";
+import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import type { DeployOptionsComponent as Component } from "@/types/api.types";
-import { parseSchema, validateField } from "@/utils/schemaParser";
+import {
+  parseSchema,
+  validateField,
+  type JSONSchema,
+} from "@/utils/schemaParser";
 import { useServiceParams } from "../hooks/useServiceParams";
 import { shouldShowParam } from "@/utils/paramFilter";
 
@@ -59,6 +63,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     {},
   );
   const [hasValidationError, setHasValidationError] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Fetch service-level schema
   const { params: serviceSchema } = useServiceParams(serviceId);
@@ -148,9 +153,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
   // Parse service-level schema fields
   const serviceFields = useMemo(() => {
     if (!serviceSchema) return [];
-    return parseSchema(
-      serviceSchema as import("@/utils/schemaParser").JSONSchema,
-    );
+    return parseSchema(serviceSchema as JSONSchema);
   }, [serviceSchema]);
 
   const togglePasswordVisibility = (key: string) => {
@@ -160,10 +163,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     }));
   };
 
-  // Validate inference backend parameters
-  const validateInferenceBackendParams = (): boolean => {
+  const buildFieldErrors = (): Record<string, string> => {
     if (!currentConfig?.inferenceBackend || !currentConfig?.params) {
-      return true; // No params to validate
+      return {};
     }
 
     // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
@@ -172,38 +174,34 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     const schema = paramsMap[currentConfig.inferenceBackend];
 
     if (!schema || !schema.properties) {
-      return true; // No schema to validate against
+      return {};
     }
 
-    // Parse schema to get field definitions with validation rules
-    const fields = parseSchema(
-      schema as import("@/utils/schemaParser").JSONSchema,
-    );
+    const errors: Record<string, string> = {};
+    const fields = parseSchema(schema as JSONSchema);
 
-    // Validate each field
     for (const field of fields) {
-      if (field.key === "model") continue; // Skip model field
-
-      const value = currentConfig.params[field.key];
-      const error = validateField(value, field);
-
+      if (field.key === "model") continue;
+      const error = validateField(currentConfig.params[field.key], field);
       if (error) {
-        return false; // Validation failed
+        errors[field.key] = error;
       }
     }
 
-    return true; // All validations passed
+    return errors;
   };
 
   // Handle Apply with validation
   const handleApplyWithValidation = () => {
-    const isValid = validateInferenceBackendParams();
+    const errors = buildFieldErrors();
 
-    if (!isValid) {
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       setHasValidationError(true);
       return;
     }
 
+    setFieldErrors({});
     setHasValidationError(false);
     onApply();
   };
@@ -713,9 +711,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                               values={currentConfig?.params || {}}
                               onChange={(params) => {
                                 // Clear validation error when user makes changes
-                                if (hasValidationError) {
-                                  setHasValidationError(false);
-                                }
+                                setHasValidationError(false);
+                                setFieldErrors({});
                                 // Get provider schema keys to know which params belong to provider
                                 const providerSchema =
                                   providerParamsByType[componentType]
@@ -752,10 +749,11 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                                 (providerParamsByType[componentType]
                                   ?.paramsMap || {}) as Record<
                                   string,
-                                  import("@/utils/schemaParser").JSONSchema
+                                  JSONSchema
                                 >
                               }
                               hasValidationError={hasValidationError}
+                              fieldErrors={fieldErrors}
                             />
                           </div>
                         </>
@@ -774,12 +772,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   values={currentConfig?.params || {}}
                   onChange={(params) => {
                     // Clear validation error when user makes changes
-                    if (hasValidationError) {
-                      setHasValidationError(false);
-                    }
+                    setHasValidationError(false);
+                    setFieldErrors({});
                     // Get service schema keys to know which params belong to service
-                    const serviceSchemaTyped =
-                      serviceSchema as import("@/utils/schemaParser").JSONSchema;
+                    const serviceSchemaTyped = serviceSchema as JSONSchema;
                     const serviceKeys = new Set(
                       serviceSchemaTyped?.properties
                         ? Object.keys(serviceSchemaTyped.properties)
@@ -806,10 +802,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     });
                   }}
                   providerParamsMap={{
-                    [serviceId]:
-                      serviceSchema as import("@/utils/schemaParser").JSONSchema,
+                    [serviceId]: serviceSchema as JSONSchema,
                   }}
                   hasValidationError={hasValidationError}
+                  fieldErrors={fieldErrors}
                 />
               </div>
             )}

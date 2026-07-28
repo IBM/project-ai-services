@@ -329,12 +329,13 @@ export interface ProviderSchemaProperty {
 
 export interface ProviderSchema {
   $schema?: string;
+  type: string;
   properties: {
     model?: ProviderSchemaProperty;
     [key: string]: ProviderSchemaProperty | undefined;
   };
   required?: string[];
-  type: string;
+  [key: string]: unknown;
 }
 
 export interface LLMOption {

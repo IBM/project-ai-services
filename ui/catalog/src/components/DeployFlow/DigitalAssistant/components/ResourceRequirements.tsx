@@ -76,7 +76,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                 key={`${resource.label}-${resource.acceleratorType || ""}`}
                 className={styles.resourceItem}
               >
-                <p className={styles.resourceLabel}>
+                <div className={styles.resourceLabel}>
                   <span>{resource.label}</span>
                   {status === "sufficient" && (
                     <CheckmarkFilled size={16} className={styles.green} />
@@ -95,8 +95,8 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                       </button>
                     </Tooltip>
                   )}
-                </p>
-                <p className={styles.resourceValue}>
+                </div>
+                <div className={styles.resourceValue}>
                   <span className={styles.required}>{resource.required}</span>
                   {resource.available !== "N/A" && (
                     <span className={styles.unit}>
@@ -106,7 +106,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                   {resource.available === "N/A" && (
                     <span className={styles.unit}> {resource.unit}</span>
                   )}
-                </p>
+                </div>
               </Tile>
             );
           })}
