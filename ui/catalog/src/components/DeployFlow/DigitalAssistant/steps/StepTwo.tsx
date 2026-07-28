@@ -19,10 +19,6 @@ import type {
   ResourcesResponse,
   DeployOptionsComponent as Component,
 } from "@/types/api.types";
-import type {
-  ResourcesResponse,
-  DeployOptionsComponent as Component,
-} from "@/types/api.types";
 import type { ResourceItem } from "../../shared/types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
@@ -157,7 +153,8 @@ export const StepTwo: React.FC<StepProps> = ({
     });
 
     // Then, iterate through all services for service-specific components
-    Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
+    Object.entries(formData.services).forEach(([serviceId, serviceConfig_]) => {
+      const serviceConfig = serviceConfig_ as ServiceConfig;
       if (!serviceConfig.enabled) return;
 
       const service = deployOptions.services.find((s) => s.id === serviceId);
@@ -383,11 +380,8 @@ export const StepTwo: React.FC<StepProps> = ({
 
   // Fetch provider parameters for all component types dynamically
   // This single hook call handles all component types, respecting Rules of Hooks
-  const {
-    paramsByType,
-    isLoading: _paramsLoading,
-    errorsByType,
-  } = useMultiTypeProviderParams(allProviderIds);
+  const { paramsByType, errorsByType } =
+    useMultiTypeProviderParams(allProviderIds);
 
   // Transform to match the interface expected by the rest of the component
   const providerParamsByType = useMemo(() => {

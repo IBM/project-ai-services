@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import {
   Button,
@@ -8,6 +8,8 @@ import {
   Accordion,
   AccordionItem,
 } from "@carbon/react";
+import { fetchResources } from "@/api/applications.api";
+import type { ResourcesResponse } from "@/types/api.types";
 import { useProviderSchema } from "../hooks/useProviderSchema";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { ProductiveCard } from "@carbon/ibm-products";
@@ -30,6 +32,24 @@ export const StepTwo: React.FC<StepProps> = ({
   serviceDescription,
   isLoadingLlmModels = false,
 }) => {
+  const [resources, setResources] = useState<ResourcesResponse | null>(null);
+  const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchResources()
+      .then((data) => {
+        setResources(data);
+        setResourcesLoading(false);
+      })
+      .catch((err) => {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to load resources";
+        setResourcesError(errorMessage);
+        setResourcesLoading(false);
+      });
+  }, []);
+
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
@@ -765,6 +785,9 @@ export const StepTwo: React.FC<StepProps> = ({
       <ResourceRequirements
         formData={formData}
         deployOptions={deployOptions}
+        resourceData={resources}
+        resourcesLoading={resourcesLoading}
+        resourcesError={resourcesError}
         onResourceStatusChange={onResourceStatusChange}
       />
 

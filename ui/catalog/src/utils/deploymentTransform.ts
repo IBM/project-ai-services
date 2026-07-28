@@ -16,6 +16,11 @@ import type {
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
 
+// DA-specific DeployFormData where services carry the DA-extended ServiceConfig (with inferenceBackend).
+type DADeployFormData = Omit<DeployFormData, "services"> & {
+  services: Record<string, ServiceConfig>;
+};
+
 /**
  * Determines the component type (llm or reranker) that uses the inference backend
  * for a given service configuration
@@ -238,7 +243,7 @@ function separateParams(
  * sharing the same provider+model have identical parameters and returns an error if not.
  */
 export function transformToDeploymentPayload(
-  formData: DeployFormData,
+  formData: DADeployFormData,
   deployOptions: DeployOptionsResponse,
   providerParamsCache: Record<string, ProviderSchema>,
   serviceParamsCache: Record<string, Record<string, unknown>>,

@@ -1,5 +1,16 @@
 import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
 
+export type {
+  ComponentConfig,
+  DeployFormData,
+  ServiceConfig,
+  BaseStepProps,
+  ResourceItem,
+  SHARED_ACTION_TYPES,
+  SharedDeployFlowAction,
+} from "../shared/types";
+import type { DeployFormData, BaseStepProps } from "../shared/types";
+
 export interface ServicesDeployFlowProps {
   open: boolean;
   onClose: () => void;
@@ -52,16 +63,10 @@ export type DeployFlowAction =
       payload: boolean;
     };
 
-export interface StepProps {
-  title: string;
-  formData: DeployFormData;
-  onChange: (updates: Partial<DeployFormData>) => void;
+export interface StepProps extends BaseStepProps {
   deployOptions: ServiceDeployOptions;
-  onEditingChange?: (isEditing: boolean) => void;
-  onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
   selectedServiceId?: string | null;
   llmModelsWithProviders?: LLMOption[];
   serviceDescription?: string;
   isLoadingLlmModels?: boolean;
-  showNameError?: boolean;
 }

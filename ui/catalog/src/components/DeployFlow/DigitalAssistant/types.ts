@@ -1,5 +1,24 @@
 import type { DeployOptionsResponse } from "@/types/api.types";
 
+export type {
+  ComponentConfig,
+  DeployFormData,
+  BaseStepProps,
+  ResourceItem,
+  SHARED_ACTION_TYPES,
+  SharedDeployFlowAction,
+} from "../shared/types";
+import type {
+  DeployFormData,
+  ServiceConfig as BaseServiceConfig,
+  BaseStepProps,
+} from "../shared/types";
+
+// DA-only extension of ServiceConfig — inferenceBackend removed in PR 9.
+export interface ServiceConfig extends BaseServiceConfig {
+  inferenceBackend?: string;
+}
+
 export interface DeployFlowProps {
   open: boolean;
   onClose: () => void;
@@ -59,12 +78,6 @@ export type DeployFlowAction =
     }
   | { type: typeof ACTION_TYPES.RESET_STATE };
 
-export interface StepProps {
-  title: string;
-  formData: DeployFormData;
-  onChange: (updates: Partial<DeployFormData>) => void;
+export interface StepProps extends BaseStepProps {
   deployOptions: DeployOptionsResponse;
-  onEditingChange?: (isEditing: boolean) => void;
-  onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
-  showNameError?: boolean;
 }
