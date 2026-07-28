@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -40,6 +43,9 @@ var (
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
 	resetCertificateFlag bool
+
+	// openShift flags.
+	timeout time.Duration
 )
 
 const (
@@ -107,6 +113,7 @@ func NewConfigureCmd() *cobra.Command {
 func init() {
 	initConfigureCommonFlags()
 	initConfigurePodmanFlags()
+	initConfigureOpenShiftFlags()
 }
 
 // runConfigure executes the catalog configuration process.
@@ -139,8 +146,12 @@ func runConfigure() error {
 		return catalogPodman.DeployCatalog(ctx, opts)
 
 	case types.RuntimeTypeOpenShift:
-		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")
+		opts := catalogUtils.OpenShiftConfigureOptions{
+			Namespace: catalogConstants.CatalogAppName,
+			Timeout:   timeout,
+		}
 
+		return catalogOpenShift.DeployCatalog(ctx, opts)
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", rt)
 	}
@@ -388,15 +399,39 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddPodmanFlag("reset-podman-auth", nil).
 		AddPodmanFlag("reset-certificate", nil)
 
+	// OpenShift-only flags.
+	builder.AddOpenShiftFlag("timeout", nil)
+
 	return builder.Build()
 }
 
 func runResetPassword() error {
-	return catalogPodman.ResetCatalogPassword()
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	switch rt {
+	case types.RuntimeTypePodman:
+		return catalogPodman.ResetCatalogPassword()
+
+	case types.RuntimeTypeOpenShift:
+		return catalogOpenShift.ResetCatalogPassword()
+
+	default:
+		return fmt.Errorf("unsupported runtime: %s", rt)
+	}
 }
 
 func runResetPodmanAuth() error {
 	return catalogPodman.ResetPodmanAuth()
+}
+
+func initConfigureOpenShiftFlags() {
+	configureCmd.Flags().DurationVar(
+		&timeout,
+		"timeout",
+		0,
+		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
+			"Note: Supported for openshift runtime only.\n"+
+			"Example: --timeout 30m\n",
+	)
 }
 
 // Made with Bob

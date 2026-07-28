@@ -8,9 +8,18 @@ import type {
   DeployOptionsService as Service,
   DeployOptionsComponent as Component,
   Provider,
+  ArchitectureDeploymentPayload,
+  DeploymentComponent,
+  DeploymentService,
+  ProviderSchema,
 } from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "./paramFilter";
+
+// DA-specific DeployFormData where services carry the DA-extended ServiceConfig (with inferenceBackend).
+type DADeployFormData = Omit<DeployFormData, "services"> & {
+  services: Record<string, ServiceConfig>;
+};
 
 /**
  * Determines the component type (llm or reranker) that uses the inference backend
@@ -34,29 +43,6 @@ function getInferenceComponentType(
   }
 
   return componentType;
-}
-
-interface DeploymentComponent {
-  component_type: string;
-  provider_id: string;
-  version: string;
-  params?: Record<string, unknown>;
-}
-
-interface DeploymentService {
-  catalog_id: string;
-  version: string;
-  components: DeploymentComponent[];
-  params?: {
-    backend?: Record<string, unknown>;
-  };
-}
-
-export interface DeploymentPayload {
-  name: string;
-  catalog_id: string;
-  version: string;
-  services: DeploymentService[];
 }
 
 /**
@@ -195,7 +181,7 @@ function buildDeploymentComponent(
  */
 function separateParams(
   allParams: Record<string, unknown>,
-  providerSchemaData: Record<string, unknown> | null,
+  providerSchemaData: ProviderSchema | null,
   serviceSchemaData: Record<string, unknown> | null,
 ): {
   inferenceBackendParams: Record<string, unknown>;
@@ -206,9 +192,8 @@ function separateParams(
   }
 
   // Get provider schema properties with defaults
-  const providerProperties =
-    (providerSchemaData?.properties as Record<string, { default?: unknown }>) ||
-    {};
+  const providerProperties: Record<string, { default?: unknown } | undefined> =
+    providerSchemaData?.properties ?? {};
 
   // Get service schema properties with defaults (under backend.properties)
   const serviceProperties: Record<string, { default?: unknown }> = {};
@@ -258,11 +243,11 @@ function separateParams(
  * sharing the same provider+model have identical parameters and returns an error if not.
  */
 export function transformToDeploymentPayload(
-  formData: DeployFormData,
+  formData: DADeployFormData,
   deployOptions: DeployOptionsResponse,
-  providerParamsCache: Record<string, Record<string, unknown>>,
+  providerParamsCache: Record<string, ProviderSchema>,
   serviceParamsCache: Record<string, Record<string, unknown>>,
-): DeploymentPayload {
+): ArchitectureDeploymentPayload {
   const services: DeploymentService[] = [];
 
   // Process each enabled service
@@ -288,8 +273,7 @@ export function transformToDeploymentPayload(
 
     // Get cached schemas from store
     const providerKey = `${componentType}:${serviceConfig.inferenceBackend}`;
-    const providerSchemaData =
-      (providerParamsCache[providerKey] as Record<string, unknown>) || null;
+    const providerSchemaData = providerParamsCache[providerKey] ?? null;
     const serviceSchemaData =
       (serviceParamsCache[serviceId] as Record<string, unknown>) || null;
 

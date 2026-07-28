@@ -36,7 +36,7 @@ var docCallTimeout = 60 * time.Second //nolint:mnd
 const (
 	transportMaxIdleConnsPerHost   = 4                //nolint:mnd
 	transportIdleConnTimeout       = 90 * time.Second //nolint:mnd
-	transportResponseHeaderTimeout = 25 * time.Second //nolint:mnd
+	transportResponseHeaderTimeout = 35 * time.Second //nolint:mnd
 	transportDialTimeout           = 15 * time.Second //nolint:mnd
 	transportDialKeepAlive         = 30 * time.Second //nolint:mnd
 )
@@ -276,30 +276,52 @@ func GetDigitizeBaseURL(port string) string {
 }
 
 // HealthCheck performs a health check on the digitize service.
+const healthCheckRetryInterval = 10 * time.Second //nolint:mnd
+
+// HealthCheck polls baseURL/health until HTTP 200 is returned or ctx is cancelled.
 func HealthCheck(ctx context.Context, baseURL string) error {
-	url := fmt.Sprintf("%s/health", baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
+	healthURL := fmt.Sprintf("%s/health", baseURL)
 	client := getHTTPClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("health check request failed: %w", err)
+	attempt := 0
+
+	for {
+		attempt++
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create health check request: %w", err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Warningf("[DIGITIZE] Health check attempt %d failed: %v — retrying in %s",
+				attempt, err, healthCheckRetryInterval)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("health check request failed: %w", err)
+			case <-time.After(healthCheckRetryInterval):
+				continue
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			drainAndClose(resp.Body)
+			logger.Warningf("[DIGITIZE] Health check attempt %d: status %d — retrying in %s",
+				attempt, resp.StatusCode, healthCheckRetryInterval)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
+			case <-time.After(healthCheckRetryInterval):
+				continue
+			}
+		}
+
+		drainAndClose(resp.Body)
+		logger.Infof("[DIGITIZE] Health check passed (attempt %d)", attempt)
+
+		return nil
 	}
-	defer drainAndClose(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	logger.Infof("[DIGITIZE] Health check passed")
-
-	return nil
 }
 
 // buildJobURL constructs the job creation URL with query parameters.
@@ -312,24 +334,31 @@ func buildJobURL(baseURL, operation, outputFormat, jobName string) string {
 	return url
 }
 
-// createMultipartBody creates a multipart form body with a single file.
-func createMultipartBody(filePath string) (*bytes.Buffer, *multipart.Writer, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-
+// createMultipartBody builds a multipart form body containing one or more files.
+func createMultipartBody(filePaths ...string) (*bytes.Buffer, *multipart.Writer, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	part, err := writer.CreateFormFile("files", filepath.Base(filePath))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create form file: %w", err)
-	}
+	for _, filePath := range filePaths {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
+		}
 
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, nil, fmt.Errorf("failed to copy file: %w", err)
+		part, err := writer.CreateFormFile("files", filepath.Base(filePath))
+		if err != nil {
+			_ = file.Close()
+
+			return nil, nil, fmt.Errorf("failed to create form file: %w", err)
+		}
+
+		if _, err := io.Copy(part, file); err != nil {
+			_ = file.Close()
+
+			return nil, nil, fmt.Errorf("failed to copy file: %w", err)
+		}
+
+		_ = file.Close()
 	}
 
 	if err := writer.Close(); err != nil {
@@ -689,40 +718,11 @@ func DeleteDocumentExpectingError(ctx context.Context, baseURL, docID string) (*
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
-// createMultipartBodyWithMultipleFiles creates a multipart form body with multiple files.
-func createMultipartBodyWithMultipleFiles(filePaths []string) (*bytes.Buffer, *multipart.Writer, error) {
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	for _, filePath := range filePaths {
-		file, err := os.Open(filePath)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
-		}
-		defer func() { _ = file.Close() }()
-
-		part, err := writer.CreateFormFile("files", filepath.Base(filePath))
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create form file: %w", err)
-		}
-
-		if _, err := io.Copy(part, file); err != nil {
-			return nil, nil, fmt.Errorf("failed to copy file: %w", err)
-		}
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, nil, fmt.Errorf("failed to close writer: %w", err)
-	}
-
-	return body, writer, nil
-}
-
 // CreateJobWithMultipleFiles attempts to create a job with multiple files (should fail for digitization).
 func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths []string, operation, outputFormat, jobName string) (*ErrorResponse, error) {
 	url := buildJobURL(baseURL, operation, outputFormat, jobName)
 
-	body, writer, err := createMultipartBodyWithMultipleFiles(filePaths)
+	body, writer, err := createMultipartBody(filePaths...)
 	if err != nil {
 		return nil, err
 	}
@@ -739,12 +739,33 @@ func CreateJobWithMultipleFiles(ctx context.Context, baseURL string, filePaths [
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(respBody))
 }
 
+// logFailedDocDetails fetches and logs per-document error details for any failed.
+func logFailedDocDetails(ctx context.Context, digitizeBaseURL string, status *JobStatusResponse) {
+	if status == nil {
+		return
+	}
+	for _, doc := range status.Documents {
+		if doc.Status != "failed" {
+			continue
+		}
+		detail, err := GetDocument(ctx, digitizeBaseURL, doc.ID)
+		if err != nil {
+			logger.Warningf("[INGEST] could not fetch detail for doc %s (%s): %v", doc.ID, doc.Name, err)
+
+			continue
+		}
+		logger.Infof("[INGEST] doc %s (%s) failure detail: %v", doc.ID, doc.Name, detail.Error)
+	}
+}
+
 // IngestTestDocumentViaDigitizeAPI ingests test_doc.pdf via the digitize microservice (operation=ingestion) so it is indexed in OpenSearch before RAG evaluation.
 func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobName string) error {
 	pdfPath := GetTestPDFPath()
 	if pdfPath == "" {
 		return fmt.Errorf("could not resolve test PDF path")
 	}
+
+	const ingestTimeout = 20 * time.Minute // OCR + embedding + OpenSearch indexing can take up to 20 min.
 
 	logger.Infof("[INGEST] Submitting ingestion job for %s (job name: %s)", filepath.Base(pdfPath), jobName)
 
@@ -755,10 +776,10 @@ func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobN
 
 	logger.Infof("[INGEST] Job submitted (job_id=%s) — waiting for completion", jobResp.JobID)
 
-	const ingestTimeout = 20 * time.Minute // OCR + embedding + OpenSearch indexing can take up to 20 min.
-
 	finalStatus, err := WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, ingestTimeout)
 	if err != nil {
+		logFailedDocDetails(ctx, digitizeBaseURL, finalStatus)
+
 		return fmt.Errorf("ingestion job %s did not complete: %w", jobResp.JobID, err)
 	}
 

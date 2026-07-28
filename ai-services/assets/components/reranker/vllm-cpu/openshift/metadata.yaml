@@ -1,0 +1,7 @@
+name: reranker-vllm-cpu
+version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 8
+  memory: 4294967296 # 4Gi in bytes

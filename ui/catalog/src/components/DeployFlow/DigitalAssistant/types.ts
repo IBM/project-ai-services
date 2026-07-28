@@ -1,19 +1,20 @@
 import type { DeployOptionsResponse } from "@/types/api.types";
-import type {
-  DeployFormData,
-  ServiceConfig as BaseServiceConfig,
-} from "../Shared/types";
 
-// Re-export shared types so existing consumers of this file keep working.
 export type {
   ComponentConfig,
   DeployFormData,
   BaseStepProps,
   ResourceItem,
+  SHARED_ACTION_TYPES,
   SharedDeployFlowAction,
-} from "../Shared/types";
+} from "../shared/types";
+import type {
+  DeployFormData,
+  ServiceConfig as BaseServiceConfig,
+  BaseStepProps,
+} from "../shared/types";
 
-// UI-only field for tracking the selected LLM provider ID. Removed in PR 9.
+// DA-only extension of ServiceConfig — inferenceBackend removed in PR 9.
 export interface ServiceConfig extends BaseServiceConfig {
   inferenceBackend?: string;
 }
@@ -77,12 +78,6 @@ export type DeployFlowAction =
     }
   | { type: typeof ACTION_TYPES.RESET_STATE };
 
-export interface StepProps {
-  title: string;
-  formData: DeployFormData;
-  onChange: (updates: Partial<DeployFormData>) => void;
+export interface StepProps extends BaseStepProps {
   deployOptions: DeployOptionsResponse;
-  onEditingChange?: (isEditing: boolean) => void;
-  onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
-  showNameError?: boolean;
 }
