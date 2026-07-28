@@ -78,8 +78,9 @@ Common fields:
 | `type` | `string` | ✅ | `ssh` or `s3` |
 | `host` | `string` | ✅ | SFTP host or S3 endpoint |
 | `allowed_extensions` | `array[string]` | ✅ | Non-matching files are ignored |
-| `sync_interval_seconds` | `integer` | ✅ | Poll interval |
 | `connection_details` | `object` | ✅ | Type-specific fields |
+
+> **Note:** `sync_interval_seconds` is not accepted in the API payload. It is read from the `CONNECTOR_SYNC_INTERVAL_SECONDS` environment variable (default `300`) and applies uniformly to all connectors.
 
 `connection_details` for `ssh`:
 
@@ -107,7 +108,6 @@ Common fields:
   "type": "ssh",
   "host": "sftp.example.com",
   "allowed_extensions": [".pdf", ".docx"],
-  "sync_interval_seconds": 300,
   "connection_details": {
     "username": "sync_user",
     "remote_path": "/exports/reports",
@@ -122,7 +122,6 @@ Common fields:
   "type": "s3",
   "host": "s3.amazonaws.com",
   "allowed_extensions": [".pdf", ".docx"],
-  "sync_interval_seconds": 300,
   "connection_details": {
     "bucket_name": "my-rag-documents",
     "prefix": "reports/",
@@ -152,12 +151,12 @@ Rules:
 - `type` cannot change.
 - `connection_details` is merged by key, not replaced wholesale.
 - If credentials are included, they are re-encrypted before storage.
+- `sync_interval_seconds` cannot be set via this endpoint; change the env variable and redeploy.
 
 Example partial update:
 
 ```json
 {
-  "sync_interval_seconds": 600,
   "connection_details": {
     "remote_path": "/exports/v2/reports",
     "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n..."
@@ -307,6 +306,8 @@ CREATE TABLE IF NOT EXISTS active_connectors (
     CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
 );
 ```
+
+> **Note:** `sync_interval_seconds` is stored per-connector for future extensibility but is not accepted via the API today. On `POST`, it is populated from the `CONNECTOR_SYNC_INTERVAL_SECONDS` environment variable (default `300`). The worker reads the value from the DB before each tick.
 
 ### 4.3 `file_checksum_registry`
 
@@ -780,7 +781,7 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 **What's built:**
 - 4 new tables: `active_connectors`, `file_checksum_registry`, `connector_file_membership`, `connector_sync_history`
 - ORM models: `ActiveConnector`, `FileChecksumRegistry`, `ConnectorFileMembership`, `ConnectorSyncHistory`
-- Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap
+- Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap, `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`, written into `active_connectors.sync_interval_seconds` on connector creation)
 
 **How to test:**
 - Run `init_schema.sql` against a local/test DB and assert all 4 tables exist with correct columns, constraints, and indexes
