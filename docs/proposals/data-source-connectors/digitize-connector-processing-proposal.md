@@ -1540,79 +1540,9 @@ If catalog calls `POST /v1/connectors` with the same `connector_id` as a previou
 
 A module-level singleton, following the same pattern as the existing [`workers/concurrency.py`](../../services/digitize/workers/concurrency.py) `ConcurrencyManager`.
 
-### 10.1 Background Thread vs Background Process — Analysis
+### 10.1 Design Decision — Background Thread
 
-Before presenting the implementation, this section works through the trade-offs between the two primary options for running long-lived sync workers in a Python service, and explains why threads are chosen here.
-
-#### A. `threading.Thread` (background thread, same process)
-
-A thread runs inside the Uvicorn/FastAPI process. It shares the same memory space, the same open database connections, and the same in-process state as the API handlers.
-
-| Factor | Detail |
-| --- | --- |
-| **Memory overhead** | ~8 KB stack per thread. Ten connectors costs ~80 KB. Negligible. |
-| **Startup latency** | Microseconds — OS thread creation, no process fork. |
-| **Shared memory access** | Direct, zero-copy. The worker can call `connector_worker_manager`, read settings, and use DB connection objects already initialised by the main process without any IPC. |
-| **Shutdown / stop signalling** | `threading.Event.set()` + `thread.join()` — clean cooperative stop with a timeout. |
-| **Python GIL** | The GIL serialises pure-Python bytecode across threads. However, the sync worker spends the majority of its time in **I/O-bound operations**: paramiko socket reads/writes, SFTP transfers, and Postgres queries. The GIL is released during all system calls and C-extension I/O, so in practice the GIL is **not a bottleneck** for this workload. |
-| **Crash isolation** | An unhandled exception in a thread does not kill the process, but a thread that calls `os.abort()` or triggers a segfault in a C extension (e.g. a bug in a native crypto library) would crash the whole pod. In practice, the sync worker is pure Python + paramiko + psycopg2 — all mature libraries with no known crash-inducing bugs in this usage pattern. |
-| **Forceful kill** | Python provides no `Thread.kill()` or `Thread.terminate()`. A thread that is genuinely stuck (e.g. blocked on a hung socket beyond the configured timeout) cannot be forcefully terminated — it must be left until the pod restarts. The tick guard ensures no second tick starts, and `daemon=True` ensures the thread is reaped at pod exit. |
-| **Secrets access** | Reads `/run/secrets/connector_kek` directly via `Path.read_bytes()` — same as the main process. No IPC needed to pass secrets. |
-| **Dependency footprint** | None — `threading` is in the Python standard library. |
-
-#### B. `multiprocessing.Process` (background process, separate process)
-
-Each worker runs as a separate OS process with its own memory space, its own GIL, and its own Python interpreter.
-
-| Factor | Detail |
-| --- | --- |
-| **Memory overhead** | ~15–50 MB per process (full Python interpreter + imported modules + SQLAlchemy + paramiko). Ten connectors costs ~150–500 MB. Significant in a constrained pod. |
-| **Startup latency** | Tens of milliseconds per worker — OS `fork()` or `spawn()`, module re-import, DB connection re-establishment. |
-| **Shared memory access** | None. Every shared object (DB connections, settings, in-memory config) must be passed via pickle serialisation across the process boundary or re-initialised inside the child. |
-| **Shutdown / stop signalling** | Must use `multiprocessing.Event` (backed by shared memory) or OS signals (`SIGTERM`). Slightly more complex than `threading.Event`. |
-| **Python GIL** | Each process has its own GIL — true parallelism for CPU-bound code. **Irrelevant here** — the sync worker is I/O-bound, not CPU-bound. The ingest pipeline (`pipeline.ingest.ingest()`) does use CPU (PDF parsing, embedding calls), but it already offloads heavy work to worker threads internally and makes network I/O calls to external LLM/embedding services. There is no CPU-bound tight loop in the sync worker itself. |
-| **Crash isolation** | A crash or segfault in a child process does not affect the API server. This is the main genuine advantage of processes over threads. |
-| **Secrets access** | Child process inherits open file descriptors from the parent if using `fork`. With `spawn` (safer, avoids fork-safety issues with SQLAlchemy connection pools), secrets must be re-read from disk in the child. Still straightforward — `/run/secrets/connector_kek` is readable by any process in the pod. |
-| **Forceful kill** | `process.kill()` (SIGKILL) is available — immediate, unconditional termination of a stuck worker without waiting for cooperative shutdown or pod restart. |
-| **Dependency footprint** | `multiprocessing` is standard library, but `fork`-based spawning has well-known conflicts with SQLAlchemy connection pools and asyncio event loops — requiring `set_start_method("spawn")` and careful re-initialisation of all resources in each child. |
-
-#### Side-by-Side Summary
-
-| Concern | Thread | Process | Winner |
-| --- | --- | --- | --- |
-| Memory per worker | ~8 KB | ~15–50 MB | **Thread** |
-| Startup cost | µs | tens of ms | **Thread** |
-| Shared state access | Direct (zero-copy) | Pickle / IPC | **Thread** |
-| Stop signalling | `threading.Event` | `multiprocessing.Event` / signal | **Thread** (simpler) |
-| GIL impact | Released during all I/O | N/A (separate GIL) | **Tie** — workload is I/O-bound |
-| Crash isolation | Pod crashes if thread calls `os.abort()` | Child crash doesn't affect API | **Process** |
-| Forceful kill | No `Thread.kill()` — stuck thread waits for pod exit | `process.kill()` (SIGKILL) available | **Process** |
-| Fork-safety with SQLAlchemy | No issue | Requires `spawn` + re-init | **Thread** |
-| Secrets access | Direct read | Direct read (with `spawn`) | **Tie** |
-| Extra dependencies | None | None (stdlib) | **Tie** |
-
-#### Decision D-12 — Chosen: Background Thread
-
-**Background threads (`threading.Thread`) are chosen.** The reasoning:
-
-1. **The workload is I/O-bound, not CPU-bound.** The GIL — the only scenario where processes would outperform threads — is released for every paramiko socket operation, every SFTP read, and every psycopg2 query. Multiple connector workers run concurrently in practice even under the GIL.
-2. **Memory is constrained inside a pod.** Processes cost 15–50 MB each; threads cost 8 KB each. With potentially several connectors active per application, the difference is material.
-3. **Shared state is an asset, not a liability here.** Workers legitimately share the DB connection pool, settings, and the `connector_worker_manager` registry. Replicating this across processes via IPC adds complexity with no benefit.
-4. **The crash isolation argument is weak for this workload.** The sync worker is pure Python calling well-tested I/O libraries. There is no native code path that would produce a segfault. Unhandled Python exceptions in a thread are caught at the `while` loop level and logged without killing the process.
-5. **Fork-safety.** The service uses SQLAlchemy with a connection pool and asyncio. Using `multiprocessing` with `fork` in this environment is explicitly unsafe (SQLAlchemy's own docs warn against it). Using `spawn` is safe but requires full re-initialisation of all resources in each child — adding complexity that threads do not impose.
-
-The two real advantages of processes — crash isolation and forceful kill — do not apply to this workload. The sync worker is pure Python calling well-tested I/O libraries with no native crash-inducing paths, and socket-level timeouts in the scanners bound the maximum tick duration so a stuck thread remains a recoverable condition. Threads are simpler, cheaper, and correct.
-
-#### When would processes be the right choice instead?
-
-Processes would be the correct model if any of these conditions held:
-
-1. **CPU-bound workload.** If workers ran local ML inference, on-device OCR, or heavy compression in a tight Python loop, the GIL would serialise them and per-process GIL isolation would give true parallelism.
-2. **Untrusted or crash-prone native extensions.** If the connector code executed third-party C extensions with known crash risks, process-level crash isolation would prevent a segfault from taking down the API server.
-3. **Immediate forced termination required.** If a stuck worker must be killed unconditionally (bypassing the 30 s `thread.join` timeout), `process.kill()` (SIGKILL) makes that possible. Threads have no equivalent.
-4. **No shared in-process state needed.** If workers required no access to the DB connection pool, settings, or manager registry, the process boundary would impose no extra IPC cost and the isolation would be a net win.
-
-None of these conditions hold for the connector sync workload. The decision remains threads.
+Background threads (`threading.Thread`) were chosen over separate processes (`multiprocessing.Process`) for sync workers. The sync workload is entirely I/O-bound — time is spent in paramiko socket transfers, SFTP reads, and psycopg2 queries — so the Python GIL is released for all meaningful work and offers no disadvantage. Threads are dramatically cheaper (~8 KB stack vs ~15–50 MB per process), start in microseconds rather than tens of milliseconds, and share the DB connection pool, settings, and `connector_worker_manager` registry directly with no IPC overhead. The main arguments for processes — crash isolation and forceful kill — do not apply here: the worker is pure Python calling well-tested I/O libraries with no native crash-inducing paths, and socket-level timeouts in the scanners bound the maximum tick duration to a recoverable condition. Using `multiprocessing` with `fork` is also explicitly unsafe alongside SQLAlchemy connection pools and asyncio, and `spawn` would require full resource re-initialisation in every child. Threads are simpler, cheaper, and correct for this workload.
 
 ### 10.2 Implementation
 
