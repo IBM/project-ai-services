@@ -121,13 +121,13 @@ This section documents every HTTP endpoint that catalog calls on the digitize po
 
 ### A. `POST /v1/connectors` — Register a new connector
 
-**Purpose:** Called by catalog when a new data-source connector is created and fully validated. Digitize stores the encrypted credentials, provisions the `active_connectors` row, starts a sync worker thread for the connector, and **immediately triggers a manual sync tick** so that the first batch of documents is ingested without waiting for the first scheduled interval.
+**Purpose:** Called by catalog when a new data-source connector is created and fully validated. Digitize stores the encrypted credentials, provisions the `active_connectors` row, and starts a sync worker thread for the connector. The worker's tick loop begins immediately — the first tick runs as soon as the thread starts, without waiting for the first scheduled interval to elapse.
 
 **When catalog calls it:** After credential validation and DEK/KEK wrapping are complete on the catalog side. This is the "activate" signal — the connector will begin syncing immediately after this call.
 
 **Thread spawning on POST:** The handler registers a FastAPI `BackgroundTask` that calls `connector_worker_manager.start_worker(config)` *after* the 202 response is flushed to the client — the HTTP response is therefore never blocked by thread creation. Inside `start_worker()`, under `self._lock`, a `threading.Event` (the stop signal) is created, a `ConnectorSyncWorker` is constructed, a `daemon=True` `threading.Thread` is created with `target=worker.run`, and `thread.start()` is called. From that point the OS thread is live and the triple `(thread, worker, stop_event)` is registered in the `_workers` dict. There is **no dedicated spawner thread** — the Uvicorn process itself is the spawner, via the BackgroundTask mechanism.
 
-**Manual sync on POST:** After `insert_active_connector` writes the row and `connector_worker_manager.start_worker()` starts the background thread, the handler enqueues an **immediate manual tick** by calling `worker.trigger_now()` (see §10.2). This sets a `threading.Event` on the worker so that the sleep at the bottom of the tick loop is interrupted and the next tick starts at once rather than waiting `sync_interval_seconds`.
+**First tick on POST:** The worker's `run()` loop executes the first tick immediately upon thread start — there is no initial sleep. Subsequent ticks are separated by `sync_interval_seconds`. This means the first batch of documents is ingested as soon as the thread is live, without any manual signal needed.
 
 **Request body (`application/json`):**
 
@@ -216,11 +216,9 @@ Fields common to **all** connector types are at the top level. All connector-spe
 
 ### B. `PUT /v1/connectors/{connector_id}` — Update an existing connector
 
-**Purpose:** Called by catalog when the configuration of an existing connector changes — for example, credentials are rotated, the remote path or bucket changes, the sync interval is adjusted, or `allowed_extensions` is updated. Digitize stops the existing sync worker, applies the updated config via `upsert_active_connector`, restarts a fresh worker with the new settings, and **immediately triggers a manual sync tick** on the new worker so that any changes take effect at once.
+**Purpose:** Called by catalog when the configuration of an existing connector changes — for example, credentials are rotated, the remote path or bucket changes, the sync interval is adjusted, or `allowed_extensions` is updated. Digitize waits for any in-progress sync tick to finish naturally, then stops the existing worker, applies the updated config via `upsert_active_connector`, and restarts a fresh worker with the new settings. The new worker begins its first tick immediately upon thread start.
 
-**Thread stop/restart on PUT:** The handler calls `connector_worker_manager.stop_worker(connector_id, timeout=30.0)` on the old thread (cooperative stop via `stop_event.set()` + `thread.join()`), then calls `start_worker(new_config)` to spawn a fresh thread with the updated configuration. The new thread picks up the updated `sync_interval_seconds` from its own `_config` dict — there is no shared scheduler state to update. The interval change takes effect from the first tick of the new thread.
-
-**Manual sync on PUT:** After the worker is restarted, the handler calls `worker.trigger_now()` on the newly started worker. This is especially important for credential rotations (the new credentials need to be tested) and for path/extension changes (the updated filter must be applied immediately).
+**Thread stop/restart on PUT:** The handler calls `connector_worker_manager.stop_worker(connector_id, timeout=30.0)` on the old thread (cooperative stop via `stop_event.set()` + `thread.join()`). If a tick is currently running, `stop_event` does **not** interrupt it mid-flight — the tick runs to completion, then the thread exits at the top of its loop where it checks `stop_event`. Only after `thread.join()` returns does the handler call `start_worker(new_config)` to spawn a fresh thread with the updated configuration. The new thread picks up the updated `sync_interval_seconds` from its own `_config` dict — there is no shared scheduler state to update. Config changes take effect from the first tick of the new thread.
 
 **When catalog calls it:** After any connector-level update is saved on the catalog side and re-validated (e.g. new key pair generated, new IAM keys rotated, or settings edited by the user).
 
@@ -498,7 +496,7 @@ Non-sensitive `connection_details` are returned so catalog can display configura
 
 ### E. `GET /v1/connectors/{connector_id}` — Get a single connector
 
-**Purpose:** Fetch the full current state of one connector by its UUID, including file-processing statistics from the most recent sync tick. Catalog uses this for per-connector detail views and to poll sync status after triggering a manual sync.
+**Purpose:** Fetch the full current state of one connector by its UUID, including file-processing statistics from the most recent sync tick. Catalog uses this for per-connector detail views and to poll sync status.
 
 **When catalog calls it:** On demand — connector detail page load, post-sync status refresh, or targeted health checks.
 
@@ -1361,7 +1359,7 @@ Each connector's worker thread executes the following flow on every tick. Steps 
           skip ◄───┘                 ▼
                         ┌────────────────────────┐
                         │  sleep(interval) or    │
-                        │  wake on trigger/stop  │
+                        │  wake on stop_event    │
                         └────────────────────────┘
 ```
 
@@ -1384,63 +1382,15 @@ Each connector's worker thread executes the following flow on every tick. Steps 
 
 In both cases the file's SHA is absent from `file_checksum_registry` at tick end. The next tick's scan will recompute the same SHA, find it absent from `known_hashes`, and re-add the file to `to_ingest` — giving the file a clean retry without any manual intervention.
 
-### 9.2 Tick Guard — Graceful Manual Trigger & Skipping Overlapping Ticks
+### 9.2 Tick Guard — Skipping Overlapping Ticks
 
-If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next **scheduled** interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval.
-
-If a **manual trigger** (`trigger_now()`, called from a `PUT /v1/connectors` handler) arrives while a tick is running, the trigger is **preserved** — a `_pending_trigger` boolean flag is set — so that, as soon as the current tick finishes naturally, the post-tick sleep is bypassed and the next tick starts immediately. The tick in progress is **never interrupted** by a manual trigger; it always runs to completion.
+If the previous tick's sync process (SFTP walk + staging + ingest) is still running when the next **scheduled** interval fires, the new tick is **skipped entirely**. No second worker is spawned; the timer simply resets for the next interval. There is no manual trigger mechanism — ticks fire only on the schedule.
 
 **Connector deletion** (`DELETE /v1/connectors`) is the only path that can interrupt a running tick. It sets `stop_event`, which `_run_tick()` checks via `_cancel_if_requested()` at each **inter-phase boundary** (post-scan, post-dedup, post-each-batch, post-orphans). When the event is detected, the tick self-cleans — closes connections, purges in-flight SHA rows, deletes OpenSearch documents for already-ingested files — then returns early, allowing the thread to exit without completing the remainder of the tick. See §15.5 for the full interrupt protocol.
 
-#### Flow A — Manual trigger arrives while tick is running
+**`PUT /v1/connectors` while a tick is running:** The PUT handler calls `stop_worker()`, which sets `stop_event` and calls `thread.join()`. The running tick is **not interrupted** — it runs to completion, then the thread exits because `stop_event` is set. Only after `join()` returns does the handler start a fresh worker with the new config. Config changes therefore take effect from the first tick of the new thread, never mid-tick.
 
-```
-[API thread]                         [Worker thread]
-──────────────────────────           ─────────────────────────────────────────
-                                     while not stop_event.is_set():
-                                       _tick_running is False → guard skipped
-                                       _pending_trigger = False
-                                       _manual_trigger.clear()
-                                       _tick_running = True
-                                       ┌──────────────────────────────────┐
-PUT /v1/connectors/{id}                │  _run_tick()  ← blocking         │
-  → trigger_now() called               │  scan → dedup → batch ingest     │
-  → _pending_trigger = True  ────────▶ │  (tick NOT interrupted)          │
-  → _manual_trigger.set()              │                                  │
-  ← returns 200 OK immediately         └──────────────────────────────────┘
-     (does not wait for tick)          finally: _tick_running = False
-                                       │
-                                       ▼
-                                     if _pending_trigger:        ← True
-                                       log "skipping post-tick sleep"
-                                       _pending_trigger = False
-                                       _manual_trigger.clear()
-                                       │
-                                       ▼
-                                     while not stop_event.is_set():  ← loops immediately
-                                       → new _run_tick() starts at once
-```
-
-#### Flow B — Manual trigger arrives during post-tick sleep (no tick running)
-
-```
-[API thread]                         [Worker thread]
-──────────────────────────           ─────────────────────────────────────────
-                                     _run_tick() just finished
-                                     _tick_running = False
-                                     _pending_trigger is False → normal sleep
-                                     ┌─────────────────────────────────────┐
-PUT /v1/connectors/{id}              │ _manual_trigger.wait(interval)      │
-  → trigger_now() called             │          sleeping...                │
-  → _pending_trigger = True          │                                     │
-  → _manual_trigger.set()  ────────▶ │  ← sleep wakes immediately         │
-  ← returns 200 OK                   └─────────────────────────────────────┘
-                                     _pending_trigger = False
-                                     _manual_trigger.clear()
-                                     while loop → top → new tick starts at once
-```
-
-#### Flow C — Scheduled interval fires while previous tick still running (skip)
+#### Flow — Scheduled interval fires while previous tick still running (skip)
 
 ```
 [Worker thread — single timeline]
@@ -1459,8 +1409,6 @@ while not stop_event.is_set():
     continue                    ← no tick run, no history row written
 ```
 
-**Note:** A manual `trigger_now()` that arrives during the skip-wait is not lost — `_pending_trigger` stays `True` and is honoured after the running tick eventually finishes.
-
 ```python
 class ConnectorSyncWorker:
     def __init__(self, connector_id: str, connector_config: dict,
@@ -1469,7 +1417,6 @@ class ConnectorSyncWorker:
         self._config = connector_config
         self._stop_event = stop_event
         self._tick_running = False    # ← guarded on the single worker thread
-        self._pending_trigger = False # ← set by trigger_now(); read only on worker thread
 ```
 
 ### 9.3 Tmp Layout
@@ -1509,7 +1456,6 @@ No tick-level staging directory is created or maintained. The existing `cleanup_
 | S3 credential/bucket error (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
 | Unexpected exception (whole tick) | Catch exception; log error; history row closed with `"failed: <error>"`; sleep full interval then next tick | `"failed: <error>"` | Unchanged |
 | Tick fired while previous tick running (scheduled interval) | Skip — log info; reset timer | (no row written) | Unchanged |
-| Manual `trigger_now()` while tick running | **Preserve trigger** (`_pending_trigger = True`); current tick completes naturally; post-tick sleep skipped; next tick starts immediately | (no row written for the wait; normal row for the following tick) | Unchanged during wait |
 
 ### 9.5 Blocking Semantics of File Download & Ingest
 
@@ -1684,40 +1630,14 @@ class ConnectorSyncWorker:
         self._config = connector_config
         self._stop_event = stop_event
         self._tick_running = False    # guarded on the single worker thread
-        self._pending_trigger = False # set by trigger_now(); consumed on the worker thread
-        self._manual_trigger = threading.Event()  # used only for the post-tick sleep interrupt
-
-    def trigger_now(self) -> None:
-        """Signal the worker to start a tick immediately, bypassing the scheduled sleep.
-
-        Safe to call from any thread.
-
-        - If no tick is running: wakes the post-tick sleep so the next tick starts
-          at once (same as before).
-        - If a tick is currently running: sets _pending_trigger so the post-tick
-          sleep is skipped when the current tick finishes. The running tick is
-          never interrupted — it always completes naturally.
-        """
-        self._pending_trigger = True   # visible across threads; bool assignment is atomic in CPython
-        self._manual_trigger.set()     # also wake any in-progress sleep, just in case
 
     def run(self) -> None:
         while not self._stop_event.is_set():
             # --- TICK GUARD (scheduled-interval overlap only) ---
-            # A manual trigger while a tick is running does NOT skip — it sets
-            # _pending_trigger so the sleep after this tick is bypassed instead.
             if self._tick_running:
                 logger.info(f"Connector {self.connector_id}: previous tick still running, skip")
-                # Wait for either the interval or a stop signal, then loop back.
-                # Do NOT clear _pending_trigger here — preserve it for after the tick.
                 self._stop_event.wait(self._config["sync_interval_seconds"])
                 continue
-
-            # Consume any pending trigger before the tick starts so that a
-            # trigger_now() that arrived during the guard wait is not double-honoured.
-            pending = self._pending_trigger
-            self._pending_trigger = False
-            self._manual_trigger.clear()
 
             self._tick_running = True
             try:
@@ -1725,22 +1645,8 @@ class ConnectorSyncWorker:
             finally:
                 self._tick_running = False
 
-            # Post-tick sleep — skipped entirely if a manual trigger arrived
-            # while the tick was running (or just before it started).
-            if self._pending_trigger:
-                # Trigger arrived during _run_tick(); honour it immediately.
-                logger.info(
-                    f"Connector {self.connector_id}: manual trigger pending — skipping post-tick sleep"
-                )
-                self._pending_trigger = False
-                self._manual_trigger.clear()
-            else:
-                # Normal case: interruptible sleep until next scheduled tick.
-                # Wakes early if trigger_now() is called during the sleep, or
-                # if stop_event is set (DELETE path).
-                self._manual_trigger.wait(timeout=self._config["sync_interval_seconds"])
-                self._pending_trigger = False
-                self._manual_trigger.clear()
+            # Post-tick sleep — interruptible only by stop_event (DELETE path).
+            self._stop_event.wait(timeout=self._config["sync_interval_seconds"])
 
     def _run_tick(self) -> None:
         """Execute one sync tick (scan → diff → stage → ingest → delete)."""
@@ -1754,18 +1660,17 @@ class ConnectorWorkerManager:
         self._workers: dict[str, tuple[threading.Thread, ConnectorSyncWorker, threading.Event]] = {}
         self._lock = threading.Lock()
 
-    def start_worker(self, connector_config: dict) -> ConnectorSyncWorker:
+    def start_worker(self, connector_config: dict) -> None:
         """Start a new sync worker thread for the given connector.
 
-        Returns the ConnectorSyncWorker instance so the caller can immediately
-        call trigger_now() to fire a manual sync.
+        The worker's run() loop fires the first tick immediately upon thread
+        start — no external signal is needed.
         """
         connector_id = connector_config["id"]
         with self._lock:
             if connector_id in self._workers:
                 logger.info(f"Worker for connector {connector_id} already running — skipping")
-                _, worker, _ = self._workers[connector_id]
-                return worker
+                return
             stop_event = threading.Event()
             worker = ConnectorSyncWorker(connector_id, connector_config, stop_event)
             thread = threading.Thread(
@@ -1776,7 +1681,6 @@ class ConnectorWorkerManager:
             thread.start()
             self._workers[connector_id] = (thread, worker, stop_event)
             logger.info(f"Started sync worker for connector {connector_id}")
-            return worker
 
     def stop_worker(self, connector_id: str, timeout: float = 30.0) -> None:
         with self._lock:
@@ -1803,12 +1707,10 @@ class ConnectorWorkerManager:
 connector_worker_manager = ConnectorWorkerManager()
 ```
 
-**`trigger_now()` mechanics:**
+**Sleep mechanics:**
 
-- `_manual_trigger` is a second `threading.Event` kept alongside `_stop_event` in the worker.
-- At the bottom of the tick loop the worker calls `self._manual_trigger.wait(timeout=sync_interval_seconds)` instead of `stop_event.wait(...)`. This means the sleep returns early when either `_manual_trigger` is set (manual trigger) or `_stop_event` is set (shutdown).
-- After waking, both events are `.clear()`-ed before the next iteration to avoid spurious re-triggers.
-- `trigger_now()` is safe to call from the API handler thread (the handler does not hold the worker lock at that point).
+- At the bottom of the tick loop the worker calls `self._stop_event.wait(timeout=sync_interval_seconds)`. This means the sleep returns early only if `stop_event` is set (DELETE / shutdown path).
+- There is no second event and no manual wakeup mechanism — the interval is the only scheduler.
 
 `daemon=True` ensures threads are reaped automatically when the main Uvicorn process exits — no manual cleanup needed at pod shutdown.
 
@@ -1820,7 +1722,7 @@ connector_worker_manager = ConnectorWorkerManager()
 
 After the existing zombie job recovery block in the `lifespan()` context manager, add connector worker recovery. This is a **self-healing path** — if all connector configs are in the DB, the pod recovers fully without any catalog involvement.
 
-**Spawner identity at startup:** Thread spawning at startup runs on the **main Uvicorn startup path**, inside the `lifespan()` async context manager, before the HTTP server begins accepting requests. There is no dedicated background thread or process responsible for spawning — the lifespan hook calls `start_worker()` synchronously in a loop, and `start_worker()` creates and starts each daemon thread inline. No manual trigger (`trigger_now()`) is called during recovery — the worker threads fire their first tick after their initial `sync_interval_seconds` sleep. This is intentional: at pod startup all connectors recovered simultaneously, and an immediate flood of SFTP/S3 connections would impose unnecessary load; the staggered natural interval is preferred.
+**Spawner identity at startup:** Thread spawning at startup runs on the **main Uvicorn startup path**, inside the `lifespan()` async context manager, before the HTTP server begins accepting requests. There is no dedicated background thread or process responsible for spawning — the lifespan hook calls `start_worker()` synchronously in a loop, and `start_worker()` creates and starts each daemon thread inline. The worker threads fire their first tick after their initial `sync_interval_seconds` sleep. This is intentional: at pod startup all connectors recovered simultaneously, and an immediate flood of SFTP/S3 connections would impose unnecessary load; the staggered natural interval is preferred.
 
 ```python
 # In lifespan(), after zombie job recovery:
@@ -1883,7 +1785,7 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 
 | File | Status | Responsibility |
 | --- | --- | --- |
-| `api/v1/connectors.py` | **NEW** | POST/PUT/DELETE/GET /v1/connectors; bearer-token dependency; 202 + BackgroundTask worker start/restart; manual sync trigger on POST and PUT; stop-sync document-cleanup sequence on DELETE |
+| `api/v1/connectors.py` | **NEW** | POST/PUT/DELETE/GET /v1/connectors; bearer-token dependency; 202 + BackgroundTask worker start; worker stop/restart on PUT (waits for running tick to finish); stop-sync document-cleanup sequence on DELETE |
 | `connector/__init__.py` | **NEW** | Makes `connector/` a Python sub-package |
 | `connector/base_scanner.py` | **NEW** | `RemoteFile` dataclass; `BaseScanner` ABC with four abstract methods (`connect`, `close`, `scan`, `download_to`); shared `_decrypt_dek()` implementation; context manager (`__enter__`/`__exit__`) |
 | `connector/sftp_scanner.py` | **NEW** | `SFTPScanner(BaseScanner)` — `connect()` does KEK→DEK→privkey→paramiko; `scan()` does DFS `listdir_attr` + streaming SHA-256; `download_to()` streams via `sftp.open()` |
@@ -1918,7 +1820,7 @@ Then add `connector: ConnectorConfig = Field(default_factory=ConnectorConfig)` t
 | D-11 | Change detection | **SHA-256 only** | Content-accurate; immune to mtime precision / server clock skew |
 | D-12 | Threading model — Thread vs Process | **`daemon=True` `threading.Thread` per connector** | Workload is I/O-bound (GIL released during all network/DB calls); threads are 8 KB vs 15–50 MB per process; shared DB pool + state is an asset; fork-safety issues make `multiprocessing` with SQLAlchemy/asyncio complex; crash isolation and forceful-kill advantages of processes do not apply to this pure-Python I/O workload; socket-level timeouts in scanners bound maximum tick duration making stuck threads recoverable at pod restart. Full analysis in §10.1. |
 | D-13 | Recovery failure policy | **Log and continue** | Matches existing zombie-job recovery behaviour; pod health check not blocked |
-| D-14 | Manual sync on POST/PUT | **`trigger_now()` on `ConnectorSyncWorker` — sets `_manual_trigger` event to interrupt the sleep** | Fires the first tick immediately without waiting `sync_interval_seconds`; safe to call from the API handler thread; no-op if a tick is already running (tick guard skips it and the next tick fires after the normal interval) |
+| D-14 | First tick on POST; PUT waits for tick completion | **Worker `run()` loop fires first tick immediately on thread start; PUT uses `stop_event` + `thread.join()` to wait for any running tick before replacing the worker** | First tick begins as soon as the thread is live — no external signal needed. PUT config changes take effect from the first tick of the new thread, never mid-tick. |
 | D-15 | Document cleanup on DELETE | **Best-effort per-hash loop over `connector_file_membership` with reference-counted deletion** | Reads membership snapshot once via `list_connector_hashes`; for each hash calls `delete_connector_membership_atomic` (removes membership row + counts remaining refs in a single transaction); only calls `DELETE /v1/documents/{doc_id}` and `delete_checksum_registry` when remaining count == 0 (last connector to hold that content); treats 404 as success; logs but does not abort on 5xx; `ON DELETE CASCADE` on `connector_id` removes any remaining membership rows after the loop so the connector row delete is not held hostage by per-hash failures. |
 | D-16 | Registry table design — single table vs split | **Split into `file_checksum_registry` (global, `sha256` PK) and `connector_file_membership` (per-connector, `(connector_id, sha256)` PK)** | A single table keyed on `(connector_id, sha256)` cannot serve global dedup — the dedup check needs a `sha256`-only lookup across all connectors. Splitting into two tables gives each concern its own shape: `file_checksum_registry` is a pure content store (one row per unique document), and `connector_file_membership` is the per-connector view used for orphan detection and safe reference-counted deletion. `ON DELETE CASCADE` on `connector_id` in the membership table safely removes a connector's membership rows without touching the shared content registry. |
 | D-17 | Orphan delete race condition | **Atomic transaction: delete membership row first, then count remaining refs in the same transaction** | Two concurrent connector ticks could both observe `remaining == 0` for the same orphaned hash if the check is not atomic. By deleting the membership row and counting remaining rows inside a single `BEGIN/COMMIT`, the database serialises the decision — only one tick can observe `remaining == 0` and proceed to delete the document and registry entry. All others will see `remaining >= 1` at check time and leave the document intact. |
@@ -2176,7 +2078,7 @@ monitor_thread.join(timeout=10)
 
 When `DELETE /v1/connectors/{connector_id}` is called, the DELETE handler stops the sync thread as quickly as possible before proceeding with document cleanup. Rather than waiting for a running tick to finish naturally, `_run_tick()` checks `stop_event` at each **inter-phase boundary** — between scan, dedup, each ingest batch, and orphan deletes. When the event is set mid-tick, the thread performs an **immediate cooperative self-cleanup**: it closes all active connections, removes any in-flight pending-SHA rows, deletes OpenSearch documents (and their membership rows) for every file that already completed ingest during the current tick, closes the sync-history row, and then returns — exiting the loop and the thread.
 
-**Relationship to `trigger_now()` / `_pending_trigger`:** The DELETE path sets `stop_event`, not `_pending_trigger`. When no tick is running, `stop_event.set()` wakes the `_manual_trigger.wait()` sleep immediately and the thread exits on the next loop iteration. When a tick is running, the tick detects the event at the next inter-phase boundary and self-cleans before returning, so the thread exits well within the 30 s join timeout rather than running to natural completion.
+**Relationship to the sleep:** The DELETE path sets `stop_event`. When no tick is running, `stop_event.set()` wakes the `stop_event.wait()` sleep immediately and the thread exits on the next loop iteration. When a tick is running, the tick detects the event at the next inter-phase boundary and self-cleans before returning, so the thread exits well within the 30 s join timeout rather than running to natural completion.
 
 #### Cancellation check helper — `_cancel_if_requested()`
 
@@ -2358,7 +2260,7 @@ DELETE /v1/connectors/{id}           while not stop_event.is_set():
 ──────────────────────────           ─────────────────────────────────────────
                                      _tick_running = False
                                      ┌─────────────────────────────────────┐
-1. stop_event.set()                  │ _manual_trigger.wait(interval)      │
+1. stop_event.set()                  │ stop_event.wait(interval)           │
    ────────────────────────────────▶ │  ← returns immediately              │
                                      └─────────────────────────────────────┘
 2. thread.join(timeout=30 s)         while not stop_event.is_set():
@@ -2375,8 +2277,6 @@ DELETE /v1/connectors/{id}           while not stop_event.is_set():
 | --- | --- | --- | --- | --- |
 | Scheduled interval, no tick running | timer expires | N/A | — | Yes — starts next tick |
 | Scheduled interval, tick still running | timer expires | **No** — skipped | Waits another full interval | Yes — starts next tick |
-| `trigger_now()`, no tick running | `_pending_trigger` + `_manual_trigger.set()` | N/A | Sleep wakes immediately | Yes — starts next tick at once |
-| `trigger_now()`, tick currently running | `_pending_trigger = True` | **No** — completes naturally | Post-tick sleep skipped | Yes — starts next tick at once |
 | `DELETE`, no tick running | `stop_event.set()` | N/A | Sleep wakes; loop exits | **No** — thread exits |
 | `DELETE`, tick currently running | `stop_event.set()` | **Yes** — at next inter-phase boundary | Thread self-cleans; loop condition False; thread exits | **No** — thread exits |
 
@@ -2384,9 +2284,8 @@ DELETE /v1/connectors/{id}           while not stop_event.is_set():
 
 | Invariant | How it is upheld |
 | --- | --- |
-| A running tick is **never interrupted by a manual trigger or scheduled interval** | Neither `_pending_trigger` nor the scheduled timer is checked inside `_run_tick()`; both are acted on only after `_run_tick()` returns |
+| A running tick is **never interrupted by a scheduled interval** | The scheduled timer is not checked inside `_run_tick()`; it is acted on only after `_run_tick()` returns |
 | A DELETE **cooperatively interrupts** a running tick at the next inter-phase boundary | `stop_event` is checked by `_cancel_if_requested()` after each phase; the tick self-cleans and returns early rather than running to completion |
-| A manual trigger is **never silently dropped** while a tick is running | `_pending_trigger = True` persists through the tick; it is checked after `finally` and bypasses the sleep |
 | DELETE always produces a **clean thread exit** | `_cancel_if_requested()` closes connections, purges in-flight state, and closes the history row before returning; `stop_event` at the loop boundary guarantees no re-entry |
 | No two ticks for the same connector run **concurrently** | The tick guard and the single-threaded loop guarantee at most one active tick per connector at any time |
 | In-tick cleanup is **idempotent with §3C step 3** | `delete_connector_membership_atomic` is transactional; the DELETE handler's membership loop treats already-deleted rows as no-ops via `remaining > 0` / `404` checks |
@@ -2448,7 +2347,7 @@ lifespan()  [async generator, runs in main thread before Uvicorn accepts request
    │       for config in connectors:
    │           start_worker(config)   ← spawns daemon thread per connector
    │           log "✅ Restarted connector {id}"
-   │       ← NO trigger_now() here; staggered first tick is intentional
+   │       ← no immediate trigger; staggered first tick is intentional
    │
    ├─ 4. Monitor thread start
    │       _monitor_stop = threading.Event()
