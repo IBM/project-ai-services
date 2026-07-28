@@ -5,20 +5,18 @@ on:
       - 'ui/digitize/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/digitize/**'
       - .github/workflows/digitize-ui-image.yml
     branches:
       - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  ICR_REGISTRY: icr.io
-  ICR_NAMESPACE: ai-services-cicd
 
 jobs:
   lint:
@@ -27,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Use Node.js
         uses: actions/setup-node@v6
@@ -47,25 +45,10 @@ jobs:
   build-publish-image:
     name: Build and Publish Image
     needs: [lint]
-    runs-on: ubuntu-24.04-ppc64le
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Build digitize-ui image
-        working-directory: ui/digitize
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-
-      - name: Publish digitize-ui image
-        working-directory: ui/digitize
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          make push \
-            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
-            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
-            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'ui/digitize'
+    secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
@@ -73,4 +56,4 @@ jobs:
       path: 'ui/digitize'
       image: 'digitize-ui'
 
- # Made with Bob
+# Made with Bob

@@ -3,15 +3,18 @@ Table processing: extraction, merging, and summarisation.
 
 Responsibilities:
 - process_table  — extract/summarise tables from a converted document
-- extract_table_headers — parse markdown table header row
-- headers_match — compare two header lists
-- merge_markdown_tables — combine two markdown tables by dropping the second header
+- clean_markdown_table_and_caption — fix parser glitches where caption becomes table header
+- extract_table_headers — parse markdown table header row smartly
+- is_table_continuation — fuzzy matching of headers across pages
+- merge_markdown_tables — combine tables by dropping duplicate setup rows
 - merge_consecutive_tables — merge tables spanning consecutive pages
 """
 
 import json
 import time
+import re
 from pathlib import Path
+from rapidfuzz import fuzz
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
 from common.llm_utils import summarize_and_classify_tables, tqdm_wrapper
@@ -20,15 +23,57 @@ from digitize.settings import settings
 
 logger = get_logger("processing.tables")
 
+def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) -> tuple[str, str]:
+    """
+    Cleans up markdown tables where the PDF parser accidentally put the caption
+    as the first header row, and the real headers as the first data row.
+    """
+    if not markdown_table:
+        return markdown_table, current_caption
+
+    lines = [line.strip() for line in markdown_table.strip().split('\n')]
+    sep_idx = -1
+    for i, line in enumerate(lines):
+        if '|' in line and '-' in line and not any(c.isalnum() for c in line):
+            sep_idx = i
+            break
+
+    if sep_idx > 0 and len(lines) > sep_idx + 1:
+        header_line = lines[sep_idx - 1]
+        headers = [h.strip() for h in header_line.strip('|').split('|') if h.strip()]
+
+        first_data_line = lines[sep_idx + 1]
+
+        # Check if the header row is a repeated string or looks like a caption
+        is_repeated_header = len(set(headers)) == 1 and len(headers) >= 1
+        starts_with_caption = False
+        if headers:
+            starts_with_caption = bool(re.match(r'^(table|tabelle|figure|abbildung|tableau|fig|figura)\s*\d+', headers[0], re.IGNORECASE))
+
+        if is_repeated_header or starts_with_caption:
+            potential_caption = headers[0] if headers else ""
+
+            # Reconstruct the markdown with the first data row promoted to the header
+            new_lines = []
+            if sep_idx - 1 > 0:
+                new_lines.extend(lines[:sep_idx - 1])
+
+            new_lines.append(first_data_line)     # Promote data row to header
+            new_lines.append(lines[sep_idx])      # Separator
+            new_lines.extend(lines[sep_idx + 2:]) # Remaining data rows
+
+            new_markdown = '\n'.join(new_lines)
+            new_caption = current_caption if current_caption else potential_caption
+            return new_markdown, new_caption
+
+    return markdown_table, current_caption
 
 def extract_table_headers(markdown_table: str) -> list[str]:
     """
-    Extract headers from a markdown table by parsing the first row with pipe symbols.
-    Handles cases where the first line might be a caption without pipes.
-
+    Extract headers from a markdown table.
+    Smartly searches for the line directly above the separator (|---|).
     Args:
         markdown_table: Markdown formatted table string
-
     Returns:
         List of header strings, or empty list if no headers found
     """
@@ -36,17 +81,21 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         return []
 
     try:
-        lines = markdown_table.strip().split('\n')
-        if not lines:
-            return []
+        lines = [line.strip() for line in markdown_table.strip().split('\n')]
 
-        # Find the first line that contains pipe symbols (actual table row)
-        header_line = None
-        for line in lines:
-            line = line.strip()
-            if '|' in line:
-                header_line = line
+        # Find the separator line
+        sep_idx = -1
+        for i, line in enumerate(lines):
+            if '|' in line and '-' in line and not any(c.isalnum() for c in line):
+                sep_idx = i
                 break
+
+        # The real headers in Markdown are always directly above the separator
+        if sep_idx > 0:
+            header_line = lines[sep_idx - 1]
+        else:
+            # Fallback: The first line with a pipe symbol
+            header_line = next((line for line in lines if '|' in line), None)
 
         if not header_line:
             return []
@@ -57,85 +106,103 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         if header_line.endswith('|'):
             header_line = header_line[:-1]
 
-        # Split by pipe and strip whitespace from each header
-        headers = [h.strip() for h in header_line.split('|')]
-
-        # Filter out empty headers
-        headers = [h for h in headers if h]
+        # Split by pipe and strip whitespace from each header and filter out empty headers
+        headers = [h.strip() for h in header_line.split('|') if h.strip()]
         return headers
     except Exception as e:
         logger.debug(f"Failed to extract headers from markdown table: {e}")
         return []
 
-
-def headers_match(headers1: list[str], headers2: list[str]) -> bool:
+def is_table_continuation(headers1: list[str], headers2: list[str], fuzzy_threshold: float = 85.0) -> bool:
     """
-    Check if two header lists match (case-insensitive, whitespace normalized).
-
-    Args:
-        headers1: First list of headers
-        headers2: Second list of headers
-
-    Returns:
-        True if headers match, False otherwise
+    Determines if a table continues across pages by comparing ONLY headers.
+    Independent of captions to unify PDF and DOCX processing.
     """
     if not headers1 or not headers2:
         return False
+
+    # If column counts differ, it's not a continuation
     if len(headers1) != len(headers2):
         return False
-    # Normalize and compare headers
-    normalized1 = [h.lower().strip() for h in headers1]
-    normalized2 = [h.lower().strip() for h in headers2]
-    return normalized1 == normalized2
 
+    # Join headers as strings for fuzzy matching
+    h1_str = "|".join(headers1).lower().strip()
+    h2_str = "|".join(headers2).lower().strip()
+
+    # Check exact match (Fast path)
+    if h1_str == h2_str:
+        return True
+
+    # Fuzzy match for OCR errors in headers
+    similarity = fuzz.ratio(h1_str, h2_str)
+    if similarity >= fuzzy_threshold:
+        return True
+
+    return False
 
 def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
     """
-    Merge two markdown tables by removing the header from the second table
-    and appending its rows to the first table.
-    Handles cases where tables might have captions before the actual table.
-
-    Args:
-        table1_md: First markdown table (with headers)
-        table2_md: Second markdown table (headers will be removed)
-
-    Returns:
-        Merged markdown table
+    Merges two markdown tables.
+    Dynamically removes all redundant title and header rows from the second table.
     """
     if not table1_md or not table2_md:
         return table1_md or table2_md or ""
 
     # Split tables into lines
-    lines1 = table1_md.strip().split('\n')
-    lines2 = table2_md.strip().split('\n')
+    lines1 = [line.strip() for line in table1_md.strip().split('\n')]
+    lines2 = [line.strip() for line in table2_md.strip().split('\n')]
 
-    # Find where the data rows start in table2 (skip caption, header and separator)
-    # Look for the separator line (contains dashes and pipes: |---|---|)
-    data_start_idx = 0
+    # Find separator in table 2
+    sep_idx2 = -1
     for i, line in enumerate(lines2):
-        line = line.strip()
-        # Separator line typically contains dashes and pipes: |---|---|
-        if '|' in line and '---' in line:
-            data_start_idx = i + 1
+        # Bulletproof separator check: Line has a pipe, a dash, and NO alphanumeric characters
+        if '|' in line and '-' in line and not any(c.isalnum() for c in line):
+            sep_idx2 = i
             break
 
-    # If we found a separator, append only the data rows from table2
-    if 0 < data_start_idx < len(lines2):
-        merged_lines = lines1 + lines2[data_start_idx:]
-        return '\n'.join(merged_lines)
-
     # Fallback: just append all lines from table2 (shouldn't happen with valid markdown tables)
-    return table1_md + '\n' + table2_md
+    if sep_idx2 == -1:
+        return table1_md + '\n' + table2_md
 
+    # Find separator in table 1 (to identify setup rows)
+    sep_idx1 = -1
+    for i, line in enumerate(lines1):
+        if '|' in line and '-' in line and not any(c.isalnum() for c in line):
+            sep_idx1 = i
+            break
+
+    data_start_idx = sep_idx2 + 1
+
+    # Smart filtering: check if rows after the separator in table 2
+    # already exist as a header/title in table 1. If so, skip them.
+    while data_start_idx < len(lines2):
+        row_to_check = lines2[data_start_idx]
+        is_repeated_header = False
+
+        # Compare against the first few rows of table 1 (including possible sub-headers)
+        limit = sep_idx1 + 3 if sep_idx1 != -1 else len(lines1)
+        for t1_row in lines1[:limit]:
+            clean_t2 = row_to_check.replace('|', '').strip().lower()
+            clean_t1 = t1_row.replace('|', '').strip().lower()
+
+            if clean_t2 and clean_t1 and clean_t2 == clean_t1:
+                is_repeated_header = True
+                break
+
+        if is_repeated_header:
+            data_start_idx += 1
+        else:
+            break  # Reached the start of actual data
+
+    merged_lines = lines1 + lines2[data_start_idx:]
+    return '\n'.join(merged_lines)
 
 def merge_consecutive_tables(table_dict: dict) -> dict:
     """
-    Merge tables that span multiple consecutive pages with matching headers.
-
+    Merge tables that span multiple consecutive pages (header check only).
     Args:
         table_dict: Dictionary with table index as key and table data as value
-                   Each value should have 'markdown', 'caption', and 'page_number' keys
-
+                    Each value should have 'markdown', 'caption', and 'page_number' keys
     Returns:
         Dictionary with merged tables, using same structure as input
     """
@@ -155,36 +222,40 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
         current_table = table_dict[idx]
         current_markdown = current_table.get('markdown', '')
         current_page = current_table.get('page_number')
+        current_caption = current_table.get('caption', '')
         current_headers = extract_table_headers(current_markdown)
 
-        # Try to merge with subsequent tables on consecutive pages
         merged_markdown = current_markdown
         last_merged_page = current_page
-        # look at the next 2 pages
+
+        # Look ahead at the next 2 pages
         for j in range(i + 1, min(i + 3, len(sorted_indices))):
             next_idx = sorted_indices[j]
             next_table = table_dict[next_idx]
             next_markdown = next_table.get('markdown', '')
             next_page = next_table.get('page_number')
             next_headers = extract_table_headers(next_markdown)
-            # Check if tables are on consecutive pages and have matching headers
+
+            # Check for consecutive pages AND fuzzy header match
             if (next_page is not None and
                     last_merged_page is not None and
                     next_page == last_merged_page + 1 and
-                    headers_match(current_headers, next_headers)):
+                    is_table_continuation(current_headers, next_headers)):
+
                 # Merge the tables
                 merged_markdown = merge_markdown_tables(merged_markdown, next_markdown)
                 last_merged_page = next_page
                 skip_indices.add(next_idx)
                 logger.debug(f"Merged table {next_idx} (page {next_page}) into table {idx} (page {current_page})")
             else:
+                # Stop looking if pages are not consecutive or tables don't match
                 # Stop looking if pages are not consecutive or headers don't match
                 break
 
         # Store the merged (or original) table
         merged_dict[idx] = {
             'markdown': merged_markdown,
-            'caption': current_table.get('caption', ''),
+            'caption': current_caption, 
             'page_number': current_page,
         }
 
@@ -197,13 +268,12 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     filtered_table_dicts = {}
     t0 = time.time()
 
-    # --- Table Extraction ---
+     # --- Table Extraction ---
     if not converted_doc.tables:
         logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
 
-    # Determine if this is a DOCX file
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
 
@@ -211,16 +281,21 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     from digitize.parsing.docx import recover_table_caption_from_body_context
 
     table_dict = {}
-    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{doc_path}'")):
+    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content for '{doc_path}'")):
         table_dict[table_ix] = {}
-        # Use Markdown format for better LLM understanding
-        table_dict[table_ix]["markdown"] = table.export_to_markdown(doc=converted_doc)
 
+        # Use Markdown format for better LLM understanding
+        raw_markdown = table.export_to_markdown(doc=converted_doc)
         caption = table.caption_text(doc=converted_doc)
+
         if not caption:
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
-        table_dict[table_ix]["caption"] = caption
+        # Clean the markdown to fix parser glitches and recover hidden captions
+        clean_markdown, clean_caption = clean_markdown_table_and_caption(raw_markdown, caption)
+
+        table_dict[table_ix]["markdown"] = clean_markdown
+        table_dict[table_ix]["caption"] = clean_caption
 
         # Get page number from provenance if available (PDF files)
         # For DOCX files, assign sequential page numbers based on table order
@@ -234,13 +309,11 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         else:
             table_dict[table_ix]["page_number"] = None
 
-    logger.debug(f"Merging tables spanning multiple pages for '{doc_path}'")
+    logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
 
     table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
     table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
-    # For PDF files: extract actual page numbers
-    # For DOCX files: create list of None values (same length as other lists for zip())
     table_page_numbers = (
         [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
         if not is_docx
@@ -266,7 +339,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
 
     logger.debug(
-        f"Using language {document_language} prompt and max_tokens ({selected_max_tokens}) "
+        f"Using language prompt {document_language} and max_tokens ({selected_max_tokens}) "
         f"for table summarization"
     )
 

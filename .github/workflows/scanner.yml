@@ -53,7 +53,7 @@ jobs:
     if: ${{ !inputs['skip-cves-scan'] }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       
       - name: Build image
         if: ${{ !inputs.skip-image-build }}
@@ -91,7 +91,7 @@ jobs:
     if: ${{ !inputs['skip-license-scan'] }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Build image
         if: ${{ !inputs.skip-image-build }}

@@ -3,7 +3,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 RUN microdnf install -y ca-certificates libcap wget tar gzip git && microdnf clean all
 
 ARG CADDY_VERSION=v2.11.2
-ARG GO_VERSION=1.25.11
+ARG GO_VERSION=1.25.12
 
 RUN set -eux; \
     mkdir -p /config/caddy /data/caddy /etc/caddy /usr/share/caddy ; \

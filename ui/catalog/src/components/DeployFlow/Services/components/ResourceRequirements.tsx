@@ -13,7 +13,7 @@ import type {
   ResourcesResponse,
   ServiceDeployOptions,
 } from "@/types/api.types";
-import type { ResourceItem } from "../../shared/types";
+import type { ResourceItem } from "../../DeployFlow/types/StepTwo.types";
 import {
   bytesToGB,
   getResourceStatus,

@@ -1,37 +1,18 @@
 package configure
 
-import (
-	"context"
-	"fmt"
-
-	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
-	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+// ArgParam keys common to both Podman and OpenShift deployments.
+const (
+	ArgParamAdminPasswordHash = "backend.adminPasswordHash"
+	ArgParamDBPassword        = "db.password"
 )
 
-// Run executes the configure process for the catalog service.
-// It creates runtime-specific options and calls the appropriate runtime implementation.
-func Run(runtime types.RuntimeType, baseDir, domainName, sslCertPath, sslKeyPath string, httpsPort int) error {
-	ctx := context.Background()
-	// Deploy catalog service based on runtime
-	switch runtime {
-	case types.RuntimeTypePodman:
-		opts := catalogUtils.PodmanConfigureOptions{
-			BaseDir:     baseDir,
-			DomainName:  domainName,
-			SSLCertPath: sslCertPath,
-			SSLKeyPath:  sslKeyPath,
-			HttpsPort:   httpsPort,
-		}
+// ArgParam keys used only by the OpenShift deployment.
+// (no OpenShift-specific params at present; extend here when needed)
 
-		return catalogPodman.DeployCatalog(ctx, opts)
-
-	case types.RuntimeTypeOpenShift:
-		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")
-
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtime)
-	}
-}
-
-// Made with Bob
+// ArgParam keys used only by the Podman deployment.
+const (
+	ArgParamRuntime               = "backend.runtime"
+	ArgParamPodmanAuthFileContent = "backend.podman.authFileContent"
+	ArgParamPodmanURI             = "backend.podman.uri"
+	ArgParamCaddyHTTPSPort        = "caddy.httpsPort"
+)

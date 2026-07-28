@@ -1,4 +1,3 @@
-// Architecture Types - Used for listing available architectures
 export interface ArchitectureSummary {
   id: string;
   name: string;
@@ -7,7 +6,6 @@ export interface ArchitectureSummary {
   services: string[];
 }
 
-// Architecture Details Types - Used for fetching full architecture information
 export interface AboutSectionValue {
   title?: string;
   value?: string;
@@ -15,8 +13,8 @@ export interface AboutSectionValue {
 
 export interface AboutSectionItem {
   title?: string;
-  value?: string; // Single value for resource allocation items (e.g., "15 - 20")
-  values?: string[]; // Multiple values for use case domain items (e.g., ["Assistant 1", "Assistant 2"])
+  value?: string;
+  values?: string[];
   url?: string;
   ctaLabel?: string;
   description?: string;
@@ -48,7 +46,6 @@ export interface ArchitectureDetailsResponse {
   about: AboutSection[];
 }
 
-// Service Summary Types - Used for listing available services
 export interface ServiceSummary {
   id: string;
   name: string;
@@ -57,7 +54,6 @@ export interface ServiceSummary {
   architectures: string[];
 }
 
-// Deploy Options Types - Used for fetching deployment configuration
 export interface Provider {
   id: string;
   name: string;
@@ -73,7 +69,6 @@ export interface Provider {
   };
 }
 
-// Unified: was Component in digitalAssistants.ts and DeployOptionsComponent in deployment.api.ts
 export interface DeployOptionsComponent {
   type: string;
   name: string;
@@ -86,6 +81,12 @@ export interface DeployOptionsService {
   version: string;
   schema?: string;
   components: DeployOptionsComponent[];
+  resources?: {
+    cpu: number;
+    memory: number;
+    storage?: number;
+    accelerators?: Record<string, number>;
+  };
 }
 
 export interface DeployOptionsResponse {
@@ -96,7 +97,6 @@ export interface DeployOptionsResponse {
   services: DeployOptionsService[];
 }
 
-// Application Types - Used for managing deployed applications
 export interface ServiceComponent {
   id: string;
   type: string;
@@ -148,7 +148,6 @@ export interface ApplicationListResponse {
   pagination: PaginationMetadata;
 }
 
-// API Request/Response Types
 export interface FetchApplicationsParams {
   page?: number;
   page_size?: number;
@@ -166,8 +165,7 @@ export interface DeployApplicationResponse {
   id: string;
 }
 
-// Resources API Types
-// Available resources (how much the system has in total)
+// Available system resources (total and available capacity)
 export interface ResourcesResponse {
   cpu: {
     total_cpu: number;
@@ -185,7 +183,7 @@ export interface ResourcesResponse {
   };
 }
 
-// Used resources (how much is currently consumed) — different endpoint, different fields
+// Currently consumed resources
 export interface UsedResourcesResponse {
   cpu: {
     used_cpu: number;
@@ -198,7 +196,6 @@ export interface UsedResourcesResponse {
   accelerators: Record<string, { used: number; total: number }>;
 }
 
-// DeploymentDetails Types - Used for displaying application deployment details
 export interface ResourceAllocation {
   name: string;
   used: number;
@@ -266,7 +263,6 @@ export interface ApplicationDetailsApiResponse {
   }>;
 }
 
-// Service Types - Used by the services flow
 export interface Service {
   id: string;
   name: string;
@@ -277,7 +273,6 @@ export interface Service {
   version?: string;
 }
 
-// Deploy component interface
 export interface DeployComponent {
   type: string;
   name?: string;
@@ -319,7 +314,6 @@ export interface ServiceDeployOptions {
   };
 }
 
-// Provider schema types
 export interface ProviderSchemaProperty {
   default?: string;
   description?: string;
@@ -350,23 +344,38 @@ export interface LLMOption {
   providerName: string;
 }
 
-// Deployment payload
-export interface DeploymentPayload {
+export interface DeploymentComponent {
+  component_type: string;
+  provider_id: string;
+  version: string;
+  params?: Record<string, unknown>;
+}
+
+export interface DeploymentService {
+  catalog_id: string;
+  version: string;
+  components: DeploymentComponent[];
+  params?: {
+    backend?: Record<string, unknown>;
+  };
+}
+
+export interface ArchitectureDeploymentPayload {
+  name: string;
+  catalog_id: string;
+  version: string;
+  services: DeploymentService[];
+}
+
+export interface ServiceDeploymentPayload {
   name: string;
   catalog_id: string;
   version: string;
   deployment_type: "service";
-  services: Array<{
-    catalog_id: string;
-    version: string;
-    components: Array<{
-      component_type: string;
-      provider_id: string;
-      version: string;
-      params?: Record<string, unknown>;
-    }>;
-  }>;
-  global_components?: {
-    [key: string]: string;
-  };
+  services: DeploymentService[];
+  global_components?: Record<string, string>;
 }
+
+export type DeploymentPayload =
+  | ArchitectureDeploymentPayload
+  | ServiceDeploymentPayload;

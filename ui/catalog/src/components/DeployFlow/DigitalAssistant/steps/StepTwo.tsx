@@ -19,6 +19,10 @@ import type {
   ResourcesResponse,
   DeployOptionsComponent as Component,
 } from "@/types/api.types";
+import type {
+  ResourcesResponse,
+  DeployOptionsComponent as Component,
+} from "@/types/api.types";
 import type { ResourceItem } from "../../shared/types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 

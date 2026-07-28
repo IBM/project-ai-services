@@ -4,11 +4,16 @@ on:
   workflow_call:
     inputs:
       service:
-       required: true
+       required: false
        type: string
+       default: ''
       working-directory:
        required: true
        type: string
+      runner:
+       required: false
+       type: string
+       default: 'ubuntu-24.04-ppc64le'
 
 env:
   ICR_REGISTRY: icr.io
@@ -16,10 +21,10 @@ env:
 
 jobs:
   build-publish-image:
-    runs-on: ubuntu-24.04-ppc64le
+    runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       
       - name: Build Image
         working-directory: ${{ inputs.working-directory }}
@@ -32,7 +37,7 @@ jobs:
       
       - name: Publish image
         working-directory: ${{ inputs.working-directory }}
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             SERVICE=${{ inputs.service }} \
