@@ -4,6 +4,7 @@ Coordinator layer between the API routers and the DB/storage layers:
 job initialisation, file staging, active-job guards, document content
 retrieval, and bulk deletion helpers.
 """
+import asyncio
 import uuid
 from typing import Optional
 
@@ -14,6 +15,7 @@ from digitize.models import (
     JobStatus,
     DocStatus,
 )
+from digitize.parsing.pdf import get_document_page_count
 from digitize.settings import settings
 from digitize.utils.db import (
     create_job,
@@ -176,6 +178,60 @@ def initialize_job_state(
             )
 
     return doc_id_dict
+
+
+async def enqueue_conversion_tasks(
+    job_id: str,
+    op_key: str,
+    filenames: list[str],
+    doc_id_dict: dict[str, str],
+    staging_dir,
+    output_format: OutputFormat,
+    quota: int,
+    queued_for_op: int,
+) -> None:
+    """
+    Insert conversion_tasks rows for every file in the job.
+
+    Slots up to the free quota are inserted as ``queued``; the rest as
+    ``pending`` (the dispatcher will promote them as capacity frees up).
+
+    Args:
+        job_id:        Job identifier.
+        op_key:        ``"ingestion"`` or ``"digitization"``.
+        filenames:     Ordered list of filenames being submitted.
+        doc_id_dict:   Mapping of filename → document ID.
+        staging_dir:   Path to the job's staging directory.
+        output_format: Requested output format.
+        quota:         Per-operation queue quota from settings.
+        queued_for_op: Number of tasks already queued for this operation.
+    """
+    from digitize.db.manager import db_manager
+
+    slots_free = max(0, quota - queued_for_op)
+
+    for idx, filename in enumerate(filenames):
+        task_id = generate_uuid()
+        doc_id = doc_id_dict[filename]
+        file_path = staging_dir / filename
+        page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
+        is_large = page_count >= settings.digitize.heavy_doc_page_threshold
+        task_status = "queued" if idx < slots_free else "pending"
+        db_manager.create_conversion_task(
+            task_id=task_id,
+            job_id=job_id,
+            doc_id=doc_id,
+            operation=op_key,
+            cached_file=str(file_path),
+            output_format=output_format.value,
+            page_count=page_count,
+            is_large=is_large,
+            status=task_status,
+        )
+        logger.debug(
+            f"Enqueued task {task_id} for {filename} "
+            f"(op={op_key}, status={task_status}, large={is_large})"
+        )
 
 
 async def stage_upload_files(

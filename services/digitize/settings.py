@@ -50,17 +50,24 @@ class DigitizeConfig(BaseSettings):
         description="Page count threshold for heavy document classification",
     )
 
-    # API concurrency limits
-    digitization_concurrency_limit: int = Field(
-        default=2,
+    # Conversion queue quotas (max tasks in 'queued' status per operation type)
+    ingestion_queue_quota: int = Field(
+        default=10,
         ge=1,
-        description="Concurrency limit for digitization API",
+        description="Max queued ingestion tasks (multi-file jobs)",
     )
 
-    ingestion_concurrency_limit: int = Field(
-        default=1,
+    digitization_queue_quota: int = Field(
+        default=5,
         ge=1,
-        description="Concurrency limit for ingestion API",
+        description="Max queued digitization tasks (1 file per job)",
+    )
+
+    # Dispatcher poll interval in seconds
+    conversion_poll_interval: float = Field(
+        default=2.0,
+        gt=0.0,
+        description="Dispatcher poll interval (seconds)",
     )
 
     # Chunking parameters
