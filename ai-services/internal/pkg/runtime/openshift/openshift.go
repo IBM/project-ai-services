@@ -22,7 +22,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -578,12 +577,11 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 //
 // Available is computed as:
 //
-//	Total − (sum of ibm.com/spyre_pf limits across all Running pods)
+//	Total − (Thanos: sum of ibm.com/spyre_pf requests across all non-infra containers)
 //
-// node.Status.Allocatable is NOT used for available because it reflects a
-// static node-level capacity set by the device plugin and does not decrease
-// as pods consume cards via resource limits. The correct in-use count comes
-// from inspecting running pod resource limits directly.
+// The in-use count is fetched via Thanos using:
+//
+//	sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})
 func (kc *OpenshiftClient) getSpyreCardInfo() (*models.AcceleratorInfo, error) {
 	totalSpyre, err := kc.sumSpyreCapacity()
 	if err != nil {
@@ -628,60 +626,17 @@ func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
 	return total, nil
 }
 
-// sumSpyreInUse sums ibm.com/spyre_pf resource consumption across all active
-// (non-terminating) pods cluster-wide.
+// sumSpyreInUse queries Thanos for the total number of ibm.com/spyre_pf units
+// currently requested by all non-infra containers cluster-wide.
+//
+// PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})
 func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
-	podList, err := kc.KubeClient.CoreV1().Pods("").List(kc.Ctx, metav1.ListOptions{})
+	used, err := queryThanos(`sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
 	if err != nil {
-		return 0, fmt.Errorf("failed to list running pods: %w", err)
+		return 0, fmt.Errorf("failed to query Spyre cards in use: %w", err)
 	}
 
-	var used int64
-
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-
-		// Skip pods that are being terminated — their resources are being released.
-		// We do NOT filter by status.phase because the cross-namespace pod list
-		// API does not reliably populate status.phase (KServe RawDeployment pods
-		// in particular return an empty phase). Any non-deleted pod holds its
-		// scheduled resources regardless of phase.
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
-
-		used += spyreUsedByPod(pod)
-	}
-
-	return used, nil
-}
-
-// spyreUsedByPod returns the total ibm.com/spyre_pf quantity consumed by a
-// single pod, summed across all its containers.
-// Limits are preferred; Requests are used as a fallback (KServe RawDeployment
-// may omit Limits).
-func spyreUsedByPod(pod *corev1.Pod) int64 {
-	spyreRes := corev1.ResourceName(spyreResourceName)
-
-	var used int64
-
-	for j := range pod.Spec.Containers {
-		res := &pod.Spec.Containers[j].Resources
-
-		var qty resource.Quantity
-
-		if lim, ok := res.Limits[spyreRes]; ok {
-			qty = lim
-		} else if req, ok := res.Requests[spyreRes]; ok {
-			qty = req
-		} else {
-			continue
-		}
-
-		used += qty.Value()
-	}
-
-	return used
+	return int64(used), nil
 }
 
 // GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
