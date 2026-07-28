@@ -97,7 +97,7 @@ class JobDocumentSummary(BaseModel):
     status: str
     message: Optional[str] = Field(
         default=None,
-        description="Human-readable message; set when status is 'already_exists'",
+        description="Human-readable message providing additional context about the document status",
     )
 
 
