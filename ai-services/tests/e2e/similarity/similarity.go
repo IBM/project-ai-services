@@ -58,11 +58,6 @@ func drainAndClose(body io.ReadCloser) {
 	_ = body.Close()
 }
 
-// GetSimilarityBaseURL returns the base URL for the similarity-api service given a port.
-func GetSimilarityBaseURL(port string) string {
-	return fmt.Sprintf("http://localhost:%s", port)
-}
-
 // -----------------------------------------------------------------------
 // Request / Response types
 // -----------------------------------------------------------------------
@@ -163,30 +158,18 @@ func doGet(ctx context.Context, url string, timeout time.Duration) ([]byte, int,
 	return body, resp.StatusCode, resp.Header, nil
 }
 
-// -----------------------------------------------------------------------
-// Public API helpers used by test specs
-// -----------------------------------------------------------------------
+func getHealthEndpoint(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/health"
+}
 
-// HealthCheck calls GET /health and returns an error if the service is not healthy.
-func HealthCheck(ctx context.Context, baseURL string) error {
-	url := strings.TrimRight(baseURL, "/") + "/health"
-	body, statusCode, _, err := doGet(ctx, url, getCallTimeout)
-	if err != nil {
-		return fmt.Errorf("health check request failed: %w", err)
-	}
 
-	if statusCode != http.StatusOK {
-		return fmt.Errorf("health check returned HTTP %d: %s", statusCode, string(body))
-	}
-
-	logger.Infof("[SIMILARITY] GET /health → HTTP %d", statusCode)
-
-	return nil
+func getSimilaritySearchEndpoint(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/v1/similarity-search"
 }
 
 // HealthCheckWithResponse calls GET /health and returns the parsed response, status code, and headers.
 func HealthCheckWithResponse(ctx context.Context, baseURL string) (*HealthResponse, int, http.Header, error) {
-	url := strings.TrimRight(baseURL, "/") + "/health"
+	url := getHealthEndpoint(baseURL)
 	body, statusCode, headers, err := doGet(ctx, url, getCallTimeout)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("health check request failed: %w", err)
@@ -205,7 +188,7 @@ func HealthCheckWithResponse(ctx context.Context, baseURL string) (*HealthRespon
 // SimilaritySearch calls POST /v1/similarity-search and returns the parsed success response,
 // the HTTP status code, response headers, and any transport error.
 func SimilaritySearch(ctx context.Context, baseURL string, req SimilaritySearchRequest) (*SimilaritySearchResponse, int, http.Header, error) {
-	url := strings.TrimRight(baseURL, "/") + "/v1/similarity-search"
+	url := getSimilaritySearchEndpoint(baseURL)
 	body, statusCode, headers, err := doPost(ctx, url, req, postCallTimeout)
 	if err != nil {
 		return nil, 0, nil, err
@@ -229,7 +212,7 @@ func SimilaritySearch(ctx context.Context, baseURL string, req SimilaritySearchR
 // SimilaritySearchExpectingError calls POST /v1/similarity-search and returns the error response body
 // along with the HTTP status code when the server returns a non-200 status.
 func SimilaritySearchExpectingError(ctx context.Context, baseURL string, req SimilaritySearchRequest) (*SimilarityErrorResponse, int, error) {
-	url := strings.TrimRight(baseURL, "/") + "/v1/similarity-search"
+	url := getSimilaritySearchEndpoint(baseURL)
 	body, statusCode, _, err := doPost(ctx, url, req, postCallTimeout)
 	if err != nil {
 		return nil, 0, err
@@ -278,8 +261,8 @@ func VerifyHealthEndpoint(ctx context.Context, baseURL string) (*HealthResponse,
 }
 
 // VerifyTimeInfoInResponse calls POST /v1/similarity-search and checks that the API
-// includes timing information either in the response headers (e.g. X-Response-Time,
-// X-Process-Time, X-Duration) or in the response body. This validates the podman
+// includes timing information either in the response headers (e.g. X-Retrieve-Time,
+// X-Total-Time) or in the response body. This validates the podman
 // runtime timing instrumentation requirement.
 //
 // Corresponds to test case "Verify Similarity search API includes time info in response headers or body in podman runtime".
@@ -289,7 +272,7 @@ func VerifyTimeInfoInResponse(ctx context.Context, baseURL string) error {
 		Mode:  "dense",
 	}
 
-	url := strings.TrimRight(baseURL, "/") + "/v1/similarity-search"
+	url := getSimilaritySearchEndpoint(baseURL)
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)

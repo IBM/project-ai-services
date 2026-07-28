@@ -1654,7 +1654,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 				// Step 1: Create digitization job
 				logger.Infof("[TEST] Step 1: Creating ingestion job")
-				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-combined-workflow")
+				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-similarity-workflow")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(jobResp).NotTo(gomega.BeNil())
 				gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
