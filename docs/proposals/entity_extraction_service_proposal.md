@@ -61,10 +61,6 @@ graph LR
         W["Background Worker"]
     end
 
-    subgraph P2 ["Digitize Documents Service (port 4000)"]
-        DIG["/v1/documents"]
-    end
-
     PG[("PostgreSQL<br/>extract_metadata")]
     FS[("/var/cache/extract<br/>staging + results")]
     VLLM["External vLLM<br/>endpoint (OpenAI APIs)"]
@@ -75,7 +71,6 @@ graph LR
     API <--> PG
     API --> W
     W <--> PG
-    W <--> DIG
     W <--> VLLM
     API <--> VLLM
     W <--> FS
@@ -119,13 +114,14 @@ graph LR
 
 **Request body:**
 
-| Field | Type | Required | Description |
-|:---|:---|:---|:---|
-| `name` | string | Yes | Unique, human-readable identifier (e.g., `invoice-extraction`). 1–200 chars, `[a-zA-Z0-9._-]`. |
-| `description` | string | No | Free-text description of what the schema extracts. |
-| `json_schema` | object | Yes | JSON Schema (draft 2020-12). Root must be `type: object`. Properties may be tagged `"required": true` (see 5.1.1). |
-| `examples` | array | No | Few-shot examples: `[{"text": "...", "output": {...}}]`. Max 5. Each `output` must validate against `json_schema`. |
-| `custom_prompt` | string | No | Extra instructions appended to the system prompt (e.g., domain conventions, date formats). Max 2,000 chars. |
+| Field | Type | Required                           | Description |
+|:---|:---|:-----------------------------------|:---|
+| `name` | string | Yes                                | Unique, human-readable identifier (e.g., `invoice-extraction`). 1–200 chars, `[a-zA-Z0-9._-]`. |
+| `description` | string | No                                 | Free-text description of what the schema extracts. |
+| `json_schema` | object | Not required if example is present | JSON Schema (draft 2020-12). Root must be `type: object`. Properties may be tagged `"required": true` (see 5.1.1). |
+| `examples` | array | Not required if schema is present  | Few-shot examples: `[{"text": "...", "output": {...}}]`. Max 5. Each `output` must validate against `json_schema`. |
+| `custom_prompt` | string | No                                 | Extra instructions appended to the system prompt (e.g., domain conventions, date formats). Max 2,000 chars. |
+> Note: If json schema is not present, a schema will be inferred by the service from the given examples and stored in schema field
 
 **Response codes:**
 
@@ -136,7 +132,7 @@ graph LR
 | 409 Conflict | A schema with this `name` already exists. |
 | 500 Internal Server Error | Database failure. |
 
-**Sample request:**
+**Sample request with both json schema and examples:**
 
 ```bash
 curl -X POST http://localhost:7000/v1/schemas \
@@ -165,6 +161,27 @@ curl -X POST http://localhost:7000/v1/schemas \
         }
       }
     },
+    "examples": [
+      {
+        "text": "INVOICE #INV-2041 ... Acme GmbH ... TOTAL: EUR 1,204.50",
+        "output": {
+          "invoice_number": "INV-2041",
+          "vendor_name": "Acme GmbH",
+          "total_amount": 1204.50,
+          "currency": "EUR"
+        }
+      }
+    ]
+  }'
+```
+
+**Sample request without json schema:**
+```bash
+curl -X POST http://localhost:7000/v1/schemas \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "invoice-extraction",
+    "description": "Extracts core commercial fields from invoices",
     "examples": [
       {
         "text": "INVOICE #INV-2041 ... Acme GmbH ... TOTAL: EUR 1,204.50",
@@ -292,7 +309,8 @@ Returns the full schema record including the normalized `json_schema`, `examples
 {
   "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
   "name": "invoice-extraction",
-  "description": "Extracts core commercial fields from invoices",
+  "description": "Extracts core commercial fields from invoices", 
+  "inferred_schema": false,
   "json_schema": {
     "type": "object",
     "properties": {
@@ -500,8 +518,7 @@ curl -X POST http://localhost:7000/v1/extract \
 **Background worker:**
 
 1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (PDF) or `'extracting'` (TXT).
-2. **PDF path:** submit to digitize — `POST http://digitize-url/v1/documents?operation=digitization&output_format=md` (markdown preserves table structure, which matters for invoices/contracts). Store `digitize_job_id`. Poll `GET /v1/documents/jobs/{digitize_job_id}` every `DIGITIZE_POLL_INTERVAL_SECS` (default 10) until `completed`/`failed` or `DIGITIZE_JOB_TIMEOUT_SECS` (default 3600). Fetch text via `GET /v1/documents/{doc_id}/content`; store `digitize_doc_id`.
-   **TXT path:** read the staged file (UTF-8 decode).
+2. **TXT path:** read the staged file (UTF-8 decode).
 3. Tokenize; run the hard context-window guard. On breach → `status='failed'`, `error='CONTEXT_SCHEMA_SHARE'`, diagnostics in `metadata`.
 4. `metadata.phase='extracting'`: build prompt, acquire `concurrency_limiter`, call vLLM.
 5. If vLLM response fails due to reason `length`, we'll increase max_tokens based on the remaining budget in 6.1 and retry above step.
@@ -510,14 +527,13 @@ curl -X POST http://localhost:7000/v1/extract \
 8. Update row → `status='completed'`, `completed_at=now()` (or `failed` + `error`).
 9. Delete `/var/cache/extract/staging/{job_id}/`; release `job_limiter`.
 
-> **Digitize cache note:** the digitized document remains in the digitize service's cache and registry after extraction, keyed by `digitize_doc_id`. Users manage its lifecycle through the digitize service's own `DELETE /v1/documents/{id}`.
 
 **Response codes:**
 
 | Status                     | Description                                                                                                                                              |
 |:---------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 202 Accepted               | Job created.                                                                                                                                             |
-| 400 Bad Request            | Missing file, multiple files, or missing `schema_id`, sending .docx or.pdf file when digitize service is not present                                     |
+| 400 Bad Request            | Missing file, multiple files, or missing `schema_id`,                                                                                                    |
 | 404 Not Found              | Unknown `schema_id`.                                                                                                                                     |
 | 415 Unsupported Media Type | Not a valid `.txt` or `.pdf`.                                                                                                                            |
 | 422 Unprocessable Entity   | Validation failed, Model output failed schema validation after retry. Error includes missing required properties and the raw model output for debugging. |
@@ -597,9 +613,7 @@ curl -X POST http://localhost:7000/v1/extract/jobs \
     "status": "in_progress",
     "document": {
         "name": "contract_2026.pdf",
-        "source_type": "pdf",
-        "digitize_job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
-        "digitize_doc_id": null
+        "source_type": "txt"
     },
     "metadata": {
         "phase": "digitizing"
@@ -633,8 +647,7 @@ SUCCESSFUL JOB RESULT:
         "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
         "source": {
             "input_type": "file",
-            "document_name": "contract_2026.pdf",
-            "digitize_doc_id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+            "document_name": "contract_2026.txt",
             "input_words": 6412,
             "input_tokens": 8850
         }
@@ -668,8 +681,7 @@ FAILED JOB RESULT:
         "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
         "source": {
             "input_type": "file",
-            "document_name": "contract_2026.pdf",
-            "digitize_doc_id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+            "document_name": "contract_2026.md",
             "input_words": 6412,
             "input_tokens": 8850
         }
@@ -695,7 +707,7 @@ FAILED JOB RESULT:
 
 ### 5.11 DELETE /v1/extract/jobs/{job_id}
 
-Deletes the job row and its result file. Only `completed` or `failed` jobs may be deleted. Does **not** delete the digitized document in the digitize service (managed independently).
+Deletes the job row and its result file. Only `completed` or `failed` jobs may be deleted. 
 
 | Status | Description |
 |:---|:---|
@@ -789,20 +801,12 @@ A second, smaller semaphore caps how many extraction **jobs** run concurrently:
 job_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_jobs)  # default: 4
 ```
 
-| Semaphore | Scope | Limit | Purpose |
-|:---|:---|:---|:---|
-| `job_limiter` | Async jobs | 4 (configurable) | Caps background workers; bounds staging disk usage and digitize-service load. |
+| Semaphore | Scope | Limit | Purpose                                                           |
+|:---|:---|:---|:------------------------------------------------------------------|
+| `job_limiter` | Async jobs | 4 (configurable) | Caps background workers; bounds staging disk usage.               |
 | `concurrency_limiter` | Global | 32 | Caps total concurrent vLLM connections across sync + async paths. |
 
 The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` for each LLM call. Because each job makes at most 2 LLM calls (extraction + one validation retry) and holds no vLLM slot while digitizing or polling, async jobs consume very little of the vLLM budget — the sync path stays responsive even at full job concurrency.
-
-### 7.3 Digitize service backpressure
-
-The digitize service applies its own semaphore (2 concurrent digitizations) and returns `429` when saturated. The extract worker treats digitize `429`s as retryable:
-
-- Exponential backoff: 5s, 10s, 20s, 40s, 80s (capped), up to `DIGITIZE_SUBMIT_TIMEOUT_SECS` (default 900).
-- If the budget is exhausted, the job fails with `UPSTREAM_BUSY`.
-- Digitize `5xx` responses are retried 3 times with backoff, then the job fails with `UPSTREAM_ERROR` carrying the digitize error payload.
 
 ---
 
@@ -891,7 +895,6 @@ sequenceDiagram
     participant PG as PostgreSQL (extract_metadata)
     participant FS as /var/cache/extract
     participant Worker as Background Worker
-    participant DIG as Digitize Service (:4000)
     participant vLLM as vLLM Endpoint
 
     User->>API: POST /v1/extract/jobs (file, schema_id)
@@ -905,17 +908,8 @@ sequenceDiagram
     activate Worker
     Worker->>PG: status=in_progress, phase=digitizing
 
-    alt File is PDF
-        Worker->>DIG: POST /v1/documents?operation=digitization&output_format=md
-        Note over Worker,DIG: 429 → exponential backoff and resubmit
-        DIG-->>Worker: 202 {digitize_job_id}
-        loop Poll until terminal state
-            Worker->>DIG: GET /v1/documents/jobs/{digitize_job_id}
-            DIG-->>Worker: status
-        end
-        Worker->>DIG: GET /v1/documents/{doc_id}/content
-        DIG-->>Worker: Digitized markdown text
-    else File is TXT
+    
+    alt File is TXT or MD
         Worker->>FS: Read staged file (UTF-8)
     end
 
@@ -983,6 +977,7 @@ class ExtractionSchema(Base):
     json_schema    = Column(JSONB, nullable=False)      # normalized draft 2020-12
     examples       = Column(JSONB, nullable=True)       # [{"text": ..., "output": ...}]
     custom_prompt  = Column(Text, nullable=True)
+    inferred_schema= Column(Bool, nullable=False, default=False)
 
     # Token counts cached at registration (Section 7.1)
     schema_tokens   = Column(Integer, nullable=False)
@@ -1025,9 +1020,6 @@ class ExtractJob(Base):
     source_type         = Column(String(10), nullable=False)   # 'txt' | 'pdf'
     document_word_count = Column(Integer, nullable=True)
 
-    # Digitize service pointers (PDF path only)
-    digitize_job_id = Column(String(255), nullable=True)
-    digitize_doc_id = Column(String(255), nullable=True)
 
     # Phase, token diagnostics, timings, validation debug info
     job_metadata = Column('metadata', JSONB, nullable=True)
@@ -1048,7 +1040,7 @@ class ExtractJob(Base):
 
 ```json
 {
-    "phase": "digitizing | extracting | validating",
+    "phase": "extracting | validating",
     "token_diagnostics": {
         "input_tokens": 8850,
         "schema_tokens": 1480,
@@ -1099,6 +1091,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     json_schema           JSONB NOT NULL,
     examples              JSONB,
     custom_prompt         TEXT,
+    inferred_schema       BOOLEAN NOT NULL DEFAULT FALSE,
     schema_tokens         INTEGER NOT NULL,
     examples_tokens       INTEGER NOT NULL DEFAULT 0,
     custom_prompt_tokens  INTEGER NOT NULL DEFAULT 0
@@ -1116,8 +1109,6 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     document_name       VARCHAR(500) NOT NULL,
     source_type         VARCHAR(10) NOT NULL,
     document_word_count INTEGER,
-    digitize_job_id     VARCHAR(255),
-    digitize_doc_id     VARCHAR(255),
     metadata            JSONB,
     updated_at          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_extract_job_status  CHECK (status IN ('accepted','in_progress','completed','failed')),
@@ -1162,7 +1153,6 @@ The accompanying `init_db.sh` follows the digitize script verbatim (wait for Pos
 | `extract_jobs` row | `POST /v1/extract/jobs` (status `accepted`) | Worker updates status/phase/metadata/timestamps | `DELETE /v1/extract/jobs/{id}` or bulk delete |
 | Staging file | `POST /v1/extract/jobs` | — | Worker deletes after job completes/fails |
 | Result file | Worker writes on success | — | Job delete or bulk delete |
-| Digitized doc (digitize service) | Worker-triggered digitization | — | Owned by digitize service; user-managed via its `DELETE /v1/documents/{id}` |
 
 ---
 
@@ -1179,10 +1169,6 @@ The accompanying `init_db.sh` follows the digitize script verbatim (wait for Pos
 | `PROMPT_OVERHEAD_TOKENS` | System prompt                                            | `150` |
 | `MAX_CONCURRENT_REQUESTS` | Global vLLM semaphore                                    | `32` |
 | `MAX_CONCURRENT_JOBS` | Async job semaphore                                      | `4` |
-| `DIGITIZE_BASE_URL` | Digitize service endpoint                                | `http://digitize:4000` |
-| `DIGITIZE_POLL_INTERVAL_SECS` | Poll interval for digitize jobs                          | `10` |
-| `DIGITIZE_JOB_TIMEOUT_SECS` | Max wait for a digitize job                              | `3600` |
-| `DIGITIZE_SUBMIT_TIMEOUT_SECS` | Max backoff budget on digitize 429s                      | `900` |
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (`extract_metadata`, `extract_user`) | — |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | SQLAlchemy pool                                          | `5` / `5` |
 
@@ -1196,36 +1182,30 @@ Adapted from the digitize/summarize pattern for PostgreSQL:
 2. **Identify zombies:** any such row is a zombie — no worker can be handling it after a restart.
 3. **Mark as failed:** update to `status='failed'`, `error='System restarted during processing'`, `completed_at=now()`. Transactional, so the scan and update are atomic with respect to newly submitted jobs.
 4. **Cleanup:** delete corresponding `/var/cache/extract/staging/{job_id}/` directories.
-5. **Upstream orphans:** if a zombie job had submitted a digitization that is still running in the digitize service, that digitize job completes (or fails) independently and its output remains in the digitize cache. The extract job's stored `digitize_job_id` lets the user locate and optionally clean it via the digitize API. The recovery scan does not delete upstream artifacts — a resubmitted extract job for the same file benefits from the already-digitized cache.
 
 ---
 
 ## 13. Test Cases
 
-| Test Case | Input | Expected Result |
-|:---|:---|:---|
-| Register valid schema | Valid name + schema + 1 example | 201 with `schema_id` |
-| Register with `"required": true` tags | Per-property boolean convention | 201; `GET` returns normalized `required` array |
-| Duplicate schema name | Existing name | 409 `CONFLICT` |
-| Invalid JSON schema | Root `type: array` | 400 `INVALID_SCHEMA` |
-| Example fails own schema | `output` missing required prop | 400 identifying example index |
-| Oversized schema | > 64 KB serialized | 400 `SCHEMA_TOO_LARGE` |
-| Get schema | Valid `schema_id` | 200 with normalized schema + examples |
-| Delete unreferenced schema | No jobs reference it | 204 |
-| Delete referenced schema | Jobs exist (any status) | 409 listing referencing job IDs |
-| Sync extract, valid | text + `schema_id` | 200, extraction validates against schema |
-| Sync extract, unknown schema | Random UUID | 404 |
-| Sync extract, over limit | Text exceeding context budget | 413 with full token diagnostics |
-| Sync extract, invalid output twice | Adversarial text | 422 with validation errors + raw output |
+| Test Case                                     | Input | Expected Result |
+|:----------------------------------------------|:---|:---|
+| Register valid schema                         | Valid name + schema + 1 example | 201 with `schema_id` |
+| Register with `"required": true` tags         | Per-property boolean convention | 201; `GET` returns normalized `required` array |
+| Duplicate schema name                         | Existing name | 409 `CONFLICT` |
+| Invalid JSON schema                           | Root `type: array` | 400 `INVALID_SCHEMA` |
+| Example fails own schema                      | `output` missing required prop | 400 identifying example index |
+| Oversized schema                              | > 64 KB serialized | 400 `SCHEMA_TOO_LARGE` |
+| Get schema                                    | Valid `schema_id` | 200 with normalized schema + examples |
+| Delete unreferenced schema                    | No jobs reference it | 204 |
+| Delete referenced schema                      | Jobs exist (any status) | 409 listing referencing job IDs |
+| Sync extract, valid                           | text + `schema_id` | 200, extraction validates against schema |
+| Sync extract, unknown schema                  | Random UUID | 404 |
+| Sync extract, over limit                      | Text exceeding context budget | 413 with full token diagnostics |
+| Sync extract, invalid output twice            | Adversarial text | 422 with validation errors + raw output |
 | Sync extract, required field absent from text | Text lacking a required value | 422 after bounded retry (no hallucinated value) |
 | Semaphore exhausted | 32 vLLM slots busy | 429 `RATE_LIMIT_EXCEEDED` |
 | Async TXT job | 1 `.txt` + `schema_id` | 202; completes without digitize call |
-| Async PDF job | 1 `.pdf` + `schema_id` | 202; digitize invoked; result stores `digitize_doc_id` |
 | Multiple files | 2 files in one request | 400 `INVALID_REQUEST` |
-| Corrupt PDF | Invalid bytes, `.pdf` ext | 415 `UNSUPPORTED_MEDIA_TYPE` |
-| Digitize saturated | Digitize returns 429 repeatedly | Worker backs off; job completes after slot frees; fails `UPSTREAM_BUSY` only past budget |
-| Digitize job fails | Corrupt page mid-digitization | Extract job `failed` with `UPSTREAM_ERROR` + digitize payload |
-| Async over-limit PDF | Digitized text exceeds budget | Job `failed`, `CONTEXT_LIMIT_EXCEEDED`, diagnostics in `metadata` |
 | Job progress phases | Poll during PDF job | `phase` transitions digitizing → extracting → validating |
 | Get result (in progress) | Active `job_id` | 202 Accepted |
 | Get result (completed) | Completed `job_id` | 200 with extraction + usage + timings |
