@@ -561,8 +561,8 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	spyreInfo, err := kc.getSpyreCardInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve Spyre card info: %w", err)
-	} 
-    if spyreInfo != nil {
+	}
+	if spyreInfo != nil {
 		sysInfo.Accelerators[spyreResourceName] = spyreInfo
 	}
 
