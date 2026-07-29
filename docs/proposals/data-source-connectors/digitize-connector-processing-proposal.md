@@ -1,6 +1,6 @@
 # Digitize — Data Source Connector Processing Proposal
 
-> **Scope:** Internal `digitize` behavior after catalog sends connector payloads. Catalog-side concerns such as key generation, connector CRUD, deployment wiring, TLS provisioning, and bearer-token enforcement remain out of scope and are treated as infrastructure-level prerequisites.
+> **Scope:** Internal `digitize` behavior after catalog sends connector payloads. Catalog-side concerns such as key management, connector CRUD, deployment wiring and TLS provisioning remain out of scope and are treated as infrastructure-level prerequisites.
 
 ---
 
@@ -9,12 +9,11 @@
 Before any `digitize` connector endpoint is called:
 
 - Catalog has already validated the remote connector configuration.
-- Catalog sends secret material in plaintext over TLS:
+- Catalog sends secret material in plaintext via API calls:
   - `ssh`: `private_key`
   - `s3`: `secret_access_key`
 - `digitize` encrypts those secret fields at rest using `/run/secrets/connector_encryption_key` before persisting them.
 - `/run/secrets/connector_api_token` and `/run/secrets/connector_encryption_key` are mounted before pod start.
-- TLS and bearer-token enforcement are already provided by infrastructure.
 
 These assumptions are referenced once here and not repeated below.
 
@@ -138,7 +137,6 @@ Common fields:
 | --- | --- |
 | `202 Accepted` | Connector created; worker start scheduled in a background task |
 | `409 Conflict` | Connector already exists |
-| `401 Unauthorized` | Missing or invalid token |
 
 ### 3.2 `PUT /v1/connectors/{connector_id}`
 
@@ -170,7 +168,6 @@ Response codes:
 | --- | --- |
 | `200 OK` | Connector updated; worker picks up changes on next tick |
 | `404 Not Found` | Connector does not exist |
-| `401 Unauthorized` | Missing or invalid token |
 
 ### 3.3 `DELETE /v1/connectors/{connector_id}`
 
@@ -211,7 +208,6 @@ Response codes:
 | --- | --- |
 | `204 No Content` | Connector removed |
 | `404 Not Found` | Connector does not exist |
-| `401 Unauthorized` | Missing or invalid token |
 
 ### 3.4 `GET /v1/connectors`
 
@@ -221,12 +217,35 @@ Returned fields include:
 
 - connector identity and config
 - `sync_status`, `last_sync_at`, `last_sync_error`, `attached_at`
-- non-secret `connection_details`
 
-Never returned:
+#### Example response
 
-- `private_key`
-- `secret_access_key`
+```json
+[
+  {
+    "connector_id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+    "type": "ssh",
+    "host": "sftp.example.com",
+    "allowed_extensions": [".pdf", ".docx"],
+    "sync_interval_seconds": 300,
+    "attached_at": "2025-01-10T08:00:00Z",
+    "last_sync_at": "2025-01-15T14:32:10Z",
+    "sync_status": "idle",
+    "last_sync_error": null,
+  },
+  {
+    "connector_id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "type": "s3",
+    "host": "s3.amazonaws.com",
+    "allowed_extensions": [".pdf", ".docx"],
+    "sync_interval_seconds": 300,
+    "attached_at": "2025-01-12T09:15:00Z",
+    "last_sync_at": "2025-01-15T14:30:00Z",
+    "sync_status": "idle",
+    "last_sync_error": "3 files failed to ingest",
+  }
+]
+```
 
 ### 3.5 `GET /v1/connectors/{connector_id}`
 
@@ -238,6 +257,30 @@ Returns one connector plus the latest file-processing counters:
 - `files_failed`
 
 Only non-secret `connection_details` are returned.
+
+#### Example response
+
+```json
+{
+  "connector_id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+  "type": "ssh",
+  "host": "sftp.example.com",
+  "allowed_extensions": [".pdf", ".docx"],
+  "sync_interval_seconds": 300,
+  "attached_at": "2025-01-10T08:00:00Z",
+  "last_sync_at": "2025-01-15T14:32:10Z",
+  "sync_status": "idle",
+  "last_sync_error": null,
+  "connection_details": {
+    "username": "sync_user",
+    "remote_path": "/exports/reports"
+  },
+  "files_found": 42,
+  "files_syncing": 0,
+  "files_completed": 40,
+  "files_failed": 2
+}
+```
 
 ### 3.6 `GET /v1/connectors/{connector_id}/sync-history`
 
@@ -270,6 +313,48 @@ Status values:
 - `failed: <reason>`
 
 At most one in-progress `syncing` row exists per connector.
+
+#### Example response
+
+```json
+{
+  "total": 3,
+  "limit": 50,
+  "offset": 0,
+  "items": [
+    {
+      "sync_id": 3,
+      "started_at": "2025-01-15T14:32:00Z",
+      "finished_at": "2025-01-15T14:32:10Z",
+      "files_found": 42,
+      "files_syncing": 0,
+      "files_completed": 42,
+      "files_failed": 0,
+      "sync_status": "completed"
+    },
+    {
+      "sync_id": 2,
+      "started_at": "2025-01-15T14:27:00Z",
+      "finished_at": "2025-01-15T14:27:18Z",
+      "files_found": 41,
+      "files_syncing": 0,
+      "files_completed": 38,
+      "files_failed": 3,
+      "sync_status": "3 files failed to ingest"
+    },
+    {
+      "sync_id": 1,
+      "started_at": "2025-01-15T14:22:00Z",
+      "finished_at": null,
+      "files_found": 0,
+      "files_syncing": 5,
+      "files_completed": 0,
+      "files_failed": 0,
+      "sync_status": "syncing"
+    }
+  ]
+}
+```
 
 ---
 
