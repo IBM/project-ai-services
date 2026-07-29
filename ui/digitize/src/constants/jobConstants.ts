@@ -17,6 +17,11 @@ export const DISPLAY_STATUS = {
   DIGITIZING: 'Digitizing...',
 } as const;
 
+// Document status constants (matching backend DocStatus enum values)
+export const DOC_STATUS = {
+  ALREADY_EXISTS: 'already_exists',
+} as const;
+
 // Job operation types
 export const JOB_OPERATION = {
   INGESTION: 'ingestion',
