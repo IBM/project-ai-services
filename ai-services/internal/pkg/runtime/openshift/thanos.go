@@ -38,9 +38,9 @@ var (
 	// thanosOnce ensures the shared HTTP client and bearer token are initialised
 	// exactly once for the lifetime of the process — consistent with the
 	// clientsOnce / catalogOnce pattern used elsewhere in the codebase.
-	thanosOnce   sync.Once
-	thanosHTTP   *http.Client
-	thanosToken  string
+	thanosOnce  sync.Once
+	thanosHTTP  *http.Client
+	thanosToken string
 )
 
 // initThanosClient builds the shared HTTP client and reads the SA bearer token
