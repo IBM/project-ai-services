@@ -12,7 +12,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
-from digitize.db.models import Job, Document, FileChecksumRegistry
+from digitize.db.models import Job, Document, DocumentChecksum
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 
@@ -345,7 +345,7 @@ class DatabaseManager:
     @staticmethod
     def upsert_file_checksum(sha256: str, doc_id: str) -> None:
         """
-        Insert or ignore a (sha256, doc_id) pair into file_checksum_registry.
+        Insert or ignore a (sha256, doc_id) pair into document_checksum.
 
         Called once a document reaches COMPLETED status so that subsequent
         uploads of the same content can be detected via find_completed_document_by_hash.
@@ -357,7 +357,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = (
-                    insert(FileChecksumRegistry)
+                    insert(DocumentChecksum)
                     .values(sha256=sha256, doc_id=doc_id)
                     .on_conflict_do_update(
                         index_elements=["sha256"],
@@ -376,7 +376,7 @@ class DatabaseManager:
     ) -> Optional[Document]:
         """
         Find the completed document of the given operation type with a matching
-        file hash, using the file_checksum_registry lookup table.
+        file hash, using the document_checksum lookup table.
 
         Only documents with status='completed' and the specified type are considered.
         Failed and in-progress documents are deliberately excluded so that a previous
@@ -395,11 +395,11 @@ class DatabaseManager:
                 stmt = (
                     select(Document)
                     .join(
-                        FileChecksumRegistry,
-                        FileChecksumRegistry.doc_id == Document.doc_id,
+                        DocumentChecksum,
+                        DocumentChecksum.doc_id == Document.doc_id,
                     )
                     .where(
-                        FileChecksumRegistry.sha256 == file_hash,
+                        DocumentChecksum.checksum == file_hash,
                         Document.type == operation,
                         Document.status == DocStatus.COMPLETED.value,
                     )
@@ -595,7 +595,7 @@ class DatabaseManager:
                 # Remove checksum registry entry first so the hash can be re-registered
                 # if the same file is ingested again after deletion.
                 session.execute(
-                    delete(FileChecksumRegistry).where(FileChecksumRegistry.doc_id == doc_id)
+                    delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
                 )
 
                 # Remove any already_exists shadow docs that reference this document.
@@ -670,7 +670,7 @@ class DatabaseManager:
             with get_db_session() as session:
                 # Wipe the checksum registry so previously-seen hashes are no longer
                 # blocked after a full reset.
-                session.execute(delete(FileChecksumRegistry))
+                session.execute(delete(DocumentChecksum))
                 stmt = delete(Document)
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
