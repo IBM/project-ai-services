@@ -57,11 +57,7 @@ export type SharedTableAction =
   | { type: "SHARED_SET_PAGE"; payload: number }
   | { type: "SHARED_SET_PAGE_SIZE"; payload: number }
   | { type: "SHARED_OPEN_DELETE_DIALOG"; payload: string }
-  | {
-      type: "SHARED_CLOSE_DELETE_DIALOG";
-      hasError: boolean;
-      selectedRowId: string | null;
-    }
+  | { type: "SHARED_CLOSE_DELETE_DIALOG" }
   | { type: "SHARED_SET_CONFIRMED"; payload: boolean }
   | { type: "SHARED_SET_SELECTED_ROW_ID"; payload: string | null }
   | { type: "SHARED_SET_LOADING"; payload: boolean }

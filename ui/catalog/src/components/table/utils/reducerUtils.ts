@@ -19,7 +19,7 @@ export function handleSharedTableAction<S extends BaseTableState>(
     case "SHARED_CLOSE_DELETE_DIALOG":
       return {
         ...state,
-        ...closeDeleteDialog(action.hasError, action.selectedRowId),
+        ...closeDeleteDialog(state.hasError, state.selectedRowId),
       };
     case "SHARED_SET_CONFIRMED":
       return { ...state, ...setConfirmed(action.payload) };
