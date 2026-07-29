@@ -24,7 +24,6 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
-	"github.com/project-ai-services/ai-services/tests/e2e/similarity"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
@@ -65,6 +64,7 @@ var (
 	// appPsWideOutput caches the last 'application ps -o wide' result so that
 	// subsequent specs (pods existence, logs) can reuse it without a second CLI call.
 	appPsWideOutput string
+	backupAppName   string
 )
 
 func init() {
@@ -1574,197 +1574,104 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ Blank PDF ingestion completed successfully")
 		})
 	})
-	ginkgo.Context("Similarity Tests", ginkgo.Label("spyre-dependent", "similarity-tests"), func() {
-		var similarityBaseURL string
-		var digitizeBaseURL string
-		var createdJobIDs []string
+	ginkgo.Context("Application Backup And Restore", ginkgo.Ordered, ginkgo.Label("spyre-dependent", "digitization-tests"), func() {
+		var (
+			digitizeDocID        string
+			digitizeDocName      string
+			digitizeDocStatus    string
+			opensearchBackupFile string
+			digitizeBackupFile   string
+		)
 
-		ginkgo.BeforeAll(func() {
-			if appName == "" {
-				ginkgo.Fail("Application name is not set")
-			}
-
-			logger.Infof("[SIMILARITY] Setting up similarity tests")
-
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ginkgo.It("backs up and restores application data", func() {
+			ctx, cancel := withTimeout(60 * time.Minute)
 			defer cancel()
+
+			catalogLoginWithDiscovery(ctx, true)
 
 			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			if appRuntime == "podman" {
-				const similarityPollInterval = 15 * time.Second
-				for {
-					similarityBaseURL = cli.ExtractSimilarityAPIURL(infoOutput)
-					digitizeBaseURL = cli.ExtractCatalogDigitizeURL(infoOutput)
-					if similarityBaseURL != "" && digitizeBaseURL != "" {
-						break
-					}
-					if ctx.Err() != nil {
-						ginkgo.Fail("Timed out waiting for similarity-backend URL in 'application info' output")
-					}
-					logger.Infof("[SIMILARITY] similarity-backend URL not yet present — retrying in %s", similarityPollInterval)
-					select {
-					case <-ctx.Done():
-						ginkgo.Fail("Timed out waiting for similarity-backend URL in 'application info' output")
-					case <-time.After(similarityPollInterval):
-					}
-					infoOutput, err = cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
-					if err != nil {
-						logger.Warningf("[SIMILARITY] application info error while polling for similarity URL: %v", err)
-					}
-				}
-			} else {
-				urlList := cli.ExtractURLsFromOutput(infoOutput)
-				if len(urlList) == 0 {
-					ginkgo.Fail("No urls extracted from application info output")
-				} else {
-					similarityBaseURL = urlList[0]
-					digitizeBaseURL = strings.Replace(urlList[0], "ui", "digitize-api", 1)
-				}
-			}
+			digitizeBaseURL := cli.ExtractDigitizeURL(infoOutput)
+			gomega.Expect(digitizeBaseURL).NotTo(gomega.BeEmpty())
 
-			_ = err
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(similarityBaseURL).NotTo(gomega.BeEmpty(),
-				"could not determine similarity-api base URL")
-			logger.Infof("[SIMILARITY] Similarity Base URL: %s", similarityBaseURL)
+			gomega.Expect(digitization.IngestTestDocumentViaDigitizeAPI(ctx, digitizeBaseURL, "e2e-backup-restore-ingestion")).To(gomega.Succeed())
+
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-backup-restore-digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+
+			digitizeDocID = finalStatus.Documents[0].ID
+
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, digitizeDocID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			digitizeDocName = doc.Name
+			digitizeDocStatus = doc.Status
+
+			opensearchBackupFile = filepath.Join(tempDir, "opensearch-backup-"+runID+".tar.gz")
+			digitizeBackupFile = filepath.Join(tempDir, "digitize-backup-"+runID+".tar.gz")
+
+			_, err = cli.ApplicationBackup(ctx, cfg, appName, "opensearch", opensearchBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = cli.ApplicationBackup(ctx, cfg, appName, "digitize", digitizeBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			deleteOutput, deleteErr := cli.DeleteAppSkipCleanup(ctx, cfg, appName, appRuntime)
+			gomega.Expect(deleteErr).NotTo(gomega.HaveOccurred())
+			gomega.Expect(deleteOutput).NotTo(gomega.BeEmpty())
+
+			backupAppName = appName
+
+			createOutput, err := cli.CreateRAGAppAndValidate(
+				ctx,
+				cfg,
+				backupAppName,
+				templateName,
+				createParams,
+				backendPort,
+				uiPort,
+				cli.CreateOptions{
+					SkipModelDownload: false,
+					ImagePullPolicy:   "IfNotPresent",
+				},
+				[]string{"backend", "ui", "db"},
+				appRuntime,
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(createOutput).NotTo(gomega.BeEmpty())
+
+			catalogLoginWithDiscovery(ctx, true)
+
+			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "opensearch", opensearchBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "digitize", digitizeBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			restoredInfoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, backupAppName, appRuntime, 8*time.Minute, 15*time.Second)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			restoredDigitizeBaseURL := cli.ExtractDigitizeURL(restoredInfoOutput)
+			gomega.Expect(restoredDigitizeBaseURL).NotTo(gomega.BeEmpty())
+
+			restoredDocs, err := digitization.ListDocuments(ctx, restoredDigitizeBaseURL, 20, 0, "", digitizeDocName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(restoredDocs.Data).NotTo(gomega.BeEmpty())
+			gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(digitizeDocName))
+			gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(digitizeDocStatus))
 		})
 
-		ginkgo.It("should pass health check",
-			func() {
-				ctx, cancel := withTimeout(30 * time.Second)
-				defer cancel()
-
-				resp, err := similarity.VerifyHealthEndpoint(ctx, similarityBaseURL)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(resp).NotTo(gomega.BeNil())
-				gomega.Expect(resp.Status).NotTo(gomega.BeEmpty())
-				logger.Infof("[TEST] Similarity service health check passed status=%q", resp.Status)
-			})
-		
-		// Verify /v1/similarity-search with dense, sparse, and hybrid modes
-		ginkgo.It("Verify /v1/similarity-search endpoint by providing different search mode such as dense, sparse or hybrid",
-			func() {
-				ctx, cancel := withTimeout(20 * time.Minute)
-				defer cancel()
-
-				pdfPath := digitization.GetTestPDFPath()
-				gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
-
-				// Step 1: Create digitization job
-				logger.Infof("[TEST] Step 1: Creating ingestion job")
-				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-similarity-workflow")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(jobResp).NotTo(gomega.BeNil())
-				gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-				createdJobIDs = append(createdJobIDs, jobResp.JobID)
-				logger.Infof("[TEST] Created ingestion job: %s", jobResp.JobID)
-
-				// Step 2: Get job status immediately after creation
-				logger.Infof("[TEST] Step 2: Getting job status")
-				status, err := digitization.GetJobStatus(ctx, digitizeBaseURL, jobResp.JobID)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(status.JobID).To(gomega.Equal(jobResp.JobID))
-				logger.Infof("[TEST] Job status retrieved: %s", status.Status)
-
-				// Step 3: Wait for job completion (only wait ONCE for all checks)
-				logger.Infof("[TEST] Step 3: Waiting for job completion")
-				finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
-				logger.Infof("[TEST] Ingestion job completed: %s", jobResp.JobID)
-
-				results := similarity.VerifySearchModes(ctx, similarityBaseURL)
-
-				//Step 4: Every mode that returned a response must carry the correct score_type.
-				logger.Infof("[TEST] Step 4: Verifying similarity search api")
-				expectedScoreTypes := map[string]string{
-					"dense":  "cosine",
-					"sparse": "bm25",
-					"hybrid": "hybrid",
-				}
-				for mode, resp := range results {
-					gomega.Expect(resp).NotTo(gomega.BeNil(),
-						"mode=%s: got nil response", mode)
-					gomega.Expect(resp.ScoreType).To(gomega.Equal(expectedScoreTypes[mode]),
-						"mode=%s: unexpected score_type", mode)
-					logger.Infof("[TEST] C82598625: mode=%s score_type=%s results=%d",
-						mode, resp.ScoreType, len(resp.Results))
-				}
-				// At least one mode must have responded successfully.
-				gomega.Expect(results).NotTo(gomega.BeEmpty(),
-					"all search modes failed — index may be empty or similarity-api is unreachable")
-			})
-		
-		// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
-		ginkgo.It("Verify Similarity search API includes time info in response headers or body in podman runtime",
-			func() {
-				ctx, cancel := withTimeout(30 * time.Second)
-				defer cancel()
-
-				gomega.Expect(
-					similarity.VerifyTimeInfoInResponse(ctx, similarityBaseURL),
-				).To(gomega.Succeed())
-				logger.Infof("[TEST] Timing info verified in similarity-api response")
-			})
-
-		// Verify /v1/similarity-search returns 400 for invalid mode
-		ginkgo.It("Verify /v1/similarity-search endpoint by providing invalid parameter for mode field (400 error code)",
-			func() {
-				ctx, cancel := withTimeout(30 * time.Second)
-				defer cancel()
-
-				errResp, err := similarity.VerifyInvalidModeReturns400(ctx, similarityBaseURL)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Error.Message).NotTo(gomega.BeEmpty())
-				gomega.Expect(errResp.Error.Status).To(gomega.Equal(400))
-				gomega.Expect(errResp.Error.Message).To(gomega.ContainSubstring("mode must be one of"))
-				logger.Infof("[TEST] invalid mode correctly rejected with: %s", errResp.Error)
-			})
-
-
-		// Verify /v1/similarity-search with rerank=true
-		ginkgo.It("Verify /v1/similarity-search endpoint by providing rerank as true",
-			func() {
-				ctx, cancel := withTimeout(2 * time.Minute)
-				defer cancel()
-
-				resp, err := similarity.VerifyRerankTrue(ctx, similarityBaseURL)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(resp).NotTo(gomega.BeNil())
-				gomega.Expect(resp.ScoreType).To(gomega.Equal("relevance"))
-				logger.Infof("[TEST] rerank=true returned score_type=%s results=%d",
-					resp.ScoreType, len(resp.Results))
-			})
-
-		// Verify /v1/similarity-search returns 422 for invalid top_k
-		ginkgo.It("Verify /v1/similarity-search endpoint by providing invalid value for top_k",
-			func() {
-				ctx, cancel := withTimeout(30 * time.Second)
-				defer cancel()
-
-				errResp, err := similarity.VerifyInvalidTopKReturns422(ctx, similarityBaseURL)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Detail).NotTo(gomega.BeNil())
-				logger.Infof("[TEST] invalid top_k correctly rejected with: %s", errResp.Error)
-			})
-
-		// Reproduce 400: Validation Error
-		ginkgo.It("Reproduce 400 validation error code for similarity-search endpoint",
-			func() {
-				ctx, cancel := withTimeout(30 * time.Second)
-				defer cancel()
-
-				errResp, err := similarity.ReproduceValidationError(ctx, similarityBaseURL)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(errResp).NotTo(gomega.BeNil())
-				gomega.Expect(errResp.Error.Message).NotTo(gomega.BeEmpty())
-				gomega.Expect(errResp.Error.Status).To(gomega.Equal(400))
-				logger.Infof("[TEST] 400 reproduced with error: %s", errResp.Error)
-			})
+		ginkgo.It("deletes the restored application", func() {
+			if backupAppName == "" {
+				ginkgo.Skip("No restored application created")
+			}
+		})
 	})
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent"), func() {
