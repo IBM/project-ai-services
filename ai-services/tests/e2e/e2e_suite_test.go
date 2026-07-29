@@ -1819,7 +1819,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(deleteErr).NotTo(gomega.HaveOccurred())
 			gomega.Expect(deleteOutput).NotTo(gomega.BeEmpty())
 
+			// Recreate target app after backup using the original name when the suite
+			// owns the lifecycle. For caller-provided apps, restore into a fresh
+			// sibling name so OpenShift cleanup lag does not block recreation of the
+			// exact same application name immediately after delete.
 			backupAppName = appName
+			if providedAppName != "" {
+				backupAppName = appName + "-restore-" + runID
+			}
 
 			createOutput, err := cli.CreateRAGAppAndValidate(
 				ctx,
