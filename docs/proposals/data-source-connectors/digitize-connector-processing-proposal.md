@@ -39,10 +39,12 @@ PUT
 
 Each tick
   → fetch latest connector config from DB
-  → scan source
-  → compare with known hashes
-  → reuse already-known documents
+  → scan source — yields (remote_path, checksum) per file
+  → compare checksums with known_checksums from registry
+  → skip files whose checksum is already registered (zero bytes transferred)
   → ingest only new content
+  → store checksum + doc_id in file_checksum_registry
+  → store source checksum in document metadata
   → remove orphaned content by ref count
   → write sync status + history
 ```
@@ -50,12 +52,12 @@ Each tick
 ### 2.3 Main Components
 
 - `active_connectors`: current connector configuration and top-level sync state
-- `file_checksum_registry`: global content registry keyed by `sha256`
-- `connector_file_membership`: which connector currently references which hash
+- `file_checksum_registry`: global content registry keyed by `checksum` — stores a content fingerprint (S3 ETag or SFTP MD5) and a reference to the ingested `doc_id`
+- `connector_file_membership`: which connector currently references which checksum
 - `connector_sync_history`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
 - `ConnectorSyncWorker`: executes periodic sync logic
-- scanner implementations: transport-specific remote access for SFTP and S3
+- scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5
 
 ---
 
@@ -91,13 +93,16 @@ Common fields:
 
 `connection_details` for `s3`:
 
-| Field | Type | Required |
-| --- | --- | --- |
-| `bucket_name` | `string` | ✅ |
-| `prefix` | `string` | ❌ |
-| `delimiter` | `string` | ❌ |
-| `access_key_id` | `string` | ✅ |
-| `secret_access_key` | `string` | ✅ |
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `endpoint_url` | `string` | ✅ | Full S3 endpoint URL. AWS S3: `https://s3.<region>.amazonaws.com`. IBM COS: `https://s3.<region>.cloud-object-storage.appdomain.cloud`. Provider and region are auto-detected from this URL — no separate `region` field needed. |
+| `bucket_name` | `string` | ✅ | |
+| `access_key_id` | `string` | ✅ | IAM key ID (AWS) or HMAC key ID (IBM COS) |
+| `secret_access_key` | `string` | ✅ | IAM secret (AWS) or HMAC secret (IBM COS) |
+| `prefix` | `string` | ❌ | Key prefix to scope listing — empty means bucket root |
+| `delimiter` | `string` | ❌ | Set `"/"` for non-recursive (immediate children only) |
+
+> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — the scanner stores this as the `checksum` in `file_checksum_registry`. If the checksum is already registered the file is **never downloaded**. The checksum is also stored in document `metadata.source_checksum` for traceability. See [§4.3](#43-file_checksum_registry) and [§7.2](#72-s3-scanner).
 
 #### Example payloads
 
@@ -119,14 +124,32 @@ Common fields:
 {
   "connector_id": "a1b2c3d4-...",
   "type": "s3",
-  "host": "s3.amazonaws.com",
+  "host": "s3.us-east-1.amazonaws.com",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
+    "endpoint_url": "https://s3.us-east-1.amazonaws.com",
     "bucket_name": "my-rag-documents",
     "prefix": "reports/",
     "delimiter": "/",
     "access_key_id": "AKIAIOSFODNN7EXAMPLE",
     "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }
+}
+```
+
+IBM COS example:
+
+```json
+{
+  "connector_id": "b5c6d7e8-...",
+  "type": "s3",
+  "host": "s3.us.cloud-object-storage.appdomain.cloud",
+  "allowed_extensions": [".pdf", ".docx"],
+  "connection_details": {
+    "endpoint_url": "https://s3.us.cloud-object-storage.appdomain.cloud",
+    "bucket_name": "ai-services",
+    "access_key_id": "<hmac-key-id>",
+    "secret_access_key": "<hmac-secret>"
   }
 }
 ```
@@ -192,12 +215,13 @@ DELETE /v1/connectors/{connector_id}
   → check if sync tick is in progress
       if YES → 409 Conflict (no state modified)
   → stop worker
-  → list connector hashes
-  → for each sha256:
+  → list connector checksums
+  → for each checksum:
        remove membership in transaction
-       count remaining refs
+       count remaining refs for this checksum
        if refs == 0:
          DELETE /v1/documents/{doc_id}
+         DELETE FROM file_checksum_registry WHERE checksum = $1
   → delete connector row
   → cleanup staging dirs
 ```
@@ -402,34 +426,60 @@ CREATE TABLE IF NOT EXISTS active_connectors (
 
 ### 4.3 `file_checksum_registry`
 
-Global content registry keyed by `sha256`. One row per unique document body.
+Global content registry keyed by `checksum`. One row per unique document body. The `checksum` column stores a content fingerprint: for S3 sources this is the S3 ETag returned by `list_objects_v2` (quotes stripped) — for single-part objects this equals `MD5(file_bytes)`; for multi-part objects it is `MD5(raw_part_md5s…)-N`. For SFTP sources the `checksum` column stores the remotely-computed MD5 hex digest.
 
 ```sql
 CREATE TABLE IF NOT EXISTS file_checksum_registry (
-    sha256        TEXT PRIMARY KEY,
-    doc_id        TEXT NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
+    checksum      TEXT PRIMARY KEY,
+    -- S3:   ETag from list_objects_v2, e.g. "b4f8873b..." or "0234031e...-13"
+    -- SFTP: md5sum output from remote host, e.g. "d41d8cd98f00b204e980..."
+    source        TEXT NOT NULL,
+    -- Connector type that first registered this content: "s3" | "ssh"
+    doc_id        TEXT NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE,
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_fcr_doc_id ON file_checksum_registry(doc_id);
 ```
+
+> **Document metadata:** When a document row is created the scanner also writes `checksum` into `documents.metadata` as `metadata.source_checksum`. This makes the content fingerprint visible in the document record without a registry join.
+>
+> ```json
+> {
+>   "source_checksum": "0234031ed6cb7d686152f45c38f41bc6-13",
+>   "source_type": "s3",
+>   "bucket": "ai-services",
+>   "key": "reports/sg248590-2.pdf"
+> }
+> ```
+
+**Checksum format reference:**
+
+| Source | Checksum value | Dedup property |
+| --- | --- | --- |
+| S3 single-part | S3 ETag = `MD5(file_bytes)` — 32-char hex, no suffix | Unique per file content (for this upload method) |
+| S3 multi-part | S3 ETag = `MD5(MD5(p₁)‖…‖MD5(pₙ))-N` — hex + `-N` suffix | Unique per (file content + part size) |
+| SFTP | `md5sum` output from remote host — 32-char hex | Unique per file content, protocol-independent |
 
 ### 4.4 `connector_file_membership`
 
-Maps connectors to hashes they currently own.
+Maps connectors to the checksums they currently own.
 
 ```sql
 CREATE TABLE IF NOT EXISTS connector_file_membership (
     connector_id  TEXT NOT NULL,
-    sha256        TEXT NOT NULL,
-    PRIMARY KEY (connector_id, sha256),
+    checksum      TEXT NOT NULL,
+    PRIMARY KEY (connector_id, checksum),
     FOREIGN KEY (connector_id) REFERENCES active_connectors(id) ON DELETE CASCADE,
-    FOREIGN KEY (sha256) REFERENCES file_checksum_registry(sha256)
+    FOREIGN KEY (checksum) REFERENCES file_checksum_registry(checksum) ON DELETE CASCADE
 );
 ```
 
 Deduplication and deletion rules:
 
-- Existing `sha256` in `file_checksum_registry` => reuse document and add membership only.
-- New `sha256` => ingest content, insert registry row, then add membership.
-- On removal, delete membership first, count remaining references inside the same transaction, and delete the document only when the count reaches zero.
+- Existing `checksum` in `file_checksum_registry` → reuse `doc_id`, add membership row only — **no download, no ingest**.
+- New `checksum` → download file, run ingest pipeline, insert registry row with `doc_id`, then add membership.
+- On removal, delete membership first, count remaining references for this `checksum` inside the same transaction, and delete the document and registry row only when the count reaches zero.
 
 #### Reference-counted delete stub
 
@@ -437,11 +487,12 @@ Deduplication and deletion rules:
 BEGIN;
 
 DELETE FROM connector_file_membership
-WHERE connector_id = $1 AND sha256 = $2;
+WHERE connector_id = $1 AND checksum = $2;
 
+-- Returns 0 when this was the last owner → safe to delete document + registry row
 SELECT COUNT(*)
 FROM connector_file_membership
-WHERE sha256 = $2;
+WHERE checksum = $2;
 
 COMMIT;
 ```
@@ -478,8 +529,8 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 Add matching ORM models in `services/digitize/db/models.py`:
 
 - `ActiveConnector`
-- `FileChecksumRegistry`
-- `ConnectorFileMembership`
+- `FileChecksumRegistry` — fields: `checksum` (PK), `source`, `doc_id` (FK → `documents`), `registered_at`
+- `ConnectorFileMembership` — fields: `connector_id` (FK → `active_connectors`), `checksum` (FK → `file_checksum_registry`)
 - `ConnectorSyncHistory`
 
 ---
@@ -501,30 +552,47 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 | `delete_active_connector()` | delete connector |
 | `update_connector_sync_status()` | write top-level sync state |
 | `merge_connection_details()` | key-level JSON merge for PUT |
-| `lookup_content_by_sha256()` | dedup lookup |
-| `insert_checksum_registry()` | register newly ingested content |
-| `delete_checksum_registry()` | defensive cleanup |
-| `list_connector_hashes()` | current connector hashes |
-| `insert_connector_membership()` | add ownership row |
-| `delete_connector_membership_atomic()` | remove ownership and return remaining ref count |
+| `lookup_content_by_checksum(checksum)` | dedup lookup — returns `doc_id` or `None` |
+| `insert_checksum_registry(checksum, source, doc_id)` | register newly ingested content |
+| `delete_checksum_registry(checksum)` | defensive cleanup |
+| `list_connector_checksums(connector_id)` | current checksums owned by this connector |
+| `insert_connector_membership(connector_id, checksum)` | add ownership row |
+| `delete_connector_membership_atomic(connector_id, checksum)` | remove ownership, return remaining ref count |
 | `insert_sync_history()` | create tick row |
 | `update_sync_history()` | finalize tick row |
 | `update_sync_history_files_syncing()` | live progress updates |
 | `list_sync_history()` | paginated history query |
+| `set_document_metadata(doc_id, metadata)` | write `source_checksum` + S3 key into `documents.metadata` |
 
 ### 5.2 DB-layer stub
 
 ```python
-def delete_connector_membership_atomic(connector_id: str, sha256: str) -> int:
+def lookup_content_by_checksum(checksum: str) -> str | None:
+    """Return doc_id if checksum is already registered, else None."""
+    return tx.scalar(
+        "SELECT doc_id FROM file_checksum_registry WHERE checksum = :checksum",
+        {"checksum": checksum},
+    )
+
+
+def insert_checksum_registry(checksum: str, source: str, doc_id: str) -> None:
+    """Register a newly ingested document by its content checksum."""
+    tx.execute(
+        "INSERT INTO file_checksum_registry (checksum, source, doc_id) VALUES (:checksum, :src, :doc)",
+        {"checksum": checksum, "src": source, "doc": doc_id},
+    )
+
+
+def delete_connector_membership_atomic(connector_id: str, checksum: str) -> int:
     """Delete one membership row and return remaining reference count."""
     with transaction() as tx:
         tx.execute(
-            "DELETE FROM connector_file_membership WHERE connector_id = :cid AND sha256 = :sha",
-            {"cid": connector_id, "sha": sha256},
+            "DELETE FROM connector_file_membership WHERE connector_id = :cid AND checksum = :checksum",
+            {"cid": connector_id, "checksum": checksum},
         )
         remaining = tx.scalar(
-            "SELECT COUNT(*) FROM connector_file_membership WHERE sha256 = :sha",
-            {"sha": sha256},
+            "SELECT COUNT(*) FROM connector_file_membership WHERE checksum = :checksum",
+            {"checksum": checksum},
         )
     return int(remaining)
 ```
@@ -547,9 +615,10 @@ Base scanner responsibilities:
 
 Subclass responsibilities:
 
-- remote listing
-- SHA-256 computation (strategy is transport-specific — see §7.1 and §7.2)
-- file download
+- remote listing — yields `(remote_path, checksum)` pairs
+- dedup check against `known_checksums` before downloading (strategy is transport-specific — see §7.1 and §7.2)
+- file download (only when checksum is not already known)
+- storing `checksum` in `file_checksum_registry` and in `documents.metadata` after ingest
 - connection lifecycle
 
 ### 6.2 Class diagram
@@ -557,13 +626,13 @@ Subclass responsibilities:
 ```text
 BaseScanner
   ├─ connect()
-  ├─ scan(known_hashes)
+  ├─ scan(known_checksums)    → list[(remote_path, checksum)]
   ├─ download_to(remote_path, local_path)
   └─ close()
 
 BaseScanner
-  ├─ SFTPScanner
-  └─ S3Scanner
+  ├─ SFTPScanner          (checksum = remotely-computed md5sum)
+  └─ S3Scanner            (checksum = S3 ETag from list_objects_v2)
 ```
 
 ### 6.3 Interface stub
@@ -582,7 +651,13 @@ class BaseScanner(ABC):
         ...
 
     @abstractmethod
-    def scan(self, known_hashes: set[str]):
+    def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
+        """Yield (remote_path, checksum) for files not in known_checksums.
+
+        Implementations must skip any file whose checksum is already present
+        in known_checksums — no download should occur for those files.
+        Returns only files that need to be ingested.
+        """
         ...
 
     @abstractmethod
@@ -617,30 +692,40 @@ Behavior:
 - connect with Paramiko (SFTP channel for listing/download, SSH channel for hashing)
 - recursively walk the remote path
 - ignore files whose extension is not allowed
-- compute SHA-256 **on the remote host** via `ssh.exec_command()` — no file bytes are transferred during hashing
+- compute MD5 **on the remote host** via `ssh.exec_command()` — no file bytes are transferred during hashing
 - download selected files into staging
 
-SHA-256 is obtained by running `sha256sum` on the remote side:
+> **Note — SFTP checksum is an MD5 digest.** `file_checksum_registry.checksum` stores the hex MD5 digest for SFTP files (e.g. `"d41d8cd98f00b204e980..."`), computed remotely via `md5sum`. For S3 files the same column stores the S3 ETag returned by `list_objects_v2` — both are treated uniformly as an opaque `checksum` string (see [§7.2](#72-s3-scanner)).
+
+MD5 is obtained by running `md5sum` on the remote side:
 
 ```python
-def _remote_sha256(self, remote_file_path: str) -> str:
-    """Execute sha256sum on the remote host and return the hex digest."""
-    _, stdout, _ = self._ssh.exec_command(f'sha256sum "{remote_file_path}"')
+def _remote_md5(self, remote_file_path: str) -> str:
+    """Execute md5sum on the remote host and return the hex digest."""
+    _, stdout, _ = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
     output = stdout.read().decode().strip()
-    # sha256sum output format: "<hex_digest>  <filename>"
+    # md5sum output format: "<hex_digest>  <filename>"
     return output.split()[0]
 ```
 
 SFTP scan sketch:
 
 ```python
-def scan(self, known_hashes: set[str]):
+def scan(self, known_checksums: set[str]):
+    """Return (remote_file, checksum) for files whose checksum is not yet registered.
+
+    For SFTP sources the checksum is a hex MD5 digest computed on the
+    remote host via md5sum — stored in file_checksum_registry.checksum
+    alongside S3 checksums (S3 ETags) with no schema difference.
+    """
     found = []
     for remote_file in self._walk_remote_tree():
         if not self._is_allowed(remote_file.path):
             continue
-        sha256 = self._remote_sha256(remote_file.path)
-        found.append((remote_file, sha256))
+        checksum = self._remote_md5(remote_file.path)
+        if checksum in known_checksums:
+            continue   # already ingested — skip download
+        found.append((remote_file, checksum))
     return found
 ```
 
@@ -648,25 +733,89 @@ def scan(self, known_hashes: set[str]):
 
 **Modified file:** `services/digitize/connector/s3_scanner.py`
 
-Behavior mirrors SFTP but uses boto3:
+**Detailed design:** [S3 Scanner — Detailed Design Proposal](./s3-scanner-proposal.md)
 
-- decrypt secret access key per tick
-- list objects via S3 APIs
-- filter by extension
-- stream object content to compute SHA-256
-- download selected objects into staging
+Behavior:
+
+- Auto-detect provider (AWS S3 or IBM COS) from `endpoint_url` hostname — no separate region field needed
+- Build boto3 client per tick using `IBMCOSConnector._build_client()` (pure-Python, ppc64le compatible)
+- List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag, at no extra API cost
+- **Checksum pre-check before download:** if checksum is already in `known_checksums` → skip file entirely (zero bytes transferred)
+- Download only new files via `download_fileobj()`
+- Store checksum in `file_checksum_registry` and in `documents.metadata.source_checksum`
+
+**Checksum dedup flow:**
+
+```
+list_objects_v2  →  (key, checksum)          # checksum = S3 ETag
+                          │
+          checksum in known_checksums?
+                    │
+          YES ──────┘                    NO
+           ▼                              ▼
+      skip — zero bytes             download_fileobj()
+      add membership only           + _HashingWriter (inline MD5)
+                                    ingest pipeline
+                                    INSERT file_checksum_registry(checksum, ...)
+                                    SET documents.metadata.source_checksum = checksum
+```
 
 S3 scan sketch:
 
 ```python
-def scan(self, known_hashes: set[str]):
-    found = []
-    for obj in self._list_objects():
-        if not self._is_allowed(obj.key):
-            continue
-        sha256 = self._stream_hash(obj.key)
-        found.append((obj, sha256))
-    return found
+def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
+    """Return (key, checksum) for objects whose checksum is not yet registered."""
+    to_ingest = []
+    for key, checksum in self._list_document_keys():   # checksum = S3 ETag, free from list_objects_v2
+        if checksum in known_checksums:
+            continue                                    # skip — already ingested
+        to_ingest.append((key, checksum))
+    return to_ingest
+
+
+def download_and_register(self, key: str, checksum: str, staging_dir: Path) -> str:
+    """Download key, run ingest, register checksum + metadata, return doc_id."""
+    local_path = staging_dir / Path(key).name
+    with open(local_path, "wb") as fh:
+        writer = _HashingWriter(fh)                # inline MD5 — no second read
+        self._client.download_fileobj(
+            Bucket=self._cfg.bucket_name,
+            Key=key,
+            Fileobj=writer,
+        )
+    # checksum = S3 ETag from list_objects_v2 — the registry key.
+    # For single-part: local MD5 == checksum (sanity check available).
+    # For multi-part:  local MD5 != checksum (different formula — expected).
+    doc_id = run_ingest_pipeline(local_path)
+    insert_checksum_registry(checksum=checksum, source="s3", doc_id=doc_id)
+    set_document_metadata(doc_id, {
+        "source_checksum": checksum,
+        "source_type":     "s3",
+        "bucket":          self._cfg.bucket_name,
+        "key":             key,
+    })
+    return doc_id
+```
+
+**boto3 client construction** (provider auto-detected from `endpoint_url`):
+
+```python
+is_aws = "amazonaws.com" in cfg.endpoint_url
+
+client = boto3.Session(
+    aws_access_key_id=cfg.access_key_id,
+    aws_secret_access_key=cfg.secret_access_key,
+    region_name=_region_from_endpoint(cfg.endpoint_url),
+).client(
+    "s3",
+    config=botocore.config.Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "auto" if is_aws else "path"},
+    ),
+    # AWS S3: omit endpoint_url — boto3 auto-resolves virtual-hosted style.
+    # IBM COS: forward endpoint_url — required for path-style addressing.
+    **({} if is_aws else {"endpoint_url": cfg.endpoint_url}),
+)
 ```
 
 ---
@@ -699,11 +848,18 @@ def _run_tick(self) -> None:
     scanner = build_scanner(self.config)
     try:
         scanner.connect()
-        known_hashes = list_connector_hashes(self.connector_id)
-        remote_files = scanner.scan(known_hashes)
-        to_ingest, orphan_hashes = self._diff(remote_files, known_hashes)
+
+        # known_checksums: set of checksums already in file_checksum_registry
+        # for this connector. Passed to scanner.scan() so the scanner can skip
+        # files whose checksum is already registered — no download occurs.
+        known_checksums = set(list_connector_checksums(self.connector_id))
+
+        # scan() returns only (remote_path, checksum) pairs not in known_checksums.
+        remote_files = scanner.scan(known_checksums)
+
+        to_ingest, orphan_checksums = self._diff(remote_files, known_checksums)
         self._process_new_files(sync_id, scanner, to_ingest)
-        self._delete_orphans(orphan_hashes)
+        self._delete_orphans(orphan_checksums)
         self._complete_tick(sync_id)
     except Exception as exc:
         self._fail_tick(sync_id, exc)
@@ -845,8 +1001,8 @@ Two in-tick tracking collections:
 
 | Variable | Holds | Populated |
 | --- | --- | --- |
-| `pending_shas` | SHA-256 values pre-written with `NULL doc_id` | Before each download; removed on success |
-| `ingested_this_tick` | `(sha256, doc_id)` pairs | After each successful ingest |
+| `pending_checksums` | Checksum values pre-written with `NULL doc_id` | Before each download; removed on success |
+| `ingested_this_tick` | `(checksum, doc_id)` pairs | After each successful ingest |
 
 DELETE flow:
 
@@ -897,7 +1053,7 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 
 **What's built:**
 All DB functions from §5.1:
-`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_content_by_sha256`, `insert_checksum_registry`, `delete_checksum_registry`, `list_connector_hashes`, `insert_connector_membership`, `delete_connector_membership_atomic`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`
+`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_content_by_checksum`, `insert_checksum_registry`, `delete_checksum_registry`, `list_connector_checksums`, `insert_connector_membership`, `delete_connector_membership_atomic`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`
 
 **How to test:**
 - Unit tests per function against a test DB (real or in-memory with pg_testcontainer / SQLite shim)
@@ -932,12 +1088,12 @@ All DB functions from §5.1:
 **What's built:**
 - `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
 - `build_scanner()` factory — dispatches on `type`
-- `SFTPScanner` — decrypts private key, Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote SHA-256 via `ssh.exec_command(f'sha256sum "{remote_file_path}"')`, staged download
+- `SFTPScanner` — Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote MD5 via `ssh.exec_command(f'md5sum "{remote_file_path}"')`, staged download
 
 **How to test:**
 - Unit test `SFTPScanner` against a local mock SFTP server (e.g. `pytest-sftpserver` or `paramiko.SFTPServer` in a thread)
 - Assert extension filtering works correctly
-- Assert SHA-256 is computed via remote `sha256sum` exec (not by streaming bytes) and matches expected digest
+- Assert MD5 is computed via remote `md5sum` exec (not by streaming bytes) and matches expected digest
 - Assert `build_scanner("ssh", config)` returns an `SFTPScanner` instance
 
 ---
@@ -947,7 +1103,7 @@ All DB functions from §5.1:
 **Files touched:** `connector/s3_scanner.py`
 
 **What's built:**
-- `S3Scanner` — decrypts secret key, boto3 list-objects, extension filter, streaming SHA-256, staged download
+- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, **checksum dedup pre-check** (skip objects whose checksum is already in `known_checksums`), `download_fileobj()`, staged download, checksum (S3 ETag) registered in `file_checksum_registry` and stored in `documents.metadata.source_checksum`
 
 **How to test:**
 - Unit test with `moto` (mock AWS) — assert listing, filtering, hash computation, and download
@@ -965,14 +1121,14 @@ All DB functions from §5.1:
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
-- `pending_shas` / `ingested_this_tick` rollback tracking for mid-tick DELETE interruption
+- `pending_checksums` / `ingested_this_tick` rollback tracking for mid-tick DELETE interruption
 
 **How to test:**
 - Unit tests with mocked scanner and mocked DB layer
 - Assert tick guard skips when a tick is already running
 - Assert crash guard writes `"crashed: <error>"` to DB on unhandled exception
 - Assert `stop_event.set()` before a tick results in no DB writes
-- Assert mid-tick cancellation cleans up `pending_shas` and `ingested_this_tick`
+- Assert mid-tick cancellation cleans up `pending_checksums` and `ingested_this_tick`
 
 ---
 
