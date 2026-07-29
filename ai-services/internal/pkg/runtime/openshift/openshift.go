@@ -524,12 +524,12 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// --- CPU ---
-	totalCPU, err := queryThanos(`sum(kube_node_status_capacity{resource="cpu"})`)
+	totalCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="cpu"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query total CPU capacity: %w", err)
 	}
 
-	availCPU, err := queryThanos(`sum(kube_node_status_allocatable{resource="cpu"})`)
+	availCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="cpu"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allocatable CPU: %w", err)
 	}
@@ -540,12 +540,12 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// --- Memory ---
-	totalMem, err := queryThanos(`sum(kube_node_status_capacity{resource="memory"})`)
+	totalMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="memory"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query total memory capacity: %w", err)
 	}
 
-	availMem, err := queryThanos(`sum(kube_node_status_allocatable{resource="memory"})`)
+	availMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="memory"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allocatable memory: %w", err)
 	}
@@ -560,8 +560,7 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	// even when Thanos has not yet scraped the custom resource metric.
 	spyreInfo, err := kc.getSpyreCardInfo()
 	if err != nil {
-		// Non-fatal: log and return an empty accelerator map.
-		logger.ErrorfCtx(kc.Ctx, "Could not retrieve Spyre card info: %v", err)
+		return nil, fmt.Errorf("failed to retrieve Spyre card info: %w", err)
 	} else if spyreInfo != nil {
 		sysInfo.Accelerators[spyreResourceName] = spyreInfo
 	}
@@ -631,7 +630,7 @@ func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
 //
 // PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""}).
 func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
-	used, err := queryThanos(`sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
+	used, err := queryThanos(kc.Ctx, `sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query Spyre cards in use: %w", err)
 	}

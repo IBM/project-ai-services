@@ -1,6 +1,7 @@
 package openshift
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -30,6 +34,37 @@ const (
 	thanosValueLen = 2
 )
 
+var (
+	// thanosOnce ensures the shared HTTP client and bearer token are initialised
+	// exactly once for the lifetime of the process — consistent with the
+	// clientsOnce / catalogOnce pattern used elsewhere in the codebase.
+	thanosOnce   sync.Once
+	thanosHTTP   *http.Client
+	thanosToken  string
+)
+
+// initThanosClient builds the shared HTTP client and reads the SA bearer token
+// from the filesystem. Called exactly once via thanosOnce.
+func initThanosClient(ctx context.Context) {
+	thanosOnce.Do(func() {
+		thanosHTTP = &http.Client{
+			Timeout: thanosHTTPTimeout,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, //nolint:gosec // in-cluster self-signed cert
+					MinVersion:         tls.VersionTLS12,
+				},
+			},
+		}
+
+		if data, err := os.ReadFile(serviceAccountTokenPath); err == nil {
+			thanosToken = strings.TrimSpace(string(data))
+		} else {
+			logger.WarninglnCtx(ctx, "No Thanos bearer token found; requests will be unauthenticated")
+		}
+	})
+}
+
 // thanosResponse is the JSON envelope returned by /api/v1/query.
 type thanosResponse struct {
 	Status string `json:"status"`
@@ -43,20 +78,6 @@ type thanosResponse struct {
 	Error string `json:"error"`
 }
 
-// buildThanosHTTPClient returns an HTTP client configured for the in-cluster
-// Thanos Querier (TLS 1.2+, self-signed cert accepted, fixed timeout).
-func buildThanosHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: thanosHTTPTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // in-cluster self-signed cert
-				MinVersion:         tls.VersionTLS12,
-			},
-		},
-	}
-}
-
 // parseThanosResponse unmarshals the Thanos JSON body, validates the status,
 // and sums all result values into a single float64.
 func parseThanosResponse(body []byte) (float64, error) {
@@ -67,6 +88,10 @@ func parseThanosResponse(body []byte) (float64, error) {
 
 	if result.Status != "success" {
 		return 0, fmt.Errorf("thanos returned non-success status %q: %s", result.Status, result.Error)
+	}
+
+	if len(result.Data.Result) == 0 {
+		return 0, fmt.Errorf("thanos returned empty result set for query")
 	}
 
 	var total float64
@@ -95,7 +120,9 @@ func parseThanosResponse(body []byte) (float64, error) {
 // queryThanos executes an instant PromQL query against the Thanos Querier and
 // returns the result as a float64. For vector results all values are summed,
 // which is appropriate for both cluster-wide and filtered per-pod aggregations.
-func queryThanos(query string) (float64, error) {
+func queryThanos(ctx context.Context, query string) (float64, error) {
+	initThanosClient(ctx)
+
 	u, err := url.Parse(defaultThanosURL + "/api/v1/query")
 	if err != nil {
 		return 0, fmt.Errorf("invalid thanos URL: %w", err)
@@ -105,17 +132,16 @@ func queryThanos(query string) (float64, error) {
 	q.Set("query", query)
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to build thanos request: %w", err)
 	}
 
-	token := loadThanosToken()
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if thanosToken != "" {
+		req.Header.Set("Authorization", "Bearer "+thanosToken)
 	}
 
-	resp, err := buildThanosHTTPClient().Do(req)
+	resp, err := thanosHTTP.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("thanos query failed: %w", err)
 	}
@@ -134,15 +160,4 @@ func queryThanos(query string) (float64, error) {
 	}
 
 	return parseThanosResponse(body)
-}
-
-// loadThanosToken returns the bearer token for Thanos from the in-cluster
-// projected service-account token file. Returns an empty string when the file
-// is not present (e.g. out-of-cluster development).
-func loadThanosToken() string {
-	if data, err := os.ReadFile(serviceAccountTokenPath); err == nil {
-		return strings.TrimSpace(string(data))
-	}
-
-	return ""
 }
