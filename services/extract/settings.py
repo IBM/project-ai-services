@@ -6,7 +6,7 @@ All values can be overridden via environment variables.
 
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from common.misc_utils import get_logger
@@ -68,10 +68,41 @@ class ExtractionConfig(BaseSettings):
         description="Maximum reserved output tokens (ceiling for large schemas)",
     )
 
-    prompt_overhead_tokens: int = Field(
-        default=150,
-        ge=0,
-        description="Estimated token budget for the fixed system-prompt scaffold",
+    # Prompts (Section 8.1 of proposal)
+    extraction_system_prompt: str = Field(
+        default=(
+            "You are an information extraction assistant. You extract data from the provided\n"
+            "text and return it strictly as a single JSON object that conforms to the given\n"
+            "JSON schema. Output ONLY the JSON object. Do not add explanations, markdown\n"
+            "fences, headings, or any other text.\n\n"
+            "Rules:\n"
+            "1. Extract values EXACTLY as they appear in the text (preserve numbers, dates,\n"
+            "   identifiers verbatim; normalize dates to the schema's declared format).\n"
+            "2. If a non-required property is not present in the text, omit it or set it to\n"
+            "   null. NEVER invent values.\n"
+            "3. Required properties must be populated from the text.\n\n"
+            "{custom_prompt}"
+        ),
+        description=(
+            "System prompt template for extraction requests (Section 8.1).  "
+            "Contains one optional placeholder: {custom_prompt}, which is replaced "
+            "with the schema's custom_prompt value or removed when absent."
+        ),
+    )
+
+    extraction_user_prompt: str = Field(
+        default=(
+            "JSON schema:\n"
+            "{normalized_json_schema}\n\n"
+            "{few_shot_block}\n\n"
+            "Text:\n"
+            "{input_text}\n\n"
+            "JSON:"
+        ),
+        description=(
+            "User prompt template for extraction requests (Section 8.1).  "
+            "Placeholders: {normalized_json_schema}, {few_shot_block}, {input_text}."
+        ),
     )
 
     # vLLM
@@ -92,30 +123,6 @@ class ExtractionConfig(BaseSettings):
         default=4,
         ge=1,
         description="Maximum number of async extraction jobs running in parallel",
-    )
-
-    # Digitize service integration
-    digitize_base_url: str = Field(
-        default="http://digitize:4000",
-        description="Base URL of the Digitize Documents service",
-    )
-
-    digitize_poll_interval_secs: int = Field(
-        default=10,
-        ge=1,
-        description="Polling interval (seconds) for digitize job status",
-    )
-
-    digitize_job_timeout_secs: int = Field(
-        default=3600,
-        ge=1,
-        description="Maximum wait time (seconds) for a digitize job to complete",
-    )
-
-    digitize_submit_timeout_secs: int = Field(
-        default=900,
-        ge=1,
-        description="Maximum backoff budget (seconds) when digitize returns 429",
     )
 
     @property

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from extract.schema_utils import SchemaValidationError
+from extract.utils.schema import SchemaValidationError
 
 
 # ---- helpers -----------------------------------------------------------
@@ -95,24 +95,24 @@ class TestRegisterSchema:
     def _patch_all_passing(self):
         """Context-manager stack for the happy path."""
         return [
-            patch("extract.app.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]),
-            patch("extract.app.validate_json_schema_structure"),
-            patch("extract.app.validate_examples"),
-            patch("extract.app.db_repo.schema_name_exists", return_value=False),
+            patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]),
+            patch("extract.api.v1.schema.validate_json_schema_structure"),
+            patch("extract.api.v1.schema.validate_examples"),
+            patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False),
             patch(
-                "extract.app.compute_token_counts",
+                "extract.api.v1.schema.compute_token_counts",
                 return_value=(50, 30, 0),
             ),
-            patch("extract.app.check_schema_share_in_context"),
+            patch("extract.api.v1.schema.check_schema_share_in_context"),
             patch(
-                "extract.app.db_repo.create_schema",
+                "extract.api.v1.schema.db_repo.create_schema",
                 return_value=_mock_schema_row(),
             ),
         ]
 
     def test_valid_schema_returns_201(self, extract_test_client, monkeypatch):
         monkeypatch.setattr(
-            "extract.app.asyncio.to_thread",
+            "extract.api.v1.schema.asyncio.to_thread",
             AsyncMock(return_value=(50, 30, 0)),
         )
         patches = self._patch_all_passing()
@@ -129,19 +129,19 @@ class TestRegisterSchema:
         assert body["name"] == "invoice-extraction"
 
     def test_duplicate_name_returns_409(self, extract_test_client):
-        with patch("extract.app.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
-             patch("extract.app.validate_json_schema_structure"), \
-             patch("extract.app.validate_examples"), \
-             patch("extract.app.db_repo.schema_name_exists", return_value=True):
+        with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+             patch("extract.api.v1.schema.validate_json_schema_structure"), \
+             patch("extract.api.v1.schema.validate_examples"), \
+             patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=True):
             resp = extract_test_client.post("/v1/schemas", json=_VALID_SCHEMA_BODY)
 
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "CONFLICT"
 
     def test_invalid_json_schema_returns_400(self, extract_test_client):
-        with patch("extract.app.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+        with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
              patch(
-                 "extract.app.validate_json_schema_structure",
+                 "extract.api.v1.schema.validate_json_schema_structure",
                  side_effect=SchemaValidationError("INVALID_SCHEMA", "Root must be type:object", 400),
              ):
             resp = extract_test_client.post(
@@ -156,10 +156,10 @@ class TestRegisterSchema:
         assert resp.json()["error"]["code"] == "INVALID_SCHEMA"
 
     def test_invalid_example_returns_400(self, extract_test_client):
-        with patch("extract.app.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
-             patch("extract.app.validate_json_schema_structure"), \
+        with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+             patch("extract.api.v1.schema.validate_json_schema_structure"), \
              patch(
-                 "extract.app.validate_examples",
+                 "extract.api.v1.schema.validate_examples",
                  side_effect=SchemaValidationError(
                      "INVALID_EXAMPLE",
                      "examples[0].output does not validate",
@@ -174,15 +174,15 @@ class TestRegisterSchema:
 
     def test_budget_exceeded_returns_400(self, extract_test_client, monkeypatch):
         monkeypatch.setattr(
-            "extract.app.asyncio.to_thread",
+            "extract.api.v1.schema.asyncio.to_thread",
             AsyncMock(return_value=(9000, 8000, 500)),
         )
-        with patch("extract.app.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
-             patch("extract.app.validate_json_schema_structure"), \
-             patch("extract.app.validate_examples"), \
-             patch("extract.app.db_repo.schema_name_exists", return_value=False), \
+        with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+             patch("extract.api.v1.schema.validate_json_schema_structure"), \
+             patch("extract.api.v1.schema.validate_examples"), \
+             patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
              patch(
-                 "extract.app.check_schema_share_in_context",
+                 "extract.api.v1.schema.check_schema_share_in_context",
                  side_effect=SchemaValidationError(
                      "SCHEMA_BUDGET_EXCEEDED",
                      "Schema overhead exceeds budget",
@@ -220,7 +220,7 @@ class TestRegisterSchema:
 class TestListSchemas:
     def test_returns_200_with_pagination(self, extract_test_client):
         rows = [_mock_schema_row(schema_id=f"s-{i}", name=f"schema-{i}") for i in range(3)]
-        with patch("extract.app.db_repo.list_schemas", return_value=(rows, 3)):
+        with patch("extract.api.v1.schema.db_repo.list_schemas", return_value=(rows, 3)):
             resp = extract_test_client.get("/v1/schemas")
 
         assert resp.status_code == 200
@@ -229,18 +229,18 @@ class TestListSchemas:
         assert len(body["data"]) == 3
 
     def test_empty_registry_returns_200(self, extract_test_client):
-        with patch("extract.app.db_repo.list_schemas", return_value=([], 0)):
+        with patch("extract.api.v1.schema.db_repo.list_schemas", return_value=([], 0)):
             resp = extract_test_client.get("/v1/schemas")
         assert resp.status_code == 200
         assert resp.json()["pagination"]["total"] == 0
 
     def test_name_filter_passed_to_db(self, extract_test_client):
-        with patch("extract.app.db_repo.list_schemas", return_value=([], 0)) as mock_list:
+        with patch("extract.api.v1.schema.db_repo.list_schemas", return_value=([], 0)) as mock_list:
             extract_test_client.get("/v1/schemas?name=invoice")
         mock_list.assert_called_once_with(name_filter="invoice", limit=20, offset=0)
 
     def test_limit_and_offset_passed_to_db(self, extract_test_client):
-        with patch("extract.app.db_repo.list_schemas", return_value=([], 0)) as mock_list:
+        with patch("extract.api.v1.schema.db_repo.list_schemas", return_value=([], 0)) as mock_list:
             extract_test_client.get("/v1/schemas?limit=5&offset=10")
         mock_list.assert_called_once_with(name_filter=None, limit=5, offset=10)
 
@@ -250,7 +250,7 @@ class TestListSchemas:
 
     def test_schema_body_not_included_in_list(self, extract_test_client):
         row = _mock_schema_row()
-        with patch("extract.app.db_repo.list_schemas", return_value=([row], 1)):
+        with patch("extract.api.v1.schema.db_repo.list_schemas", return_value=([row], 1)):
             resp = extract_test_client.get("/v1/schemas")
         item = resp.json()["data"][0]
         assert "json_schema" not in item   # body excluded from list endpoint
@@ -264,7 +264,7 @@ class TestListSchemas:
 class TestGetSchema:
     def test_existing_schema_returns_200_with_body(self, extract_test_client):
         row = _mock_schema_row()
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=row):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=row):
             resp = extract_test_client.get(f"/v1/schemas/{row.schema_id}")
 
         assert resp.status_code == 200
@@ -274,7 +274,7 @@ class TestGetSchema:
         assert "examples" in body
 
     def test_unknown_id_returns_404(self, extract_test_client):
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=None):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=None):
             resp = extract_test_client.get("/v1/schemas/nonexistent")
 
         assert resp.status_code == 404
@@ -288,7 +288,7 @@ class TestGetSchema:
             "required": ["name"],
         }
         row = _mock_schema_row(json_schema=stored_schema)
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=row):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=row):
             resp = extract_test_client.get(f"/v1/schemas/{row.schema_id}")
         assert resp.json()["json_schema"] == stored_schema
 
@@ -301,23 +301,23 @@ class TestGetSchema:
 class TestDeleteSchema:
     def test_unreferenced_schema_returns_204(self, extract_test_client):
         row = _mock_schema_row()
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=row), \
-             patch("extract.app.db_repo.get_referencing_job_ids", return_value=[]), \
-             patch("extract.app.db_repo.delete_schema", return_value=True):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=row), \
+             patch("extract.api.v1.schema.db_repo.get_referencing_job_ids", return_value=[]), \
+             patch("extract.api.v1.schema.db_repo.delete_schema", return_value=True):
             resp = extract_test_client.delete(f"/v1/schemas/{row.schema_id}")
 
         assert resp.status_code == 204
 
     def test_unknown_schema_returns_404(self, extract_test_client):
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=None):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=None):
             resp = extract_test_client.delete("/v1/schemas/unknown")
 
         assert resp.status_code == 404
 
     def test_schema_with_jobs_returns_409(self, extract_test_client):
         row = _mock_schema_row()
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=row), \
-             patch("extract.app.db_repo.get_referencing_job_ids", return_value=["job-1", "job-2"]):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=row), \
+             patch("extract.api.v1.schema.db_repo.get_referencing_job_ids", return_value=["job-1", "job-2"]):
             resp = extract_test_client.delete(f"/v1/schemas/{row.schema_id}")
 
         assert resp.status_code == 409
@@ -331,10 +331,10 @@ class TestDeleteSchema:
         from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
         row = _mock_schema_row()
-        with patch("extract.app.db_repo.get_schema_by_id", return_value=row), \
-             patch("extract.app.db_repo.get_referencing_job_ids", return_value=[]), \
-             patch("extract.app.db_repo.delete_schema", side_effect=SAIntegrityError(None, None, None)), \
-             patch("extract.app.db_repo.get_referencing_job_ids", return_value=["job-1"]):
+        with patch("extract.api.v1.schema.db_repo.get_schema_by_id", return_value=row), \
+             patch("extract.api.v1.schema.db_repo.get_referencing_job_ids", return_value=[]), \
+             patch("extract.api.v1.schema.db_repo.delete_schema", side_effect=SAIntegrityError(None, None, None)), \
+             patch("extract.api.v1.schema.db_repo.get_referencing_job_ids", return_value=["job-1"]):
             resp = extract_test_client.delete(f"/v1/schemas/{row.schema_id}")
 
         assert resp.status_code == 409
@@ -347,8 +347,8 @@ class TestDeleteSchema:
 @pytest.mark.unit
 class TestBulkDeleteSchemas:
     def test_confirm_true_no_jobs_returns_204(self, extract_test_client):
-        with patch("extract.app.db_repo.any_schema_has_jobs", return_value=False), \
-             patch("extract.app.db_repo.delete_all_schemas", return_value=True):
+        with patch("extract.api.v1.schema.db_repo.any_schema_has_jobs", return_value=False), \
+             patch("extract.api.v1.schema.db_repo.delete_all_schemas", return_value=True):
             resp = extract_test_client.delete("/v1/schemas?confirm=true")
 
         assert resp.status_code == 204
@@ -364,7 +364,7 @@ class TestBulkDeleteSchemas:
         assert resp.json()["error"]["code"] == "CONFIRMATION_REQUIRED"
 
     def test_jobs_exist_returns_409(self, extract_test_client):
-        with patch("extract.app.db_repo.any_schema_has_jobs", return_value=True):
+        with patch("extract.api.v1.schema.db_repo.any_schema_has_jobs", return_value=True):
             resp = extract_test_client.delete("/v1/schemas?confirm=true")
 
         assert resp.status_code == 409

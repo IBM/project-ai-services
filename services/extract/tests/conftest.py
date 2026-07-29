@@ -86,7 +86,7 @@ def extract_test_client(monkeypatch, mock_model_dict):
 
     with patch("extract.app.check_db_connection", return_value=True), \
          patch("extract.db.models.Base.metadata.create_all"), \
-         patch("extract.job_utils.recover_zombie_jobs", return_value=0):
+         patch("extract.utils.job.recover_zombie_jobs", return_value=0):
         client = TestClient(extract_app.app)
         yield client
         client.close()

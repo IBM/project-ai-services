@@ -8,11 +8,8 @@ Responsibilities:
   - Validation: check that the submitted schema is a valid JSON Schema
     draft 2020-12 with root ``type: object``, and that every example output
     validates against the normalized schema.
-  - Size guard: enforce MAX_SCHEMA_BYTES before any normalization work.
   - Budget check: verify that schema fixed-overhead token counts do not
     exceed CONTEXT_SCHEMA_SHARE × MAX_MODEL_LEN at registration time.
-  - Custom-prompt safety: block prompt-injection patterns (mirrors chatbot
-    validation logic).
 """
 
 import json
@@ -27,6 +24,34 @@ from common.misc_utils import get_logger
 from extract.settings import settings
 
 logger = get_logger("schema_utils")
+
+# ---------------------------------------------------------------------------
+# Prompt overhead — dynamically computed at service startup
+# ---------------------------------------------------------------------------
+
+# Token count of the fixed system + user prompt scaffold (placeholders empty).
+# Set to 0 here; overwritten by calculate_prompt_overhead_tokens() during
+# the FastAPI lifespan startup once the LLM session is available.
+prompt_overhead_tokens: int = 0
+
+
+def calculate_prompt_overhead_tokens(llm_endpoint: str) -> None:
+    """
+    Tokenise the fixed prompt scaffold with all variable placeholders replaced
+    by empty strings, and store the result in the module-level
+    ``prompt_overhead_tokens``.
+
+    Call this once during service startup after ``create_llm_session()`` and
+    ``initialize_models()`` have completed.
+    """
+    global prompt_overhead_tokens
+    system_scaffold = settings.extract.extraction_system_prompt.format(custom_prompt="")
+    user_scaffold = settings.extract.extraction_user_prompt.format(
+        normalized_json_schema="", few_shot_block="", input_text=""
+    )
+    scaffold_text = system_scaffold + "\n" + user_scaffold
+    prompt_overhead_tokens = _tokenize(scaffold_text, llm_endpoint)
+    logger.info(f"Computed prompt_overhead_tokens={prompt_overhead_tokens}")
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +303,7 @@ def check_schema_share_in_context(
 
     Raises SchemaValidationError with code SCHEMA_BUDGET_EXCEEDED on failure.
     """
-    overhead = settings.extract.prompt_overhead_tokens
+    overhead = prompt_overhead_tokens
     share = settings.extract.context_schema_share
     budget = int(share * max_model_len)
 
@@ -348,7 +373,7 @@ def check_extraction_budget(
     diagnostics on failure.  The caller is responsible for converting this
     into the appropriate HTTP 413 response.
     """
-    overhead = settings.extract.prompt_overhead_tokens
+    overhead = prompt_overhead_tokens
     reserved_output = compute_reserved_output(schema_tokens)
 
     total = (
@@ -383,5 +408,15 @@ def check_extraction_budget(
         )
 
     return reserved_output
+
+
+# ---------------------------------------------------------------------------
+# Helper: format datetime for responses
+# ---------------------------------------------------------------------------
+
+def fmt_dt(dt) -> Optional[str]:
+    if dt is None:
+        return None
+    return dt.isoformat().replace("+00:00", "Z")
 
 # Made with Bob

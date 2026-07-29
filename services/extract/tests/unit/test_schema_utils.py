@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from extract.schema_utils import (
+from extract.utils.schema import (
     SchemaValidationError,
     check_extraction_budget,
     check_schema_share_in_context,
@@ -249,21 +249,21 @@ class TestValidateExamples:
 
 class TestComputeReservedOutput:
     def test_normal_factor(self, monkeypatch):
-        monkeypatch.setattr("extract.schema_utils.settings.extract.output_token_factor", 2.0)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.min_output_tokens", 512)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.max_output_tokens", 4096)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.output_token_factor", 2.0)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.min_output_tokens", 512)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.max_output_tokens", 4096)
         assert compute_reserved_output(500) == 1000   # 500 * 2.0
 
     def test_floor_applied(self, monkeypatch):
-        monkeypatch.setattr("extract.schema_utils.settings.extract.output_token_factor", 2.0)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.min_output_tokens", 512)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.max_output_tokens", 4096)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.output_token_factor", 2.0)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.min_output_tokens", 512)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.max_output_tokens", 4096)
         assert compute_reserved_output(10) == 512   # 10 * 2.0 = 20 < 512
 
     def test_ceiling_applied(self, monkeypatch):
-        monkeypatch.setattr("extract.schema_utils.settings.extract.output_token_factor", 2.0)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.min_output_tokens", 512)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.max_output_tokens", 4096)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.output_token_factor", 2.0)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.min_output_tokens", 512)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.max_output_tokens", 4096)
         assert compute_reserved_output(5000) == 4096  # 5000 * 2.0 = 10000 > 4096
 
 
@@ -273,8 +273,8 @@ class TestComputeReservedOutput:
 
 class TestCheckRegistrationBudget:
     def _patch_settings(self, monkeypatch):
-        monkeypatch.setattr("extract.schema_utils.settings.extract.context_schema_share", 0.5)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.prompt_overhead_tokens", 150)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.context_schema_share", 0.5)
+        monkeypatch.setattr("extract.utils.schema.prompt_overhead_tokens", 150)
 
     def test_within_budget_passes(self, monkeypatch):
         self._patch_settings(monkeypatch)
@@ -302,10 +302,10 @@ class TestCheckRegistrationBudget:
 
 class TestCheckExtractionBudget:
     def _patch_settings(self, monkeypatch):
-        monkeypatch.setattr("extract.schema_utils.settings.extract.output_token_factor", 2.0)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.min_output_tokens", 512)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.max_output_tokens", 4096)
-        monkeypatch.setattr("extract.schema_utils.settings.extract.prompt_overhead_tokens", 150)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.output_token_factor", 2.0)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.min_output_tokens", 512)
+        monkeypatch.setattr("extract.utils.schema.settings.extract.max_output_tokens", 4096)
+        monkeypatch.setattr("extract.utils.schema.prompt_overhead_tokens", 150)
 
     def test_within_budget_returns_reserved_output(self, monkeypatch):
         self._patch_settings(monkeypatch)
