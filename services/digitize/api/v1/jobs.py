@@ -129,10 +129,7 @@ async def _validate_files(
     responses={
         **http_error_responses,
         409: {
-            "description": (
-                "Conflict — all submitted files have already been processed as completed "
-                "documents of the same operation type (duplicate detection via SHA-256 hash). "
-            ),
+            "description": "All submitted files have already been processed.",
         },
     },
     summary="Create async jobs to upload and process documents",
@@ -142,18 +139,9 @@ async def _validate_files(
         "- **digitization**: Convert document to text/markdown/JSON format (single file only)\n\n"
         "The operation runs asynchronously in the background. "
         "Use the returned `job_id` to track progress.\n\n"
-        "### Already-exists detection\n\n"
-        "Every submitted file is hashed (SHA-256) and compared against completed documents "
-        "of the same operation type already stored in the database.\n\n"
-        "| Scenario | Behaviour |\n"
-        "|---|---|\n"
-        "| All files already exist | **409 Conflict** — no job is created |\n"
-        "| Some files already exist | **202 Accepted** — only novel files are processed; "
-        "skipped files appear in the job's document list with `status=already_exists` and "
-        "a `message` field such as `\"Already ingested as <filename>\"` |\n"
-        "| No files already exist | **202 Accepted** |\n\n"
-        "Only *completed* documents trigger already-exists detection. Failed or in-progress records "
-        "are not considered to already exist."
+        "Files are deduplicated using hash against completed documents. "
+        "If only some files are duplicates, the job proceeds with the novel files; "
+        "skipped files appear in the document list with `status=already_exists`."
     ),
     response_description="Job accepted. `job_id` can be used to poll status.",
 )
