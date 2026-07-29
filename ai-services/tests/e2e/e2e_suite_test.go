@@ -1766,13 +1766,17 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] 400 reproduced with error: %s", errResp.Error)
 			})
 	})
-	ginkgo.Context("Application Backup And Restore", ginkgo.Ordered, ginkgo.Label("spyre-dependent", "digitization-tests"), func() {
+	ginkgo.Context("Application Backup And Restore", ginkgo.Ordered, ginkgo.Label("spyre-dependent", "app-backup-restore"), func() {
 		var (
-			digitizeDocID        string
-			digitizeDocName      string
-			digitizeDocStatus    string
-			opensearchBackupFile string
-			digitizeBackupFile   string
+			digitizeDocID          string
+			digitizeDocName        string
+			digitizeDocStatus      string
+			digitizeJobID          string
+			digitizeJobStatus      string
+			preBackupPowerVCResp   string
+			preBackupSpyreGPUResp  string
+			opensearchBackupFile   string
+			digitizeBackupFile     string
 		)
 
 		ginkgo.It("backs up and restores application data", func() {
@@ -1782,6 +1786,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			catalogLoginWithDiscovery(ctx, true)
 
 			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			digitizeBaseURL := cli.ExtractDigitizeURL(infoOutput)
@@ -1800,12 +1807,30 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
 			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
 
+			digitizeJobID = finalStatus.JobID
+			digitizeJobStatus = finalStatus.Status
 			digitizeDocID = finalStatus.Documents[0].ID
 
 			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, digitizeDocID)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			digitizeDocName = doc.Name
 			digitizeDocStatus = doc.Status
+
+			ragPrompts := []struct {
+				question string
+				response *string
+			}{
+				{question: "What is PowerVC?", response: &preBackupPowerVCResp},
+				{question: "How is a spyre card different from a GPU?", response: &preBackupSpyreGPUResp},
+			}
+			for _, prompt := range ragPrompts {
+				logger.Infof("[TEST] Pre-backup RAG prompt: %s", prompt.question)
+				response, askErr := rag.AskRAG(ctx, ragBaseURL, prompt.question)
+				gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+				gomega.Expect(strings.TrimSpace(response)).NotTo(gomega.BeEmpty())
+				logger.Infof("[TEST] Pre-backup RAG response for %q: %s", prompt.question, response)
+				*prompt.response = response
+			}
 
 			opensearchBackupFile = filepath.Join(tempDir, "opensearch-backup-"+runID+".tar.gz")
 			digitizeBackupFile = filepath.Join(tempDir, "digitize-backup-"+runID+".tar.gz")
@@ -1815,7 +1840,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			_, err = cli.ApplicationBackup(ctx, cfg, appName, "digitize", digitizeBackupFile, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			deleteOutput, deleteErr := cli.DeleteAppSkipCleanup(ctx, cfg, appName, appRuntime)
+			deleteOutput, deleteErr := cli.DeleteApp(ctx, cfg, appName, appRuntime)
 			gomega.Expect(deleteErr).NotTo(gomega.HaveOccurred())
 			gomega.Expect(deleteOutput).NotTo(gomega.BeEmpty())
 
@@ -1859,11 +1884,36 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			restoredDigitizeBaseURL := cli.ExtractDigitizeURL(restoredInfoOutput)
 			gomega.Expect(restoredDigitizeBaseURL).NotTo(gomega.BeEmpty())
 
+			restoredJobs, err := digitization.ListJobs(ctx, restoredDigitizeBaseURL, false, 20, 0, digitizeJobStatus, "digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(restoredJobs.Data).NotTo(gomega.BeEmpty())
+			jobFound := false
+			for _, job := range restoredJobs.Data {
+				if job.JobID == digitizeJobID {
+					jobFound = true
+					gomega.Expect(job.Status).To(gomega.Equal(digitizeJobStatus))
+					break
+				}
+			}
+			gomega.Expect(jobFound).To(gomega.BeTrue(), "restored digitize job %s not found", digitizeJobID)
+
 			restoredDocs, err := digitization.ListDocuments(ctx, restoredDigitizeBaseURL, 20, 0, "", digitizeDocName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(restoredDocs.Data).NotTo(gomega.BeEmpty())
 			gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(digitizeDocName))
 			gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(digitizeDocStatus))
+
+			restoredRAGBaseURL, err := cli.GetBaseURL(restoredInfoOutput, backendPort)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			for _, prompt := range ragPrompts {
+				logger.Infof("[TEST] Post-restore RAG prompt: %s", prompt.question)
+				restoredResponse, askErr := rag.AskRAG(ctx, restoredRAGBaseURL, prompt.question)
+				gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+				gomega.Expect(strings.TrimSpace(restoredResponse)).NotTo(gomega.BeEmpty())
+				logger.Infof("[TEST] Post-restore RAG response for %q: %s", prompt.question, restoredResponse)
+				gomega.Expect(restoredResponse).To(gomega.Equal(*prompt.response))
+			}
 		})
 
 		ginkgo.It("deletes the restored application", func() {

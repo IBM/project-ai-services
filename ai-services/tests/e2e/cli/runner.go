@@ -648,21 +648,8 @@ func StartApplication(
 	return output, nil
 }
 
-// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
-func DeleteAppSkipCleanup(
-	ctx context.Context,
-	cfg *config.Config,
-	appName string,
-	appRuntime string,
-) (string, error) {
-	args := []string{
-		"application", "delete", appName,
-		"--skip-cleanup",
-		"--yes",
-		"--runtime", appRuntime,
-	}
-
-	output, err := runCLI(ctx, cfg, "application delete --skip-cleanup", args...)
+func deleteAppWithArgs(ctx context.Context, cfg *config.Config, appName string, appRuntime string, errLabel string, args []string) (string, error) {
+	output, err := runCLI(ctx, cfg, errLabel, args...)
 	if err != nil {
 		return output, err
 	}
@@ -689,6 +676,39 @@ func DeleteAppSkipCleanup(
 	}
 
 	return output, nil
+}
+
+// DeleteApp deletes an application with normal cleanup.
+func DeleteApp(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete", args)
+}
+
+// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
+func DeleteAppSkipCleanup(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--skip-cleanup",
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete --skip-cleanup", args)
 }
 
 // ApplicationInfo runs the 'application info' command.
