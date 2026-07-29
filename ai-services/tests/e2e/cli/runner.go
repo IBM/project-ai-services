@@ -442,19 +442,6 @@ func ExtractDigitizeURL(infoOutput string) string {
 	return ""
 }
 
-// ExtractCatalogSummarizeURL parses the 'application info' output for the
-// summarize service URL.
-//
-// Actual output line:
-//
-//	"- Summarize API is available to use at https://summarize-api-<slug>.<domain>."
-//
-// We match on URL-host substring "summarize-api" which is stable regardless
-// of human-readable title changes in info.md.
-func ExtractCatalogSummarizeURL(infoOutput string) string {
-	return extractURLBySubstring(infoOutput, "summarize-api")
-}
-
 // ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
 // Falls back to legacy plain-HTTP extraction for non-catalog podman environments.
 func ExtractSimilarityAPIURL(infoOutput string) string {
@@ -477,6 +464,19 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 	}
 
 	return ""
+}
+
+// ExtractCatalogSummarizeURL parses the 'application info' output for the
+// summarize service URL.
+//
+// Actual output line:
+//
+//	"- Summarize API is available to use at https://summarize-api-<slug>.<domain>."
+//
+// We match on URL-host substring "summarize-api" which is stable regardless
+// of human-readable title changes in info.md.
+func ExtractCatalogSummarizeURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, "summarize-api")
 }
 
 // WaitForApplicationInfoURLs polls 'application info' until service URLs are present.
