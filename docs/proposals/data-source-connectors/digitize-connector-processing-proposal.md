@@ -173,19 +173,24 @@ Response codes:
 
 Removes a connector and its runtime state.
 
+> **Constraint — active sync tick:** DELETE is accepted **only when no sync tick is currently in progress** for the connector. If the worker is mid-tick, the request is rejected with `409 Conflict`. This restriction exists because the system does not yet have the ability to cancel or interrupt a running job. Once job cancellation is supported, DELETE will be allowed at any point in the connector lifecycle.
+
 Delete flow:
 
-1. Stop the worker.
-2. Snapshot the connector's known hashes.
-3. Remove membership rows hash by hash.
-4. Delete documents only when the remaining reference count reaches zero.
-5. Delete the `active_connectors` row.
-6. Best-effort cleanup of staging directories.
+1. **Guard:** check whether a sync tick is actively running for the connector. If yes, return `409 Conflict` immediately — no state is modified.
+2. Stop the worker.
+3. Snapshot the connector's known hashes.
+4. Remove membership rows hash by hash.
+5. Delete documents only when the remaining reference count reaches zero.
+6. Delete the `active_connectors` row.
+7. Best-effort cleanup of staging directories.
 
 #### Delete sequence diagram
 
 ```text
 DELETE /v1/connectors/{connector_id}
+  → check if sync tick is in progress
+      if YES → 409 Conflict (no state modified)
   → stop worker
   → list connector hashes
   → for each sha256:
@@ -208,6 +213,9 @@ Response codes:
 | --- | --- |
 | `204 No Content` | Connector removed |
 | `404 Not Found` | Connector does not exist |
+| `409 Conflict` | A sync tick is currently running; retry after the tick completes |
+
+> **Future:** when job cancellation is introduced, the `409` guard will be replaced by an interrupt call so that DELETE can succeed at any stage of the lifecycle.
 
 ### 3.4 `GET /v1/connectors`
 
