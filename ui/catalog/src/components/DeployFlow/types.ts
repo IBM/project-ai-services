@@ -1,4 +1,4 @@
-import type { DeployOptionsResponse } from "@/types/digitalAssistants";
+import type { DeployOptionsResponse } from "@/types/api.types";
 
 export interface DeployFlowProps {
   open: boolean;

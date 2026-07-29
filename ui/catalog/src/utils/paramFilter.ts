@@ -29,16 +29,14 @@ export function shouldIncludeParam(
 export function shouldShowParam(
   key: string,
   value: unknown,
-  schema: { properties?: Record<string, { default?: unknown }> },
+  schema: { properties?: Record<string, { default?: unknown } | undefined> },
   excludeKeys: Set<string> = new Set(["model"]),
 ): boolean {
   if (excludeKeys.has(key)) {
     return false;
   }
 
-  const property = (
-    schema.properties as Record<string, { default?: unknown }>
-  )?.[key];
+  const property = schema.properties?.[key];
 
   return shouldIncludeParam(value, property);
 }

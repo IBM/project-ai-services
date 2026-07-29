@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "chat-bot-backend"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: chat-bot-backend
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: chat-bot-backend
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend-server
+          image: "{{ .Values.backend.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "uvicorn"
+            - "app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "5000"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          env:
+            - name: EMB_ENDPOINT
+              value: http://embedding-predictor:8080
+            - name: EMB_MODEL
+              value: {{ .Values.embedding.model.name | quote }}
+            - name: EMB_MAX_MODEL_LEN
+              value: {{ .Values.embedding.model.maxModelLen | quote }}
+            - name: LLM_ENDPOINT
+              value: http://instruct-predictor:8000
+            - name: LLM_MODEL
+              value: {{ .Values.llm.model.name | quote }}
+            - name: LLM_MAX_MODEL_LEN
+              value: {{ .Values.llm.model.maxModelLen | quote }}
+            - name: LLM_MAX_BATCH_SIZE
+              value: {{ .Values.llm.model.maxBatchSize | quote }}
+            - name: RERANKER_ENDPOINT
+              value: http://reranker-predictor:8080
+            - name: RERANKER_MODEL
+              value: {{ .Values.reranker.model.name | quote }}
+            - name: OPENSEARCH_HOST
+              value: "opensearch"
+            - name: OPENSEARCH_PORT
+              value: "9200"
+            - name: OPENSEARCH_DB_PREFIX
+              value: "RAG_DB"
+            - name: OPENSEARCH_INDEX_NAME
+              value: "RAG_INDEX"
+            - name: OPENSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: username
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: password
+            - name: OPENSEARCH_NUM_SHARDS
+              value: "{{ .Values.opensearch.numShards }}"
+            - name: LOG_LEVEL
+              value: "{{ .Values.backend.log_level }}"
+            - name: CHATBOT_SEARCH_MODE
+              value: "{{ .Values.chatbot.searchMode }}"
+            - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
+              value: "{{ .Values.chatbot.numChunksPostReranker }}"
+            - name: CHATBOT_RERANK
+              value: "{{ .Values.chatbot.rerank }}"
+            - name: CHATBOT_SYSTEM_PROMPT
+              value: "{{ .Values.backend.systemPrompt }}"
+            - name: CHATBOT_SIMILARITY_SERVICE_URL
+              value: "http://similarity-api:7000"
+          {{- if .Values.llm.apiKey }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "vllm-instruct-api-key"
+                  key: apiKey
+          {{- end }}
+          ports:
+            - containerPort: 5000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.backend.resources.requests.cpu | quote }}
+              memory: {{ .Values.backend.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.backend.resources.limits.cpu | quote }}
+              memory: {{ .Values.backend.resources.limits.memory | quote }}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { fetchServiceParams } from "@/api/digitalAssistants";
+import { fetchServiceParams } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 
 interface UseServiceParamsResult {

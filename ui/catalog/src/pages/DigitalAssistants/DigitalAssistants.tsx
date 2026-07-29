@@ -51,7 +51,7 @@ import {
   fetchApplications,
   deleteApplication,
   transformApplicationToRow,
-} from "@/api/digitalAssistants";
+} from "@/api/applications.api";
 import { AboutTab } from "./components/AboutTab";
 import DeploymentDetails from "@/components/DeploymentDetails";
 
@@ -253,7 +253,7 @@ const DigitalAssistantsPage = () => {
       // Fetch all pages sequentially until has_next is false
       let currentPage = 1;
       let hasNext = true;
-      const allData: import("@/types/digitalAssistants").Application[] = [];
+      const allData: import("@/types/api.types").Application[] = [];
 
       while (hasNext) {
         const response = await fetchApplications({

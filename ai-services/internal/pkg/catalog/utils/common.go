@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -21,6 +22,12 @@ type PodmanConfigureOptions struct {
 	SSLCertPath string // Path to user-provided SSL certificate
 	SSLKeyPath  string // Path to user-provided SSL private key
 	HttpsPort   int
+}
+
+// OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
+type OpenShiftConfigureOptions struct {
+	Namespace string
+	Timeout   time.Duration
 }
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.

@@ -6,6 +6,7 @@ export default defineConfig(() => {
   return {
     build: {
       outDir: 'build',
+      cssMinify: 'esbuild',
     },
     preview: {
       port: 3010,

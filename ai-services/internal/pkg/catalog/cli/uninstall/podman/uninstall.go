@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -16,14 +19,14 @@ import (
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
-func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
+func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error {
 	// Initialize runtime
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	pods, err := validateCatalogExists(rt)
+	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return err
 	}
@@ -32,57 +35,13 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	logger.Warningln("Ensure no applications are running before uninstalling the catalog, as they may go stale when the catalog is uninstalled and will need to be deleted manually")
 
 	// Confirm deletion if not auto-yes
-	if !autoYes {
-		if confirmed, err := confirmDeletion(pods); !confirmed || err != nil {
+	if !opts.AutoYes {
+		if confirmed, err := cliutils.ConfirmDeletion(ctx, pods); !confirmed || err != nil {
 			return err
 		}
 	}
 
-	return performCleanup(rt, pods, skipCleanup)
-}
-
-// validateCatalogExists checks if catalog resources exist and returns them.
-func validateCatalogExists(rt *podman.PodmanClient) ([]types.Pod, error) {
-	// Check if catalog pods exist
-	pods, err := rt.ListPods(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	if len(pods) == 0 {
-		logger.Infoln("Catalog service is not deployed")
-
-		return nil, nil
-	}
-
-	logger.Infof("Found %d catalog pod(s)\n", len(pods))
-
-	return pods, nil
-}
-
-// confirmDeletion prompts the user to confirm deletion and logs pods to be deleted.
-func confirmDeletion(pods []types.Pod) (bool, error) {
-	// Print pods to be deleted
-	logger.Infoln("Below are the list of pods to be deleted")
-	for _, pod := range pods {
-		logger.Infof("\t-> %s\n", pod.Name)
-	}
-
-	// Confirm deletion
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
-	if err != nil {
-		return false, fmt.Errorf("failed to get confirmation: %w", err)
-	}
-
-	if !confirmed {
-		logger.Infoln("Deletion cancelled")
-
-		return false, nil
-	}
-
-	return true, nil
+	return performCleanup(rt, pods, opts.SkipCleanup)
 }
 
 // performCleanup executes all cleanup operations.

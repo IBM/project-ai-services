@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { fetchResources } from "@/api/digitalAssistants";
+import { fetchResources } from "@/api/applications.api";
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 

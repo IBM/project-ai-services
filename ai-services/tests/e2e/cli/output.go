@@ -19,6 +19,27 @@ func checkRequiredStrings(output, label string, required []string) error {
 	return nil
 }
 
+// checkAnyPattern returns nil if output contains at least one of the given
+// patterns (case-insensitive OR logic). If none match, it returns an error
+// quoting the checked patterns and the actual output for easy diagnosis.
+// Used by all failure-scenario validators in this file.
+func checkAnyPattern(output, label string, patterns []string) error {
+	lower := strings.ToLower(output)
+	for _, p := range patterns {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"%s output did not contain any expected pattern.\n"+
+			"Checked patterns: %v\nActual output:\n%s",
+		label,
+		patterns,
+		output,
+	)
+}
+
 // checkNotOpenShiftUnsupported returns an error when the openshift-not-supported warning is missing.
 func checkNotOpenShiftUnsupported(output, label string) error {
 	const marker = "WARNING:  Not supported for openshift runtime"
@@ -256,8 +277,8 @@ func ValidateStartAppOutputOpenshift(output string) (err error) {
 	return nil
 }
 
-// ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
-func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
+// scanCmdOutput iterates command output lines, calling fn(podName, status) for each data row.
+func scanCmdOutput(psOutput string, fn func(podName, status string) error) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -271,17 +292,25 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 		if len(parts) < 2 { //nolint:mnd
 			continue
 		}
-		podName := parts[len(parts)-2]
-		status := parts[len(parts)-1]
 
-		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
-			return fmt.Errorf(
-				"main pod %s not in Exited state for app %s (got: %s)",
-				podName,
-				appName,
-				status,
-			)
+		if err := fn(parts[len(parts)-2], parts[len(parts)-1]); err != nil {
+			return err
 		}
+	}
+
+	return nil
+}
+
+// ValidatePodsExitedAfterStop checks that all main pods are in Exited state.
+func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
+		if isMainPod(podName, appRuntime) && strings.ToLower(status) != "exited" {
+			return fmt.Errorf("main pod %s not in Exited state for app %s (got: %s)", podName, appName, status)
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logger.Infof("[TEST] Main pods are in Exited state")
@@ -289,8 +318,7 @@ func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 	return nil
 }
 
-// ValidateDeleteAppOutput validates the application delete command output.
-// Success is determined by exit code and absence of pods, not specific phrases.
+// ValidateDeleteAppOutput validates the delete command output (success determined by exit code).
 func ValidateDeleteAppOutput(_, _ string) error {
 	return nil
 }
@@ -322,13 +350,10 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 	}
 
 	if templateName == "rag" {
-		// Each string appears in both the running (URL) and stopped (pod-hint) branches
-		// of info.md, so the check passes regardless of pod health at call time.
 		required = append(required,
-			"chat-bot",
-			"digitize-ui",
-			"digitize-backend",
-			"summarize-api",
+			"Question and answer", // chat service display name
+			"Digitize documents",  // digitize service display name
+			"Find similar items",  // similarity service display name
 		)
 	}
 
@@ -448,26 +473,14 @@ func isMainPod(pod string, appRuntime string) bool {
 
 // ValidatePodsRunningAfterStart checks that the main pods are running after application start.
 func ValidatePodsRunningAfterStart(psOutput, appName, appRuntime string) error {
-	for line := range strings.SplitSeq(psOutput, "\n") {
-		line = strings.TrimSpace(line)
-
-		if line == "" ||
-			strings.HasPrefix(line, "APPLICATION") ||
-			strings.HasPrefix(line, "──") {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		podName := parts[len(parts)-2]
-		status := parts[len(parts)-1]
-
+	if err := scanCmdOutput(psOutput, func(podName, status string) error {
 		if isMainPod(podName, appRuntime) && !strings.Contains(strings.ToLower(status), "running") {
-			return fmt.Errorf(
-				"main pod %s not running after start for app %s",
-				podName,
-				appName,
-			)
+			return fmt.Errorf("main pod %s not running after start for app %s", podName, appName)
 		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logger.Infof("[TEST] Main pods are running after start")
@@ -562,6 +575,322 @@ func ValidateCatalogUninstallOutput(output string) error {
 	}
 
 	logger.Infof("[TEST] Catalog service uninstalled successfully")
+
+	return nil
+}
+
+// ValidateCatalogApiServerHelpOutput validates 'catalog apiserver --help' output.
+func ValidateCatalogApiServerHelpOutput(output string) error {
+	required := []string{
+		"apiserver",
+		"--port",
+		"--admin-password-hash",
+		"--runtime",
+	}
+
+	return checkRequiredStrings(output, "catalog apiserver help", required)
+}
+
+// ValidateCatalogConfigureOutput validates 'catalog configure' success output.
+func ValidateCatalogConfigureOutput(output string) error {
+	// configure prints either "Access the Catalog Backend at" (first run) or
+	// "Catalog Backend API is available at" (already running). Either is success.
+	const markerFirst = "Access the Catalog Backend at"
+	const markerRunning = "Catalog Backend API is available at"
+
+	switch {
+	case strings.Contains(output, markerFirst):
+		if url := extractURLAfterMarker(output, markerFirst); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerFirst, output)
+		}
+	case strings.Contains(output, markerRunning):
+		if url := extractURLAfterMarker(output, markerRunning); url == "" {
+			return fmt.Errorf("catalog configure validation failed: URL after %q is empty\nOutput: %s", markerRunning, output)
+		}
+	case strings.Contains(output, "catalog service is already running"):
+		// no URL expected in this branch
+	default:
+		return fmt.Errorf("catalog configure validation failed: expected catalog backend URL in output\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogInfoOutput validates 'catalog info' output.
+func ValidateCatalogInfoOutput(output string) error {
+	const marker = "Catalog Backend API is available at"
+	if !strings.Contains(output, marker) {
+		return fmt.Errorf("catalog info validation failed: missing backend URL marker\nOutput: %s", output)
+	}
+
+	url := extractURLAfterMarker(output, marker)
+	if url == "" {
+		return fmt.Errorf("catalog info validation failed: backend URL is empty\nOutput: %s", output)
+	}
+
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("catalog info validation failed: backend URL %q is not a valid http/https URL", url)
+	}
+
+	return nil
+}
+
+// extractURLAfterMarker returns the trimmed text on the first line containing marker, after marker itself.
+func extractURLAfterMarker(output, marker string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(marker):]), " .,")
+		}
+	}
+
+	return ""
+}
+
+// ValidateCatalogLoginOutput validates a successful 'catalog login' output.
+func ValidateCatalogLoginOutput(output string) error {
+	if !strings.Contains(output, "Login successful") {
+		return fmt.Errorf("catalog login validation failed: missing 'Login successful'\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogHashpwOutput validates that 'catalog hashpw' produced a well-formed hash.
+func ValidateCatalogHashpwOutput(output string) error {
+	const hashParts = 3 // expected "iterations.salt.hash" dot-separated format
+
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return fmt.Errorf("catalog hashpw validation failed: output is empty")
+	}
+
+	parts := strings.SplitN(trimmed, ".", hashParts)
+	if len(parts) != hashParts || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("catalog hashpw validation failed: output does not match expected format 'iterations.salt.hash'\nOutput: %s", trimmed)
+	}
+
+	return nil
+}
+
+// ValidateCatalogWhoamiOutput validates 'catalog whoami' output.
+func ValidateCatalogWhoamiOutput(output string) error {
+	required := []string{"Server", "Username"}
+
+	return checkRequiredStrings(output, "catalog whoami", required)
+}
+
+// ValidateCatalogLogoutOutput validates 'catalog logout' success output.
+func ValidateCatalogLogoutOutput(output string) error {
+	if !strings.Contains(output, "Logged out successfully") {
+		return fmt.Errorf("catalog logout validation failed: missing 'Logged out successfully'\nOutput: %s", output)
+	}
+
+	return nil
+}
+
+// ValidateCatalogDbMigrateHelpOutput validates 'catalog dbmigrate --help' output.
+func ValidateCatalogDbMigrateHelpOutput(output string) error {
+	required := []string{
+		"dbmigrate",
+		"init",
+		"--db-host",
+		"--db-password",
+	}
+
+	return checkRequiredStrings(output, "catalog dbmigrate help", required)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bootstrap failure validators
+//
+// These functions are used exclusively by bootstrap_failure_test.go.  Each one
+// accepts the combined stdout+stderr output captured from a CLI invocation that
+// is expected to have failed, and returns an error if the output does not
+// contain at least one of the known failure-indicator strings.
+//
+// Matching is intentionally broad (substring, case-insensitive) so that minor
+// phrasing changes in upstream error messages do not break the tests.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ValidateRegistryLoginFailureOutput verifies that the output from a failed
+// `podman login` attempt contains a recognisable authentication-error string.
+//
+// Known strings emitted by Podman on credential rejection:
+//   - "invalid username/password"
+//   - "unauthorized"
+//   - "authentication required"
+//   - "failed with status"
+//   - "Error logging in to"
+func ValidateRegistryLoginFailureOutput(output string) error {
+	knownPatterns := []string{
+		"invalid username/password",
+		"unauthorized",
+		"authentication required",
+		// Podman: "login attempt to https://.../v2/ failed with status: 401 Unauthorized"
+		"failed with status",
+		// Podman: "Error logging in to registry"
+		"Error logging in to",
+		// ICR (IBM Container Registry) returns 400 Bad Request for invalid credentials.
+		// "bad request" covers this without matching bare numbers in unrelated output.
+		"bad request",
+		// Generic Podman auth failure prefix
+		"authenticating creds",
+		"requesting bearer token",
+	}
+
+	return checkAnyPattern(output, "registry login failure", knownPatterns)
+}
+
+// ValidateCatalogLoginFailureOutput verifies that the output from a failed
+// `catalog login` attempt (wrong credentials) contains a recognisable error.
+//
+// Known strings emitted by the catalog backend on credential rejection:
+//   - "catalog login failed"
+//   - "invalid credentials"
+//   - "unauthorized"
+//   - "authentication failed"
+//   - "401"
+func ValidateCatalogLoginFailureOutput(output string) error {
+	knownPatterns := []string{
+		"catalog login failed",
+		"invalid credentials",
+		"unauthorized",
+		"authentication failed",
+		"401",
+		"incorrect password",
+		"invalid username or password",
+	}
+
+	return checkAnyPattern(output, "catalog login failure", knownPatterns)
+}
+
+// ValidateCatalogUnreachableOutput verifies that the output from a failed
+// `catalog login` attempt against an unreachable server contains a recognisable
+// connectivity-error string.
+//
+// Known strings emitted when the server cannot be reached:
+//   - "connection refused"
+//   - "no such host"
+//   - "timeout"
+//   - "context deadline exceeded"
+//   - "catalog login failed"
+//   - "dial tcp"
+func ValidateCatalogUnreachableOutput(output string) error {
+	knownPatterns := []string{
+		"connection refused",
+		"no such host",
+		"timeout",
+		"context deadline exceeded",
+		"catalog login failed",
+		"dial tcp",
+		"EOF",
+		"network",
+	}
+
+	return checkAnyPattern(output, "catalog unreachable-server", knownPatterns)
+}
+
+// ValidateBootstrapValidateFailureOutput verifies that the output from a failed
+// `bootstrap validate` run contains a recognisable validation-error string.
+//
+// Known strings emitted when prerequisites are missing:
+//   - "validation failed"
+//   - "not found"
+//   - "podman"          (the missing component should be named in the error)
+//   - "prerequisite"
+//   - "failed"
+//   - "error"
+func ValidateBootstrapValidateFailureOutput(output string) error {
+	knownPatterns := []string{
+		"validation failed",
+		"not found",
+		"podman",
+		"prerequisite",
+		"failed",
+		"error",
+	}
+
+	return checkAnyPattern(output, "bootstrap validate failure", knownPatterns)
+}
+
+// ValidateInvalidRuntimeOutput verifies that the output from a
+// `bootstrap validate --runtime <invalid>` invocation contains the expected
+// rejection message emitted by bootstrapPersistentPreRunE in bootstrap.go:55:
+//
+//	"invalid runtime type: <value> (must be 'podman' or 'openshift').
+//	 Please specify runtime using --runtime flag"
+//
+// This is a pure CLI flag-validation failure — no system checks are run.
+func ValidateInvalidRuntimeOutput(output string) error {
+	knownPatterns := []string{
+		"invalid runtime type",
+		"must be 'podman' or 'openshift'",
+		"--runtime",
+	}
+
+	return checkAnyPattern(output, "invalid runtime", knownPatterns)
+}
+
+// OutputIndicatesSpyreAbsence returns true when the bootstrap validate output
+// contains the specific error string emitted by SpyreRule.Verify() when no
+// Spyre PCI devices are found on the LPAR.
+//
+// This is used by the Spyre failure test as a pre-check to distinguish between
+// a Spyre-specific failure and any other kind of validate failure, so the test
+// only asserts the Spyre message when the output is actually Spyre-related.
+//
+// Source: internal/pkg/validators/podman/spyre/spyre.go — Verify() line 32.
+func OutputIndicatesSpyreAbsence(output string) bool {
+	spyreAbsencePatterns := []string{
+		"IBM Spyre Accelerator is not attached to the LPAR",
+		"spyre accelerator is not attached",
+		"no spyre",
+	}
+
+	lowerOutput := strings.ToLower(output)
+	for _, pattern := range spyreAbsencePatterns {
+		if strings.Contains(lowerOutput, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ValidateSpyreAbsenceOutput verifies that the output from a failed
+// `bootstrap validate` run on a Spyre-less LPAR contains the expected
+// hardware-absence error emitted by SpyreRule.Verify().
+//
+// The exact message from the validator (spyre/spyre.go:32) is:
+//
+//	"IBM Spyre Accelerator is not attached to the LPAR"
+//
+// The hint from the validator (spyre/spyre.go:68) is:
+//
+//	"Run 'ai-services bootstrap configure' to fix configuration issues."
+//
+// Both are checked here so the test validates that the operator receives
+// not only the error but also guidance on how to resolve it.
+func ValidateSpyreAbsenceOutput(output string) error {
+	// Primary error — must always be present.
+	if !strings.Contains(output, "IBM Spyre Accelerator is not attached to the LPAR") {
+		return fmt.Errorf(
+			"spyre absence output missing expected error message.\n"+
+				"Expected: %q\nActual output:\n%s",
+			"IBM Spyre Accelerator is not attached to the LPAR",
+			output,
+		)
+	}
+
+	// Remediation hint — validates the operator gets actionable guidance.
+	// Uses a substring match so minor phrasing changes don't break the test.
+	if !strings.Contains(strings.ToLower(output), "bootstrap configure") {
+		return fmt.Errorf(
+			"spyre absence output missing remediation hint (expected mention of 'bootstrap configure').\n"+
+				"Actual output:\n%s",
+			output,
+		)
+	}
 
 	return nil
 }
