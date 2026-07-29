@@ -48,7 +48,6 @@ var (
 	templateName                string
 	goldenPath                  string
 	ragBaseURL                  string
-	summarizeBaseURL            string
 	judgeBaseURL                string
 	backendPort                 string
 	uiPort                      string
@@ -264,14 +263,6 @@ var _ = ginkgo.BeforeSuite(func() {
 				ragBaseURL, _ = cli.GetBaseURL(infoOut, backendPort)
 				judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
 				logger.Infof("[SETUP] Extracted RAG URL: %s", ragBaseURL)
-			} else if templateName == "summarize" {
-				summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
-				if summarizeBaseURL == "" {
-					logger.Errorf("[SETUP] ERROR: ExtractCatalogSummarizeURL returned empty string!")
-					logger.Errorf("[SETUP] Application info output:\n%s", infoOut)
-				} else {
-					logger.Infof("[SETUP] Extracted Summarize URL: %s", summarizeBaseURL)
-				}
 			}
 		}
 	}
@@ -393,22 +384,22 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Bootstrap Steps", func() {
-		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			output, err := cli.BootstrapConfigure(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapValidateOutput(output)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs full bootstrap", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("runs full bootstrap", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			output, err := cli.Bootstrap(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" { //nolint:dupl
 				ginkgo.Skip("catalog configure only supported for podman runtime")
 			}
@@ -429,7 +420,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
 			}
 		})
-		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog info only supported for podman runtime")
 			}
@@ -461,7 +452,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
-		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog login only supported for podman runtime")
 			}
@@ -480,7 +471,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateCatalogLoginOutput(output)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Catalog login validated successfully!")
 		})
-		ginkgo.It("verifies catalog whoami after login", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies catalog whoami after login", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog whoami only supported for podman runtime")
 			}
@@ -498,7 +489,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateCatalogWhoamiOutput(output)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Catalog whoami output validated successfully!")
 		})
-		ginkgo.It("verifies catalog logout invalidates session", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies catalog logout invalidates session", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}
@@ -532,19 +523,19 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Image Command Tests", func() {
-		ginkgo.It("lists images for rag template", ginkgo.Label("spyre-independent"), func() {
+		ginkgo.It("lists images for rag template", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 			gomega.Expect(cli.ListImage(ctx, cfg, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infof("[TEST] Images listed successfully for %s template", templateName)
 		})
-		ginkgo.It("pulls images for rag template", ginkgo.Label("spyre-independent"), func() {
+		ginkgo.It("pulls images for rag template", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
 			gomega.Expect(cli.PullImage(ctx, cfg, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infof("[TEST] Images pulled successfully for %s template", templateName)
 		})
-		ginkgo.It("verifies application model download command", ginkgo.Label("spyre-independent"), func() {
+		ginkgo.It("verifies application model download command", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(30 * time.Minute)
 			defer cancel()
 			output, err := cli.ModelDownload(ctx, cfg, templateName, appRuntime)
@@ -554,7 +545,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent"), func() {			if providedAppName != "" {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
 				defer cancel()
@@ -563,19 +554,20 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
 				
 				if templateName == "rag" {
-					ragBaseURL, err := cli.GetBaseURL(infoOut, backendPort)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					var ragErr error
+					ragBaseURL, ragErr = cli.GetBaseURL(infoOut, backendPort)
+					gomega.Expect(ragErr).NotTo(gomega.HaveOccurred())
 					judgeBaseURL = cli.GetJudgeBaseURL(judgePort)
 					logger.Infof("[TEST] Using existing RAG application: %s (URL: %s)", appName, ragBaseURL)
 				} else if templateName == "summarize" {
 					summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
 					gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty(), "Failed to extract summarize URL from existing application")
 					logger.Infof("[TEST] Using existing summarization application: %s (URL: %s)", appName, summarizeBaseURL)
-			} else if templateName == "digitize" {
-				logger.Infof("[TEST] Using existing digitize application: %s", appName)
-			}
-
-			ginkgo.Skip("Skipping creation — using existing application")
+				} else if templateName == "digitize" {
+					logger.Infof("[TEST] Using existing digitize application: %s", appName)
+				}
+	
+				ginkgo.Skip("Skipping creation — using existing application")
 			}
 
 			ctx, cancel := withTimeout(45 * time.Minute)
@@ -620,8 +612,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 				logger.Infof("[TEST] RAG application %s created and validated", appName)
 			} else if templateName == "summarize" || templateName == "digitize" {
-				// Deploy standalone service (summarize or digitize)
-				createOutput, err := cli.CreateApp(
+				// Deploy standalone service (summarize or digitize).
+				// URL resolution is deferred to each context's BeforeAll via application info.
+				_, err := cli.CreateApp(
 					ctx,
 					cfg,
 					appName,
@@ -631,37 +624,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					appRuntime,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				logger.Infof("[TEST] %s service deployment initiated: %s", templateName, appName)
-
-				// Extract service URL
-				if appRuntime == "podman" {
-					infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
-					gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
-
-					if templateName == "summarize" {
-						summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
-						gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty())
-
-						// Verify summarization service health
-						healthCtx, healthCancel := withTimeout(2 * time.Minute)
-						defer healthCancel()
-						err = summarization.HealthCheck(healthCtx, summarizeBaseURL)
-						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						logger.Infof("[TEST] Summarization service deployed and healthy at: %s", summarizeBaseURL)
-					}
-				} else {
-					if templateName == "summarize" {
-						summarizeBaseURL = cli.ExtractCatalogSummarizeURL(createOutput)
-						gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty())
-
-						// Verify summarization service health
-						healthCtx, healthCancel := withTimeout(2 * time.Minute)
-						defer healthCancel()
-						err = summarization.HealthCheck(healthCtx, summarizeBaseURL)
-						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						logger.Infof("[TEST] Summarization service deployed and healthy at: %s", summarizeBaseURL)
-					}
-				}
 				logger.Infof("[TEST] %s service %s created successfully", templateName, appName)
 			} else {
 				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize", templateName))
@@ -671,7 +633,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Observability", func() {
-		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 
@@ -685,7 +647,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateApplicationPS(appPsWideOutput)).To(gomega.Succeed())
 		})
-		ginkgo.It("verifies application info output", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies application info output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 
@@ -695,15 +657,15 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateApplicationInfo(infoOutput, appName, templateName)).To(gomega.Succeed())
 			logger.Infof("[TEST] Application info output validated successfully!")
 		})
-		ginkgo.It("Verifies pods existence, health status  and restart count", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("Verifies pods existence, health status  and restart count", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			err := podman.VerifyContainers(ctx, cfg, appPsWideOutput, appName, appRuntime)
+			err := podman.VerifyContainers(ctx, cfg, appPsWideOutput, appName, appRuntime, templateName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "verify containers failed")
 			logger.Infof("[TEST] Containers verified")
 		})
-		ginkgo.It("Verifies Exposed Ports/Routes of the application", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("Verifies Exposed Ports/Routes of the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
@@ -717,7 +679,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			logger.Infof("[TEST] Exposed ports/routes verified")
 		})
-		ginkgo.It("verifies application logs output", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("verifies application logs output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			// fetchAndValidateLogs calls ApplicationLogs with a 30 s per-call timeout
 			// and validates the output, failing the spec immediately on any error.
 			fetchAndValidateLogs := func(podRef, container string) {
@@ -747,7 +709,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Runtime Operations", func() {
-		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if templateName == "summarize" {
+				ginkgo.Skip("Skipping stop/start for summarize template — LLM reload would delay summarization tests")
+			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
 
@@ -780,7 +745,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s stopped successfully using --pod", appName)
 		})
-		ginkgo.It("starts application pods", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("starts application pods", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if templateName == "summarize" {
+				ginkgo.Skip("Skipping stop/start for summarize template — LLM reload would delay summarization tests")
+			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
 
@@ -1697,40 +1665,87 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.Context("Summarization Tests", ginkgo.Label("summarization-tests"), func() {
+		var summarizeBaseURL string
 		var createdJobIDs []string
 
 		ginkgo.BeforeAll(func() {
-			// Skip all summarization tests if template is not "summarize"
 			if templateName != "summarize" {
 				ginkgo.Skip(fmt.Sprintf("Skipping summarization tests — template is '%s', not 'summarize'", templateName))
 			}
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
 
-			if summarizeBaseURL == "" {
-				if providedAppName != "" {
-					ginkgo.Fail(fmt.Sprintf("Summarization service URL is not set.\n\n"+
-						"You provided -app-name=%s but the application is not running or catalog is not accessible.\n\n"+
-						"Please ensure:\n"+
-						"  1. Catalog is running: ai-services catalog configure --runtime %s\n"+
-						"  2. Application exists and is running: ai-services application info %s --runtime %s\n\n"+
-						"Or remove -app-name flag to let the test create a new application.",
-						providedAppName, appRuntime, providedAppName, appRuntime))
+			logger.Infof("[SUMMARIZE] Setting up summarization tests for app: %s", appName)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			// Poll 'application info' until the summarize-api URL is present.
+			// WaitForApplicationInfoURLs checks for RAG-specific URLs (chat-bot-backend +
+			// similarity-api) which don't exist in the summarize template, so we poll
+			// directly — same approach as Similarity Tests.
+			const summarizePollInterval = 15 * time.Second
+			var infoOutput string
+			for {
+				var infoErr error
+				infoOutput, infoErr = cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+				if infoErr != nil {
+					logger.Warningf("[SUMMARIZE] application info error while polling for summarize URL: %v", infoErr)
 				} else {
-					ginkgo.Fail("Summarization service URL is not set — ensure summarization service was deployed successfully.\n\n"+
-						"This usually means the application creation step was skipped.\n"+
-						"Remove --label-filter to run the full test suite including application creation.")
+					summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOutput)
+					if summarizeBaseURL != "" {
+						break
+					}
+				}
+				if ctx.Err() != nil {
+					ginkgo.Fail(fmt.Sprintf(
+						"Timed out waiting for summarize-api URL in 'application info' output for app %q.\n"+
+							"Ensure the summarize template was deployed and the catalog is running.\n"+
+							"Last output:\n%s", appName, infoOutput))
+				}
+				logger.Infof("[SUMMARIZE] summarize-api URL not yet present — retrying in %s", summarizePollInterval)
+				select {
+				case <-ctx.Done():
+					ginkgo.Fail(fmt.Sprintf(
+						"Timed out waiting for summarize-api URL in 'application info' output for app %q.\n"+
+							"Last output:\n%s", appName, infoOutput))
+				case <-time.After(summarizePollInterval):
 				}
 			}
 
-			logger.Infof("[SUMMARIZE] Setting up summarization tests with URL: %s", summarizeBaseURL)
-
-			// Set the runtime for the summarization package
-			summarization.SetAppRuntime(appRuntime)
-
 			logger.Infof("[SUMMARIZE] Summarize Base URL: %s", summarizeBaseURL)
+
+			// Wait for the summarize-api health endpoint to be ready.
+			// The LLM pod needs time to load the model after start — the URL being
+			// present in 'application info' does not mean the service is accepting
+			// requests yet. Poll /health until it returns 200 (up to 15 minutes).
+			logger.Infof("[SUMMARIZE] Waiting for summarize-api to be healthy at %s/health", summarizeBaseURL)
+			healthCtx, healthCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer healthCancel()
+			const healthPollInterval = 15 * time.Second
+			for {
+				healthErr := summarization.HealthCheck(healthCtx, summarizeBaseURL)
+				if healthErr == nil {
+					logger.Infof("[SUMMARIZE] summarize-api is healthy")
+					break
+				}
+				if healthCtx.Err() != nil {
+					ginkgo.Fail(fmt.Sprintf(
+						"Timed out waiting for summarize-api to become healthy at %s — last error: %v",
+						summarizeBaseURL, healthErr))
+				}
+				logger.Infof("[SUMMARIZE] summarize-api not yet healthy (%v) — retrying in %s", healthErr, healthPollInterval)
+				select {
+				case <-healthCtx.Done():
+					ginkgo.Fail(fmt.Sprintf(
+						"Timed out waiting for summarize-api to become healthy at %s", summarizeBaseURL))
+				case <-time.After(healthPollInterval):
+				}
+			}
 		})
 
 		ginkgo.AfterEach(func() {
-			// Cleanup: delete created jobs
 			for _, jobID := range createdJobIDs {
 				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				_, _ = summarization.WaitForJobCompletion(cleanCtx, summarizeBaseURL, jobID, 5*time.Minute)
@@ -1756,28 +1771,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			pdfPath := testFilePath("ingestion/docs/test_doc.pdf")
 			jobName := fmt.Sprintf("pdf-summary-%d", time.Now().Unix())
 
-			// Create summarization job
-			jobResp, err := summarization.CreateJobWithFile(ctx, summarizeBaseURL, pdfPath, "standard", jobName, false)
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, pdfPath, "", "standard", jobName, false, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			createdJobIDs = append(createdJobIDs, jobResp.JobID)
-			logger.Infof("[TEST] Created PDF summarization job: %s", jobResp.JobID)
-
-			// Wait for job completion
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
-			logger.Infof("[TEST] ✓ PDF summarization job completed: %s", jobResp.JobID)
-
-			// Get job result
-			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
-			summary, ok := result.Data["summary"].(string)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(summary).NotTo(gomega.BeEmpty())
-			logger.Infof("[TEST] ✓ PDF summary retrieved successfully (length: %d chars)", len(summary))
+			createdJobIDs = append(createdJobIDs, res.Detail.JobID)
+			logger.Infof("[TEST] ✓ PDF summary retrieved successfully (length: %d chars)", len(res.Summary))
 		})
 
 		ginkgo.It("summarizes a TXT file with brief level", func() {
@@ -1787,28 +1784,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			txtPath := testFilePath("ingestion/docs/sample_txt.txt")
 			jobName := fmt.Sprintf("txt-summary-%d", time.Now().Unix())
 
-			// Create summarization job
-			jobResp, err := summarization.CreateJobWithFile(ctx, summarizeBaseURL, txtPath, "brief", jobName, false)
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, txtPath, "", "brief", jobName, false, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			createdJobIDs = append(createdJobIDs, jobResp.JobID)
-			logger.Infof("[TEST] Created TXT summarization job: %s", jobResp.JobID)
-
-			// Wait for job completion
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
-			logger.Infof("[TEST] ✓ TXT summarization job completed: %s", jobResp.JobID)
-
-			// Get job result
-			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
-			summary, ok := result.Data["summary"].(string)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(summary).NotTo(gomega.BeEmpty())
-			logger.Infof("[TEST] ✓ TXT summary retrieved successfully (length: %d chars)", len(summary))
+			createdJobIDs = append(createdJobIDs, res.Detail.JobID)
+			logger.Infof("[TEST] ✓ TXT summary retrieved successfully (length: %d chars)", len(res.Summary))
 		})
 
 		ginkgo.It("summarizes text input with detailed level", func() {
@@ -1818,28 +1797,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			testText := "Artificial Intelligence (AI) is transforming industries worldwide. Machine learning algorithms enable computers to learn from data and improve their performance over time. Deep learning, a subset of machine learning, uses neural networks with multiple layers to process complex patterns. Natural language processing allows machines to understand and generate human language. Computer vision enables machines to interpret and analyze visual information from the world."
 			jobName := fmt.Sprintf("text-summary-%d", time.Now().Unix())
 
-			// Create summarization job
-			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "detailed", jobName, false)
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, "detailed", jobName, false, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			createdJobIDs = append(createdJobIDs, jobResp.JobID)
-			logger.Infof("[TEST] Created text summarization job: %s", jobResp.JobID)
-
-			// Wait for job completion
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
-			logger.Infof("[TEST] ✓ Text summarization job completed: %s", jobResp.JobID)
-
-			// Get job result
-			result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(result.Data).NotTo(gomega.BeEmpty())
-			summary, ok := result.Data["summary"].(string)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(summary).NotTo(gomega.BeEmpty())
-			logger.Infof("[TEST] ✓ Text summary retrieved successfully (length: %d chars)", len(summary))
+			createdJobIDs = append(createdJobIDs, res.Detail.JobID)
+			logger.Infof("[TEST] ✓ Text summary retrieved successfully (length: %d chars)", len(res.Summary))
 		})
 
 		ginkgo.It("tests different summary levels produce different outputs", func() {
@@ -1854,24 +1815,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			for _, level := range levels {
 				jobName := fmt.Sprintf("level-test-%s-%d", level, time.Now().Unix())
 
-				// Create job
-				jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, level, jobName, false)
+				res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, level, jobName, false, 15*time.Minute)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				createdJobIDs = append(createdJobIDs, jobResp.JobID)
-
-				// Wait for completion
-				time.Sleep(jobStartDelay)
-				finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
-
-				// Get result
-				result, err := summarization.GetJobResult(ctx, summarizeBaseURL, jobResp.JobID)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				summary, ok := result.Data["summary"].(string)
-				gomega.Expect(ok).To(gomega.BeTrue())
-				summaries[level] = summary
-				logger.Infof("[TEST] %s summary length: %d chars", level, len(summary))
+				createdJobIDs = append(createdJobIDs, res.Detail.JobID)
+				summaries[level] = res.Summary
+				logger.Infof("[TEST] %s summary length: %d chars", level, len(res.Summary))
 			}
 
 			// Verify summaries are different
@@ -1887,19 +1835,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			testText := "The Internet of Things (IoT) connects everyday devices to the internet, enabling them to send and receive data. Smart homes use IoT devices to automate lighting, heating, and security systems. Wearable technology tracks health metrics and fitness activities. Industrial IoT improves manufacturing efficiency and predictive maintenance."
 			jobName := fmt.Sprintf("stream-test-%d", time.Now().Unix())
 
-			// Create job with streaming enabled
-			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "standard", jobName, true)
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, "standard", jobName, true, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			createdJobIDs = append(createdJobIDs, jobResp.JobID)
-			logger.Infof("[TEST] Created streaming summarization job: %s", jobResp.JobID)
-
-			// Wait for completion
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
-			logger.Infof("[TEST] ✓ Streaming summarization job completed: %s", jobResp.JobID)
+			createdJobIDs = append(createdJobIDs, res.Detail.JobID)
+			logger.Infof("[TEST] ✓ Streaming summarization job completed: %s", res.Detail.JobID)
 		})
 
 		ginkgo.It("handles empty text input - job fails with appropriate error", func() {
@@ -1907,28 +1846,17 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			defer cancel()
 
 			jobName := fmt.Sprintf("empty-text-%d", time.Now().Unix())
-			// API accepts empty files but job fails during processing
-			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, "", "standard", jobName, false)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			logger.Infof("[TEST] Created empty text job: %s", jobResp.JobID)
 
-			// Wait for job to process (will fail)
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 2*time.Minute)
-			
-			// Job should fail with "Extracted text is empty" error
+			finalStatus, err := summarization.SubmitJobExpectingFailure(ctx, summarizeBaseURL, "", "standard", jobName, 2*time.Minute)
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("job failed"))
 			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusFailed))
 			gomega.Expect(finalStatus.Error).NotTo(gomega.BeNil())
 			gomega.Expect(*finalStatus.Error).To(gomega.ContainSubstring("Extracted text is empty"))
 			logger.Infof("[TEST] ✓ Empty text correctly failed with error: %s", *finalStatus.Error)
-			
-			// Cleanup
+
 			time.Sleep(5 * time.Second)
-			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(summarization.DeleteJob(ctx, summarizeBaseURL, finalStatus.JobID)).To(gomega.Succeed())
 		})
 
 		ginkgo.It("handles invalid summary level - defaults to standard", func() {
@@ -1937,24 +1865,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			testText := "This is a test text for invalid level. Artificial Intelligence is transforming industries."
 			jobName := fmt.Sprintf("invalid-level-%d", time.Now().Unix())
-			
-			// API accepts invalid level and defaults to "standard"
-			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "invalid_level", jobName, false)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
-			logger.Infof("[TEST] Created job with invalid level (will default to standard): %s", jobResp.JobID)
 
-			// Wait for completion
-			time.Sleep(jobStartDelay)
-			finalStatus, err := summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 2*time.Minute)
+			// API accepts invalid level and treats it as "standard" — job completes.
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, "invalid_level", jobName, false, 2*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusCompleted))
 			logger.Infof("[TEST] ✓ Job completed successfully with default level")
-			
-			// Cleanup
+
 			time.Sleep(5 * time.Second)
-			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(summarization.DeleteJob(ctx, summarizeBaseURL, res.Detail.JobID)).To(gomega.Succeed())
 		})
 
 		ginkgo.It("handles invalid file format error", func() {
@@ -1993,10 +1911,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			for _, jobName := range jobNames {
-				jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "brief", jobName, false)
+				res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, "brief", jobName, false, 15*time.Minute)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				createdJobIDs = append(createdJobIDs, jobResp.JobID)
-				time.Sleep(1 * time.Second) // Small delay between jobs
+				createdJobIDs = append(createdJobIDs, res.Detail.JobID)
 			}
 
 			// List all jobs
@@ -2025,23 +1942,16 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			testText := "Test text for job deletion."
 			jobName := fmt.Sprintf("delete-test-%d", time.Now().Unix())
 
-			// Create job
-			jobResp, err := summarization.CreateJobWithText(ctx, summarizeBaseURL, testText, "brief", jobName, false)
+			res, err := summarization.SubmitAndVerifyJob(ctx, summarizeBaseURL, "", testText, "brief", jobName, false, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			logger.Infof("[TEST] Created job for deletion: %s", jobResp.JobID)
+			jobID := res.Detail.JobID
+			logger.Infof("[TEST] Job ready for deletion: %s", jobID)
 
-			// Wait for completion
-			time.Sleep(jobStartDelay)
-			_, err = summarization.WaitForJobCompletion(ctx, summarizeBaseURL, jobResp.JobID, 15*time.Minute)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			// Delete job
-			err = summarization.DeleteJob(ctx, summarizeBaseURL, jobResp.JobID)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			logger.Infof("[TEST] ✓ Job deleted successfully: %s", jobResp.JobID)
+			gomega.Expect(summarization.DeleteJob(ctx, summarizeBaseURL, jobID)).To(gomega.Succeed())
+			logger.Infof("[TEST] ✓ Job deleted successfully: %s", jobID)
 
 			// Verify job is deleted (should return error)
-			_, err = summarization.GetJobDetail(ctx, summarizeBaseURL, jobResp.JobID)
+			_, err = summarization.GetJobDetail(ctx, summarizeBaseURL, jobID)
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			logger.Infof("[TEST] ✓ Verified job no longer exists")
 		})
@@ -2744,7 +2654,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
-		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if providedAppName != "" {
 				// The app was provided by the caller — do not delete it so the
 				// caller can inspect or reuse it after the run.
@@ -2760,7 +2670,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s deleted successfully", appName)
 		})
-		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}

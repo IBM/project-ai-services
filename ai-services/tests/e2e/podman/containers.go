@@ -351,7 +351,7 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 }
 
 // VerifyContainers checks that all expected pods are healthy and have zero restarts; matches pods by prefix for both OpenShift and podman catalog paths.
-func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName string, appRuntime string) error {
+func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName, appRuntime, templateName string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
 
 	if strings.TrimSpace(widePSOutput) == "" {
@@ -364,7 +364,13 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 		return err
 	}
 
-	for _, suffix := range common.ExpectedPodSuffixes[appRuntime] {
+	// Prefer template-aware suffix map; fall back to legacy runtime-only map for unknown templates.
+	suffixes, ok := common.ExpectedPodSuffixesByTemplate[templateName][appRuntime]
+	if !ok {
+		suffixes = common.ExpectedPodSuffixes[appRuntime]
+	}
+
+	for _, suffix := range suffixes {
 		var foundPodName string
 
 		// Match by prefix: both OpenShift and podman catalog path use dynamic pod names beginning with the service suffix.

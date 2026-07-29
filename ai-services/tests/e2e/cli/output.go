@@ -357,6 +357,12 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 		)
 	}
 
+	if templateName == "summarize" {
+		required = append(required,
+			"Summarize API", // summarize service display name
+		)
+	}
+
 	for _, r := range required {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("application info validation failed: missing '%s'", r)

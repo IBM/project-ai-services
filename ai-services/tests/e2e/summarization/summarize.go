@@ -27,9 +27,9 @@ const (
 // SetAppRuntime stores the application runtime for summarization tests.
 func SetAppRuntime(string) {}
 
-// getHTTPClient returns an HTTP client configured based on the runtime.
+// getClient returns an HTTP client configured based on the runtime.
 // Skips TLS certificate verification for both Podman (nip.io self-signed certs) and OpenShift.
-func getHTTPClient(timeout time.Duration) *http.Client {
+func getClient(timeout time.Duration) *http.Client {
 	// Skip TLS certificate verification for both podman (nip.io) and openshift
 	// Podman uses self-signed certificates with nip.io domains
 	return &http.Client{
@@ -158,7 +158,7 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
@@ -224,7 +224,7 @@ func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, content
 	}
 	req.Header.Set("Content-Type", contentType)
 
-	client := getHTTPClient(postCallTimeout)
+	client := getClient(postCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
@@ -297,13 +297,97 @@ func createTempTextFile(text string) (string, error) {
 	if _, err := tmpFile.WriteString(text); err != nil {
 		_ = os.Remove(tmpFile.Name()) //nolint:errcheck // Cleanup on error path
 
-
 		return "", fmt.Errorf("failed to write to temp file: %w", err)
 	}
 
 	return tmpFile.Name(), nil
 }
 
+// JobResult bundles the completed job detail and its summary text.
+// Returned by SubmitAndVerifyJob so callers need only one call for the full happy-path flow.
+type JobResult struct {
+	Detail  *JobDetailResponse
+	Summary string
+}
+
+// SubmitAndVerifyJob submits a file-based summarization job, waits for completion,
+// fetches the result, and returns the parsed summary.
+// filePath — absolute path to the file to summarize; use "" to fall back to text.
+// text     — used only when filePath is empty (creates a temporary text file).
+// All three create/wait/result steps are collapsed into a single call, eliminating
+// the repeated boilerplate that appeared in every happy-path spec.
+func SubmitAndVerifyJob(
+	ctx context.Context,
+	baseURL string,
+	filePath string,
+	text string,
+	level string,
+	jobName string,
+	stream bool,
+	jobTimeout time.Duration,
+) (*JobResult, error) {
+	var (
+		jobResp *JobCreatedResponse
+		err     error
+	)
+
+	if filePath != "" {
+		jobResp, err = CreateJobWithFile(ctx, baseURL, filePath, level, jobName, stream)
+	} else {
+		jobResp, err = CreateJobWithText(ctx, baseURL, text, level, jobName, stream)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("create job: %w", err)
+	}
+
+	// Brief pause to let the service begin processing before polling.
+	time.Sleep(2 * time.Second) //nolint:mnd
+
+	detail, err := WaitForJobCompletion(ctx, baseURL, jobResp.JobID, jobTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("wait for job %s: %w", jobResp.JobID, err)
+	}
+
+	result, err := GetJobResult(ctx, baseURL, jobResp.JobID)
+	if err != nil {
+		return nil, fmt.Errorf("get result for job %s: %w", jobResp.JobID, err)
+	}
+
+	summary, ok := result.Data["summary"].(string)
+	if !ok || summary == "" {
+		return nil, fmt.Errorf("job %s result missing non-empty summary", jobResp.JobID)
+	}
+
+	return &JobResult{Detail: detail, Summary: summary}, nil
+}
+
+// SubmitJobExpectingFailure submits a text-based job and waits for it to reach
+// the Failed terminal state. It returns the completed JobDetailResponse so callers
+// can assert on the Error field. An error is returned only when the job does not
+// reach a terminal state within the timeout or when the status is not Failed.
+func SubmitJobExpectingFailure(
+	ctx context.Context,
+	baseURL string,
+	text string,
+	level string,
+	jobName string,
+	jobTimeout time.Duration,
+) (*JobDetailResponse, error) {
+	jobResp, err := CreateJobWithText(ctx, baseURL, text, level, jobName, false)
+	if err != nil {
+		return nil, fmt.Errorf("create job: %w", err)
+	}
+
+	// Brief pause to let the service begin processing before polling.
+	time.Sleep(2 * time.Second) //nolint:mnd
+
+	detail, err := WaitForJobCompletion(ctx, baseURL, jobResp.JobID, jobTimeout)
+	// WaitForJobCompletion returns a non-nil error when status == Failed; that is
+	// expected here, so we return the detail alongside the error so the caller can
+	// inspect both.
+	return detail, err
+}
 
 // GetJobDetail retrieves the details of a specific job.
 func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailResponse, error) {
@@ -314,7 +398,7 @@ func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailRespons
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -347,7 +431,7 @@ func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultRespons
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -430,7 +514,7 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jo
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -463,7 +547,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
@@ -490,7 +574,7 @@ func DeleteAllJobs(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := getHTTPClient(getCallTimeout)
+	client := getClient(getCallTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
@@ -561,7 +645,6 @@ func CreateJobWithTextExpectingError(ctx context.Context, baseURL, text, level, 
 	// Use the file-based error creation
 	return CreateJobExpectingError(ctx, baseURL, tmpFile, level, jobName, stream)
 }
-
 
 // IsResourceLockedError checks if an error is a resource locked error (409).
 func IsResourceLockedError(err error) bool {
