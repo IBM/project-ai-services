@@ -542,7 +542,7 @@ Base scanner responsibilities:
 Subclass responsibilities:
 
 - remote listing
-- streaming SHA-256 computation
+- SHA-256 computation (strategy is transport-specific — see §7.1 and §7.2)
 - file download
 - connection lifecycle
 
@@ -608,11 +608,22 @@ This keeps `ConnectorSyncWorker` independent of transport type.
 Behavior:
 
 - decrypt private key per tick
-- connect with Paramiko
+- connect with Paramiko (SFTP channel for listing/download, SSH channel for hashing)
 - recursively walk the remote path
 - ignore files whose extension is not allowed
-- compute SHA-256 by streaming file content
+- compute SHA-256 **on the remote host** via `ssh.exec_command()` — no file bytes are transferred during hashing
 - download selected files into staging
+
+SHA-256 is obtained by running `sha256sum` on the remote side:
+
+```python
+def _remote_sha256(self, remote_file_path: str) -> str:
+    """Execute sha256sum on the remote host and return the hex digest."""
+    _, stdout, _ = self._ssh.exec_command(f'sha256sum "{remote_file_path}"')
+    output = stdout.read().decode().strip()
+    # sha256sum output format: "<hex_digest>  <filename>"
+    return output.split()[0]
+```
 
 SFTP scan sketch:
 
@@ -622,7 +633,7 @@ def scan(self, known_hashes: set[str]):
     for remote_file in self._walk_remote_tree():
         if not self._is_allowed(remote_file.path):
             continue
-        sha256 = self._stream_hash(remote_file.path)
+        sha256 = self._remote_sha256(remote_file.path)
         found.append((remote_file, sha256))
     return found
 ```
@@ -915,12 +926,12 @@ All DB functions from §5.1:
 **What's built:**
 - `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
 - `build_scanner()` factory — dispatches on `type`
-- `SFTPScanner` — decrypts private key, Paramiko connection, recursive walk, extension filter, streaming SHA-256, staged download
+- `SFTPScanner` — decrypts private key, Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote SHA-256 via `ssh.exec_command(f'sha256sum "{remote_file_path}"')`, staged download
 
 **How to test:**
 - Unit test `SFTPScanner` against a local mock SFTP server (e.g. `pytest-sftpserver` or `paramiko.SFTPServer` in a thread)
 - Assert extension filtering works correctly
-- Assert SHA-256 is correctly computed from streamed content
+- Assert SHA-256 is computed via remote `sha256sum` exec (not by streaming bytes) and matches expected digest
 - Assert `build_scanner("ssh", config)` returns an `SFTPScanner` instance
 
 ---
