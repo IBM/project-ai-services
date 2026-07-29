@@ -245,14 +245,24 @@ var _ = ginkgo.BeforeSuite(func() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	logger.Infof("[SETUP] ai-services version: %s", binVersion)
 
-	// Extract URLs from existing application (if provided) - must happen after CLI is built
+	ginkgo.By("Logging in to catalog API server (if already running)")
+	if providedAppName != "" {
+		// Existing app: catalog is already running — login is required before any CLI call.
+		// Fatal so a missing CATALOG_PASSWORD surfaces immediately with a clear message.
+		catalogLoginWithDiscovery(ctx, true)
+	} else {
+		// Fresh run: catalog may not be running yet — non-fatal, login happens again before 'application create'.
+		catalogLoginWithDiscovery(ctx, false)
+	}
+
+	// Extract URLs from existing application (if provided) - must happen after catalog login.
 	if providedAppName != "" {
 		ginkgo.By("Extracting URLs from existing application")
 		logger.Infof("[SETUP] Attempting to extract URL for app=%s, template=%s, runtime=%s", appName, templateName, appRuntime)
-		
+
 		extractCtx, extractCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer extractCancel()
-		
+
 		infoOut, infoErr := cli.ApplicationInfo(extractCtx, cfg, appName, appRuntime)
 		if infoErr != nil {
 			logger.Errorf("[SETUP] ERROR: Failed to get application info: %v", infoErr)
@@ -266,10 +276,6 @@ var _ = ginkgo.BeforeSuite(func() {
 			}
 		}
 	}
-
-	ginkgo.By("Logging in to catalog API server (if already running)")
-	// Non-fatal: catalog may not be running yet — a fresh login happens before 'application create'.
-	catalogLoginWithDiscovery(ctx, false)
 
 	ginkgo.By("Checking Podman environment (non-blocking)")
 	err = bootstrap.CheckPodman()
@@ -385,21 +391,33 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Bootstrap Steps", func() {
 		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping bootstrap configure — using existing application")
+			}
 			output, err := cli.BootstrapConfigure(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping bootstrap validate — using existing application")
+			}
 			output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapValidateOutput(output)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs full bootstrap", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping full bootstrap — using existing application")
+			}
 			output, err := cli.Bootstrap(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping catalog configure — using existing application")
+			}
 			if appRuntime != "podman" { //nolint:dupl
 				ginkgo.Skip("catalog configure only supported for podman runtime")
 			}
@@ -421,6 +439,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 		})
 		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping catalog info — using existing application")
+			}
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog info only supported for podman runtime")
 			}
@@ -453,6 +474,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
 		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping catalog login — using existing application")
+			}
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog login only supported for podman runtime")
 			}
@@ -472,6 +496,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infoln("[TEST] Catalog login validated successfully!")
 		})
 		ginkgo.It("verifies catalog whoami after login", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping catalog whoami — using existing application")
+			}
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog whoami only supported for podman runtime")
 			}
@@ -490,6 +517,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infoln("[TEST] Catalog whoami output validated successfully!")
 		})
 		ginkgo.It("verifies catalog logout invalidates session", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping catalog logout — using existing application")
+			}
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}
@@ -524,18 +554,27 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Application Image Command Tests", func() {
 		ginkgo.It("lists images for rag template", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping image list — using existing application")
+			}
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 			gomega.Expect(cli.ListImage(ctx, cfg, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infof("[TEST] Images listed successfully for %s template", templateName)
 		})
 		ginkgo.It("pulls images for rag template", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping image pull — using existing application")
+			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
 			gomega.Expect(cli.PullImage(ctx, cfg, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infof("[TEST] Images pulled successfully for %s template", templateName)
 		})
 		ginkgo.It("verifies application model download command", ginkgo.Label("spyre-independent", "summarization-tests"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping model download — using existing application")
+			}
 			ctx, cancel := withTimeout(30 * time.Minute)
 			defer cancel()
 			output, err := cli.ModelDownload(ctx, cfg, templateName, appRuntime)
@@ -633,6 +672,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Observability", func() {
+		ginkgo.BeforeEach(func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping observability specs — using existing application")
+			}
+		})
 		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
@@ -1677,6 +1721,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			logger.Infof("[SUMMARIZE] Setting up summarization tests for app: %s", appName)
+
+			// Ensure catalog session is active before any CLI call.
+			// When --app-name is provided the catalog is already running but the
+			// session token may not have been established (e.g. CATALOG_PASSWORD was
+			// not set at BeforeSuite time, or the token TTL has elapsed).
+			loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			catalogLoginWithDiscovery(loginCtx, true)
+			loginCancel()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
