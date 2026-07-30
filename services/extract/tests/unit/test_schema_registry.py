@@ -140,6 +140,7 @@ class TestRegisterSchema:
 
     def test_invalid_json_schema_returns_400(self, extract_test_client):
         with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+             patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
              patch(
                  "extract.api.v1.schema.validate_json_schema_structure",
                  side_effect=SchemaValidationError("INVALID_SCHEMA", "Root must be type:object", 400),
@@ -157,6 +158,7 @@ class TestRegisterSchema:
 
     def test_invalid_example_returns_400(self, extract_test_client):
         with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
+             patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
              patch("extract.api.v1.schema.validate_json_schema_structure"), \
              patch(
                  "extract.api.v1.schema.validate_examples",

@@ -13,12 +13,11 @@ from typing import  Optional
 from fastapi import APIRouter, Query
 from fastapi.responses import  Response
 from sqlalchemy.exc import IntegrityError
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, get_llm_endpoint
 from common.error_utils import  http_error_responses
 
 from extract.settings import settings
 
-import extract.app as _app
 from extract.db.manager import db_repo
 from extract.models import (
     PaginationInfo,
@@ -87,7 +86,8 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
 
 
     # --- Token-count caching ---
-    llm_endpoint = _app.llm_model_dict.get("llm_endpoint", "")
+    llm_model_dict = get_llm_endpoint()
+    llm_endpoint = llm_model_dict.get("llm_endpoint", "")
     try:
         schema_tokens, examples_tokens, custom_prompt_tokens = await asyncio.to_thread(
             compute_token_counts,
