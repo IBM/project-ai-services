@@ -29,9 +29,11 @@
    - 6.3 [Create Datasource](#63-create-datasource)
    - 6.4 [Update Datasource](#64-update-datasource)
    - 6.5 [Delete Datasource](#65-delete-datasource)
-   - 6.6 [Connect Datasource to Application](#66-connect-datasource-to-application)
-   - 6.7 [Disconnect Datasource from Application](#67-disconnect-datasource-from-application)
-   - 6.8 [Get Datasource Status for Application](#68-get-datasource-status-for-application)
+   - 6.6 [List Supported Datasource Providers](#66-list-supported-datasource-providers)
+   - 6.7 [Get Datasource Provider Input Schema](#67-get-datasource-provider-input-schema)
+   - 6.8 [Connect Datasource to Application](#68-connect-datasource-to-application)
+   - 6.9 [Disconnect Datasource from Application](#69-disconnect-datasource-from-application)
+   - 6.10 [Get Datasource Status for Application](#610-get-datasource-status-for-application)
 7. [Digitize Service Integration](#7-digitize-service-integration)
    - 7.1 [Connector API Overview](#71-connector-api-overview)
    - 7.2 [Connect Flow](#72-connect-flow)
@@ -45,9 +47,7 @@
    - 8.3 [Remote SSH/SFTP Provider](#83-remote-sshsftp-provider)
 9. [Secret Encryption](#9-secret-encryption)
    - 9.1 [Encryption Scheme Overview](#91-encryption-scheme-overview)
-   - 9.2 [Catalog Backend Encryption](#92-catalog-backend-encryption)
-   - 9.3 [Digitize Service Encryption](#93-digitize-service-encryption)
-   - 9.4 [Deployment Changes](#94-deployment-changes)
+   - 9.2 [Deployment Changes](#92-deployment-changes)
 10. [Sync Service](#10-sync-service)
     - 10.1 [Sync Job Design](#101-sync-job-design)
     - 10.2 [Status Updates](#102-status-updates)
@@ -97,9 +97,7 @@ Users need to:
 
 ### 3.1 Key Concepts
 
-**Datasource**: A named, typed, remote content store with connection credentials. Datasources are tenant-level resources — they are not owned by a single application.
-
-**Connector**: The Digitize service's representation of an active link between a deployed application and a datasource. A connector is created in the Digitize service when a datasource is connected to an application, and stores the `connector_id`.
+**Datasource Connector**: A named, typed, remote content store with connection credentials. Datasources are tenant-level resources — they are not owned by a single application.
 
 **Application-Datasource Link**: The catalog-level record of which datasources are connected to which applications. This is a many-to-many relationship. Each link stores the `connector_id` used by the Digitize service.
 
@@ -147,7 +145,7 @@ A datasource record in the `components` table looks like:
 | `type`       | `"datasource"`                                                                                               |
 | `provider`   | `"s3"`                                                                                                       |
 | `source`     | `"remote"`                                                                                                   |
-| `status`     | `"Initializing"` / `"Running"` / `"Error"`                                                                   |
+| `status`     | `"Connected"` / `"Disconnected"`                                                                             |
 | `message`    | `""` / `"Permission denied on bucket"`                                                                       |
 | `metadata`   | `{"bucket": "my-docs", "region": "us-east-1", "access_key_id": "AK...", "secret_access_key": "<encrypted>"}` |
 | `version`    | `"1"`                                                                                                        |
@@ -156,7 +154,7 @@ A datasource record in the `components` table looks like:
 
 ### 4.2 Application-Datasource Join Table
 
-A new join table `application_datasources` captures the many-to-many relationship between applications and datasources. It also stores the `connector_id` returned by the Digitize service for each link.
+A new join table `application_datasources` captures the many-to-many relationship between applications and datasources. It stores only the `connector_id` returned by the Digitize service — no status, message, or file counters are cached here. All per-link runtime state is fetched live from the Digitize service on demand.
 
 ```sql
 -- +goose Up
@@ -165,26 +163,17 @@ CREATE TABLE application_datasources (
     application_id  UUID NOT NULL,
     datasource_id   UUID NOT NULL,
     connector_id    VARCHAR(255),           -- ID returned by Digitize /v1/connectors
-    status          component_status NOT NULL DEFAULT 'Initializing',
-    message         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (application_id, datasource_id),
     CONSTRAINT fk_application_id FOREIGN KEY (application_id)
         REFERENCES applications(id) ON DELETE CASCADE,
     CONSTRAINT fk_datasource_id FOREIGN KEY (datasource_id)
         REFERENCES components(id)
 );
-
-CREATE TRIGGER update_application_datasources_updated_at
-    BEFORE UPDATE ON application_datasources
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TRIGGER IF EXISTS update_application_datasources_updated_at ON application_datasources;
 DROP TABLE IF EXISTS application_datasources;
 -- +goose StatementEnd
 ```
@@ -198,16 +187,28 @@ DROP TABLE IF EXISTS application_datasources;
 
 ### 4.3 New Enum Values
 
-No new enum types are required. The existing `component_status` enum (`Initializing`, `Running`, `Error`) covers all datasource and connector link states.
+Two new values are added to the existing `component_status` enum to represent the connectors-page status of a datasource:
+
+```sql
+-- Migration: extend component_status with datasource connectivity states
+ALTER TYPE component_status ADD VALUE 'Connected';
+ALTER TYPE component_status ADD VALUE 'Disconnected';
+```
+
+| Value          | Meaning                                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Connected`    | The sync job successfully reached the datasource — credentials valid, files/folders accessible                                                          |
+| `Disconnected` | The sync job failed to reach the datasource — could be invalid credentials, permission error, network issue, etc. `message` contains the specific error |
 
 ### 4.4 Migration Plan
 
-Two new goose migration files, numbered after the current highest (`20260430094506`):
+Three new goose migration files, numbered after the current highest (`20260430094506`):
 
-| File                                                      | Purpose                              |
-| --------------------------------------------------------- | ------------------------------------ |
-| `20260430094507_add_source_to_components.sql`             | Adds `source` column to `components` |
-| `20260430094508_create_application_datasources_table.sql` | Creates the join table               |
+| File                                                      | Purpose                                                   |
+| --------------------------------------------------------- | --------------------------------------------------------- |
+| `20260430094507_add_source_to_components.sql`             | Adds `source` column to `components`                      |
+| `20260430094508_extend_component_status_enum.sql`         | Adds `Connected` and `Disconnected` to `component_status` |
+| `20260430094509_create_application_datasources_table.sql` | Creates the join table                                    |
 
 ---
 
@@ -217,21 +218,23 @@ Two new goose migration files, numbered after the current highest (`202604300945
 
 All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 
-| Method   | Path               | Description                                                    |
-| -------- | ------------------ | -------------------------------------------------------------- |
-| `GET`    | `/datasources`     | List all datasources (paginated, filterable by status)         |
-| `GET`    | `/datasources/:id` | Get a single datasource by ID                                  |
-| `POST`   | `/datasources`     | Create a new datasource (validates connectivity first)         |
-| `PUT`    | `/datasources/:id` | Update datasource metadata / credentials                       |
-| `DELETE` | `/datasources/:id` | Delete a datasource (only if not connected to any application) |
+| Method   | Path                                              | Description                                                    |
+| -------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| `GET`    | `/connectors/datasources`                         | List all datasources (paginated, filterable by status)         |
+| `GET`    | `/connectors/datasources/:id`                     | Get a single datasource by ID                                  |
+| `POST`   | `/connectors/datasources`                         | Create a new datasource (validates connectivity first)         |
+| `PUT`    | `/connectors/datasources/:id`                     | Update datasource metadata / credentials                       |
+| `DELETE` | `/connectors/datasources/:id`                     | Delete a datasource (only if not connected to any application) |
+| `GET`    | `/connectors/datasources/providers`               | List all supported datasource provider types                   |
+| `GET`    | `/connectors/datasources/providers/:provider_id/params` | Get the input schema for a specific provider type         |
 
 ### 5.2 Application-Datasource Connection APIs
 
-| Method   | Path                                           | Description                                                         |
-| -------- | ---------------------------------------------- | ------------------------------------------------------------------- |
-| `PUT`    | `/applications/:id/datasources/:datasource_id` | Connect a datasource to an application                              |
-| `DELETE` | `/applications/:id/datasources/:datasource_id` | Disconnect a datasource from an application                         |
-| `GET`    | `/applications/:id/datasources/:datasource_id` | Get datasource status/details for a specific application connection |
+| Method   | Path                                                      | Description                                                         |
+| -------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
+| `PUT`    | `/applications/:id/connectors/datasources/:datasource_id` | Connect a datasource to an application                              |
+| `DELETE` | `/applications/:id/connectors/datasources/:datasource_id` | Disconnect a datasource from an application                         |
+| `GET`    | `/applications/:id/connectors/datasources/:datasource_id` | Get datasource status/details for a specific application connection |
 
 ---
 
@@ -239,28 +242,28 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 
 ### 6.1 List Datasources
 
-**`GET /api/v1/datasources`**
+**`GET /api/v1/connectors/datasources`**
 
 Query parameters:
 
-| Parameter   | Type   | Required | Description                                          |
-| ----------- | ------ | -------- | ---------------------------------------------------- |
-| `page`      | int    | No       | Page number (default: 1)                             |
-| `page_size` | int    | No       | Items per page (default: 20, max: 100)               |
-| `status`    | string | No       | Filter by status: `Initializing`, `Running`, `Error` |
-| `provider`  | string | No       | Filter by provider type: `s3`, `sftp`                |
+| Parameter   | Type   | Required | Description                                   |
+| ----------- | ------ | -------- | --------------------------------------------- |
+| `page`      | int    | No       | Page number (default: 1)                      |
+| `page_size` | int    | No       | Items per page (default: 20, max: 100)        |
+| `status`    | string | No       | Filter by status: `Connected`, `Disconnected` |
+| `provider`  | string | No       | Filter by provider type: `s3`, `sftp`         |
 
 **Response `200 OK`:**
 
 ```json
 {
-  "datasources": [
+  "data": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "name": "My S3 Bucket",
       "type": "datasource",
       "provider": "s3",
-      "status": "Running",
+      "status": "Connected",
       "message": "",
       "metadata": {
         "bucket": "my-docs",
@@ -281,7 +284,7 @@ Query parameters:
 
 ### 6.2 Get Datasource
 
-**`GET /api/v1/datasources/:id`**
+**`GET /api/v1/connectors/datasources/:id`**
 
 **Response `200 OK`:** Single datasource object (same structure as list item above, without secrets).
 
@@ -293,7 +296,7 @@ Query parameters:
 
 ### 6.3 Create Datasource
 
-**`POST /api/v1/datasources`**
+**`POST /api/v1/connectors/datasources`**
 
 The request body varies by `provider`. The catalog backend validates the connection using the provided credentials before persisting.
 
@@ -304,10 +307,14 @@ The request body varies by `provider`. The catalog backend validates the connect
   "name": "My S3 Bucket",
   "provider": "s3",
   "metadata": {
-    "bucket": "my-docs",
+    "bucket_name": "my-docs",
     "region": "us-east-1",
     "access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "endpoint_url": "https://s3.amazonaws.com",
+    "prefix": "reports/2026/",
+    "delimiter": "/",
+    "allowed_extensions": [".pdf", ".docx", ".xlsx"]
   }
 }
 ```
@@ -320,10 +327,10 @@ The request body varies by `provider`. The catalog backend validates the connect
   "provider": "ssh_sftp",
   "metadata": {
     "host": "192.168.1.100",
-    "port": 22,
     "username": "datauser",
     "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-    "remote_path": "/data/documents"
+    "remote_path": "/data/documents",
+    "allowed_extensions": [".pdf", ".docx", ".txt"]
   }
 }
 ```
@@ -334,7 +341,7 @@ The request body varies by `provider`. The catalog backend validates the connect
 - `provider` must be a registered provider identifier (`s3` or `ssh_sftp`).
 - All required fields for the given provider must be present (validated via the provider interface).
 - A live connectivity check must succeed before the datasource is persisted. If the connection test fails, return `422 Unprocessable Entity` with a descriptive error message.
-- Sensitive fields (`secret_access_key` for S3; `private_key` for SSH/SFTP) are encrypted before storage using the two-layer DEK/KEK scheme described in Section 9.
+- Sensitive fields (`secret_access_key` for S3; `private_key` for SSH/SFTP) are stored securely as described in Section 9.
 
 **Response `201 Created`:** Datasource object without secret fields.
 
@@ -348,7 +355,7 @@ The request body varies by `provider`. The catalog backend validates the connect
 
 ### 6.4 Update Datasource
 
-**`PUT /api/v1/datasources/:id`**
+**`PUT /api/v1/connectors/datasources/:id`**
 
 Same request body structure as create. If credential fields are provided, the connectivity check is re-run before saving. If credential fields are omitted, the existing encrypted credentials are preserved.
 
@@ -358,7 +365,7 @@ When a datasource is updated, for every application it is currently connected to
 
 ### 6.5 Delete Datasource
 
-**`DELETE /api/v1/datasources/:id`**
+**`DELETE /api/v1/connectors/datasources/:id`**
 
 **Rules:**
 
@@ -372,9 +379,69 @@ When a datasource is updated, for every application it is currently connected to
 { "error": "datasource is connected to 2 application(s) and cannot be deleted" }
 ```
 
-### 6.6 Connect Datasource to Application
+### 6.6 List Supported Datasource Providers
 
-**`PUT /api/v1/applications/:id/datasources/:datasource_id`**
+**`GET /api/v1/connectors/datasources/providers`**
+
+Returns all registered datasource provider types. The UI uses this to populate the "Add Datasource" provider picker. Reuses the same provider registry queried by `DatasourceProvider.ProviderID()`.
+
+**Response `200 OK`:**
+
+```json
+{
+  "providers": [
+    {
+      "provider_id": "s3",
+      "display_name": "Amazon S3",
+      "description": "Amazon S3 bucket via AWS credentials"
+    },
+    {
+      "provider_id": "ssh_sftp",
+      "display_name": "Remote SSH / SFTP",
+      "description": "Remote server accessible via SSH private key"
+    }
+  ]
+}
+```
+
+> This endpoint mirrors the pattern of `GET /api/v1/services` — it reads from the in-process provider registry, not the database. No new storage is required.
+
+### 6.7 Get Datasource Provider Input Schema
+
+**`GET /api/v1/connectors/datasources/providers/:provider_id/params`**
+
+Returns the JSON Schema describing the input fields required to create or update a datasource of the given provider type. The UI renders the form dynamically from this schema — exactly as `GET /api/v1/components/:component_type/providers/:provider_id/params` does for component configuration.
+
+The schema is derived from the provider's `RequiredFields()` and `SensitiveFields()` declarations. Sensitive fields are marked with `"x-sensitive": true` so the UI can render them as password inputs.
+
+**Response `200 OK` (S3 example):**
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "bucket_name":       { "type": "string", "title": "Bucket Name" },
+    "region":            { "type": "string", "title": "AWS Region" },
+    "access_key_id":     { "type": "string", "title": "Access Key ID" },
+    "secret_access_key": { "type": "string", "title": "Secret Access Key", "x-sensitive": true },
+    "endpoint_url":      { "type": "string", "title": "Endpoint URL (optional)" }
+  },
+  "required": ["bucket_name", "region", "access_key_id", "secret_access_key"]
+}
+```
+
+**Response `404 Not Found`:**
+
+```json
+{ "error": "unknown provider: my_unknown_provider" }
+```
+
+> This endpoint mirrors `GET /api/v1/components/:component_type/providers/:provider_id/params`. Implementation follows the same pattern as [`CatalogHandler.GetComponentProviderParams`](../../ai-services/internal/pkg/catalog/apiserver/handlers/catalog.go).
+
+### 6.8 Connect Datasource to Application
+
+**`PUT /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
 Creates a link in `application_datasources` and calls `POST /v1/connectors` on the Digitize service.
 
@@ -390,8 +457,7 @@ Creates a link in `application_datasources` and calls `POST /v1/connectors` on t
 {
   "application_id": "...",
   "datasource_id": "...",
-  "connector_id": "conn-abc123",
-  "status": "Initializing"
+  "connector_id": "conn-abc123"
 }
 ```
 
@@ -409,9 +475,9 @@ Creates a link in `application_datasources` and calls `POST /v1/connectors` on t
 }
 ```
 
-### 6.7 Disconnect Datasource from Application
+### 6.9 Disconnect Datasource from Application
 
-**`DELETE /api/v1/applications/:id/datasources/:datasource_id`**
+**`DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
 Removes the link from `application_datasources` and calls `DELETE /v1/connectors/:connectorid` on the Digitize service.
 
@@ -423,25 +489,29 @@ Removes the link from `application_datasources` and calls `DELETE /v1/connectors
 { "error": "datasource is not connected to this application" }
 ```
 
-### 6.8 Get Datasource Status for Application
+### 6.10 Get Datasource Status for Application
 
-**`GET /api/v1/applications/:id/datasources/:datasource_id`**
+**`GET /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
-Fetches live status by calling `GET /v1/connectors/:connectorid` on the Digitize service and merges it with the local link record.
+The `application_id` in the path is used only to resolve the `connector_id` from `application_datasources`. The response is the raw payload returned by `GET /v1/connectors/:connectorid` on the Digitize service, passed through verbatim — no catalog fields are added or merged.
 
 **Response `200 OK`:**
 
 ```json
 {
-  "application_id": "...",
-  "datasource_id": "...",
   "connector_id": "conn-abc123",
-  "status": "Running",
-  "message": "",
-  "files_processed": 142,
-  "last_synced_at": "2026-06-01T11:00:00Z"
+  "type": "s3",
+  "sync_status": "Completed",
+  "files_found": 150,
+  "files_syncing": 0,
+  "files_completed": 150,
+  "files_failed": 8,
+  "last_sync_at": "2026-06-01T11:00:00Z",
+  "last_sync_error": null
 }
 ```
+
+**Response `404 Not Found`:** Returned if the datasource is not connected to this application (no row in `application_datasources`).
 
 ---
 
@@ -463,12 +533,10 @@ The Digitize service exposes a `/v1/connectors` API that manages the active link
 When `PUT /applications/:id/datasources/:datasource_id` is called:
 
 1. Validate application is `Running`.
-2. Validate datasource is `Running`.
+2. Validate datasource is `Connected`.
 3. Validate the link does not already exist.
-4. Decrypt the datasource credentials from the catalog database.
-5. Call `POST /v1/connectors` on the Digitize service with the connector payload (see payload format below).
-6. On success, store the returned `connector_id` in `application_datasources`.
-7. Set link `status = "Initializing"`.
+4. Call `POST /v1/connectors` on the Digitize service with the connector payload (see payload format below).
+5. On success, store the returned `connector_id` in `application_datasources`.
 
 **`POST /v1/connectors` payload — S3 example:**
 
@@ -514,14 +582,45 @@ The digitize service responds with `202 Accepted` and `{ "connector_id": "<UUID>
 
 ### 7.3 Update Flow
 
-When `PUT /datasources/:id` is called:
+When `PUT /api/v1/connectors/datasources/:id` is called:
 
 1. Validate connectivity with new credentials.
-2. Encrypt new credentials and update the `components` record.
+2. Update the `components` record with the new credentials.
 3. Query `application_datasources` for all links to this datasource that have a non-null `connector_id`.
-4. For each link, call `PUT /v1/connectors/:connectorid` with the updated payload.
-5. The digitize service performs a partial update — only the fields sent in the payload are overwritten. Catalog may send only the changed `connection_details` keys and top-level fields.
-6. If any call fails, log the error and continue — do not roll back the datasource record update.
+4. For each link, call `PUT /v1/connectors/:connectorid` on the Digitize service with the updated payload.
+   - If the call fails, retry **once**.
+   - If the retry also fails: record the error for that link and continue to the next — do **not** roll back the datasource record update.
+5. The digitize service performs a partial update — only the fields sent in the payload are overwritten.
+6. Return `200 OK`. If any propagations failed, include a `propagation_errors` array in the response so the UI can show an inline error against each affected application. The user retriggers by re-submitting the datasource update from the UI.
+
+**Response when all propagations succeed:**
+
+```json
+{
+  "id": "550e8400-...",
+  "name": "My S3 Bucket",
+  "provider": "s3",
+  "status": "Connected"
+}
+```
+
+**Response when one or more propagations fail:**
+
+```json
+{
+  "id": "550e8400-...",
+  "name": "My S3 Bucket",
+  "provider": "s3",
+  "status": "Connected",
+  "propagation_errors": [
+    {
+      "application_id": "app-uuid-1",
+      "application_name": "My App",
+      "error": "failed to reach digitize service after 1 retry: connection refused"
+    }
+  ]
+}
+```
 
 ### 7.4 Disconnect Flow
 
@@ -535,18 +634,11 @@ When `DELETE /applications/:id/datasources/:datasource_id` is called:
 
 ### 7.5 Status Fetch Flow
 
-When `GET /applications/:id/datasources/:datasource_id` is called:
+When `GET /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
 
-1. Retrieve the link record from `application_datasources` to get `connector_id`.
-2. Call `GET /v1/connectors/:connectorid` on the Digitize service.
-3. Map the digitize response fields to the catalog response. The digitize `GET /v1/connectors/:id` response includes:
-   - `sync_status` — free-form string: `"Syncing"`, `"Completed"`, `"Failed"`, or a descriptive error message
-   - `files_found`, `files_syncing`, `files_completed`, `files_failed` — file counters from the last tick
-   - `last_sync_at` — ISO 8601 timestamp of the last completed tick
-   - `last_sync_error` — `null` or the error string from the last failed tick
-4. Return the merged response to the caller.
-
-A `GET /api/v1/applications/:id/datasources/:datasource_id/sync-history` endpoint may also be added to proxy the digitize `GET /v1/connectors/:connectorid/sync-history` endpoint, which returns a paginated history of every sync tick.
+1. Look up the link row in `application_datasources` using `(application_id, datasource_id)`. Return `404` if not found.
+2. Call `GET /v1/connectors/:connectorid` on the Digitize service using the `connector_id` from that row.
+3. Return the Digitize response body verbatim to the caller. No mapping, merging, or transformation is applied.
 
 ### 7.6 Bearer Token Authentication
 
@@ -561,19 +653,27 @@ The digitize connector API requires a bearer token for all requests (`Authorizat
 Each datasource type implements a `DatasourceProvider` interface responsible for:
 
 - Declaring the required and optional metadata fields.
-- Identifying which metadata fields contain sensitive data (to be encrypted).
+- Identifying which metadata fields contain sensitive data.
+- Providing display metadata used by the `GET /connectors/datasources/providers` endpoint.
 - Performing a live connectivity test using the provided credentials.
 
 ```go
 // DatasourceProvider defines the contract for a datasource type.
 type DatasourceProvider interface {
-    // ProviderID returns the unique identifier for this provider type (e.g. "s3", "sftp").
+    // ProviderID returns the unique identifier for this provider type (e.g. "s3", "ssh_sftp").
     ProviderID() string
+
+    // DisplayName returns the human-readable name shown in the UI provider picker.
+    DisplayName() string
+
+    // Description returns a short description of the provider type for the UI.
+    Description() string
 
     // RequiredFields returns the list of metadata field names required for this provider.
     RequiredFields() []string
 
     // SensitiveFields returns the list of metadata field names that contain secret values.
+    // These are marked x-sensitive:true in the params schema so the UI renders them as password inputs.
     SensitiveFields() []string
 
     // TestConnection attempts a live connection using the provided metadata.
@@ -582,7 +682,7 @@ type DatasourceProvider interface {
 }
 ```
 
-Providers are registered in a provider registry at startup. The `POST /datasources` and `PUT /datasources/:id` handlers look up the provider by `provider` field value to run field validation and the connectivity test.
+Providers are registered in a provider registry at startup. The `POST /connectors/datasources` and `PUT /connectors/datasources/:id` handlers look up the provider by `provider` field value to run field validation and the connectivity test. The `GET /connectors/datasources/providers` and `GET /connectors/datasources/providers/:provider_id/params` endpoints read directly from the same registry — no database access required.
 
 ### 8.2 S3 Provider
 
@@ -590,15 +690,18 @@ Providers are registered in a provider registry at startup. The `POST /datasourc
 
 Field names below match the `connection_details` keys used in the digitize push payload.
 
-| Field               | Required | Sensitive | Digitize payload key                               |
-| ------------------- | -------- | --------- | -------------------------------------------------- |
-| `bucket_name`       | Yes      | No        | `bucket_name`                                      |
-| `region`            | Yes      | No        | `region`                                           |
-| `access_key_id`     | Yes      | No        | `access_key_id`                                    |
-| `secret_access_key` | Yes      | **Yes**   | `secret_access_key_ciphertext`                     |
-| `endpoint_url`      | No       | No        | `host` (top-level, defaults to `s3.amazonaws.com`) |
+| Field                | Required | Sensitive | Notes                                              |
+| -------------------- | -------- | --------- | -------------------------------------------------- |
+| `bucket_name`        | Yes      | No        |                                                    |
+| `region`             | Yes      | No        |                                                    |
+| `access_key_id`      | Yes      | No        |                                                    |
+| `secret_access_key`  | Yes      | **Yes**   |                                                    |
+| `endpoint_url`       | No       | No        | Defaults to `https://s3.amazonaws.com`             |
+| `prefix`             | No       | No        | Key prefix to scope the sync to a folder           |
+| `delimiter`          | No       | No        | Delimiter for hierarchical listing (typically `/`) |
+| `allowed_extensions` | No       | No        | e.g. `[".pdf", ".docx", ".xlsx"]`; if omitted, all files are synced |
 
-Connectivity test: List objects in the bucket with a zero-item limit (`list_objects_v2` with `MaxKeys=0`). A successful call (even if empty) confirms valid credentials and bucket access. The digitize proposal confirms the same approach (§1 preconditions for S3).
+Connectivity test: List objects in the bucket (scoped to `prefix` if provided) with a zero-item limit (`list_objects_v2` with `MaxKeys=0`). A successful call confirms valid credentials and bucket/prefix access.
 
 ### 8.3 Remote SSH/SFTP Provider
 
@@ -606,97 +709,67 @@ Connectivity test: List objects in the bucket with a zero-item limit (`list_obje
 
 Field names below match the `connection_details` keys used in the digitize push payload.
 
-| Field         | Required | Sensitive | Digitize payload key     |
-| ------------- | -------- | --------- | ------------------------ |
-| `host`        | Yes      | No        | `host` (top-level)       |
-| `port`        | Yes      | No        | `port`                   |
-| `username`    | Yes      | No        | `username`               |
-| `private_key` | Yes      | **Yes**   | `private_key_ciphertext` |
-| `remote_path` | Yes      | No        | `remote_path`            |
+| Field                | Required | Sensitive | Notes                                                     |
+| -------------------- | -------- | --------- | --------------------------------------------------------- |
+| `host`               | Yes      | No        |                                                           |
+| `username`           | Yes      | No        |                                                           |
+| `private_key`        | Yes      | **Yes**   | Ed25519 private key                                       |
+| `remote_path`        | Yes      | No        | Absolute path on the remote server to sync from           |
+| `allowed_extensions` | No       | No        | e.g. `[".pdf", ".txt"]`; if omitted, all files are synced |
 
-Connectivity test: Establish an SSH connection using the Ed25519 private key and attempt to list the contents of `remote_path`. A successful directory listing confirms valid credentials and folder access permissions.
+Connectivity test: Establish an SSH connection using the private key and attempt to list the contents of `remote_path`. A successful directory listing confirms valid credentials and folder/file access permissions.
 
 ---
 
 ## 9. Secret Encryption
 
-The digitize proposal defines a two-layer **DEK/KEK envelope** scheme. The catalog side must produce payloads that conform to this exact scheme.
-
 ### 9.1 Encryption Scheme Overview
 
-```
-Catalog side (Go):
-  catalog_KEK  (32-byte AES key, mounted from /run/secrets/catalog_kek or env var)
-      │
-      │  For each sensitive field on create/update:
-      │  1. Generate a fresh 32-byte random DEK
-      │  2. AES-256-GCM encrypt(plaintext_field, DEK)  → field_ciphertext
-      │  3. AES-256-GCM encrypt(DEK, catalog_KEK)      → encrypted_dek (for storage)
-      │  4. Store field_ciphertext + encrypted_dek in components.metadata JSONB
-      ▼
-```
+A unique **Key Encryption Key (KEK)** is generated at application deploy time and deployed as a Kubernetes/Podman Secret. It is mounted into each Digitize service pod in that application. There is no DEK layer — the KEK is the only key.
 
-### 9.2 Catalog Backend Encryption
+The catalog backend passes plaintext credentials to the Digitize service over the authenticated connector API; encryption at rest is the responsibility of the receiving service.
 
-The catalog backend pod is deployed with a **Key Encryption Key (KEK)** mounted as a secret file (e.g., `/run/secrets/catalog_kek`). This KEK is used in a two-layer scheme:
+### 9.2 Deployment Changes
 
-- A fresh 32-byte **Data Encryption Key (DEK)** is generated for each sensitive field on create or credential update.
-- The sensitive field value is AES-256-GCM encrypted under the DEK → stored as `<field>_ciphertext`.
-- The DEK is AES-256-GCM encrypted under the catalog KEK → stored as `encrypted_dek`.
-- Both ciphertext values are stored as base64-encoded strings inside `components.metadata` JSONB.
-
-This is implemented in a new `ai-services/internal/pkg/catalog/utils/crypto.go` utility package, following the convention of the existing [`utils/password.go`](../../ai-services/internal/pkg/catalog/utils/password.go).
-
-### 9.3 Digitize Service Encryption
-
-Each Digitize service deployment pod has its own unique KEK mounted at `/run/secrets/connector_kek`.
-
-### 9.4 Deployment Changes
-
-**Catalog backend deployment:**
-
-- Mount a Kubernetes/Podman Secret containing the 32-byte catalog KEK at `/run/secrets/catalog_kek` (or an equivalent env var `CATALOG_CONNECTOR_KEK`). Generated once per environment with a cryptographically secure random source.
-- Mount the digitize connector bearer token at `/run/secrets/connector_api_token` so the `DigitizeConnectorClient` can authenticate against the digitize pod's connector API.
-
-**Digitize service deployment:**
-
-- Each Digitize deployment pod receives its own unique 32-byte KEK mounted at `/run/secrets/connector_kek` (as defined in the digitize proposal §12).
-- A bearer token for the connector API is mounted at `/run/secrets/connector_api_token`.
+- At application deploy time, generate a cryptographically secure random 32-byte KEK.
+- Deploy it as a Kubernetes/Podman Secret scoped to that application's namespace.
+- Mount the secret into each Digitize service pod (at `/run/secrets/connector_kek`).
+- Mount the digitize connector bearer token at `/run/secrets/connector_api_token` so the `DigitizeConnectorClient` can authenticate against each Digitize pod's connector API.
 
 ---
 
 ## 10. Sync Service
 
-The **catalog-side sync service** is a lightweight credential-validation heartbeat.
-
-| Job                         | Where           | What it does                                                                                                                                  |
-| --------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Catalog `DatasourceSyncJob` | Catalog backend | Periodically tests that the stored credentials can still open a connection to the remote source; updates `component_status` in the catalog DB |
+The **catalog-side sync service** is a common, connector-agnostic heartbeat that validates the health of any remotely-managed component registered in the catalog. It is designed to serve datasource connectors today and to be extended for future connector types (e.g., vector stores, models) without structural change.
 
 ### 10.1 Sync Job Design
 
-A periodic background job (`DatasourceSyncJob`) runs in the catalog backend process on a configurable schedule (default: every 15 minutes). For each datasource in the `components` table where `type = "datasource"` and `source = "remote"`, it:
+A single periodic background job (`ConnectorSyncJob`) runs in the catalog backend process on a configurable schedule (default: every 15 minutes). It queries the `components` table for all records where `source = "remote"`, regardless of `type`. For each such component:
 
-1. Loads the datasource metadata and decrypts sensitive fields using the catalog KEK/DEK scheme.
-2. Looks up the registered provider for this datasource's `provider` field.
-3. Calls `provider.TestConnection(ctx, metadata)`.
-4. If the test passes: sets `status = "Running"`, clears `message`.
-5. If the test fails: sets `status = "Error"`, stores the error string in `message`.
-6. Writes the updated status back to the `components` table via `UpdateStatus()`.
+1. Looks up the registered provider for the component's `type` and `provider` fields.
+2. Calls `provider.TestConnection(ctx, metadata)`.
+3. If the test passes: sets `status = "Connected"`, clears `message`.
+4. If the test fails: sets `status = "Disconnected"`, stores the specific error string in `message` (e.g., credential failure, permission denied, network unreachable).
+5. Writes the updated status back to the `components` table via `UpdateStatus()`.
+
+New connector types (vector stores, models, etc.) plug in by implementing the same `ConnectorProvider` interface (see Section 8.1) and registering with the provider registry. No changes to the sync job itself are required.
 
 ### 10.2 Status Updates
 
 The sync job uses the existing `component_repo.UpdateStatus(ctx, id, status, message)` method from [`ai-services/internal/pkg/catalog/db/repository/component_repo.go`](../../ai-services/internal/pkg/catalog/db/repository/component_repo.go).
 
-Datasource status values (catalog side):
+There are two distinct status spaces:
 
-| Status         | Meaning                                                      |
-| -------------- | ------------------------------------------------------------ |
-| `Initializing` | Just created, first connectivity check not yet run           |
-| `Running`      | Last connectivity check passed                               |
-| `Error`        | Last connectivity check failed; `message` contains the error |
+**Connectors page** (`components.status`, driven by `ConnectorSyncJob`):
 
-The per-application sync status (file ingestion progress) is tracked on the digitize side via `sync_status`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, and `last_sync_at` fields returned by `GET /v1/connectors/:connectorid` (see §7.5).
+| Status         | Meaning                                                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Connected`    | Sync job successfully reached the datasource — credentials valid, files/folders accessible                                                                 |
+| `Disconnected` | Sync job could not reach the datasource — invalid credentials, permission error on folder/files, network issue, etc. `message` contains the specific error |
+
+**Application-datasources page** (`application_datasources.status`, driven by Digitize service):
+
+The catalog backend fetches status from `GET /v1/connectors/:connectorid` (see §7.5) and cascades all fields — `status`, `message`, `files_processed`, `last_synced_at`, etc. — to the UI verbatim. No mapping or transformation is applied.
 
 ---
 
@@ -704,13 +777,57 @@ The per-application sync status (file ingestion progress) is tracked on the digi
 
 ### 11.1 Datasource Connection During Create Flow
 
-When a user selects datasources during the application create flow in the UI:
+#### Request Body Change
 
-1. The create application request (`POST /api/v1/applications`) includes the list of `datasource_ids` to connect after deployment.
-2. The catalog backend stores the requested datasource IDs in memory (or in the application record) alongside the in-progress deployment.
-3. The application deployment proceeds normally. The datasource connection step is **not** attempted until the application reaches `Running` status.
-4. Once the application transitions to `Running`, the existing deployment completion callback triggers the datasource connection flow: for each requested datasource ID, call the connect logic as if `PUT /applications/:id/datasources/:datasource_id` had been called.
-5. If any connector API call to the Digitize service fails, the application remains `Running` (the deployment was successful) and the failed datasource link is recorded with `status = "Error"` and the error in `message`. The UI surfaces this to the user.
+The existing [`CreateApplicationRequest`](../../ai-services/internal/pkg/catalog/apiserver/models/create_application.go) is extended with an optional `datasource_ids` field:
+
+```go
+// CreateApplicationRequest represents the request body for creating a new application.
+type CreateApplicationRequest struct {
+    Name          string    `json:"name"           binding:"required,min=3,max=100"`
+    CatalogID     string    `json:"catalog_id"     binding:"required"`
+    Version       string    `json:"version"        binding:"required"`
+    Services      []Service `json:"services"       binding:"required,dive"`
+    DatasourceIDs []string  `json:"datasource_ids"` // Optional: UUIDs of datasources to connect post-deploy
+    CreatedBy     string    `json:"-"`              // Set from auth context, not from request body
+}
+```
+
+**Example request body with datasources:**
+
+```json
+{
+  "name": "My App",
+  "catalog_id": "rag-pattern",
+  "version": "1.0.0",
+  "services": [
+    {
+      "catalog_id": "digitize",
+      "version": "1.2.0",
+      "components": [
+        {
+          "component_type": "llm",
+          "provider_id": "watsonx",
+          "version": "1.0.0"
+        }
+      ]
+    }
+  ],
+  "datasource_ids": [
+    "550e8400-e29b-41d4-a716-446655440000",
+    "661f9511-f30c-52e5-b827-557766551111"
+  ]
+}
+```
+
+- `datasource_ids` is optional. If omitted or empty, the create flow proceeds unchanged.
+- Each ID must reference an existing datasource in `Connected` status. Any ID that fails validation is returned as a `400 Bad Request` before deployment begins.
+
+#### Post-Deploy Connect Flow
+
+1. The deployment proceeds normally. The datasource connection step is **not** attempted until the application reaches `Running` status.
+2. Once the application transitions to `Running`, the deployment completion callback triggers the connect flow: for each `datasource_id`, call the same logic as `PUT /api/v1/applications/:id/connectors/datasources/:datasource_id`.
+3. If any Digitize `POST /v1/connectors` call fails after one retry, the application remains `Running` (deployment was successful). The failed link is recorded in `application_datasources` with a `NULL` `connector_id`. The UI surfaces this to the user so they can retrigger the connection manually from the application-datasources page.
 
 ### 11.2 Datasource Connection Post-Creation
 
@@ -735,8 +852,9 @@ The feature follows the existing error response convention established in the ap
 | Datasource already connected to application              | `409 Conflict`                                                           |
 | Delete attempted while datasource has active connections | `409 Conflict`                                                           |
 | Application not in `Running` status during connect       | `422 Unprocessable Entity`                                               |
-| Digitize `POST /v1/connectors` returns `409 Conflict`    | `409 Conflict` — connector already exists; catalog should use `PUT`      |
-| Digitize service API call failed (non-404)               | `502 Bad Gateway` (with `error` field describing the downstream failure) |
+| Digitize `POST /v1/connectors` returns `409 Conflict`    | `409 Conflict` — connector already exists; catalog should use `PUT`                                              |
+| Digitize `PUT /v1/connectors` failed after 1 retry       | `200 OK` — datasource update succeeds; `propagation_errors` array in response lists affected applications        |
+| Digitize service API call failed (non-404, non-PUT)      | `502 Bad Gateway` (with `error` field describing the downstream failure)                                         |
 
 ---
 
