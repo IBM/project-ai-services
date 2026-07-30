@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ or .Values.extract.port }}:5000"
+    ai-services.io/ports: "{{ or .Values.extract.port }}:6001"
 spec:
   initContainers:
     - name: extract-db-init
@@ -35,7 +35,7 @@ spec:
         - "--host"
         - "0.0.0.0"
         - "--port"
-        - "6000"
+        - "6001"
         - "--loop"
         - "uvloop"
         - "--http"
@@ -56,7 +56,7 @@ spec:
         - name: DB_MAX_OVERFLOW
           value: "5"
         - name: PORT
-          value: "6000"
+          value: "6001"
         - name: LLM_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8000"
         - name: LLM_MODEL
@@ -85,7 +85,7 @@ spec:
       livenessProbe:
         httpGet:
           path: /health
-          port: 6000
+          port: 6001
         initialDelaySeconds: 10
         periodSeconds: 30
         timeoutSeconds: 5
