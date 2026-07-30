@@ -115,7 +115,28 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 	return toPodsList(podList), nil
 }
 
-func (pc *PodmanClient) CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error) {
+// podmanCtx derives a child of pc.Context (which carries the podman connection) that
+// is cancelled when the caller's ctx is cancelled.  This is necessary because the
+// podman bindings SDK requires its own connection-carrying context, but we still want
+// cancellation signals from the caller to propagate (e.g. mid-deployment deletion).
+func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, context.CancelFunc) {
+	// Child of pc.Context so the podman connection value is present.
+	mergedCtx, cancel := context.WithCancel(pc.Context)
+
+	// Mirror cancellation from the caller into the merged context.
+	go func() {
+		select {
+		case <-callerCtx.Done():
+			cancel()
+		case <-mergedCtx.Done():
+			// merged context was cancelled by someone else — nothing to do
+		}
+	}()
+
+	return mergedCtx, cancel
+}
+
+func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	options := &kube.PlayOptions{}
 
 	// Handle start option
@@ -148,7 +169,12 @@ func (pc *PodmanClient) CreatePod(body io.Reader, opts map[string]string) ([]typ
 		}
 	}
 
-	kubeReport, err := kube.PlayWithBody(pc.Context, body, options)
+	// Use a context that carries the podman connection (from pc.Context) but is
+	// cancelled when the caller's ctx is cancelled.
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	kubeReport, err := kube.PlayWithBody(podCtx, body, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute podman kube play: %w", err)
 	}
