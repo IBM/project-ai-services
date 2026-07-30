@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--extract-api"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    ai-services.io/ports: "{{ or .Values.extract.port }}:5000"
+spec:
+  initContainers:
+    - name: extract-db-init
+      image: "{{ .Values.extract.image }}"
+      command: ["/var/venv/bin/python", "db/scripts/init_db.py"]
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.extract.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+  containers:
+    - name: extract-api
+      image: "{{ .Values.extract.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "-m"
+        - "uvicorn"
+        - "app:app"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "6000"
+        - "--loop"
+        - "uvloop"
+        - "--http"
+        - "httptools"
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.extract.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
+        - name: PORT
+          value: "6000"
+        - name: LLM_ENDPOINT
+          value: "http://{{ .AppName  }}--vllm-server:8000"
+        - name: LLM_MODEL
+          value: "{{ .Values.instruct.model.name }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.instruct.model.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.instruct.model.maxBatchSize}}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.extract.log_level}}"
+        {{- if .Values.instruct.apiKey }}
+        - name: LLM_API_KEY
+          value: "{{ .Values.instruct.apiKey }}"
+        {{- end }}
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "1Gi"
+      ports:
+        - containerPort: 6000
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 6000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+  volumes:
+    - name: cache
+      hostPath:
+        path: "{{ .BaseDir }}/applications/{{ .AppName }}/cache"
+        type: DirectoryOrCreate
