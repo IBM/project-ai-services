@@ -120,7 +120,7 @@ class ExtractionConfig(BaseSettings):
 
     # Concurrency
     max_concurrent_jobs: int = Field(
-        default=4,
+        default=32,
         ge=1,
         description="Maximum number of async extraction jobs running in parallel",
     )

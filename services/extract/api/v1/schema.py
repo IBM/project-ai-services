@@ -68,6 +68,13 @@ logger = get_logger("schema_router")
     tags=["schemas"],
 )
 async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
+    # --- Conflict check (name uniqueness) ---
+    if db_repo.schema_name_exists(body.name):
+        raise SchemaValidationError(
+            "CONFLICT",
+            f"A schema with name {body.name!r} already exists.",
+            status=409,
+        )
     # --- Normalize per-property "required": true convention FIRST ---
     normalized = normalize_schema(body.json_schema)
 
@@ -78,13 +85,6 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
     examples_raw = [ex.model_dump() for ex in body.examples] if body.examples else None
     validate_examples(examples_raw, normalized)
 
-    # --- Conflict check (name uniqueness) ---
-    if db_repo.schema_name_exists(body.name):
-        raise SchemaValidationError(
-            "CONFLICT",
-            f"A schema with name {body.name!r} already exists.",
-            status=409,
-        )
 
     # --- Token-count caching ---
     llm_endpoint = _app.llm_model_dict.get("llm_endpoint", "")
@@ -123,13 +123,6 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
         custom_prompt=body.custom_prompt,
     )
     if row is None:
-        # A second concurrent request might have inserted the same name.
-        if db_repo.schema_name_exists(body.name):
-            raise SchemaValidationError(
-                "CONFLICT",
-                f"A schema with name {body.name!r} already exists.",
-                status=409,
-            )
         raise SchemaValidationError(
             "DATABASE_ERROR",
             "Failed to persist the schema. Please try again.",
