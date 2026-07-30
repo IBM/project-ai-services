@@ -17,9 +17,9 @@ var errOpenShiftNotSupported = errors.New("OpenShift runtime is not yet supporte
 //
 // NOTE: When CreateApplication is implemented here, wire in a DeploymentRegistry (same pattern
 // as PodmanApplicationService) so that mid-deployment deletion works on OCP too:
-//   1. Add deploymentRegistry *DeploymentRegistry field
-//   2. Call registry.Register in executeDeploymentAsync
-//   3. Call registry.Cancel in DeleteApplication before firing PerformDeletion
+//  1. Add deploymentRegistry *DeploymentRegistry field
+//  2. Call registry.Register in executeDeploymentAsync
+//  3. Call registry.Cancel in DeleteApplication before firing PerformDeletion
 type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
