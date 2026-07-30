@@ -55,6 +55,9 @@ const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
 )
 
+// spyreResourceName is the Kubernetes extended resource name advertised by the Spyre operator.
+const spyreResourceName = "ibm.com/spyre_pf"
+
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
 	Client      client.Client
@@ -506,12 +509,134 @@ func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
 	return false, nil
 }
 
-// GetSystemInfo returns empty system information for OpenShift runtime.
-// Resource information is managed by Kubernetes/OpenShift and not directly accessible.
+// GetSystemInfo returns cluster-level CPU, memory, and Spyre card availability.
+//
+// CPU and memory totals/available are fetched via Thanos PromQL:
+//   - Total CPUs    : sum(kube_node_status_capacity{resource="cpu"})
+//   - Available CPUs: sum(kube_node_status_allocatable{resource="cpu"})
+//   - Total memory  : sum(kube_node_status_capacity{resource="memory"})
+//   - Available mem : sum(kube_node_status_allocatable{resource="memory"})
+//
+// Spyre card counts are read directly from the Kubernetes API — see getSpyreCardInfo.
 func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
-	return &models.SystemInfo{
+	sysInfo := &models.SystemInfo{
 		Accelerators: make(map[string]*models.AcceleratorInfo),
+	}
+
+	// --- CPU ---
+	totalCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="cpu"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query total CPU capacity: %w", err)
+	}
+
+	availCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="cpu"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query allocatable CPU: %w", err)
+	}
+
+	sysInfo.CPU = &models.CPUInfo{
+		Total:     int(totalCPU),
+		Available: availCPU,
+	}
+
+	// --- Memory ---
+	totalMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="memory"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query total memory capacity: %w", err)
+	}
+
+	availMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="memory"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query allocatable memory: %w", err)
+	}
+
+	sysInfo.Memory = &models.MemoryInfo{
+		TotalBytes:     int64(totalMem),
+		AvailableBytes: int64(availMem),
+	}
+
+	// --- Spyre cards ---
+	// Read directly from node capacity/allocatable so the count is accurate
+	// even when Thanos has not yet scraped the custom resource metric.
+	spyreInfo, err := kc.getSpyreCardInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve Spyre card info: %w", err)
+	}
+	if spyreInfo != nil {
+		sysInfo.Accelerators[spyreResourceName] = spyreInfo
+	}
+
+	return sysInfo, nil
+}
+
+// getSpyreCardInfo returns the total and available ibm.com/spyre_pf count for
+// the cluster.
+//
+// Total is read from node.Status.Capacity — the raw hardware count advertised
+// by the Spyre device plugin.
+//
+// Available is computed as:
+//
+//	Total − (Thanos: sum of ibm.com/spyre_pf requests across all non-infra containers)
+//
+// The in-use count is fetched via Thanos using:
+//
+//	sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})
+func (kc *OpenshiftClient) getSpyreCardInfo() (*models.AcceleratorInfo, error) {
+	totalSpyre, err := kc.sumSpyreCapacity()
+	if err != nil {
+		return nil, err
+	}
+
+	if totalSpyre == 0 {
+		return nil, nil //nolint:nilnil // no Spyre cards present — caller omits the key
+	}
+
+	usedSpyre, err := kc.sumSpyreInUse()
+	if err != nil {
+		return nil, err
+	}
+
+	available := totalSpyre - usedSpyre
+	if available < 0 {
+		available = 0
+	}
+
+	return &models.AcceleratorInfo{
+		Total:     int(totalSpyre),
+		Available: int(available),
 	}, nil
+}
+
+// sumSpyreCapacity sums ibm.com/spyre_pf Capacity across all cluster nodes.
+func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
+	nodeList, err := kc.KubeClient.CoreV1().Nodes().List(kc.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var total int64
+
+	for i := range nodeList.Items {
+		if qty, ok := nodeList.Items[i].Status.Capacity[corev1.ResourceName(spyreResourceName)]; ok {
+			total += qty.Value()
+		}
+	}
+
+	return total, nil
+}
+
+// sumSpyreInUse queries Thanos for the total number of ibm.com/spyre_pf units
+// currently requested by all non-infra containers cluster-wide.
+//
+// PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""}).
+func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
+	used, err := queryThanos(kc.Ctx, `sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query Spyre cards in use: %w", err)
+	}
+
+	return int64(used), nil
 }
 
 // GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
