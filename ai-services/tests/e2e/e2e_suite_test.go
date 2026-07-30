@@ -1697,7 +1697,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(results).NotTo(gomega.BeEmpty(),
 					"all search modes failed — index may be empty or similarity-api is unreachable")
 			})
-		
+
 		// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
 		ginkgo.It("Verify Similarity search API includes time info in response headers or body in podman runtime",
 			func() {
@@ -1768,15 +1768,15 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Application Backup And Restore", ginkgo.Ordered, ginkgo.Label("spyre-dependent", "app-backup-restore"), func() {
 		var (
-			digitizeDocID          string
-			digitizeDocName        string
-			digitizeDocStatus      string
-			digitizeJobID          string
-			digitizeJobStatus      string
-			preBackupPowerVCResp   string
-			preBackupSpyreGPUResp  string
-			opensearchBackupFile   string
-			digitizeBackupFile     string
+			digitizeDocID         string
+			digitizeDocName       string
+			digitizeDocStatus     string
+			digitizeJobID         string
+			digitizeJobStatus     string
+			preBackupPowerVCResp  string
+			preBackupSpyreGPUResp string
+			opensearchBackupFile  string
+			digitizeBackupFile    string
 		)
 
 		ginkgo.It("backs up and restores application data", func() {
@@ -1916,11 +1916,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 		})
 
-		ginkgo.It("deletes the restored application", func() {
-			if backupAppName == "" {
-				ginkgo.Skip("No restored application created")
-			}
-		})
 	})
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent"), func() {
