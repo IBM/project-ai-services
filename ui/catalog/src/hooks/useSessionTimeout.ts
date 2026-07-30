@@ -115,9 +115,9 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
 
   useEffect(() => {
     if (showWarning) {
-      const tick = () => updateCountdown();
-      tick();
-      countdownTimerRef.current = setInterval(tick, 1000);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- initialises countdown display immediately on warning
+      updateCountdown();
+      countdownTimerRef.current = setInterval(updateCountdown, 1000);
 
       return () => {
         if (countdownTimerRef.current) {

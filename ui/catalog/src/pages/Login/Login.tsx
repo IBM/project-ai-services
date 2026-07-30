@@ -32,23 +32,28 @@ const LoginPage = () => {
   const [loading, setLoading] = useState<boolean>(false);
 
   const locationState = location.state as LoginLocationState | null;
-  const isInactivityLogout =
-    locationState?.logoutReason === LogoutReason.INACTIVITY ||
-    sessionStorage.getItem(SESSION_STORAGE_KEYS.LOGOUT_REASON) ===
-      LogoutReason.INACTIVITY;
+
+  // Mount-only by design — /login is always a fresh navigation after logout
   const [showInactivityNotification, setShowInactivityNotification] =
-    useState<boolean>(isInactivityLogout);
+    useState<boolean>(() => {
+      const isInactivityLogout =
+        locationState?.logoutReason === LogoutReason.INACTIVITY ||
+        sessionStorage.getItem(SESSION_STORAGE_KEYS.LOGOUT_REASON) ===
+          LogoutReason.INACTIVITY;
+
+      if (isInactivityLogout) {
+        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
+        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
+      }
+
+      return isInactivityLogout;
+    });
 
   useEffect(() => {
-    if (isInactivityLogout) {
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
-
-      if (locationState) {
-        navigate(location.pathname, { replace: true, state: null });
-      }
+    if (showInactivityNotification && locationState) {
+      navigate(location.pathname, { replace: true, state: null });
     }
-  }, [isInactivityLogout, locationState, location.pathname, navigate]);
+  }, [showInactivityNotification, locationState, location.pathname, navigate]);
 
   const handleLogin = async (): Promise<void> => {
     setCredentialError(false);
