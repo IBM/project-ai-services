@@ -26,7 +26,7 @@ var _ types.ApplicationPSResponse
 
 // ApplicationHandler handles application-related HTTP requests.
 type ApplicationHandler struct {
-	appService *repository.ApplicationService
+	appService repository.ApplicationServiceInterface
 }
 
 type UpdateApplicationRequest struct {
@@ -34,7 +34,7 @@ type UpdateApplicationRequest struct {
 }
 
 // NewApplicationHandler creates a new application handler.
-func NewApplicationHandler(appService *repository.ApplicationService) *ApplicationHandler {
+func NewApplicationHandler(appService repository.ApplicationServiceInterface) *ApplicationHandler {
 	return &ApplicationHandler{
 		appService: appService,
 	}
