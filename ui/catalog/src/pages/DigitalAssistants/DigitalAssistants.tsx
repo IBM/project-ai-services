@@ -177,6 +177,17 @@ const DigitalAssistantsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogId, state.rowsData.length]);
 
+  // Poll every 5 s while any row is in a transitional state
+  useEffect(() => {
+    const hasTransitional = state.rowsData.some(
+      (r) => r.status === "Deploying..." || r.status === "Deleting...",
+    );
+    if (!hasTransitional) return;
+    const id = setInterval(loadApplications, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.rowsData]);
+
   const handleDeploySubmit = () => {
     loadApplications();
   };

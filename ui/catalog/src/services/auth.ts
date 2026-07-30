@@ -5,6 +5,7 @@ import { useDeployStore } from "@/store/deploy.store";
 import { fetchArchitectures } from "@/api/applications.api";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
+import { dedupe } from "@/utils/requestManager";
 
 export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const response = await api.post(AUTH_ENDPOINTS.LOGIN, payload);
@@ -32,16 +33,9 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   return response.data;
 };
 
-let logoutPromise: Promise<void> | null = null;
-
-export const logout = async (): Promise<void> => {
-  if (logoutPromise) {
-    return logoutPromise;
-  }
-
-  const refreshToken = useAuthStore.getState().refreshToken;
-
-  logoutPromise = (async () => {
+export const logout = (): Promise<void> =>
+  dedupe("logout", async () => {
+    const refreshToken = useAuthStore.getState().refreshToken;
     try {
       await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
         headers: {
@@ -49,48 +43,24 @@ export const logout = async (): Promise<void> => {
         },
       });
     } finally {
-      // Clear auth store state
       useAuthStore.getState().clearTokens();
       useAuthStore.getState().clearUserInfo();
-
-      // Clear all deploy store data
       useDeployStore.getState().clearAll();
-
-      // Clear all service deploy store data
       useServiceDeployStore.getState().clearAllCache();
-
-      // Reset guard only after all cleanup is done
-      logoutPromise = null;
     }
-  })();
+  });
 
-  return logoutPromise;
-};
-
-let userInfoPromise: Promise<UserInfo> | null = null;
-
-export const getUserInfo = async (): Promise<UserInfo> => {
-  if (userInfoPromise) {
-    return userInfoPromise;
-  }
-
-  userInfoPromise = (async () => {
-    try {
-      const response = await api.get(AUTH_ENDPOINTS.ME);
-      const userInfo: UserInfo = {
-        id: response.data.id,
-        username: response.data.username,
-        name: response.data.name,
-      };
-      useAuthStore.getState().setUserInfo(userInfo);
-      return userInfo;
-    } finally {
-      userInfoPromise = null;
-    }
-  })();
-
-  return userInfoPromise;
-};
+export const getUserInfo = (): Promise<UserInfo> =>
+  dedupe("getUserInfo", async () => {
+    const response = await api.get(AUTH_ENDPOINTS.ME);
+    const userInfo: UserInfo = {
+      id: response.data.id,
+      username: response.data.username,
+      name: response.data.name,
+    };
+    useAuthStore.getState().setUserInfo(userInfo);
+    return userInfo;
+  });
 
 export const refreshAccessToken = async () => {
   const refreshToken = useAuthStore.getState().refreshToken;

@@ -19,7 +19,6 @@ interface UseSessionTimeoutReturn {
   showWarning: boolean;
   timeRemaining: string;
   extendSession: () => void;
-  handleLogout: () => Promise<void>;
 }
 
 export const useSessionTimeout = (): UseSessionTimeoutReturn => {
@@ -61,52 +60,31 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
     }
   }, []);
 
-  const performLogout = useCallback(
-    async (logoutType: "auto" | "manual") => {
-      clearAllTimers();
+  const handleAutoLogout = useCallback(async () => {
+    clearAllTimers();
 
+    if (isMountedRef.current) {
+      setShowWarning(false);
+      showWarningRef.current = false;
+    }
+
+    try {
+      await logout();
+    } finally {
       if (isMountedRef.current) {
-        setShowWarning(false);
-        showWarningRef.current = false;
+        sessionStorage.setItem(
+          SESSION_STORAGE_KEYS.LOGOUT_REASON,
+          LogoutReason.INACTIVITY,
+        );
+        navigate(ROUTES.LOGIN, {
+          replace: true,
+          state: {
+            logoutReason: LogoutReason.INACTIVITY,
+          } as LoginLocationState,
+        });
       }
-
-      if (logoutType === "manual") {
-        // The /logout page is responsible for calling logout(); just navigate there.
-        if (isMountedRef.current) {
-          navigate(ROUTES.LOGOUT, { replace: true });
-        }
-        return;
-      }
-
-      try {
-        await logout();
-      } finally {
-        if (isMountedRef.current) {
-          sessionStorage.setItem(
-            SESSION_STORAGE_KEYS.LOGOUT_REASON,
-            LogoutReason.INACTIVITY,
-          );
-          navigate(ROUTES.LOGIN, {
-            replace: true,
-            state: {
-              logoutReason: LogoutReason.INACTIVITY,
-            } as LoginLocationState,
-          });
-        }
-      }
-    },
-    [navigate, clearAllTimers],
-  );
-
-  const handleAutoLogout = useCallback(
-    async () => performLogout("auto"),
-    [performLogout],
-  );
-
-  const handleManualLogout = useCallback(
-    async () => performLogout("manual"),
-    [performLogout],
-  );
+    }
+  }, [navigate, clearAllTimers]);
 
   const updateCountdown = useCallback(() => {
     const timeUntilLogout = getTimeUntilLogout(lastActivity);
@@ -241,6 +219,5 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
     showWarning,
     timeRemaining,
     extendSession: resetActivity,
-    handleLogout: handleManualLogout,
   };
 };
