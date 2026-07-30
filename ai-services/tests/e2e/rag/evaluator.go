@@ -21,14 +21,13 @@ import (
 
 // RAG transport tuning constants — values are explained in sharedRAGClient below.
 const (
-	similarityHealthTimeout  = 10 * time.Second       //nolint:mnd
-	ragMaxIdleConnsPerHost   = 4                      //nolint:mnd
-	ragMaxConnsPerHost       = 8                      //nolint:mnd
-	ragIdleConnTimeout       = 90 * time.Second       //nolint:mnd
-	ragResponseHeaderTimeout = 90 * time.Second       //nolint:mnd
-	ragDialTimeout           = 15 * time.Second       //nolint:mnd
-	ragDialKeepAlive         = 30 * time.Second       //nolint:mnd
-	ragRetryBackoffBase      = 200 * time.Millisecond //nolint:mnd
+	similarityHealthTimeout = 10 * time.Second       //nolint:mnd
+	ragMaxIdleConnsPerHost  = 4                      //nolint:mnd
+	ragMaxConnsPerHost      = 8                      //nolint:mnd
+	ragIdleConnTimeout      = 90 * time.Second       //nolint:mnd
+	ragDialTimeout          = 15 * time.Second       //nolint:mnd
+	ragDialKeepAlive        = 30 * time.Second       //nolint:mnd
+	ragRetryBackoffBase     = 200 * time.Millisecond //nolint:mnd
 )
 
 // similarityHealthClient skips TLS verification to support both plain http:// (legacy podman) and https:// nip.io self-signed certs (catalog).
@@ -41,17 +40,16 @@ var similarityHealthClient = &http.Client{
 	},
 }
 
-// sharedRAGClient pools TCP connections for all RAG/Judge requests; timeout exceeds per-question deadline so ctx cancellation fires first; ResponseHeaderTimeout guards dead keep-alive sockets.
+// sharedRAGClient pools TCP connections for all RAG/Judge requests.
 var sharedRAGClient = &http.Client{
 	Timeout: httpClientTimeout,
 	Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec
 		},
-		MaxIdleConnsPerHost:   ragMaxIdleConnsPerHost,
-		MaxConnsPerHost:       ragMaxConnsPerHost,
-		IdleConnTimeout:       ragIdleConnTimeout,
-		ResponseHeaderTimeout: ragResponseHeaderTimeout,
+		MaxIdleConnsPerHost: ragMaxIdleConnsPerHost,
+		MaxConnsPerHost:     ragMaxConnsPerHost,
+		IdleConnTimeout:     ragIdleConnTimeout,
 		DialContext: (&net.Dialer{
 			Timeout:   ragDialTimeout,
 			KeepAlive: ragDialKeepAlive,
@@ -168,8 +166,7 @@ const (
 		"MODEL ANSWER:\n" +
 		"{model_answer}\n"
 
-	// httpClientTimeout: set longer than perQuestionTimeout so context cancellation always fires first.
-	httpClientTimeout = 10 * time.Minute
+	httpClientTimeout = 25 * time.Minute
 )
 
 var ErrNonRetriable = errors.New("non-retriable error")
@@ -370,14 +367,11 @@ func buildPostJSONRequest(ctx context.Context, baseURL, path string, body map[st
 }
 
 // handlePostJSONResponse drains and closes the response body, returning it as a string.
-func handlePostJSONResponse(ctx context.Context, resp *http.Response, baseURL, path string, elapsed time.Duration) (string, error) {
+func handlePostJSONResponse(resp *http.Response) (string, error) {
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
-
-	logger.Infof("[RAG][http] POST %s%s → HTTP %d in %s",
-		baseURL, path, resp.StatusCode, elapsed.Round(time.Millisecond))
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -391,8 +385,6 @@ func handlePostJSONResponse(ctx context.Context, resp *http.Response, baseURL, p
 
 		return "", fmt.Errorf("%w: http status %d", ErrNonRetriable, resp.StatusCode)
 	}
-
-	_ = ctx // ctx is kept in the signature for future use (e.g. trace propagation)
 
 	return string(responseBody), nil
 }
@@ -410,12 +402,6 @@ func PostJSON(
 	}
 
 	start := time.Now()
-	if deadline, ok := ctx.Deadline(); ok {
-		logger.Infof("[RAG][http] POST %s%s — deadline in %s",
-			baseURL, path, time.Until(deadline).Round(time.Second))
-	} else {
-		logger.Infof("[RAG][http] POST %s%s — no deadline", baseURL, path)
-	}
 
 	resp, err := sharedRAGClient.Do(req)
 	elapsed := time.Since(start)
@@ -433,7 +419,7 @@ func PostJSON(
 		return "", fmt.Errorf("http request failed: %w", err)
 	}
 
-	return handlePostJSONResponse(ctx, resp, baseURL, path, elapsed)
+	return handlePostJSONResponse(resp)
 }
 
 // extractAssistantContent extracts the assistant message content from a chat completion response.

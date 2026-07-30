@@ -175,6 +175,10 @@
   fill: var(--cds-support-info);
 }
 
+.statusIconWarning {
+  fill: var(--cds-support-warning);
+}
+
 .errorInfoButton {
   display: inline-flex;
   align-items: center;
