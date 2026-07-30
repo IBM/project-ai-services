@@ -235,7 +235,9 @@ def get_job(job_id: str) -> Optional[dict]:
                 JobDocumentSummary(
                     id=doc.doc_id,
                     name=doc.name,
-                    status=doc.status
+                    status=doc.status,
+                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
+                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
                 )
                 for doc in documents
             ]
@@ -302,7 +304,9 @@ def get_all_jobs(
                 JobDocumentSummary(
                     id=doc.doc_id,
                     name=doc.name,
-                    status=doc.status
+                    status=doc.status,
+                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
+                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
                 )
                 for doc in documents
             ]
@@ -338,7 +342,10 @@ def create_document(
     job_id: str,
     output_format: OutputFormat,
     operation: str,
-    submitted_at: str
+    submitted_at: str,
+    initial_status: DocStatus = DocStatus.ACCEPTED,
+    completed_at: Optional[str] = None,
+    extra_metadata: Optional[dict] = None,
 ) -> None:
     """
     Create document metadata in database.
@@ -350,34 +357,51 @@ def create_document(
         output_format: Output format for the document
         operation: Type of operation (ingestion/digitization)
         submitted_at: ISO timestamp when document was submitted
+        initial_status: Initial document status (defaults to ACCEPTED)
+        completed_at: Optional ISO timestamp for immediately-terminal documents
+        extra_metadata: Optional extra fields merged into the metadata JSONB
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot create document without database connection.")
 
     try:
-        # Parse ISO timestamp to datetime
+        # Parse ISO timestamps to datetime
         submitted_dt = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+        completed_dt = (
+            datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+            if completed_at else None
+        )
+
+        metadata: dict = {
+            "pages": 0,
+            "tables": 0,
+            "timing_in_secs": {
+                "digitizing": None,
+                "processing": None,
+                "chunking": None,
+                "indexing": None,
+            },
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
 
         # Create document in database
-        db_manager.create_document(
+        result = db_manager.create_document(
             doc_id=doc_id,
             name=doc_name,
             doc_type=operation,
-            status=DocStatus.ACCEPTED,
+            status=initial_status,
             output_format=output_format.value,
             submitted_at=submitted_dt,
+            completed_at=completed_dt,
             job_id=job_id,
-            metadata={
-                "pages": 0,
-                "tables": 0,
-                "timing_in_secs": {
-                    "digitizing": None,
-                    "processing": None,
-                    "chunking": None,
-                    "indexing": None
-                }
-            }
+            metadata=metadata,
         )
+        if result is None:
+            raise RuntimeError(
+                f"db_manager.create_document returned None for doc_id={doc_id} "
+                f"(name={doc_name!r}). Check logs for the underlying DB error."
+            )
         logger.info(f"Created document {doc_id} in database")
 
     except Exception as e:
@@ -996,6 +1020,14 @@ class DatabaseStatusManager:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
                 logger.debug(f"Updated document {doc_id} in database")
+                # Register the checksum once the document is marked COMPLETED so
+                # that future uploads of the same content are caught via the
+                # file_checksum_registry table.
+                if (
+                    update_params.get("status") == DocStatus.COMPLETED
+                    and "file_hash" in metadata_fields
+                ):
+                    db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
             else:
                 logger.warning(f"Document {doc_id} not found in database for update")
 
@@ -1029,12 +1061,17 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics
+        # ALREADY_EXISTS is a terminal resolved state — count it with completed.
         stats = {
             "total_documents": len(documents),
-            "completed": sum(1 for d in documents if d.status == DocStatus.COMPLETED.value),
+            "completed": sum(
+                1 for d in documents
+                if d.status in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+            ),
             "failed": sum(1 for d in documents if d.status == DocStatus.FAILED.value),
             "in_progress": sum(
                 1 for d in documents if d.status in [
+                    DocStatus.ACCEPTED.value,
                     DocStatus.IN_PROGRESS.value,
                     DocStatus.DIGITIZED.value,
                     DocStatus.PROCESSED.value,
@@ -1102,7 +1139,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)

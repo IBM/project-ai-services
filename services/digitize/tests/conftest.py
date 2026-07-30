@@ -28,6 +28,23 @@ def _stub_module(name: str) -> types.ModuleType:
     return sys.modules[name]
 
 
+# ---------------------------------------------------------------------------
+# Stub out StderrMonitor before digitize.app is imported.
+#
+# StderrMonitor.start() calls os.dup2() on stderr's file descriptor, replacing
+# it with a pipe.  pytest's capture backend holds a tmpfile open on that same
+# fd; after dup2 the tmpfile points to a pipe and seek() raises
+# OSError: [Errno 29] Illegal seek, crashing the entire collection phase.
+#
+# We patch common.diagnostic_logger.setup_comprehensive_crash_handler so it
+# returns harmless stubs instead of wiring up the real stderr monitor.
+# ---------------------------------------------------------------------------
+import common.diagnostic_logger as _diag_logger  # noqa: E402
+
+_real_noop_crash_handler = lambda logger: (MagicMock(), MagicMock(), MagicMock())
+_diag_logger.setup_comprehensive_crash_handler = _real_noop_crash_handler
+
+
 # Ensure all package levels exist first.
 for _pkg in [
     "docling",
