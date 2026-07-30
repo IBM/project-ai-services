@@ -44,10 +44,15 @@ Each tick
   → compare checksums with known_checksums from registry
   → skip files whose checksum is already registered (zero bytes transferred)
   → ingest only new content
-  → store checksum + doc_id in file_checksum_registry
+  → create-job is called with connector_id — main thread inserts into
+     file_checksum_registry and connector_file_membership
   → store source checksum in document metadata
   → remove orphaned content by ref count
   → write sync status + history
+
+User-submitted files (no connector_id)
+  → create-job flow detects absence of connector_id
+  → inserts into connector_file_membership with connector_id = 'user_submitted'
 ```
 
 ### 2.3 Main Components
@@ -562,6 +567,13 @@ The following functions already exist in `services/digitize/db/manager.py` and c
 | `upsert_file_checksum(sha256, doc_id)` | Register newly ingested content by sha256 |
 | `find_completed_document_by_hash(sha256)` | Dedup lookup — returns `Document` or `None` |
 
+**Create-job `connector_id` threading rule:**
+
+When the create-job flow is invoked it now accepts an optional `connector_id` parameter:
+
+- **`connector_id` present** (connector-initiated job): the main thread — not the scanner — is responsible for inserting the row into `file_checksum_registry` (via `upsert_file_checksum`) and the row into `connector_file_membership` (via `insert_connector_membership`) immediately after the job completes successfully.
+- **`connector_id` absent** (user-submitted file): the create-job flow inserts a row into `connector_file_membership` with `connector_id = 'user_submitted'` so that every ingested file always has a membership record regardless of origin.
+
 New connector-specific functions to add:
 
 | Function | Purpose |
@@ -797,8 +809,10 @@ def download_and_register(self, key: str, checksum: str, staging_dir: Path) -> s
     # checksum = S3 ETag from list_objects_v2 — stored in file_checksum_registry.sha256.
     # For single-part: local MD5 == checksum (sanity check available).
     # For multi-part:  local MD5 != checksum (different formula — expected).
-    doc_id = run_ingest_pipeline(local_path)
-    db_manager.upsert_file_checksum(sha256=checksum, doc_id=doc_id)
+    doc_id = run_ingest_pipeline(local_path, connector_id=self._connector_id)
+    # registry + membership inserts are performed by the main thread via the
+    # create-job flow (connector_id is forwarded) — do NOT call upsert_file_checksum
+    # or insert_connector_membership here; they are handled after job completion.
     set_document_metadata(doc_id, {
         "source_checksum": checksum,
         "source_type":     "s3",
@@ -869,6 +883,9 @@ def _run_tick(self) -> None:
         remote_files = scanner.scan(known_checksums)
 
         to_ingest, orphan_checksums = self._diff(remote_files, known_checksums)
+        # _process_new_files passes self.connector_id to each create-job call so the
+        # main thread handles file_checksum_registry and connector_file_membership
+        # insertions after each job completes (see §5.1).
         self._process_new_files(sync_id, scanner, to_ingest)
         self._delete_orphans(orphan_checksums)
         self._complete_tick(sync_id)
@@ -1137,6 +1154,7 @@ All connector DB functions from §5.1:
 
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, dedup diff, ingest new files, orphan deletion, tick finalize
+- Pass `connector_id` to each create-job call inside `_process_new_files()`; the main thread calls `upsert_file_checksum` + `insert_connector_membership` on job completion (see §5.1)
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
