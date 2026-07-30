@@ -95,14 +95,14 @@ func (d *PodmanDeployer) ExecuteDeployment(
 ) error {
 	logger.InfofCtx(ctx, "Starting deployment execution for '%s'\n", plan.ApplicationName)
 
-	// Step 1.a: Pull container images for all components and services
+	// Step 1a: Pull container images for all components and services
 	if err := d.pullImagesForDeployment(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Image pull failed", err)
 
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
-	// Step 1.b: Download models specified in parameters
+	// Step 1b: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Model download failed", err)
 
@@ -123,7 +123,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		}
 	}
 
-	// Step 4: Deploy services if any
+	// Step 3: Deploy services if any
 	if len(plan.Services) > 0 {
 		if err := d.deployServices(ctx, plan); err != nil {
 			catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Service deployment failed", err)
@@ -132,14 +132,19 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		}
 	}
 
-	// Step 5: Register routes with Caddy proxy
+	// Step 4: Register routes with Caddy proxy
 	if err := d.registerApplicationRoutes(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Failed to register application routes", err)
 
 		return fmt.Errorf("failed to register application routes: %w", err)
 	}
 
-	// Step 6: Update application status to Running
+	// Step 5: Update application status to Running.
+	// Skip if the context was cancelled — deletion is now in charge of the status.
+	if ctx.Err() != nil {
+		return nil
+	}
+
 	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully"); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status to Running: %v\n", err)
 	}

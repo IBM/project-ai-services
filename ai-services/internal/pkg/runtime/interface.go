@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"io"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
@@ -15,7 +16,7 @@ type Runtime interface {
 
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)
-	CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error)
+	CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error)
 	DeletePod(id string, force *bool) error
 	StopPod(id string) error
 	StartPod(id string) error
