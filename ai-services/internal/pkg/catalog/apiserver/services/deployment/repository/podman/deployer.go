@@ -95,23 +95,8 @@ func (d *PodmanDeployer) ExecuteDeployment(
 ) error {
 	logger.InfofCtx(ctx, "Starting deployment execution for '%s'\n", plan.ApplicationName)
 
-	// Step 1a: Pull container images for all components and services
-	if err := d.pullImagesForDeployment(ctx, plan); err != nil {
-		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Image pull failed", err)
-
-		return fmt.Errorf("failed to pull images: %w", err)
-	}
-
-	// Step 1b: Download models specified in parameters
-	if err := d.downloadModelsForDeployment(ctx, plan); err != nil {
-		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Model download failed", err)
-
-		return fmt.Errorf("failed to download models: %w", err)
-	}
-
-	// Update application status to Deploying before starting deployment
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, catalogutils.DeployingStatusMessage(plan.IsArchitecture)); err != nil {
-		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
+	if err := d.prepareDeployment(ctx, plan); err != nil {
+		return err
 	}
 
 	// Step 2: Deploy components if any
@@ -150,6 +135,31 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	}
 
 	logger.InfofCtx(ctx, "Deployment completed successfully for '%s'\n", plan.ApplicationName)
+
+	return nil
+}
+
+// prepareDeployment pulls images, downloads models, and transitions the
+// application status to Deploying. It is a prerequisite for all deploy steps.
+func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *DeploymentPlan) error {
+	// Step 1a: Pull container images for all components and services
+	if err := d.pullImagesForDeployment(ctx, plan); err != nil {
+		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Image pull failed", err)
+
+		return fmt.Errorf("failed to pull images: %w", err)
+	}
+
+	// Step 1b: Download models specified in parameters
+	if err := d.downloadModelsForDeployment(ctx, plan); err != nil {
+		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Model download failed", err)
+
+		return fmt.Errorf("failed to download models: %w", err)
+	}
+
+	// Transition status to Deploying before pod creation begins
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, catalogutils.DeployingStatusMessage(plan.IsArchitecture)); err != nil {
+		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
+	}
 
 	return nil
 }
