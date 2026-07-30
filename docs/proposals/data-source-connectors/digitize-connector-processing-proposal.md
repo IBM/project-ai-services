@@ -638,9 +638,9 @@ Base scanner responsibilities:
 
 Subclass responsibilities:
 
-- remote listing — yields `(remote_path, checksum)` pairs
+- remote listing — yields `(remote_path, checksum)` pairs, where `remote_path` is the string path (SFTP) or object key (S3) needed by `download_to()` — the tuple is the sole carrier of the remote location; no side-channel store is needed
 - dedup check against `known_checksums` before downloading (strategy is transport-specific — see §7.1 and §7.2)
-- file download (only when checksum is not already known)
+- file download (only when checksum is not already known) — `remote_path` is taken directly from the scan tuple
 - storing the checksum in `file_checksum_registry.sha256` and in `documents.metadata` after ingest
 - connection lifecycle
 
@@ -734,8 +734,12 @@ def _remote_md5(self, remote_file_path: str) -> str:
 SFTP scan sketch:
 
 ```python
-def scan(self, known_checksums: set[str]):
-    """Return (remote_file, checksum) for files whose checksum is not yet registered.
+def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
+    """Return (remote_path, checksum) for files whose checksum is not yet registered.
+
+    remote_path is the absolute string path on the remote host.
+    It is stored in the tuple so that the worker can pass it directly to
+    download_to(remote_path, local_path) — no separate lookup is needed.
 
     For SFTP sources the checksum is a hex MD5 digest computed on the
     remote host via md5sum — stored in file_checksum_registry.sha256
@@ -745,10 +749,11 @@ def scan(self, known_checksums: set[str]):
     for remote_file in self._walk_remote_tree():
         if not self._is_allowed(remote_file.path):
             continue
-        checksum = self._remote_md5(remote_file.path)
+        remote_path: str = remote_file.path   # extract string path from SFTPAttributes
+        checksum = self._remote_md5(remote_path)
         if checksum in known_checksums:
             continue   # already ingested — skip download
-        found.append((remote_file, checksum))
+        found.append((remote_path, checksum))
     return found
 ```
 
@@ -787,7 +792,12 @@ S3 scan sketch:
 
 ```python
 def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
-    """Return (key, checksum) for objects whose checksum is not yet registered."""
+    """Return (key, checksum) for objects whose checksum is not yet registered.
+
+    key is the S3 object key (remote path). It is stored as the first element
+    of the tuple so the worker can pass it directly to download_to(key, local_path)
+    — no separate lookup or metadata store is required.
+    """
     to_ingest = []
     for key, checksum in self._list_document_keys():   # checksum = S3 ETag, free from list_objects_v2
         if checksum in known_checksums:
@@ -880,10 +890,15 @@ def _run_tick(self) -> None:
         known_checksums = set(list_connector_checksums(self.connector_id))
 
         # scan() returns only (remote_path, checksum) pairs not in known_checksums.
+        # remote_path is the string path (SFTP) or object key (S3) needed by
+        # download_to() — it travels with the checksum in the tuple so no
+        # additional lookup or metadata store is required at download time.
         remote_files = scanner.scan(known_checksums)
 
         to_ingest, orphan_checksums = self._diff(remote_files, known_checksums)
-        # _process_new_files passes self.connector_id to each create-job call so the
+        # _process_new_files unpacks each (remote_path, checksum) tuple and calls
+        # scanner.download_to(remote_path, local_path) directly.
+        # It also passes self.connector_id to each create-job call so the
         # main thread handles file_checksum_registry and connector_file_membership
         # insertions after each job completes (see §5.1).
         self._process_new_files(sync_id, scanner, to_ingest)
