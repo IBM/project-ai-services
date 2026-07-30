@@ -910,6 +910,57 @@ def _run_tick(self) -> None:
         scanner.close()
 ```
 
+### 8.4 Diff — ingest list and delete list
+
+`_diff` receives the scanner's output and the connector's current known-checksum set, then returns two lists:
+
+| List | Contents |
+| --- | --- |
+| `to_ingest` | `(remote_path, checksum)` pairs for files that must be downloaded and ingested |
+| `orphan_checksums` | checksums previously registered for this connector whose corresponding remote file is no longer present |
+
+**Ingest list construction:**
+
+`scanner.scan()` already filters out files whose checksum is in `known_checksums`, so `to_ingest` contains only genuinely new files. However, the remote source may contain duplicate files — two or more remote paths whose content is identical (same checksum). To avoid ingesting the same content twice within a single tick, `_diff` applies a second dedup pass over the raw scan result: it iterates in order and keeps only the **first** `(remote_path, checksum)` pair for each checksum; subsequent pairs with the same checksum are dropped.
+
+**Delete list construction:**
+
+The delete list is the set of checksums in `known_checksums` that were **not** seen in the current scan. These are files that were previously ingested but no longer exist on the remote source.
+
+```python
+def _diff(
+    self,
+    remote_files: list[tuple[str, str]],
+    known_checksums: set[str],
+) -> tuple[list[tuple[str, str]], set[str]]:
+    """Compute the ingest list and the delete list for a single tick.
+
+    Ingest list — (remote_path, checksum) pairs to download.
+      - Already excludes files whose checksum is in known_checksums
+        (scanner.scan() handled that).
+      - Within the raw scan result, if two remote paths share the same
+        checksum, only the first occurrence is kept; the rest are dropped.
+        This prevents double-ingestion of duplicate content within one tick.
+
+    Delete list — checksums previously owned by this connector whose remote
+      file is no longer present in the current scan.
+    """
+    seen_in_scan: set[str] = set()
+    seen_this_tick: set[str] = set()
+    to_ingest: list[tuple[str, str]] = []
+
+    for remote_path, checksum in remote_files:
+        seen_in_scan.add(checksum)
+        if checksum not in seen_this_tick:   # dedup: keep first occurrence only
+            seen_this_tick.add(checksum)
+            to_ingest.append((remote_path, checksum))
+
+    orphan_checksums = known_checksums - seen_in_scan
+    return to_ingest, orphan_checksums
+```
+
+> **Dedup invariant:** after `_diff`, every checksum in `to_ingest` is unique. The chosen remote path is the first path encountered during the scan walk (depth-first for SFTP, iteration order of `list_objects_v2` for S3).
+
 ---
 
 ## 9. Worker Manager
@@ -1168,7 +1219,8 @@ All connector DB functions from §5.1:
 **Files touched:** `connector/sync_worker.py`
 
 **What's to build:**
-- `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, dedup diff, ingest new files, orphan deletion, tick finalize
+- `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, diff, ingest new files, orphan deletion, tick finalize
+- `_diff()`: builds `to_ingest` (new files only, intra-tick checksum dedup applied — first remote path wins) and `orphan_checksums` (previously registered checksums absent from current scan) — see §8.4
 - Pass `connector_id` to each create-job call inside `_process_new_files()`; the main thread calls `upsert_file_checksum` + `insert_connector_membership` on job completion (see §5.1)
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
@@ -1181,6 +1233,9 @@ All connector DB functions from §5.1:
 - Assert crash guard writes `"crashed: <error>"` to DB on unhandled exception
 - Assert `stop_event.set()` before a tick results in no DB writes
 - Assert mid-tick cancellation cleans up `pending_checksums` and `ingested_this_tick`
+- `_diff` — assert that when two remote paths share the same checksum only the first is included in `to_ingest`
+- `_diff` — assert that checksums absent from the current scan appear in `orphan_checksums`
+- `_diff` — assert that a checksum present in both `remote_files` and `known_checksums` does not appear in either output list (already handled by scanner, but verify the contract holds end-to-end)
 
 ---
 
