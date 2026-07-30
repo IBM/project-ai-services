@@ -3,9 +3,10 @@ package rag
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -56,42 +57,16 @@ func startVLLMContainer(podName string, modelPath string) error {
 	)
 }
 
-func hasLLMServerStarted(podName string) (isStarted bool) {
-	grep := exec.Command("grep", "gRPC Server started at")
-	podmanLogs := exec.Command("podman", "logs", podName)
-
-	pipe, _ := podmanLogs.StdoutPipe()
-	defer func() {
-		_ = pipe.Close()
-	}()
-
-	grep.Stdin = pipe
-	err := podmanLogs.Start()
+// judgeHealthy returns true when the vLLM judge /v1/models endpoint responds 200.
+func judgeHealthy(port string) bool {
+	url := fmt.Sprintf("http://localhost:%s/v1/models", port)
+	resp, err := http.Get(url) //nolint:noctx
 	if err != nil {
-		logger.Errorf("Error starting vllm judge pod logs %v", err)
-
 		return false
 	}
+	_ = resp.Body.Close()
 
-	// Run and get the output of grep.
-	out, err := grep.Output()
-	if exitError, ok := err.(*exec.ExitError); ok {
-		// The command failed, check the exit code
-		if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
-			if status.ExitStatus() == 1 {
-				logger.Infof("LLM server not started yet")
-
-				return false
-			}
-		}
-		logger.Errorf("Error fetching vllm judge pod logs %v", err)
-
-		return false
-	}
-
-	output := string(out)
-
-	return output != ""
+	return resp.StatusCode == http.StatusOK
 }
 
 // judgeModelAlreadyDownloaded returns true when the model directory is non-empty.
@@ -133,9 +108,29 @@ func DownloadJudgeModel(_ context.Context, _ *config.Config) error {
 	return nil
 }
 
-// StartJudgeContainer starts the vLLM judge container and polls until ready; must run after the main LLM is up to avoid GPU contention.
+// removeJudgeContainers force-removes all containers whose names start with "vllm-judge-".
+func removeJudgeContainers() {
+	cmd := exec.Command("podman", "ps", "-a", "--format", "{{.Names}}", "--filter", "name=vllm-judge-")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+
+	for _, name := range strings.Fields(string(out)) {
+		if strings.HasPrefix(name, "vllm-judge-") {
+			logger.Infof("[JUDGE] Removing stale judge container: %s", name)
+			_ = runPodman("rm", "-f", name)
+		}
+	}
+}
+
+// StartJudgeContainer starts the vLLM judge container and polls its /health endpoint until ready.
 func StartJudgeContainer(_ context.Context, _ *config.Config, runID string) error {
 	podName := "vllm-judge-" + runID
+	llmJudgePort, _ := bootstrap.GetLLMasJudgePodDetails()
+
+	removeJudgeContainers()
+
 	if runErr := startVLLMContainer(podName, ModelPath+"/"+Model); runErr != nil {
 		logger.Errorf("error running LLM as Judge container %v", runErr)
 
@@ -143,28 +138,26 @@ func StartJudgeContainer(_ context.Context, _ *config.Config, runID string) erro
 	}
 	logger.Infof("[JUDGE] VLLM Judge container start triggered")
 
-	pollingInterval := os.Getenv("LLM_CONTAINER_POLLING_INTERVAL")
-	if pollingInterval == "" {
-		pollingInterval = "30s"
-	}
+	const (
+		pollInterval = 30 * time.Second
+		maxWait      = 10 * time.Minute
+	)
 
-	duration, err := time.ParseDuration(pollingInterval)
-	if err != nil {
-		const defaultDuration = time.Duration(30)
-		duration = defaultDuration * time.Second
-	}
+	deadline := time.Now().Add(maxWait)
 
-	time.Sleep(duration)
-
-	count := 0
-	for count <= 5 {
-		if hasLLMServerStarted(podName) {
+	for {
+		if judgeHealthy(llmJudgePort) {
 			logger.Infof("[JUDGE] VLLM as Judge container started successfully")
 
 			return nil
 		}
-		time.Sleep(duration)
-		count++
+
+		if time.Now().After(deadline) {
+			break
+		}
+
+		logger.Infof("LLM server not started yet")
+		time.Sleep(pollInterval)
 	}
 
 	logger.Errorf("polling attempts exhausted. VLLM Judge server was not started")

@@ -45,7 +45,7 @@ type APIServerOptions struct {
 	AuthService        auth.Service
 	TokenManager       *auth.TokenManager
 	Blacklist          repository.TokenBlacklist
-	ApplicationService *repository.ApplicationService
+	ApplicationService repository.ApplicationServiceInterface
 }
 
 // APIserver represents the API server instance, holding the configuration and authentication provider.
@@ -54,7 +54,7 @@ type APIserver struct {
 	authService        auth.Service
 	tokenManager       *auth.TokenManager
 	blacklist          repository.TokenBlacklist
-	applicationService *repository.ApplicationService
+	applicationService repository.ApplicationServiceInterface
 }
 
 // NewAPIserver creates a new instance of the API server with the provided options, setting default values where necessary.
