@@ -218,15 +218,15 @@ Three new goose migration files, numbered after the current highest (`2026043009
 
 All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 
-| Method   | Path                                              | Description                                                    |
-| -------- | ------------------------------------------------- | -------------------------------------------------------------- |
-| `GET`    | `/connectors/datasources`                         | List all datasources (paginated, filterable by status)         |
-| `GET`    | `/connectors/datasources/:id`                     | Get a single datasource by ID                                  |
-| `POST`   | `/connectors/datasources`                         | Create a new datasource (validates connectivity first)         |
-| `PUT`    | `/connectors/datasources/:id`                     | Update datasource metadata / credentials                       |
-| `DELETE` | `/connectors/datasources/:id`                     | Delete a datasource (only if not connected to any application) |
-| `GET`    | `/connectors/datasources/providers`               | List all supported datasource provider types                   |
-| `GET`    | `/connectors/datasources/providers/:provider_id/params` | Get the input schema for a specific provider type         |
+| Method   | Path                                                    | Description                                                    |
+| -------- | ------------------------------------------------------- | -------------------------------------------------------------- |
+| `GET`    | `/connectors/datasources`                               | List all datasources (paginated, filterable by status)         |
+| `GET`    | `/connectors/datasources/:id`                           | Get a single datasource by ID                                  |
+| `POST`   | `/connectors/datasources`                               | Create a new datasource (validates connectivity first)         |
+| `PUT`    | `/connectors/datasources/:id`                           | Update datasource metadata / credentials                       |
+| `DELETE` | `/connectors/datasources/:id`                           | Delete a datasource (only if not connected to any application) |
+| `GET`    | `/connectors/datasources/providers`                     | List all supported datasource provider types                   |
+| `GET`    | `/connectors/datasources/providers/:provider_id/params` | Get the input schema for a specific provider type              |
 
 ### 5.2 Application-Datasource Connection APIs
 
@@ -421,11 +421,15 @@ The schema is derived from the provider's `RequiredFields()` and `SensitiveField
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "bucket_name":       { "type": "string", "title": "Bucket Name" },
-    "region":            { "type": "string", "title": "AWS Region" },
-    "access_key_id":     { "type": "string", "title": "Access Key ID" },
-    "secret_access_key": { "type": "string", "title": "Secret Access Key", "x-sensitive": true },
-    "endpoint_url":      { "type": "string", "title": "Endpoint URL (optional)" }
+    "bucket_name": { "type": "string", "title": "Bucket Name" },
+    "region": { "type": "string", "title": "AWS Region" },
+    "access_key_id": { "type": "string", "title": "Access Key ID" },
+    "secret_access_key": {
+      "type": "string",
+      "title": "Secret Access Key",
+      "x-sensitive": true
+    },
+    "endpoint_url": { "type": "string", "title": "Endpoint URL (optional)" }
   },
   "required": ["bucket_name", "region", "access_key_id", "secret_access_key"]
 }
@@ -448,7 +452,7 @@ Creates a link in `application_datasources` and calls `POST /v1/connectors` on t
 **Rules:**
 
 - The application must exist and be in `Running` status.
-- The datasource must exist and be in `Running` status.
+- The datasource must exist and be in `Connected` status.
 - The link must not already exist.
 
 **Response `200 OK`:**
@@ -690,15 +694,15 @@ Providers are registered in a provider registry at startup. The `POST /connector
 
 Field names below match the `connection_details` keys used in the digitize push payload.
 
-| Field                | Required | Sensitive | Notes                                              |
-| -------------------- | -------- | --------- | -------------------------------------------------- |
-| `bucket_name`        | Yes      | No        |                                                    |
-| `region`             | Yes      | No        |                                                    |
-| `access_key_id`      | Yes      | No        |                                                    |
-| `secret_access_key`  | Yes      | **Yes**   |                                                    |
-| `endpoint_url`       | No       | No        | Defaults to `https://s3.amazonaws.com`             |
-| `prefix`             | No       | No        | Key prefix to scope the sync to a folder           |
-| `delimiter`          | No       | No        | Delimiter for hierarchical listing (typically `/`) |
+| Field                | Required | Sensitive | Notes                                                               |
+| -------------------- | -------- | --------- | ------------------------------------------------------------------- |
+| `bucket_name`        | Yes      | No        |                                                                     |
+| `region`             | Yes      | No        |                                                                     |
+| `access_key_id`      | Yes      | No        |                                                                     |
+| `secret_access_key`  | Yes      | **Yes**   |                                                                     |
+| `endpoint_url`       | No       | No        | Defaults to `https://s3.amazonaws.com`                              |
+| `prefix`             | No       | No        | Key prefix to scope the sync to a folder                            |
+| `delimiter`          | No       | No        | Delimiter for hierarchical listing (typically `/`)                  |
 | `allowed_extensions` | No       | No        | e.g. `[".pdf", ".docx", ".xlsx"]`; if omitted, all files are synced |
 
 Connectivity test: List objects in the bucket (scoped to `prefix` if provided) with a zero-item limit (`list_objects_v2` with `MaxKeys=0`). A successful call confirms valid credentials and bucket/prefix access.
@@ -843,18 +847,18 @@ The feature follows the existing error response convention established in the ap
 { "error": "<human-readable description>" }
 ```
 
-| Scenario                                                 | HTTP Status                                                              |
-| -------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Datasource not found                                     | `404 Not Found`                                                          |
-| Application not found                                    | `404 Not Found`                                                          |
-| Invalid request body or missing required fields          | `400 Bad Request`                                                        |
-| Connectivity test failed on create/update                | `422 Unprocessable Entity`                                               |
-| Datasource already connected to application              | `409 Conflict`                                                           |
-| Delete attempted while datasource has active connections | `409 Conflict`                                                           |
-| Application not in `Running` status during connect       | `422 Unprocessable Entity`                                               |
-| Digitize `POST /v1/connectors` returns `409 Conflict`    | `409 Conflict` — connector already exists; catalog should use `PUT`                                              |
-| Digitize `PUT /v1/connectors` failed after 1 retry       | `200 OK` — datasource update succeeds; `propagation_errors` array in response lists affected applications        |
-| Digitize service API call failed (non-404, non-PUT)      | `502 Bad Gateway` (with `error` field describing the downstream failure)                                         |
+| Scenario                                                 | HTTP Status                                                                                               |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Datasource not found                                     | `404 Not Found`                                                                                           |
+| Application not found                                    | `404 Not Found`                                                                                           |
+| Invalid request body or missing required fields          | `400 Bad Request`                                                                                         |
+| Connectivity test failed on create/update                | `422 Unprocessable Entity`                                                                                |
+| Datasource already connected to application              | `409 Conflict`                                                                                            |
+| Delete attempted while datasource has active connections | `409 Conflict`                                                                                            |
+| Application not in `Running` status during connect       | `422 Unprocessable Entity`                                                                                |
+| Digitize `POST /v1/connectors` returns `409 Conflict`    | `409 Conflict` — connector already exists; catalog should use `PUT`                                       |
+| Digitize `PUT /v1/connectors` failed after 1 retry       | `200 OK` — datasource update succeeds; `propagation_errors` array in response lists affected applications |
+| Digitize service API call failed (non-404, non-PUT)      | `502 Bad Gateway` (with `error` field describing the downstream failure)                                  |
 
 ---
 
