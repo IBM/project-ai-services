@@ -43,36 +43,43 @@ These assumptions are referenced once here and not repeated below.
 ── Each sync tick (connector-sourced) ───────────────────────────────
   Step 1 — load state
     → SELECT known_checksums FROM connector_file_membership
-           WHERE connector_ids @> [connector_id]
+           WHERE connector_id = :connector_id
       (all checksums this connector already owns)
+    → SELECT DISTINCT checksum FROM connector_file_membership
+      (all checksums across all connectors — for cross-connector dedup)
 
   Step 2 — file walk + classify
     → scanner walks remote source, computes (remote_path, checksum) per file
     → for each file:
         if checksum IN known_checksums:
-          → already owned by this connector — add connector_id to connector_ids
-            (idempotent JSONB upsert) and place on skip_list  ← no download
+          → already owned by this connector — skip entirely (no download, no DB write)
+        elif checksum IN all_checksums:
+          → already ingested by a different connector — place on cross_dup_list
+            (no download, no ingest; insert membership row with existing doc_id)
         else:
-          → new to this connector — place on ingest_list
+          → brand new to all connectors — place on ingest_list
 
   Step 3 — ingest new files (ingest_list)
     → for each (remote_path, checksum) in ingest_list:
         download file → run create_job(connector_id=connector_id)
         on job success:
           add_connector_to_membership(connector_id, checksum, doc_id)
-            → INSERT (checksum, [connector_id], doc_id) on first owner
-            → JSONB array append if another connector already owns checksum
-              (shared-content case — no second download)
+            → INSERT (checksum, connector_id, doc_id) ON CONFLICT DO NOTHING
+
+  Step 3b — register cross-connector duplicates (cross_dup_list)
+    → for each (remote_path, checksum) in cross_dup_list:
+        existing_doc_id = lookup_connector_content_by_checksum(checksum)
+        add_connector_to_membership(connector_id, checksum, existing_doc_id)
+          → INSERT (checksum, connector_id, existing_doc_id) ON CONFLICT DO NOTHING
 
   Step 4 — orphan detection + removal
     → orphan_checksums = known_checksums − {checksum for (_, checksum) in scanned_files}
       (checksums this connector previously owned that are no longer on the remote source)
-    → for each orphan_checksum in orphan_checksums (after all batch ingest jobs finish):
+    → for each orphan_checksum in orphan_checksums (after all Step 3/3b writes finish):
         remove_connector_from_membership(connector_id, orphan_checksum)
-          → removes connector_id from connector_ids array
+          → DELETE row WHERE checksum = orphan AND connector_id = :connector_id
           → returns (remaining_owner_count, doc_id)
         if remaining_owner_count == 0:
-          DELETE FROM connector_file_membership WHERE checksum = orphan_checksum
           DELETE /v1/documents/{doc_id}
 
   Step 5 — finalise tick
@@ -98,7 +105,7 @@ These assumptions are referenced once here and not repeated below.
 
 - `active_connectors`: current connector configuration and top-level sync state
 - `file_checksum_registry`: **user-submitted documents only** — keyed by `checksum`, stores a content fingerprint and the `doc_id`. **Already implemented** — table and ORM model exist. Connector code must never write to this table.
-- `connector_file_membership`: **connector-sourced documents only** — keyed by `checksum` (PK), carries the list of connector IDs that reference this file and the `doc_id` for deletion. User-submitted docs are never written here.
+- `connector_file_membership`: **connector-sourced documents only** — one row per `(checksum, connector_id)` pair; carries the `doc_id` for deletion. User-submitted docs are never written here.
 - `connector_sync_history`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
 - `ConnectorSyncWorker`: executes periodic sync logic
@@ -260,13 +267,12 @@ DELETE /v1/connectors/{connector_id}
   → check if sync tick is in progress
       if YES → 409 Conflict (no state modified)
   → stop worker
-  → list checksums owned by this connector (connector_file_membership WHERE connector_ids @> [connector_id])
+  → list checksums owned by this connector (connector_file_membership WHERE connector_id = :connector_id)
   → for each checksum:
        remove_connector_from_membership(connector_id, checksum)
-         → removes connector_id from connector_ids array
+         → DELETE row WHERE checksum = :checksum AND connector_id = :connector_id
          → returns (remaining_owner_count, doc_id)
        if remaining_owner_count == 0:
-         DELETE FROM connector_file_membership WHERE checksum = $1
          DELETE /v1/documents/{doc_id}
   → delete connector row
   → cleanup staging dirs
@@ -479,7 +485,7 @@ file_checksum_registry (checksum PK) ──────────────�
 
 ── Connector-sourced path ───────────────────────────────────────────
 active_connectors
-  └─< connector_file_membership (checksum PK, connector_ids[], doc_id) ─> documents
+  └─< connector_file_membership (connector_id, checksum, doc_id) ─> documents
 
 active_connectors
   └─< connector_sync_history
@@ -552,59 +558,84 @@ class FileChecksumRegistry(Base):
 
 **Connector-sourced documents only.** This table is the sole dedup and reference-counting store for all content ingested via connectors. User-submitted code must never write to this table.
 
-The schema uses `checksum` as the primary key. The `connector_ids` column is a JSON array of all connector IDs that currently reference this file (cross-connector shared-content tracking). `doc_id` is stored here — not in `file_checksum_registry` — so that deletion can proceed without a registry join.
+Each row represents **one connector's ownership of one checksum**. One checksum can appear in multiple rows (shared across connectors); one connector can appear in multiple rows (owns many files). `doc_id` is stored on every row so that deletion can proceed without a join — when the same content is shared across connectors, every row for that checksum carries the same `doc_id`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS connector_file_membership (
-    checksum      TEXT        PRIMARY KEY,
-    connector_ids JSONB       NOT NULL DEFAULT '[]',
-    doc_id        TEXT        NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE
+    checksum     TEXT NOT NULL,
+    connector_id TEXT NOT NULL,
+    doc_id       TEXT NOT NULL,
+    PRIMARY KEY (checksum, connector_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_cfm_doc_id
-    ON connector_file_membership (doc_id);
+CREATE INDEX IF NOT EXISTS idx_cfm_connector_id
+    ON connector_file_membership (connector_id);
 ```
 
-**Why `checksum` is the PK:**
+**Why `(checksum, connector_id)` is the PK and not `checksum` alone:**
 
-A given file (identified by its content checksum) can be owned by multiple connectors at once — e.g. the same PDF is stored in both an S3 bucket connector and an SFTP share connector. Rather than creating one row per `(connector_id, checksum)` pair, a single row per checksum is maintained and the `connector_ids` array is updated atomically. This makes reference counting a simple array-length check rather than a `COUNT(*)` join.
+A given file (identified by its content checksum) can be owned by multiple connectors at once — e.g. the same PDF is stored in both an S3 bucket connector and an SFTP share connector. One row per `(connector_id, checksum)` pair is maintained. The composite PK enforces that a connector cannot register the same checksum twice, while still allowing multiple connectors to reference the same checksum.
 
-**Connector IDs array invariants:**
+**Why no `ON DELETE CASCADE` on `doc_id`:**
 
-- When a connector first encounters a checksum (new content): insert a new row with `connector_ids = [connector_id]` and `doc_id` from the completed ingest job.
-- When a second connector encounters the same checksum (already ingested by another connector): append `connector_id` to `connector_ids`, reuse the existing `doc_id` — **no download, no ingest**.
-- When a connector removes a file (orphan detected): remove `connector_id` from the array. If the array becomes empty, delete the row and the associated document.
+`doc_id` is not declared as a foreign-key constraint here. Deleting a document is an intentional, reference-counted operation managed in application code (§5.3.2 Phase 4b, §5.3.3 Step 3). Cascade deletion would remove rows silently when a document is deleted through other paths, bypassing the reference-count check and potentially leaving orphaned membership rows or double-deleting shared documents. Application code is responsible for calling `DELETE /v1/documents/{doc_id}` only once the last owner row for a checksum is removed.
+
+**Why `idx_cfm_connector_id`:**
+
+Every sync tick and every connector detach sweep queries all rows owned by a given connector:
+
+```sql
+SELECT checksum, doc_id
+FROM connector_file_membership
+WHERE connector_id = :connector_id;
+```
+
+Without this index Postgres falls back to a full sequential scan over the entire table on every tick. The B-tree index resolves this predicate in **O(matching rows)** — proportional to how many files a single connector owns — rather than **O(total rows)** across all connectors.
+
+**Membership invariants:**
+
+- **New file (no prior row for this checksum):** perform normal file-walk download and ingest, then insert `(checksum, connector_id, doc_id)` once the job completes.
+- **Cross-connector duplicate (checksum exists for a different connector):** look up the existing `doc_id` via `GET /v1/documents` (or equivalent lookup), skip download and ingest entirely, and insert a new row `(checksum, connector_id, <existing_doc_id>)`.
+- **Same-connector duplicate (row already exists for this `(checksum, connector_id)`):** skip altogether — no download, no ingest, no DB write.
+- **Orphan detected (connector's row exists but file is gone from remote):** delete the single `(checksum, connector_id)` row. If no other rows remain for that checksum, delete the associated document.
 
 **Dedup check (per tick):**
 
 ```sql
--- Known checksums for this connector: all checksums where connector_id appears in the array
+-- Known checksums for this connector: all rows where this connector_id appears
 SELECT checksum
 FROM connector_file_membership
-WHERE connector_ids @> jsonb_build_array(:connector_id::text);
+WHERE connector_id = :connector_id;
+```
+
+**Cross-connector doc_id lookup:**
+
+```sql
+-- Retrieve the doc_id already assigned to a checksum (regardless of which connector owns it)
+SELECT doc_id
+FROM connector_file_membership
+WHERE checksum = :checksum
+LIMIT 1;
 ```
 
 **Reference-counted delete stub:**
 
 ```sql
-BEGIN;
+-- Remove this connector's ownership row
+DELETE FROM connector_file_membership
+WHERE checksum = :checksum
+  AND connector_id = :connector_id;
 
--- Remove this connector from the owners array
-UPDATE connector_file_membership
-SET connector_ids = connector_ids - :connector_id
-WHERE checksum = :checksum;
-
--- Check how many owners remain
-SELECT jsonb_array_length(connector_ids), doc_id
+-- Check how many owners remain for this checksum
+SELECT COUNT(*) AS remaining, MAX(doc_id) AS doc_id
 FROM connector_file_membership
 WHERE checksum = :checksum;
 
--- If jsonb_array_length == 0: delete the row and the document
--- DELETE FROM connector_file_membership WHERE checksum = :checksum;
+-- If remaining == 0: delete the document
 -- DELETE /v1/documents/{doc_id}
-
-COMMIT;
 ```
+
+**`doc_id` consistency invariant:** all rows sharing the same `checksum` must carry the same `doc_id`. This is guaranteed by application code: the first connector to ingest a checksum writes the `doc_id` from its completed ingest job; every subsequent connector looks up that `doc_id` before inserting its own row (cross-connector duplicate path above).
 
 **Checksum format reference:**
 
@@ -657,7 +688,7 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 **`FileChecksumRegistry` already exists** in `services/digitize/db/models.py` and remains unchanged — it covers user-submitted docs only. Add the remaining three models to that file:
 
 - `ActiveConnector` — fields: `id` (PK), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`
-- `ConnectorFileMembership` — fields: `checksum` (PK), `connector_ids` (JSONB array), `doc_id` (FK → `documents`)
+- `ConnectorFileMembership` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
 - `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `active_connectors`), `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`
 
 ### 4.7 Future: Retiring the User-Submitted Workflow
@@ -694,7 +725,7 @@ When the create-job flow is invoked it accepts an optional `connector_id` parame
 | Scenario | `connector_id` | Dedup table | Registry written | Notes |
 | --- | --- | --- | --- | --- |
 | User-submitted | absent | `file_checksum_registry` | `file_checksum_registry (checksum, doc_id)` | Connector tables untouched |
-| Connector-sourced | present | `connector_file_membership` | `connector_file_membership (checksum, connector_ids, doc_id)` | `file_checksum_registry` untouched |
+| Connector-sourced | present | `connector_file_membership` | `connector_file_membership (checksum, connector_id, doc_id)` | `file_checksum_registry` untouched |
 
 New connector-specific functions to add:
 
@@ -708,9 +739,10 @@ New connector-specific functions to add:
 | `update_connector_sync_status()` | write top-level sync state |
 | `merge_connection_details()` | key-level JSON merge for PUT |
 | `lookup_connector_content_by_checksum(checksum)` | connector dedup lookup — queries `connector_file_membership`, returns `doc_id` or `None` |
-| `list_connector_checksums(connector_id)` | all checksums currently owned by this connector (array containment query on `connector_ids`) |
-| `add_connector_to_membership(connector_id, checksum, doc_id)` | insert new membership row OR append `connector_id` to existing row's `connector_ids` array |
-| `remove_connector_from_membership(connector_id, checksum)` | remove `connector_id` from `connector_ids` array; return remaining owner count and `doc_id` |
+| `list_connector_checksums(connector_id)` | all checksums currently owned by this connector (B-tree index query on `connector_id`) |
+| `list_all_checksums()` | all distinct checksums present in `connector_file_membership` across all connectors (used for cross-connector dedup in Phase 3) |
+| `add_connector_to_membership(connector_id, checksum, doc_id)` | insert a new `(checksum, connector_id, doc_id)` row; no-op if the row already exists |
+| `remove_connector_from_membership(connector_id, checksum)` | delete the `(checksum, connector_id)` row; return remaining owner count and `doc_id` |
 | `insert_sync_history()` | create tick row |
 | `update_sync_history()` | finalize tick row |
 | `update_sync_history_files_syncing()` | live progress updates |
@@ -723,62 +755,69 @@ New connector-specific functions to add:
 def lookup_connector_content_by_checksum(checksum: str) -> str | None:
     """Return doc_id if checksum is already in connector_file_membership, else None.
 
-    Used exclusively by connector sync workers — never by user-submitted code.
+    Returns the doc_id from any existing row for this checksum (cross-connector or same
+    connector). Used exclusively by connector sync workers — never by user-submitted code.
     """
     with session() as s:
         row = s.execute(
-            text("SELECT doc_id FROM connector_file_membership WHERE checksum = :checksum"),
+            text("SELECT doc_id FROM connector_file_membership WHERE checksum = :checksum LIMIT 1"),
             {"checksum": checksum},
         ).one_or_none()
     return row.doc_id if row else None
 
 
 def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -> None:
-    """Insert a new membership row or append connector_id to an existing row's connector_ids array.
+    """Insert a new (checksum, connector_id, doc_id) row.
 
-    - If checksum is new: INSERT (checksum, [connector_id], doc_id).
-    - If checksum already exists (shared content): append connector_id to connector_ids array.
+    - If the row already exists (same connector, same checksum): no-op (ON CONFLICT DO NOTHING).
+    - If checksum exists for a different connector (cross-connector duplicate): inserts a new row
+      with the same doc_id, linking this connector to the already-ingested document.
+    - If checksum is brand new: inserts the first row for this checksum.
+
+    Callers must resolve doc_id before calling this function:
+      - New file:               doc_id comes from the completed ingest job.
+      - Cross-connector dup:    doc_id comes from lookup_connector_content_by_checksum().
     """
     with transaction() as tx:
         tx.execute(
             text("""
-                INSERT INTO connector_file_membership (checksum, connector_ids, doc_id)
-                VALUES (:checksum, jsonb_build_array(:connector_id::text), :doc_id)
-                ON CONFLICT (checksum) DO UPDATE
-                  SET connector_ids = connector_file_membership.connector_ids
-                      || jsonb_build_array(EXCLUDED.connector_ids->0)
-                WHERE NOT (connector_file_membership.connector_ids
-                           @> jsonb_build_array(:connector_id::text))
+                INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+                VALUES (:checksum, :connector_id, :doc_id)
+                ON CONFLICT (checksum, connector_id) DO NOTHING
             """),
             {"checksum": checksum, "connector_id": connector_id, "doc_id": doc_id},
         )
 
 
 def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[int, str | None]:
-    """Remove connector_id from the owners array; return (remaining_owner_count, doc_id).
+    """Delete the (checksum, connector_id) row; return (remaining_owner_count, doc_id).
 
-    Caller must delete the membership row and associated document when remaining_owner_count == 0.
+    remaining_owner_count is the number of rows still present for this checksum after deletion
+    (i.e. other connectors that still own the same content). Caller must delete the associated
+    document when remaining_owner_count == 0.
     """
     with transaction() as tx:
-        tx.execute(
+        deleted = tx.execute(
             text("""
-                UPDATE connector_file_membership
-                SET connector_ids = connector_ids - :connector_id
-                WHERE checksum = :checksum
+                DELETE FROM connector_file_membership
+                WHERE checksum     = :checksum
+                  AND connector_id = :connector_id
+                RETURNING doc_id
             """),
             {"connector_id": connector_id, "checksum": checksum},
-        )
+        ).one_or_none()
+        if deleted is None:
+            return 0, None
+        doc_id = deleted.doc_id
         row = tx.execute(
             text("""
-                SELECT jsonb_array_length(connector_ids) AS remaining, doc_id
+                SELECT COUNT(*) AS remaining
                 FROM connector_file_membership
                 WHERE checksum = :checksum
             """),
             {"checksum": checksum},
-        ).one_or_none()
-    if row is None:
-        return 0, None
-    return int(row.remaining), row.doc_id
+        ).one()
+    return int(row.remaining), doc_id
 ```
 
 ---
@@ -829,53 +868,55 @@ Phase 1 — open tick record
 Phase 2 — load known state
   SELECT checksum
   FROM   connector_file_membership
-  WHERE  connector_ids @> jsonb_build_array(:connector_id::text)
+  WHERE  connector_id = :connector_id
   → produces: known_checksums  (set of strings)
 
   ┌─ scanner file walk happens here (no DB) ──────────────────────┐
   │  yields: scanned_files = [(remote_path, checksum), ...]       │
   └───────────────────────────────────────────────────────────────┘
 
-Phase 3 — classify files into two lists (no DB reads)
-  skip_list   = []   ← checksum IN known_checksums
-  ingest_list = []   ← checksum NOT IN known_checksums
+Phase 3 — classify files into three buckets (no DB reads)
+  skip_list        = []   ← checksum IN known_checksums (same connector already owns it)
+  ingest_list      = []   ← checksum NOT IN known_checksums AND not yet seen cross-connector
+  cross_dup_list   = []   ← checksum NOT IN known_checksums BUT already ingested by another connector
 
-  for (remote_path, checksum) in scanned_files:
-    if checksum in known_checksums:
-      skip_list.append((remote_path, checksum))
-    else:
-      ingest_list.append((remote_path, checksum))    ← dedup: first path wins
+  Classification happens in _classify (§8.4).
 
-  Note: files on skip_list have their connector_id already in connector_ids —
-  no DB write is needed for them (idempotency guaranteed by existing membership row).
+  Note: files on skip_list are already registered for this connector — no DB write is needed.
 
-  ┌─ download + ingest loop for ingest_list (transport + create_job) ─┐
-  │  for each (remote_path, checksum) in ingest_list:                 │
-  │    download → create_job(connector_id) → doc_id                   │
-  │    ↓ (DB write, see below)                                        │
-  └───────────────────────────────────────────────────────────────────┘
+  ┌─ ingest loop (transport + create_job, ingest_list only) ──────────────────────────────────┐
+  │  for each (remote_path, checksum) in ingest_list:                                         │
+  │    download → create_job(connector_id) → doc_id                                           │
+  │    ↓ (DB write, see Phase 4a-new below)                                                   │
+  └───────────────────────────────────────────────────────────────────────────────────────────┘
 
-Phase 4a — register each newly ingested file
-  (called per file, after each successful create_job)
+  ┌─ cross-connector dup loop (no download, no ingest, cross_dup_list only) ──────────────────┐
+  │  for each (remote_path, checksum) in cross_dup_list:                                      │
+  │    existing_doc_id = lookup_connector_content_by_checksum(checksum)                       │
+  │    ↓ (DB write, see Phase 4a-dup below)                                                   │
+  └───────────────────────────────────────────────────────────────────────────────────────────┘
 
-  INSERT INTO connector_file_membership (checksum, connector_ids, doc_id)
-  VALUES (:checksum, jsonb_build_array(:connector_id::text), :doc_id)
-  ON CONFLICT (checksum) DO UPDATE
-    SET connector_ids = connector_file_membership.connector_ids
-                     || jsonb_build_array(:connector_id::text)
-  WHERE NOT (connector_file_membership.connector_ids
-             @> jsonb_build_array(:connector_id::text))
-  -- First owner:  inserts new row.
-  -- Shared-content case (another connector already owns this checksum):
-  --   appends connector_id to array; doc_id from the existing row is reused.
-  --   The file was NOT downloaded again — the ingest was skipped upstream.
+Phase 4a-new — register each genuinely new file (after successful create_job)
+
+  INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+  VALUES (:checksum, :connector_id, :doc_id)
+  ON CONFLICT (checksum, connector_id) DO NOTHING
+  -- Inserts the first (or additional) ownership row for this (checksum, connector_id) pair.
 
   UPDATE documents
   SET    metadata = metadata || :source_metadata   -- source_checksum, source_type, etc.
   WHERE  doc_id   = :doc_id
 
+Phase 4a-dup — register cross-connector duplicate (no download, no ingest)
+
+  -- existing_doc_id already retrieved via lookup_connector_content_by_checksum()
+  INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+  VALUES (:checksum, :connector_id, :existing_doc_id)
+  ON CONFLICT (checksum, connector_id) DO NOTHING
+  -- Links this connector to the already-ingested document. No new document is created.
+
 Phase 4b — orphan detection + removal
-  (runs once, after ALL ingest jobs for this tick have completed)
+  (runs once, after ALL Phase 4a writes for this tick have completed)
 
   -- Compute orphan set purely in application memory:
   scanned_checksums  = {checksum for (_, checksum) in scanned_files}
@@ -885,22 +926,20 @@ Phase 4b — orphan detection + removal
 
   for orphan_checksum in orphan_checksums:
 
-    -- Step A: remove this connector from the owners array
-    UPDATE connector_file_membership
-    SET    connector_ids = connector_ids - :connector_id
-    WHERE  checksum = :orphan_checksum
+    -- Step A: delete this connector's ownership row and capture doc_id
+    DELETE FROM connector_file_membership
+    WHERE  checksum     = :orphan_checksum
+      AND  connector_id = :connector_id
+    RETURNING doc_id   → orphan_doc_id
 
-    -- Step B: check remaining owners
-    SELECT jsonb_array_length(connector_ids) AS remaining, doc_id
+    -- Step B: check remaining owners for this checksum
+    SELECT COUNT(*) AS remaining
     FROM   connector_file_membership
     WHERE  checksum = :orphan_checksum
 
-    -- Step C: if no owners remain, delete the row and the document
+    -- Step C: if no owners remain, delete the document
     if remaining == 0:
-      DELETE FROM connector_file_membership
-      WHERE  checksum = :orphan_checksum
-
-      DELETE /v1/documents/{doc_id}         ← calls digitize document API
+      DELETE /v1/documents/{orphan_doc_id}  ← calls digitize document API
       -- 200 / 204 / 404 all treated as success; 5xx logged and skipped
 
 Phase 5 — close tick record
@@ -940,24 +979,22 @@ Step 1 — stop worker thread (not a DB operation)
 Step 2 — snapshot owned checksums
   SELECT checksum, doc_id
   FROM   connector_file_membership
-  WHERE  connector_ids @> jsonb_build_array(:connector_id::text)
+  WHERE  connector_id = :connector_id
   → produces: owned_rows = [(checksum, doc_id), ...]
 
 Step 3 — remove ownership row by row
   for (checksum, doc_id) in owned_rows:
 
-    BEGIN
-      UPDATE connector_file_membership
-      SET    connector_ids = connector_ids - :connector_id
-      WHERE  checksum = :checksum
+    -- Delete this connector's row; then check if any other connector still owns the checksum
+    DELETE FROM connector_file_membership
+    WHERE  checksum     = :checksum
+      AND  connector_id = :connector_id
 
-      SELECT jsonb_array_length(connector_ids) AS remaining
-      FROM   connector_file_membership
-      WHERE  checksum = :checksum
-    COMMIT
+    SELECT COUNT(*) AS remaining
+    FROM   connector_file_membership
+    WHERE  checksum = :checksum
 
     if remaining == 0:
-      DELETE FROM connector_file_membership WHERE checksum = :checksum
       DELETE /v1/documents/{doc_id}      ← best-effort; 200/204/404 = success
 
 Step 4 — delete connector row
@@ -970,7 +1007,7 @@ Step 5 — cleanup staging dirs (not a DB operation)
   rm -rf {staging_dir}/{connector_id}/
 ```
 
-**Invariant:** after Step 4 completes, no row in `connector_file_membership` has `:connector_id` in its `connector_ids` array.
+**Invariant:** after Step 4 completes, no row in `connector_file_membership` has `connector_id = :connector_id`.
 
 ---
 
@@ -1221,34 +1258,45 @@ _run_tick()
 ├─ [Phase 1] INSERT connector_sync_history (status='syncing')
 │            UPDATE active_connectors (sync_status='syncing')
 │
-├─ [Phase 2] known_checksums ← SELECT FROM connector_file_membership
-│                               WHERE connector_ids @> [connector_id]
+├─ [Phase 2] known_checksums ← SELECT checksum FROM connector_file_membership
+│                               WHERE connector_id = :connector_id
+│            all_checksums   ← SELECT DISTINCT checksum FROM connector_file_membership
 │
 │            ┌── scanner.connect() + scanner.scan() ─────────────────┐
 │            │   walks remote source, computes (remote_path, checksum)│
 │            │   per file; returns ALL remote files (no filtering)    │
 │            └─────────────────────────────────────────────────────── ┘
 │
-├─ [Phase 3] _classify(scanned_files, known_checksums)
-│            → skip_list   [(remote_path, checksum)] checksum IN known_checksums
-│            → ingest_list [(remote_path, checksum)] checksum NOT IN known_checksums
-│                          (intra-tick dedup: first path wins per checksum)
+├─ [Phase 3] _classify(scanned_files, known_checksums, all_checksums)
+│            → skip_list      [(remote_path, checksum)] checksum IN known_checksums
+│                              (same connector already owns it — skip entirely)
+│            → ingest_list    [(remote_path, checksum)] checksum NOT IN all_checksums
+│                              (brand new — download, ingest, register)
+│            → cross_dup_list [(remote_path, checksum)] checksum IN all_checksums
+│                              but NOT in known_checksums (different connector owns it —
+│                              no download/ingest; insert membership row with existing doc_id)
 │
-├─ [Phase 4a] _process_new_files(ingest_list)
+├─ [Phase 4a-new] _process_new_files(ingest_list)
 │             for each (remote_path, checksum) in ingest_list:
 │               download → create_job(connector_id) → doc_id
 │               add_connector_to_membership(connector_id, checksum, doc_id)
-│                 INSERT … ON CONFLICT DO UPDATE (JSONB array append)
+│                 INSERT … ON CONFLICT (checksum, connector_id) DO NOTHING
 │               UPDATE documents.metadata (source_checksum, source_type, …)
 │
+├─ [Phase 4a-dup] _process_cross_dup_files(cross_dup_list)
+│             for each (remote_path, checksum) in cross_dup_list:
+│               existing_doc_id = lookup_connector_content_by_checksum(checksum)
+│               add_connector_to_membership(connector_id, checksum, existing_doc_id)
+│                 INSERT … ON CONFLICT (checksum, connector_id) DO NOTHING
+│
 ├─ [Phase 4b] _delete_orphans(orphan_checksums)
-│   ← RUNS AFTER all Phase 4a jobs finish ←
+│   ← RUNS AFTER all Phase 4a writes finish ←
 │             orphan_checksums = known_checksums − scanned_checksums
 │             for each orphan:
 │               remove_connector_from_membership(connector_id, orphan)
-│                 UPDATE connector_ids array  (- connector_id)
+│                 DELETE WHERE checksum=orphan AND connector_id=:connector_id
+│                 RETURNING doc_id; then COUNT(*) remaining rows for checksum
 │               if remaining_owners == 0:
-│                 DELETE FROM connector_file_membership WHERE checksum = orphan
 │                 DELETE /v1/documents/{doc_id}
 │
 └─ [Phase 5] UPDATE connector_sync_history (finished_at, counters, status)
@@ -1276,25 +1324,33 @@ def _run_tick(self) -> None:
         scanner.connect()
 
         # Phase 2: load known state from connector_file_membership.
-        # Array-containment query returns all checksums this connector owns.
+        # known_checksums: rows owned by *this* connector.
+        # all_checksums:   all rows across all connectors (for cross-connector dedup).
         known_checksums: set[str] = set(list_connector_checksums(self.connector_id))
+        all_checksums: set[str] = set(list_all_checksums())
 
         # scanner.scan() walks the remote source and returns ALL (remote_path, checksum)
         # pairs — it does NOT pre-filter against known_checksums here.
-        # _classify() does the split into skip_list / ingest_list (Phase 3).
+        # _classify() does the split into skip / ingest / cross_dup (Phase 3).
         scanned_files: list[tuple[str, str]] = scanner.scan()
 
-        # Phase 3: classify into skip_list (already owned) and ingest_list (new).
-        # Also produces orphan_checksums (owned but no longer on remote source).
-        ingest_list, orphan_checksums = self._classify(scanned_files, known_checksums)
+        # Phase 3: classify into skip_list / ingest_list / cross_dup_list.
+        # Also produces orphan_checksums (owned by this connector but gone from remote).
+        ingest_list, cross_dup_list, orphan_checksums = self._classify(
+            scanned_files, known_checksums, all_checksums
+        )
 
-        # Phase 4a: download + ingest + register membership for each new file.
-        # Runs BEFORE orphan removal so membership rows exist before we compute orphans.
+        # Phase 4a-new: download + ingest + register for brand-new files.
+        # Runs BEFORE orphan removal.
         # Each successful job calls add_connector_to_membership(connector_id, checksum, doc_id).
         # file_checksum_registry is never touched.
         self._process_new_files(sync_id, scanner, ingest_list)
 
-        # Phase 4b: remove orphaned files — runs only after 4a is fully complete.
+        # Phase 4a-dup: register cross-connector duplicates (no download/ingest).
+        # Looks up existing doc_id and inserts a new membership row.
+        self._process_cross_dup_files(cross_dup_list)
+
+        # Phase 4b: remove orphaned files — runs only after ALL Phase 4a writes complete.
         self._delete_orphans(orphan_checksums)
 
         self._complete_tick(sync_id)
@@ -1304,61 +1360,78 @@ def _run_tick(self) -> None:
         scanner.close()
 ```
 
-### 8.4 Classify — skip list, ingest list, and orphan set
+### 8.4 Classify — skip list, ingest list, cross-connector duplicate list, and orphan set
 
-`_classify` (previously `_diff`) receives the full scanner output and the connector's `known_checksums` snapshot, then produces three collections:
+`_classify` receives the full scanner output, the connector's `known_checksums` snapshot (rows already owned by **this** connector), and the full set of all checksums present in `connector_file_membership` (across all connectors). It produces four collections:
 
 | Collection | Type | Contents |
 | --- | --- | --- |
-| `skip_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs where checksum is already owned — **no download, no ingest** |
-| `ingest_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs for genuinely new files that must be downloaded and ingested |
+| `skip_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs already owned by **this** connector — skip entirely, no download, no DB write |
+| `ingest_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs not yet seen by any connector — download, ingest, then register |
+| `cross_dup_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs already ingested by a **different** connector — no download, no ingest; just insert a new membership row with the existing `doc_id` |
 | `orphan_checksums` | `set[str]` | checksums this connector previously owned that are no longer present on the remote source |
 
-**Skip list:** files whose checksum is already in `known_checksums`. These are placed on `skip_list` and never reach `create_job`. Because `connector_ids` already contains this connector's ID (it is part of `known_checksums`), no DB write is required for them.
+**Skip list:** files whose checksum is already in `known_checksums` (meaning a `(checksum, connector_id)` row exists for this connector). These require no action — the membership row is already up-to-date.
 
-**Ingest list:** files whose checksum is NOT in `known_checksums`. Intra-tick dedup is applied: if two remote paths share the same checksum, only the **first** `(remote_path, checksum)` pair is placed on `ingest_list`; duplicates are dropped silently. This prevents double-ingestion of identical content within one tick.
+**Ingest list:** files whose checksum is not in `known_checksums` and not in `all_checksums` (no connector has it yet). Intra-tick dedup is applied: if two remote paths share the same checksum, only the **first** `(remote_path, checksum)` pair is placed on `ingest_list`. This prevents double-ingestion of identical content within one tick.
 
-**Orphan set:** computed purely in application memory as `known_checksums − scanned_checksums`. These are checksums that were registered at the start of the tick but whose file no longer exists on the remote source. Orphan removal (Phase 4b) runs **after** all Phase 4a ingest jobs complete, so a file that was just ingested this tick can never incorrectly appear as an orphan.
+**Cross-connector duplicate list:** files whose checksum is not in `known_checksums` but IS in `all_checksums` (already ingested by a different connector). The existing `doc_id` is retrieved via `lookup_connector_content_by_checksum()` and a new membership row is inserted without any download or ingest.
+
+**Orphan set:** computed purely in application memory as `known_checksums − scanned_checksums`. Orphan removal (Phase 4b) runs **after** all Phase 4a writes complete.
 
 ```python
 def _classify(
     self,
     scanned_files: list[tuple[str, str]],
     known_checksums: set[str],
-) -> tuple[list[tuple[str, str]], set[str]]:
-    """Split the scanner output into (ingest_list, orphan_checksums).
+    all_checksums: set[str],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], set[str]]:
+    """Split the scanner output into (ingest_list, cross_dup_list, orphan_checksums).
 
     skip_list is not returned — callers do not need it; files on skip_list
-    require no further action (membership row already up-to-date).
+    require no further action (membership row already up-to-date for this connector).
 
     ingest_list — (remote_path, checksum) pairs to download and ingest.
-      - Checksum is NOT in known_checksums (genuinely new to this connector).
+      - Checksum is NOT in known_checksums (not owned by this connector).
+      - Checksum is NOT in all_checksums (not owned by any connector).
       - Intra-tick dedup: if two remote paths share the same checksum,
         only the first occurrence is included; subsequent duplicates are dropped.
 
+    cross_dup_list — (remote_path, checksum) pairs that already exist in
+      connector_file_membership under a different connector_id. No download or
+      ingest is performed; a new membership row is inserted with the existing doc_id.
+
     orphan_checksums — checksums in known_checksums that are absent from
-      the current scan. Phase 4b removes connector_id from their ownership
-      arrays and deletes docs whose array becomes empty.
+      the current scan. Phase 4b deletes their ownership rows and deletes
+      docs whose last owner row is removed.
     """
     scanned_checksums: set[str] = set()
     seen_this_tick: set[str] = set()
     ingest_list: list[tuple[str, str]] = []
+    cross_dup_list: list[tuple[str, str]] = []
 
     for remote_path, checksum in scanned_files:
         scanned_checksums.add(checksum)
-        if checksum not in known_checksums:
+        if checksum in known_checksums:
+            pass  # already owned by this connector → skip_list (no action)
+        elif checksum in all_checksums:
+            # owned by a different connector → cross-connector duplicate
+            if checksum not in seen_this_tick:
+                seen_this_tick.add(checksum)
+                cross_dup_list.append((remote_path, checksum))
+        else:
+            # brand new to all connectors → ingest
             if checksum not in seen_this_tick:   # intra-tick dedup
                 seen_this_tick.add(checksum)
                 ingest_list.append((remote_path, checksum))
-        # files in known_checksums → skip_list (not returned, no action needed)
 
     orphan_checksums = known_checksums - scanned_checksums
-    return ingest_list, orphan_checksums
+    return ingest_list, cross_dup_list, orphan_checksums
 ```
 
-> **Dedup invariant:** after `_classify`, every checksum in `ingest_list` is unique. The chosen remote path is the first path encountered during the scan walk (depth-first for SFTP, iteration order of `list_objects_v2` for S3).
+> **Dedup invariant:** after `_classify`, every checksum in `ingest_list` is unique and every checksum in `cross_dup_list` is unique. The chosen remote path is the first path encountered during the scan walk (depth-first for SFTP, iteration order of `list_objects_v2` for S3).
 >
-> **Ordering invariant:** `_delete_orphans(orphan_checksums)` is called only after `_process_new_files(ingest_list)` returns. This guarantees that a checksum added to `connector_file_membership` in Phase 4a is never simultaneously processed as an orphan in Phase 4b within the same tick.
+> **Ordering invariant:** `_delete_orphans(orphan_checksums)` is called only after all Phase 4a writes (`ingest_list` + `cross_dup_list`) complete. This guarantees that a checksum registered in Phase 4a is never simultaneously processed as an orphan in Phase 4b within the same tick.
 
 ---
 
@@ -1535,14 +1608,17 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 
 **What's to build:**
 - 3 new tables: `active_connectors`, `connector_file_membership`, `connector_sync_history`
-  - `connector_file_membership` schema: `checksum TEXT PRIMARY KEY`, `connector_ids JSONB NOT NULL DEFAULT '[]'`, `doc_id TEXT NOT NULL REFERENCES documents(doc_id)` — no FK to `file_checksum_registry`
-- 3 new ORM models: `ActiveConnector`, `ConnectorFileMembership` (checksum PK, connector_ids JSONB, doc_id FK), `ConnectorSyncHistory`
+  - `connector_file_membership` schema: `checksum TEXT NOT NULL`, `connector_id TEXT NOT NULL`, `doc_id TEXT NOT NULL`, `PRIMARY KEY (checksum, connector_id)` — no FK constraints, no `ON DELETE CASCADE`
+  - 1 index on `connector_file_membership`: `idx_cfm_connector_id` (B-tree on `connector_id`) — see §4.4 for rationale
+- 3 new ORM models: `ActiveConnector`, `ConnectorFileMembership` (composite PK: checksum + connector_id, doc_id plain column), `ConnectorSyncHistory`
 - Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap, `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`, written into `active_connectors.sync_interval_seconds` on connector creation)
 
 **How to test:**
 - Run `init_schema.sql` against a local/test DB and assert all 3 new tables exist with correct columns, constraints, and indexes
 - Assert `connector_file_membership` has no FK to `file_checksum_registry`
-- Assert `connector_file_membership.checksum` is the sole PK and `connector_ids` is a JSONB column
+- Assert `connector_file_membership` has composite PK `(checksum, connector_id)` and no JSONB column
+- Assert `idx_cfm_connector_id` exists as a B-tree index on `connector_file_membership (connector_id)`
+- Assert no FK or `ON DELETE CASCADE` constraint exists on `connector_file_membership`
 - Unit test: instantiate ORM models and map them against the schema
 
 ---
