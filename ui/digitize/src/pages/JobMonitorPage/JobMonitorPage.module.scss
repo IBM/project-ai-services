@@ -187,6 +187,10 @@
   fill: var(--cds-support-info);
 }
 
+.statusIconWarning {
+  fill: var(--cds-support-warning);
+}
+
 .errorMessage {
   display: flex;
   align-items: center;

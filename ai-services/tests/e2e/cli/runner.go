@@ -648,21 +648,8 @@ func StartApplication(
 	return output, nil
 }
 
-// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
-func DeleteAppSkipCleanup(
-	ctx context.Context,
-	cfg *config.Config,
-	appName string,
-	appRuntime string,
-) (string, error) {
-	args := []string{
-		"application", "delete", appName,
-		"--skip-cleanup",
-		"--yes",
-		"--runtime", appRuntime,
-	}
-
-	output, err := runCLI(ctx, cfg, "application delete --skip-cleanup", args...)
+func deleteAppWithArgs(ctx context.Context, cfg *config.Config, appName string, appRuntime string, errLabel string, args []string) (string, error) {
+	output, err := runCLI(ctx, cfg, errLabel, args...)
 	if err != nil {
 		return output, err
 	}
@@ -691,9 +678,71 @@ func DeleteAppSkipCleanup(
 	return output, nil
 }
 
+// DeleteApp deletes an application with normal cleanup.
+func DeleteApp(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete", args)
+}
+
+// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
+func DeleteAppSkipCleanup(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--skip-cleanup",
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete --skip-cleanup", args)
+}
+
 // ApplicationInfo runs the 'application info' command.
 func ApplicationInfo(ctx context.Context, cfg *config.Config, appName string, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "application info", "application", "info", appName, "--runtime", appRuntime)
+}
+
+// ApplicationBackup runs the 'application backup' command.
+func ApplicationBackup(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+	args := []string{
+		"application", "backup", appName,
+		"--target", target,
+		"--runtime", appRuntime,
+	}
+	if filename != "" {
+		args = append(args, "--filename", filename)
+	}
+
+	return runCLI(ctx, cfg, "application backup", args...)
+}
+
+// ApplicationRestore runs the 'application restore' command.
+func ApplicationRestore(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+	args := []string{
+		"application", "restore", appName,
+		"--target", target,
+		"--runtime", appRuntime,
+		"--yes",
+	}
+	if filename != "" {
+		args = append(args, "--filename", filename)
+	}
+
+	return runCLI(ctx, cfg, "application restore", args...)
 }
 
 // ModelList lists models for a given application template.
