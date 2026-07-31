@@ -1,5 +1,11 @@
 import type { DataTableHeader } from "@carbon/react";
 
+export interface BaseTableRow {
+  id: string;
+  status: string;
+  messages: string;
+}
+
 export type RowStatus =
   | "Initializing"
   | "Downloading"
@@ -11,7 +17,10 @@ export type RowStatus =
 
 export type TableHeaders = DataTableHeader[];
 
-export interface BaseTableState {
+export interface BaseTableState<TRow extends BaseTableRow = BaseTableRow> {
+  // Rows
+  rowsData: TRow[];
+
   // Search
   search: string;
 
@@ -83,4 +92,10 @@ export type SharedTableAction =
       /** Pass the table's DEFAULT_VISIBLE_COLUMNS constant. */
       defaultColumns: Record<string, boolean>;
     }
-  | { type: "SHARED_SET_FETCH_ERROR"; payload: string | null };
+  | { type: "SHARED_SET_FETCH_ERROR"; payload: string | null }
+  | { type: "SHARED_SET_DELETING"; payload: boolean }
+  | {
+      type: "SHARED_UPDATE_ROW_STATUS";
+      payload: { id: string; status: string; message?: string };
+      sortFn?: (a: BaseTableRow, b: BaseTableRow) => number;
+    };

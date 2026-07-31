@@ -1,12 +1,19 @@
 import type {
+  BaseTableRow,
   BaseTableState,
   SharedTableAction,
 } from "@/components/table/types";
 
-export function handleSharedTableAction<S extends BaseTableState>(
-  state: S,
-  action: SharedTableAction,
-): S | undefined {
+export function isSharedTableAction(a: {
+  type: string;
+}): a is SharedTableAction {
+  return a.type.startsWith("SHARED_");
+}
+
+export function handleSharedTableAction<
+  TRow extends BaseTableRow,
+  S extends BaseTableState<TRow>,
+>(state: S, action: SharedTableAction): S | undefined {
   switch (action.type) {
     case "SHARED_SET_SEARCH":
       return { ...state, ...setSearch(action.payload) };
@@ -55,7 +62,18 @@ export function handleSharedTableAction<S extends BaseTableState>(
     case "SHARED_RESET_COLUMN_VISIBILITY":
       return { ...state, ...resetColumnVisibility(action.defaultColumns) };
     case "SHARED_SET_FETCH_ERROR":
-      return { ...state, fetchError: action.payload, isLoading: false };
+      return {
+        ...state,
+        fetchError: action.payload,
+        ...(action.payload !== null ? { isLoading: false } : {}),
+      };
+    case "SHARED_SET_DELETING":
+      return { ...state, isDeleting: action.payload };
+    case "SHARED_UPDATE_ROW_STATUS":
+      return {
+        ...state,
+        ...updateRowStatus(state.rowsData, action.payload, action.sortFn),
+      };
     default:
       return undefined;
   }
@@ -121,6 +139,12 @@ export function setSelectedRowId(
 
 export function setLoading(value: boolean): Pick<BaseTableState, "isLoading"> {
   return { isLoading: value };
+}
+
+export function setDeleting(
+  value: boolean,
+): Pick<BaseTableState, "isDeleting"> {
+  return { isDeleting: value };
 }
 
 // Delete error
@@ -237,4 +261,24 @@ export function resetColumnVisibility(
   defaultColumns: Record<string, boolean>,
 ): Pick<BaseTableState, "visibleColumns"> {
   return { visibleColumns: { ...defaultColumns } };
+}
+
+// Row status update (used by SHARED_UPDATE_ROW_STATUS)
+
+export function updateRowStatus<TRow extends BaseTableRow>(
+  rows: TRow[],
+  payload: { id: string; status: string; message?: string },
+  sortFn?: (a: BaseTableRow, b: BaseTableRow) => number,
+): Pick<BaseTableState<TRow>, "rowsData"> {
+  const patched = rows.map((r) =>
+    r.id === payload.id
+      ? {
+          ...r,
+          status: payload.status,
+          messages:
+            payload.message !== undefined ? payload.message : r.messages,
+        }
+      : r,
+  );
+  return { rowsData: sortFn ? patched.sort(sortFn) : patched };
 }

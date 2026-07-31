@@ -1,4 +1,12 @@
 import type { DataTableHeader } from "@carbon/react";
+import type {
+  BaseTableState,
+  SharedTableAction,
+} from "@/components/table/types";
+import {
+  handleSharedTableAction,
+  isSharedTableAction,
+} from "@/components/table/utils/reducerUtils";
 
 // API response types
 export interface ApplicationService {
@@ -30,37 +38,14 @@ export interface DeployedServicesRow {
   children?: DeployedServicesRow[];
 }
 
-export interface AppState {
-  search: string;
-  page: number;
-  pageSize: number;
-  totalItems: number;
-  isDeleteDialogOpen: boolean;
-  isConfirmed: boolean;
-  rowsData: DeployedServicesRow[];
-  selectedRowId: string | null;
-  toastOpen: boolean;
-  deleteErrorMessage: string;
-  deleteErrorRowName: string;
-  isDeleting: boolean;
-  isExportDialogOpen: boolean;
-  isExporting: boolean;
-  csvFileName: string;
-  exportErrorMessage: string;
-  hasError: boolean;
-  visibleColumns: Record<string, boolean>;
-  exportToastOpen: boolean;
-  exportToastMessage: string;
-  exportToastKind: "success" | "error";
+export interface AppState extends BaseTableState<DeployedServicesRow> {
+  // DS-specific: service filter
   selectedServices: string[];
-  isLoading: boolean;
-  fetchError: string | null;
 }
 
 export const ACTION_TYPES = {
   DEPLOYED_SERVICES_SET_EXPORTING: "DEPLOYED_SERVICES_SET_EXPORTING",
   DEPLOYED_SERVICES_SET_TOTAL_ITEMS: "DEPLOYED_SERVICES_SET_TOTAL_ITEMS",
-  DEPLOYED_SERVICES_SET_SEARCH: "DEPLOYED_SERVICES_SET_SEARCH",
   DEPLOYED_SERVICES_SET_PAGE: "DEPLOYED_SERVICES_SET_PAGE",
   DEPLOYED_SERVICES_SET_PAGE_SIZE: "DEPLOYED_SERVICES_SET_PAGE_SIZE",
   DEPLOYED_SERVICES_OPEN_DELETE_DIALOG: "DEPLOYED_SERVICES_OPEN_DELETE_DIALOG",
@@ -105,7 +90,6 @@ export type AppAction =
       type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS;
       payload: number;
     }
-  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH; payload: string }
   | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE; payload: number }
   | {
       type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE;
@@ -235,15 +219,13 @@ export const INITIAL_STATE: AppState = {
   fetchError: null,
 };
 
-// Reducer
-export const appReducer = (state: AppState, action: AppAction): AppState => {
+// DS-specific cases only. SHARED_SET_SEARCH is handled by handleSharedTableAction.
+function ownCases(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORTING:
       return { ...state, isExporting: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS:
       return { ...state, totalItems: action.payload };
-    case ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH:
-      return { ...state, search: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE:
       return { ...state, page: action.payload };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE:
@@ -398,4 +380,16 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
     default:
       return state;
   }
+}
+
+// Reducer — shared actions are narrowed via isSharedTableAction; all other
+// actions are handled by ownCases.
+export const appReducer = (
+  state: AppState,
+  action: AppAction | SharedTableAction,
+): AppState => {
+  if (isSharedTableAction(action)) {
+    return handleSharedTableAction(state, action) ?? state;
+  }
+  return ownCases(state, action);
 };
