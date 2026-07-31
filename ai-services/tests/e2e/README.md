@@ -260,7 +260,7 @@ Point the test suite at the binary you just built:
 ```bash
 export AI_SERVICES_BIN=<path to ai-services binary>
 ```
-### Run all failure tests
+### Run all Bootstrap failure tests
 
 ```bash
 ginkgo -r \
@@ -331,6 +331,59 @@ export CATALOG_SERVER_URL="..."        # optional — auto-discovered from 'cata
 | `failure-test && registry` | Invalid registry credentials |
 | `failure-test && catalog` | Wrong catalog password + unreachable catalog server |
 | `failure-test && validation` | `bootstrap validate` with missing Podman |
+
+## Running Catalog Failure Tests
+
+### Option 1 — Ginkgo CLI
+
+Always pass `--tags` to exclude C library dependencies.
+
+```bash
+cd ai-services
+
+# Run all 5 catalog failure tests
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure" \
+  --timeout=3m \
+  ./tests/e2e
+
+# Run only login/whoami failures (Tests 1, 2, 3)
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure && catalog-login" \
+  --timeout=2m \
+  ./tests/e2e
+
+# Run only configure failures (Tests 4, 5)
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure && catalog-configure" \
+  --timeout=2m \
+  ./tests/e2e
+```
+
+Pass `--runtime=podman` after `--` if the default does not match your environment:
+
+```bash
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure" \
+  --timeout=3m \
+  ./tests/e2e -- --runtime=podman
+```
+
+### Option 2 — `make test`
+
+```bash
+cd ai-services
+
+make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m"
+
+# With explicit runtime
+make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m" APP_RUNTIME=podman
+```
+
 
 ### Adding new failure tests
 
