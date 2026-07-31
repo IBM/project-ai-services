@@ -136,6 +136,6 @@
   <!-- FastAPI startup note -->
   <rect x="580" y="310" width="256" height="36" rx="4" fill="#ede9fe" stroke="#7c5cd8" stroke-width="1"/>
   <text x="708" y="325" text-anchor="middle" font-size="11" font-weight="600" fill="#4c1d95">FastAPI startup</text>
-  <text x="708" y="341" text-anchor="middle" font-size="11" fill="#4c1d95">load active_connectors · recreate workers</text>
+  <text x="708" y="341" text-anchor="middle" font-size="11" fill="#4c1d95">load connectors · recreate workers</text>
   <line x1="580" y1="328" x2="502" y2="328" stroke="#7c5cd8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#c-arrm)"/>
 </svg>

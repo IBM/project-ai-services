@@ -33,8 +33,8 @@
   <!-- ConnectorSyncWorker inner box -->
   <rect x="88" y="278" width="476" height="72" rx="4" fill="#bbf7d0" stroke="#2d9a5f" stroke-width="1"/>
   <text x="104" y="295" font-weight="600" fill="#166534">ConnectorSyncWorker</text>
-  <text x="118" y="313" fill="#1f2328">▸  builds scanner by type  ·  scans remote source  ·  computes SHA-256 per file</text>
-  <text x="118" y="329" fill="#1f2328">▸  deduplicates against global registry  ·  stages + ingests new files</text>
+  <text x="118" y="313" fill="#1f2328">▸  builds scanner by type  ·  scans remote source  ·  computes checksum per file</text>
+  <text x="118" y="329" fill="#1f2328">▸  deduplicates against connector_document_checksum  ·  stages + ingests new files</text>
   <text x="118" y="345" fill="#1f2328">▸  deletes orphaned documents when last ref is gone</text>
 
   <!-- Arrow from ConnectorWorkerManager down to Persistence -->
@@ -44,11 +44,11 @@
   <rect x="40" y="382" width="540" height="100" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
   <text x="56" y="400" font-weight="600" fill="#854d0e">Persistence</text>
   <rect x="72" y="412" width="226" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="185" y="430" text-anchor="middle" fill="#854d0e">active_connectors</text>
+  <text x="185" y="430" text-anchor="middle" fill="#854d0e">connectors</text>
   <rect x="312" y="412" width="240" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="432" y="430" text-anchor="middle" fill="#854d0e">file_checksum_registry</text>
+  <text x="432" y="430" text-anchor="middle" fill="#854d0e">document_checksum</text>
   <rect x="72" y="446" width="226" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="185" y="464" text-anchor="middle" fill="#854d0e">connector_file_membership</text>
+  <text x="185" y="464" text-anchor="middle" fill="#854d0e">connector_document_checksum</text>
   <rect x="312" y="446" width="240" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
   <text x="432" y="464" text-anchor="middle" fill="#854d0e">connector_sync_history</text>
 </svg>

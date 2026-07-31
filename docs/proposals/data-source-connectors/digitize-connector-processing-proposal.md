@@ -14,7 +14,7 @@ Before any `digitize` connector endpoint is called:
   - `s3`: `secret_access_key`
 - `digitize` encrypts those secret fields at rest using `/run/secrets/connector_encryption_key` before persisting them.
 - `/run/secrets/connector_api_token` and `/run/secrets/connector_encryption_key` are mounted before pod start.
-- The `file_checksum_registry` table and `FileChecksumRegistry` ORM model are already implemented (user-submitted documents only). Connector code must never read from or write to it — connector dedup is handled exclusively via `connector_file_membership` (see §4).
+- The `document_checksum` table and `DocumentChecksum` ORM model are already implemented (user-submitted documents only). Connector code must never read from or write to it — connector dedup is handled exclusively via `connector_document_checksum` (see §4).
 
 ---
 
@@ -29,20 +29,20 @@ Before any `digitize` connector endpoint is called:
 ```text
 ── Attach (POST /v1/connectors) ─────────────────────────────────────
   → validate + encrypt credentials
-  → INSERT active_connectors row
+  → INSERT connectors row
   → schedule worker startup (background task)
   → worker thread starts and runs first tick immediately
 
 ── Config update (PUT /v1/connectors/{id}) ──────────────────────────
   → merge + re-encrypt changed fields
-  → UPDATE active_connectors row
+  → UPDATE connectors row
   → running worker re-reads config from DB before its next tick
 
 ── Each sync tick (connector-sourced) ───────────────────────────────
   Step 1 — load state
-    → SELECT known_checksums FROM connector_file_membership
+    → SELECT known_checksums FROM connector_document_checksum
            WHERE connector_id = :connector_id
-    → SELECT DISTINCT checksum FROM connector_file_membership
+    → SELECT DISTINCT checksum FROM connector_document_checksum
       (all checksums across all connectors — for cross-connector dedup)
 
   Step 2 — file walk + classify
@@ -72,25 +72,25 @@ Before any `digitize` connector endpoint is called:
 
   Step 5 — finalise tick
     → UPDATE connector_sync_history (files_found, completed, failed, status)
-    → UPDATE active_connectors (last_sync_at, sync_status)
+    → UPDATE connectors (last_sync_at, sync_status)
 
 ── Detach (DELETE /v1/connectors/{id}) ──────────────────────────────
   → guard: reject with 409 if a tick is currently running
   → stop worker thread
   → list all checksums owned by this connector
   → for each checksum: remove_connector_from_membership → delete doc if last owner
-  → DELETE active_connectors row
+  → DELETE connectors row
   → cleanup staging dirs
 ```
 
 ### 2.3 Main Components
 
-- `active_connectors`: current connector configuration and top-level sync state
-- `connector_file_membership`: **connector-sourced documents only** — one row per `(checksum, connector_id)` pair; carries the `doc_id` for deletion
+- `connectors`: current connector configuration and top-level sync state
+- `connector_document_checksum`: **connector-sourced documents only** — one row per `(checksum, connector_id)` pair; carries the `doc_id` for deletion
 - `connector_sync_history`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
 - `ConnectorSyncWorker`: executes periodic sync logic
-- Scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5 — both stored as `checksum` in `connector_file_membership`
+- Scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5 — both stored as `checksum` in `connector_document_checksum`
 
 ---
 
@@ -135,7 +135,7 @@ Common fields:
 | `prefix` | `string` | ❌ | Key prefix to scope listing — empty means bucket root |
 | `delimiter` | `string` | ❌ | Set `"/"` for non-recursive (immediate children only) |
 
-> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — stored as `checksum` in `connector_file_membership`. If the checksum is already present for this connector the file is **never downloaded**. The checksum is also stored in `documents.metadata.source_checksum` for traceability.
+> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — stored as `checksum` in `connector_document_checksum`. If the checksum is already present for this connector the file is **never downloaded**. The checksum is also stored in `documents.metadata.source_checksum` for traceability.
 
 #### Example payloads
 
@@ -238,7 +238,7 @@ Delete flow:
 3. Snapshot the connector's known checksums.
 4. Remove membership rows checksum by checksum.
 5. Delete documents only when the remaining reference count reaches zero.
-6. Delete the `active_connectors` row.
+6. Delete the `connectors` row.
 7. Best-effort cleanup of staging directories.
 
 #### Delete sequence diagram
@@ -248,7 +248,7 @@ DELETE /v1/connectors/{connector_id}
   → check if sync tick is in progress
       if YES → 409 Conflict (no state modified)
   → stop worker
-  → list checksums owned by this connector (connector_file_membership WHERE connector_id = :connector_id)
+  → list checksums owned by this connector (connector_document_checksum WHERE connector_id = :connector_id)
   → for each checksum:
        remove_connector_from_membership(connector_id, checksum)
          → DELETE row WHERE checksum = :checksum AND connector_id = :connector_id
@@ -410,7 +410,7 @@ At most one in-progress `syncing` row exists per connector.
 
 **Rationale:** connector-sourced documents are managed exclusively through their data source. Exposing them via user-facing APIs would allow deletion without removal from the source, causing the file to be re-ingested on the next tick.
 
-**Implementation:** a document is identified as connector-sourced when a row exists in `connector_file_membership` for its `doc_id`. The DB query for user-facing document endpoints must add a `NOT EXISTS (SELECT 1 FROM connector_file_membership WHERE doc_id = ...)` filter.
+**Implementation:** a document is identified as connector-sourced when a row exists in `connector_document_checksum` for its `doc_id`. The DB query for user-facing document endpoints must add a `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = ...)` filter.
 
 #### Job APIs (`/v1/jobs`)
 
@@ -439,24 +439,24 @@ The presence of `connector_id` on a job (stored in job metadata at create time) 
 
 ```text
 ── User-submitted path ──────────────────────────────────────────────
-file_checksum_registry (checksum PK) ───────────────────> documents
+document_checksum (checksum PK) ───────────────────> documents
 
 ── Connector-sourced path ───────────────────────────────────────────
-active_connectors
-  └─< connector_file_membership (connector_id, checksum, doc_id) ─> documents
+connectors
+  └─< connector_document_checksum (connector_id, checksum, doc_id) ─> documents
 
-active_connectors
+connectors
   └─< connector_sync_history
 ```
 
 The two registries are **intentionally separate**: a file with the same content can legitimately exist in both — one row representing the user-uploaded copy and one row representing the connector-synced copy.
 
-### 4.2 `active_connectors`
+### 4.2 `connectors`
 
 Stores connector config, encrypted credential blobs, and top-level sync state.
 
 ```sql
-CREATE TABLE IF NOT EXISTS active_connectors (
+CREATE TABLE IF NOT EXISTS connectors (
     id                      TEXT        PRIMARY KEY,
     type                    TEXT        NOT NULL,
     host                    TEXT        NOT NULL,
@@ -472,29 +472,29 @@ CREATE TABLE IF NOT EXISTS active_connectors (
 
 > **Note:** `sync_interval_seconds` is stored per-connector for future extensibility but is not accepted via the API today. On `POST`, it is populated from the `CONNECTOR_SYNC_INTERVAL_SECONDS` environment variable (default `300`). The worker reads the value from the DB before each tick.
 
-### 4.3 `connector_file_membership`
+### 4.3 `connector_document_checksum`
 
 **Connector-sourced documents only.** This table is the sole dedup and reference-counting store for all content ingested via connectors.
 
 Each row represents **one connector's ownership of one checksum**. One checksum can appear in multiple rows (shared across connectors); one connector can appear in multiple rows (owns many files). `doc_id` is stored on every row so that deletion can proceed without a join.
 
 ```sql
-CREATE TABLE IF NOT EXISTS connector_file_membership (
+CREATE TABLE IF NOT EXISTS connector_document_checksum (
     checksum     TEXT NOT NULL,
     connector_id TEXT NOT NULL,
     doc_id       TEXT NOT NULL,
     PRIMARY KEY (checksum, connector_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_cfm_connector_id
-    ON connector_file_membership (connector_id);
+CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
+    ON connector_document_checksum (connector_id);
 ```
 
 **Why `(checksum, connector_id)` is the PK:** the same file can be owned by multiple connectors simultaneously. The composite PK enforces a connector cannot register the same checksum twice, while still allowing multiple connectors to reference the same checksum.
 
 **Why no `ON DELETE CASCADE` on `doc_id`:** deletion is an intentional, reference-counted operation managed in application code. Cascade deletion would bypass the reference-count check and potentially double-delete shared documents.
 
-**Why `idx_cfm_connector_id`:** every sync tick and every detach queries all rows owned by a given connector. Without this index Postgres falls back to a full sequential scan over the entire table on every tick.
+**Why `idx_cdc_connector_id`:** every sync tick and every detach queries all rows owned by a given connector. Without this index Postgres falls back to a full sequential scan over the entire table on every tick.
 
 **Membership invariants:**
 
@@ -539,7 +539,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_history (
     sync_status      TEXT        NOT NULL DEFAULT 'syncing',
     CONSTRAINT fk_csh_connector
         FOREIGN KEY (connector_id)
-        REFERENCES active_connectors(id) ON DELETE CASCADE,
+        REFERENCES connectors(id) ON DELETE CASCADE,
     CONSTRAINT uq_csh_connector_sync
         UNIQUE (connector_id, sync_id)
 );
@@ -550,11 +550,11 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 
 ### 4.5 ORM
 
-`FileChecksumRegistry` already exists in `services/digitize/db/models.py` and remains unchanged. Add three new models:
+`DocumentChecksum` already exists in `services/digitize/db/models.py` and remains unchanged. Add three new models:
 
 - `ActiveConnector` — fields: `id` (PK), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`
-- `ConnectorFileMembership` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
-- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `active_connectors`), `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`
+- `ConnectorDocumentChecksum` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
+- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`
 
 ---
 
@@ -568,8 +568,8 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 
 | Scenario | `connector_id` | Dedup table | Registry written |
 | --- | --- | --- | --- |
-| User-submitted | absent | `file_checksum_registry` | `file_checksum_registry (checksum, doc_id)` |
-| Connector-sourced | present | `connector_file_membership` | `connector_file_membership (checksum, connector_id, doc_id)` |
+| User-submitted | absent | `document_checksum` | `document_checksum (checksum, doc_id)` |
+| Connector-sourced | present | `connector_document_checksum` | `connector_document_checksum (checksum, connector_id, doc_id)` |
 
 ### 5.1 New connector DB functions
 
@@ -578,13 +578,13 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 | `insert_active_connector()` | create connector |
 | `upsert_active_connector()` | insert/update connector |
 | `get_active_connector()` | fetch one connector |
-| `list_active_connectors()` | fetch all connectors |
+| `list_connectors()` | fetch all connectors |
 | `delete_active_connector()` | delete connector |
 | `update_connector_sync_status()` | write top-level sync state |
 | `merge_connection_details()` | key-level JSON merge for PUT |
-| `lookup_connector_content_by_checksum(checksum)` | connector dedup lookup — queries `connector_file_membership`, returns `doc_id` or `None` |
+| `lookup_connector_content_by_checksum(checksum)` | connector dedup lookup — queries `connector_document_checksum`, returns `doc_id` or `None` |
 | `list_connector_checksums(connector_id)` | all checksums currently owned by this connector |
-| `list_all_checksums()` | all distinct checksums in `connector_file_membership` across all connectors |
+| `list_all_checksums()` | all distinct checksums in `connector_document_checksum` across all connectors |
 | `add_connector_to_membership(connector_id, checksum, doc_id)` | insert a new `(checksum, connector_id, doc_id)` row; no-op if the row already exists |
 | `remove_connector_from_membership(connector_id, checksum)` | delete the `(checksum, connector_id)` row; return remaining owner count and `doc_id` |
 | `insert_sync_history()` | create tick row |
@@ -597,10 +597,10 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 
 ```python
 def lookup_connector_content_by_checksum(checksum: str) -> str | None:
-    """Return doc_id if checksum is already in connector_file_membership, else None."""
+    """Return doc_id if checksum is already in connector_document_checksum, else None."""
     with session() as s:
         row = s.execute(
-            text("SELECT doc_id FROM connector_file_membership WHERE checksum = :checksum LIMIT 1"),
+            text("SELECT doc_id FROM connector_document_checksum WHERE checksum = :checksum LIMIT 1"),
             {"checksum": checksum},
         ).one_or_none()
     return row.doc_id if row else None
@@ -611,7 +611,7 @@ def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -
     with transaction() as tx:
         tx.execute(
             text("""
-                INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+                INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
                 VALUES (:checksum, :connector_id, :doc_id)
                 ON CONFLICT (checksum, connector_id) DO NOTHING
             """),
@@ -624,7 +624,7 @@ def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[
     with transaction() as tx:
         deleted = tx.execute(
             text("""
-                DELETE FROM connector_file_membership
+                DELETE FROM connector_document_checksum
                 WHERE checksum     = :checksum
                   AND connector_id = :connector_id
                 RETURNING doc_id
@@ -637,7 +637,7 @@ def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[
         row = tx.execute(
             text("""
                 SELECT COUNT(*) AS remaining
-                FROM connector_file_membership
+                FROM connector_document_checksum
                 WHERE checksum = :checksum
             """),
             {"checksum": checksum},
@@ -656,15 +656,15 @@ This section describes the **DB-only operations** for each phase of the connecto
 ```text
 DB operations (Attach)
 ────────────────────────────────────────────────────────────────────
-1. INSERT INTO active_connectors
+1. INSERT INTO connectors
        (id, type, host, connection_details, allowed_extensions,
         sync_interval_seconds, attached_at, sync_status)
    VALUES (:connector_id, :type, :host, :encrypted_details, :exts,
            :interval, NOW(), 'idle')
    ON CONFLICT (id) DO NOTHING          ← 409 if already exists
 
-Result: one row in active_connectors; worker thread starts.
-connector_file_membership is empty for this connector — populated on first tick.
+Result: one row in connectors; worker thread starts.
+connector_document_checksum is empty for this connector — populated on first tick.
 ```
 
 ---
@@ -680,10 +680,10 @@ Phase 1 — open tick record
       (connector_id, sync_id, started_at, sync_status)
   VALUES (:connector_id, :next_sync_id, NOW(), 'syncing')
 
-  UPDATE active_connectors SET sync_status = 'syncing' WHERE id = :connector_id
+  UPDATE connectors SET sync_status = 'syncing' WHERE id = :connector_id
 
 Phase 2 — load known state
-  SELECT checksum FROM connector_file_membership WHERE connector_id = :connector_id
+  SELECT checksum FROM connector_document_checksum WHERE connector_id = :connector_id
   → produces: known_checksums
 
   ┌─ scanner file walk happens here (no DB) ──────────────────────┐
@@ -696,14 +696,14 @@ Phase 3 — classify files (no DB reads)
   cross_dup_list = []   ← checksum NOT IN known_checksums BUT already in another connector
 
 Phase 4a-new — register each genuinely new file (after successful create_job)
-  INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+  INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
   VALUES (:checksum, :connector_id, :doc_id)
   ON CONFLICT (checksum, connector_id) DO NOTHING
 
   UPDATE documents SET metadata = metadata || :source_metadata WHERE doc_id = :doc_id
 
 Phase 4a-dup — register cross-connector duplicate
-  INSERT INTO connector_file_membership (checksum, connector_id, doc_id)
+  INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
   VALUES (:checksum, :connector_id, :existing_doc_id)
   ON CONFLICT (checksum, connector_id) DO NOTHING
 
@@ -713,11 +713,11 @@ Phase 4b — orphan detection + removal
   orphan_checksums = known_checksums − {checksum for (_, checksum) in scanned_files}
 
   for orphan_checksum in orphan_checksums:
-    DELETE FROM connector_file_membership
+    DELETE FROM connector_document_checksum
     WHERE checksum = :orphan_checksum AND connector_id = :connector_id
     RETURNING doc_id
 
-    SELECT COUNT(*) AS remaining FROM connector_file_membership WHERE checksum = :orphan_checksum
+    SELECT COUNT(*) AS remaining FROM connector_document_checksum WHERE checksum = :orphan_checksum
 
     if remaining == 0:
       DELETE /v1/documents/{orphan_doc_id}   ← 200/204/404 = success; 5xx logged and skipped
@@ -728,7 +728,7 @@ Phase 5 — close tick record
       files_failed = :n, sync_status = :final_status
   WHERE connector_id = :connector_id AND sync_id = :sync_id
 
-  UPDATE active_connectors SET last_sync_at = NOW(), sync_status = :final_status
+  UPDATE connectors SET last_sync_at = NOW(), sync_status = :final_status
   WHERE id = :connector_id
 ```
 
@@ -748,27 +748,27 @@ Step 1 — stop worker thread (not a DB operation)
   stop_event.set() → thread.join(timeout=30s)
 
 Step 2 — snapshot owned checksums
-  SELECT checksum, doc_id FROM connector_file_membership WHERE connector_id = :connector_id
+  SELECT checksum, doc_id FROM connector_document_checksum WHERE connector_id = :connector_id
 
 Step 3 — remove ownership row by row
   for (checksum, doc_id) in owned_rows:
-    DELETE FROM connector_file_membership
+    DELETE FROM connector_document_checksum
     WHERE checksum = :checksum AND connector_id = :connector_id
 
-    SELECT COUNT(*) AS remaining FROM connector_file_membership WHERE checksum = :checksum
+    SELECT COUNT(*) AS remaining FROM connector_document_checksum WHERE checksum = :checksum
 
     if remaining == 0:
       DELETE /v1/documents/{doc_id}      ← best-effort; 200/204/404 = success
 
 Step 4 — delete connector row
-  DELETE FROM active_connectors WHERE id = :connector_id
+  DELETE FROM connectors WHERE id = :connector_id
   -- CASCADE deletes connector_sync_history rows automatically.
 
 Step 5 — cleanup staging dirs (not a DB operation)
   rm -rf {staging_dir}/{connector_id}/
 ```
 
-**Invariant:** after Step 4, no row in `connector_file_membership` has `connector_id = :connector_id`.
+**Invariant:** after Step 4, no row in `connector_document_checksum` has `connector_id = :connector_id`.
 
 ---
 
@@ -885,7 +885,7 @@ Behavior:
 - Build boto3 client per tick using `IBMCOSConnector._build_client()`
 - List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag; **the full list is returned without filtering**
 - Download files on demand (only those the worker places on `ingest_list`)
-- Store checksum in `connector_file_membership.checksum` and `documents.metadata.source_checksum`
+- Store checksum in `connector_document_checksum.checksum` and `documents.metadata.source_checksum`
 
 S3 scan sketch:
 
@@ -944,11 +944,11 @@ client = boto3.Session(
 _run_tick()
 │
 ├─ [Phase 1] INSERT connector_sync_history (status='syncing')
-│            UPDATE active_connectors (sync_status='syncing')
+│            UPDATE connectors (sync_status='syncing')
 │
-├─ [Phase 2] known_checksums ← SELECT checksum FROM connector_file_membership
+├─ [Phase 2] known_checksums ← SELECT checksum FROM connector_document_checksum
 │                               WHERE connector_id = :connector_id
-│            all_checksums   ← SELECT DISTINCT checksum FROM connector_file_membership
+│            all_checksums   ← SELECT DISTINCT checksum FROM connector_document_checksum
 │
 │            ┌── scanner.connect() + scanner.scan() ─────────────────┐
 │            │   walks remote source; returns ALL (remote_path, checksum) │
@@ -974,7 +974,7 @@ _run_tick()
 │             remove_connector_from_membership → if remaining==0: DELETE /v1/documents/{doc_id}
 │
 └─ [Phase 5] UPDATE connector_sync_history (finished_at, counters, status)
-             UPDATE active_connectors (last_sync_at, sync_status)
+             UPDATE connectors (last_sync_at, sync_status)
 ```
 
 ### 8.2 Worker rules
@@ -1093,7 +1093,7 @@ A sync thread crash affects only that connector — the asyncio event loop and o
 
 A crash is an unhandled exception that escapes the outer `while` loop in `ConnectorSyncWorker.run()` — `thread.is_alive() == False` with `stop_event` not set.
 
-The crash guard must write `"crashed: <error>"` to `active_connectors.sync_status` and close any open `"syncing"` history row.
+The crash guard must write `"crashed: <error>"` to `connectors.sync_status` and close any open `"syncing"` history row.
 
 ```python
 # ConnectorSyncWorker.run() — outer crash guard
@@ -1188,7 +1188,7 @@ Key invariants:
 
 ### 10.6 Lifespan Recovery
 
-On FastAPI startup: load `active_connectors`, recreate workers, start the monitor. No catalog re-push needed.
+On FastAPI startup: load `connectors`, recreate workers, start the monitor. No catalog re-push needed.
 
 ---
 
@@ -1203,16 +1203,16 @@ Each PR is independently testable.
 **Files touched:** `init_schema.sql`, `db/models.py`, `config/settings.py`
 
 **What's to build:**
-- 3 new tables: `active_connectors`, `connector_file_membership`, `connector_sync_history`
-  - `connector_file_membership` schema: `checksum TEXT NOT NULL`, `connector_id TEXT NOT NULL`, `doc_id TEXT NOT NULL`, `PRIMARY KEY (checksum, connector_id)` — no FK constraints, no `ON DELETE CASCADE`
-  - Index `idx_cfm_connector_id` (B-tree on `connector_id`) — see §4.3 for rationale
-- 3 new ORM models: `ActiveConnector`, `ConnectorFileMembership`, `ConnectorSyncHistory`
+- 3 new tables: `connectors`, `connector_document_checksum`, `connector_sync_history`
+  - `connector_document_checksum` schema: `checksum TEXT NOT NULL`, `connector_id TEXT NOT NULL`, `doc_id TEXT NOT NULL`, `PRIMARY KEY (checksum, connector_id)` — no FK constraints, no `ON DELETE CASCADE`
+  - Index `idx_cdc_connector_id` (B-tree on `connector_id`) — see §4.3 for rationale
+- 3 new ORM models: `ActiveConnector`, `ConnectorDocumentChecksum`, `ConnectorSyncHistory`
 - Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap, `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`)
 
 **How to test:**
 - Run `init_schema.sql` against a test DB and assert all 3 new tables exist with correct columns, constraints, and indexes
-- Assert `connector_file_membership` has composite PK `(checksum, connector_id)` and no FK / `ON DELETE CASCADE`
-- Assert `idx_cfm_connector_id` exists as a B-tree index on `connector_file_membership (connector_id)`
+- Assert `connector_document_checksum` has composite PK `(checksum, connector_id)` and no FK / `ON DELETE CASCADE`
+- Assert `idx_cdc_connector_id` exists as a B-tree index on `connector_document_checksum (connector_id)`
 - Unit test: instantiate ORM models and map them against the schema
 
 ---
@@ -1223,14 +1223,14 @@ Each PR is independently testable.
 
 **What's to build:**
 All connector DB functions from §5.1:
-`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_connector_content_by_checksum`, `list_connector_checksums`, `list_all_checksums`, `add_connector_to_membership`, `remove_connector_from_membership`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`, `set_document_metadata`
+`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_connector_content_by_checksum`, `list_connector_checksums`, `list_all_checksums`, `add_connector_to_membership`, `remove_connector_from_membership`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`, `set_document_metadata`
 
 **How to test:**
 - Unit tests per function against a test DB
 - Assert `add_connector_to_membership` inserts a new row on first call and appends the connector_id on subsequent calls with the same checksum
 - Assert `remove_connector_from_membership` returns `remaining=0` when the last connector is removed, and `remaining>0` when others still own the checksum
 - Assert `merge_connection_details` correctly merges keys without clobbering untouched fields
-- Assert `lookup_connector_content_by_checksum` queries `connector_file_membership` and never touches `file_checksum_registry`
+- Assert `lookup_connector_content_by_checksum` queries `connector_document_checksum` and never touches `document_checksum`
 
 ---
 
@@ -1244,7 +1244,7 @@ All connector DB functions from §5.1:
 - `DELETE /v1/connectors/{id}` — stub only (stops at "would stop worker" + calls DB delete), no worker logic yet
 - `GET /v1/connectors` and `GET /v1/connectors/{id}` — read from DB, strip secret fields
 - `GET /v1/connectors/{id}/sync-history` — paginated query with `limit`/`offset`
-- **Update `GET /v1/documents` and `GET /v1/documents/{doc_id}`** to exclude connector-sourced docs via `NOT EXISTS (SELECT 1 FROM connector_file_membership WHERE doc_id = ...)` filter
+- **Update `GET /v1/documents` and `GET /v1/documents/{doc_id}`** to exclude connector-sourced docs via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = ...)` filter
 - **Update `DELETE /v1/documents/{doc_id}`** to return `404` for connector-sourced docs
 
 **How to test:**
@@ -1252,7 +1252,7 @@ All connector DB functions from §5.1:
 - Assert secrets are never returned in GET responses
 - Assert `PUT` with partial `connection_details` only overwrites provided keys
 - Assert correct HTTP status codes for 404/409/401 paths
-- Assert `GET /v1/documents` does not return docs whose `doc_id` appears in `connector_file_membership`
+- Assert `GET /v1/documents` does not return docs whose `doc_id` appears in `connector_document_checksum`
 - Assert `GET /v1/documents/{doc_id}` and `DELETE /v1/documents/{doc_id}` return `404` for connector-sourced docs
 - Assert `GET /v1/jobs` returns all jobs including connector-initiated ones
 
@@ -1322,7 +1322,7 @@ All connector DB functions from §5.1:
 **What's to build:**
 - `ConnectorWorkerManager` singleton: `start_worker()`, `stop_worker()`, `_workers` map
 - `connector-monitor` daemon thread: 30s poll, crash detection, `schedule_respawn()` with exponential back-off up to 5 attempts
-- Lifespan recovery: on startup load all `active_connectors`, recreate workers, start monitor; on shutdown stop monitor
+- Lifespan recovery: on startup load all `connectors`, recreate workers, start monitor; on shutdown stop monitor
 - Wire `DELETE /v1/connectors` to call `stop_worker()` (completing the stub from PR 3)
 
 **How to test:**
