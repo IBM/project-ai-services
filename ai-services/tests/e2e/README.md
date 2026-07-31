@@ -12,8 +12,9 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 - Go toolchain (the repository uses Go modules). Use the Go version listed in `ai-services/go.mod`.
 - Git (to checkout branches or test fixtures).
 - Podman (preferred runtime) — the suite checks for Podman and may install or skip some tests when Podman is not available. See `tests/e2e/bootstrap` for details.
-- Set your environment variables values.
+- Set the required environment variables before running the suite.
 - The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
+- For Podman-based runs, authenticate first with `podman login` so the runtime can pull required images. The suite expects Podman auth to already exist and catalog bootstrap can fail if the auth file is missing.
 - Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
 
 ## How to run tests locally
@@ -67,19 +68,19 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 The test suite reads several environment variables. Many have sensible defaults, so set these before running the suite when required.
 
 ```bash
-# Container registry credentials (used for pulling images)
+# Container registry credentials used by ai-services image pulls
 export REGISTRY_URL="icr.io"
 export REGISTRY_USER_NAME=myuser
 export REGISTRY_PASSWORD=mypassword
 
-# Used to download vllm image
+# Red Hat registry credentials used to pull the LLM judge image
 export RH_REGISTRY_URL="registry.redhat.io"
 export RH_REGISTRY_USER_NAME=<your redhat acc username>
 export RH_REGISTRY_PASSWORD=<your redhat acc password>
 export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
 export LLM_CONTAINER_POLLING_INTERVAL=30s
 
-# Exposed Ports
+# Exposed ports discovered by the suite
 export RAG_BACKEND_PORT=5100
 export RAG_UI_PORT=3100
 export DIGITIZE_PORT=4100
@@ -88,20 +89,34 @@ export SUMMARIZE_PORT=6100
 export SIMILARITY_PORT=9100
 export LLM_JUDGE_PORT=8000
 
-# Golden dataset filename
+# Golden dataset validation inputs
 export GOLDEN_DATASET_FILE="filename.csv"
+export RAG_ACCURACY_THRESHOLD=0.70
 
-# LLM as a judge model details
+# LLM-as-a-judge model details
 export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
 export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 
-# Expected Golden Dataset accuracy
-export RAG_ACCURACY_THRESHOLD=0.70
+# Optional application create params
+export CREATE_PARAMS="reranker.vllm-cpu=true"   # use this for a 4-Spyre-card setup
 
-# Catalog setup
+# Catalog setup used by bootstrap and catalog login tests
+export CATALOG_USERNAME="admin"
 export CATALOG_PASSWORD=<your-catalog-admin-password>
 export CATALOG_INSECURE=true           # set false only if using valid TLS certs
 ```
+
+## Common E2E labels
+
+Use Ginkgo label filters to run only the part of the suite you need.
+
+| Label | Coverage |
+|---|---|
+| `golden-dataset-validation` | RAG golden dataset validation against an existing application |
+| `digitization-tests` | Digitization API coverage against an existing or suite-created application |
+| `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
+| `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
+| `failure-test` | Bootstrap negative-path coverage |
 
 ## Running Golden Dataset Validation Independently
 
@@ -163,40 +178,92 @@ ginkgo -r ./tests/e2e \
 
 ## Running Digitization API Tests Independently
 
-The Digitization API tests can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.
+The Digitization API tests can be executed independently from the full E2E lifecycle. This allows validating an already running application without creating or deleting an application during the test run.
 
 ## Prerequisites
 
-- A RAG application must already be running.
+- A RAG application with digitize enabled must already be running.
 - The application must be healthy.
-- The application must expose an accessible endpoint.
-- The following environment variable must be set
+- The application must expose an accessible digitize endpoint.
+- The following environment variable must be set:
 
-- The following environment variable must be set
-
-```
+```bash
 export DIGITIZE_PORT=4100
-
 ```
 
 - Verify the application exists:
 
-```
+```bash
 ai-services application info <app-name> --runtime <runtime>
 ```
 
-If this command fails, test run will fail.
+If this command fails, the test run will fail.
 
-## Command to Run Digitization API tests Only
+## Command to Run Digitization API Tests Only
 
-```
- make test TEST_ARGS="--label-filter=\"digitization-tests\" --timeout=2h" APP_NAME=<appname> APP_RUNTIME=<runtime>
+```bash
+make test TEST_ARGS="--label-filter=\"digitization-tests\" --timeout=2h" APP_NAME=<appname> APP_RUNTIME=<runtime>
 ```
 
 OR
 
+```bash
+ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
-ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname>  --runtime=<runtime>
+
+## Running Similarity API Tests Independently
+
+The Similarity API tests validate the `similarity-api` service after the application is up. They cover health checks and `/v1/similarity-search` behavior for dense, sparse, hybrid, rerank, and invalid-input scenarios.
+
+## Prerequisites
+
+- A RAG application with similarity enabled must already be running.
+- The application must be healthy.
+- Document ingestion or digitization ingestion must be possible so the similarity index contains test data.
+- The following environment variable is typically required:
+
+```bash
+export SIMILARITY_PORT=9100
+```
+
+## Command to Run Similarity API Tests Only
+
+```bash
+make test TEST_ARGS="--label-filter=\"similarity-tests\" --timeout=2h" APP_NAME=<appname> APP_RUNTIME=<runtime>
+```
+
+OR
+
+```bash
+ginkgo -r --label-filter="similarity-tests" --timeout=2h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
+```
+
+## Running Application Backup And Restore Tests
+
+The backup and restore tests validate that application data survives a backup/restore cycle. The suite currently backs up and restores both `opensearch` and `digitize` data, then verifies:
+
+- digitize jobs are restored
+- digitize documents are restored
+- RAG responses for known prompts match before and after restore
+
+When `--app-name` is provided, the suite restores into a fresh sibling application name instead of immediately reusing the original name.
+
+## Prerequisites
+
+- A healthy application must be available, either suite-created or supplied with `--app-name`.
+- Catalog access must be configured because the flow performs catalog login before backup and restore operations.
+- The runtime must be able to pull required images before application creation or recreation.
+
+## Command to Run Backup And Restore Tests Only
+
+```bash
+make test TEST_ARGS="--label-filter=\"app-backup-restore\" --timeout=3h" APP_NAME=<appname> APP_RUNTIME=<runtime>
+```
+
+OR
+
+```bash
+ginkgo -r --label-filter="app-backup-restore" --timeout=3h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
 ## Running Bootstrap Failure Tests
 
@@ -341,7 +408,9 @@ Below is an accurate overview of the current `ai-services/tests/e2e` layout and 
 ```text
 ai-services/tests/e2e/
    ├─ e2e_suite_test.go           # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
-   ├─ bootstrap_failure_test.go   # NEW: bootstrap failure scenarios (registry, catalog, validation)
+   ├─ bootstrap_failure_test.go   # bootstrap failure scenarios (registry, catalog, validation)
+   ├─ README.md                   # suite usage, labels, prerequisites, and structure
+   ├─ nightly_run.sh              # helper script for scheduled suite execution
    ├─ bootstrap/                  # runtime preparation and bootstrap helpers
    │   ├─ bootstrap.go
    │   ├─ build.go
@@ -352,30 +421,30 @@ ai-services/tests/e2e/
    ├─ cli/                        # helpers to invoke the ai-services CLI and validate output
    │   ├─ output.go
    │   └─ runner.go
-   ├─ common/                     # small reusable helpers used across tests (exec, files, logging, retries)
+   ├─ common/                     # small reusable helpers used across tests (exec, files, JSON, retries)
    │   ├─ exec.go
    │   ├─ files.go
    │   ├─ json.go
-   │   ├─ logger.go
    │   ├─ retry.go
    │   └─ vars.go
    ├─ config/                     # test configuration helpers
    │   └─ config.go
-   ├─ digitization/               # digitization api test helper functions
-   │   ├─ digitize.go
+   ├─ digitization/               # digitization API test helpers
+   │   └─ digitize.go
    ├─ ingestion/                  # document ingestion helpers and test fixtures
-   │   ├─ ingest.go
-   │   ├─ wait.go
-   │   └─ docs/                   # test documents for document ingestion and digitization
+   │   └─ docs/                   # test documents for ingestion and digitization flows
+   │       ├─ blank.pdf
+   │       ├─ sample_png.pdf
+   │       ├─ sample_txt.txt
+   │       └─ test_doc.pdf
    ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
-   ├─ rag/                        # RAG-related test helpers (embeddings, setup, validate)
-   |   ├─ evaluator.go
-   |   ├─ golden.go
-   |   ├─ judge.go
-   │   ├─ setup.go
-   ├─ reports/                   # generated test reports (JUnit XML, etc.) are stored here
-   ├─ utils/                      # small additional utilities used by tests
-   │   └─ json.go
+   ├─ rag/                        # RAG-related test helpers
+   │   ├─ evaluator.go
+   │   ├─ golden.go
+   │   ├─ judge.go
+   │   └─ setup.go
+   ├─ similarity/                 # similarity API request/response helpers
+   │   └─ similarity.go
    └─ <other_test_files>          # add your `_test.go` files here (package `e2e`)
 ```
