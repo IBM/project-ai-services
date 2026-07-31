@@ -577,6 +577,13 @@ class DatabaseManager:
         """
         Delete a document from the database.
 
+        Also removes:
+        - The checksum registry entry (so the hash can be re-registered on
+          re-ingestion of the same file).
+        - Any 'already_exists' shadow documents whose metadata points to this
+          doc_id as their existing_doc_id, since those placeholder rows have
+          no meaning once the original document is gone.
+
         Args:
             doc_id: Unique identifier for the document
 
@@ -590,6 +597,17 @@ class DatabaseManager:
                 session.execute(
                     delete(FileChecksumRegistry).where(FileChecksumRegistry.doc_id == doc_id)
                 )
+
+                # Remove any already_exists shadow docs that reference this document.
+                # These placeholder rows are created when a duplicate file is submitted;
+                # their metadata stores the original doc_id under 'existing_doc_id'.
+                # Once the original is deleted they become stale, so clean them up too.
+                session.execute(
+                    delete(Document).where(
+                        Document.doc_metadata["existing_doc_id"].as_string() == doc_id
+                    )
+                )
+
                 stmt = delete(Document).where(Document.doc_id == doc_id)
                 result = cast(CursorResult, session.execute(stmt))
 
