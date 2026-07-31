@@ -1,15 +1,11 @@
 # Service identification
 id: extract
-name: "Entity Extraction"
+name: "Extract Information"
 description: "The service takes relevant data from unstructured text and populates a user-supplied JSON schema, enabling robust information retrieval from documents such as emails, invoices, and contracts"
 type: service
 
 # Certification and support
 certified_by: "IBM"
-
-# Service belongs to these architectures
-architectures:
-  - rag
 
 # Dependencies on other components
 dependencies:
@@ -38,10 +34,10 @@ about:
           - "JSON schema"
           - "examples"
           - "custom prompt"
-          - "text to be extracted"
+          - "text/file to be extracted"
       - title: "Outputs"
         values:
-          - "JSON entity extracted from inout text with token stats"
+          - "JSON entity extracted from input text with token stats"
 
   - title: "Dependencies and integration"
     sections:
@@ -71,8 +67,6 @@ about:
   - title: "Assets"
     sections:
       - title: "Architectures"
-        values:
-          - "Digital assistant"
       - title: "Source code"
         ctaLabel: "View source code"
         url: "https://github.com/IBM/project-ai-services"
