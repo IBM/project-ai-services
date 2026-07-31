@@ -44,6 +44,7 @@ func GetTestPDFPath() string {
 	}
 
 	testDir := filepath.Dir(filename)
+
 	return filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
 }
 
@@ -55,6 +56,7 @@ func GetTestTXTPath() string {
 	}
 
 	testDir := filepath.Dir(filename)
+
 	return filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "sample_txt.txt")
 }
 
@@ -205,12 +207,6 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// buildJobURL constructs the job creation URL with query parameters.
-// Deprecated: Use buildJobCreateURL instead. Kept for backward compatibility.
-func buildJobURL(baseURL, level, jobName string, stream bool) string {
-	return buildJobCreateURL(baseURL, level, jobName, stream)
-}
-
 // createMultipartBody creates a multipart form body with a file.
 func createMultipartBody(filePath string) (*bytes.Buffer, *multipart.Writer, error) {
 	file, err := os.Open(filePath)
@@ -236,12 +232,6 @@ func createMultipartBody(filePath string) (*bytes.Buffer, *multipart.Writer, err
 	}
 
 	return body, writer, nil
-}
-
-// sendJobRequest sends the HTTP request and returns the response body.
-// Deprecated: Use doPOST instead. Kept for backward compatibility.
-func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	return doPOST(ctx, url, body, contentType)
 }
 
 // CreateJobWithFile creates a new summarization job with a file upload.
@@ -519,6 +509,7 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 // DeleteAllJobs deletes all jobs.
 func DeleteAllJobs(ctx context.Context, baseURL string) error {
 	url := fmt.Sprintf("%s?confirm=true", jobsURL(baseURL))
+
 	return deleteJobWithURL(ctx, url, "All jobs deleted")
 }
 

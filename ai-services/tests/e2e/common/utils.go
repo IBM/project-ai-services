@@ -24,7 +24,7 @@ type HTTPClientConfig struct {
 // DefaultHTTPConfig returns sensible defaults for HTTP communication.
 func DefaultHTTPConfig() HTTPClientConfig {
 	return HTTPClientConfig{
-		Timeout:            10 * time.Second,
+		Timeout:            10 * time.Second, //nolint:mnd
 		InsecureSkipVerify: true, // Self-signed certs common in test environments
 		PoolConnections:    true,
 	}
@@ -138,7 +138,7 @@ func ValidateStatusAndUnmarshal(body []byte, statusCode, expectedStatus int, v a
 	return nil
 }
 
-// ParseErrorResponse parses a response body as a generic error response.
+// ErrorResponse represents a generic API error response body.
 // Expects JSON with an "error" field containing "code", "message", and "status" fields.
 type ErrorResponse struct {
 	Error struct {
