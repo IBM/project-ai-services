@@ -1,7 +1,5 @@
 import type { ServiceConfig } from "../types";
 
-export type { ResourceItem } from "../../Shared/types";
-
 // State interface for StepTwo useReducer
 export interface StepTwoState {
   editingService: string | null;

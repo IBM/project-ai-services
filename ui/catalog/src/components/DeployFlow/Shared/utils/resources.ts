@@ -1,3 +1,4 @@
+// Determines if resources are sufficient, insufficient, or unknown
 export const getResourceStatus = (
   required: string,
   available: string,
@@ -10,6 +11,7 @@ export const getResourceStatus = (
   return avail >= req ? "sufficient" : "insufficient";
 };
 
+// Converts bytes to gigabytes (rounded)
 export const bytesToGB = (bytes: number): number => {
   return Math.round(bytes / 1024 ** 3);
 };

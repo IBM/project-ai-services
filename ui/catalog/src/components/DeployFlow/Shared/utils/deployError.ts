@@ -1,3 +1,4 @@
+// Extracts error message from deployment error responses
 export function extractDeployError(error: unknown): string {
   if (error && typeof error === "object") {
     const err = error as {
@@ -6,10 +7,13 @@ export function extractDeployError(error: unknown): string {
       };
       message?: string;
     };
-    if (err.response?.data?.detail) return err.response.data.detail;
-    if (err.response?.data?.message) return err.response.data.message;
-    if (err.response?.data?.error) return err.response.data.error;
-    if (error instanceof Error) return error.message;
+    if (typeof err.response?.data?.detail === "string")
+      return err.response.data.detail;
+    if (typeof err.response?.data?.message === "string")
+      return err.response.data.message;
+    if (typeof err.response?.data?.error === "string")
+      return err.response.data.error;
+    if (error instanceof Error && !err.response) return error.message;
   }
   return "Failed to deploy application";
 }

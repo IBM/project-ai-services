@@ -1,11 +1,8 @@
 import { useReducer, useMemo, useEffect, useState } from "react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig, ComponentConfig } from "../types";
-import {
-  getAcceleratorLabel,
-  getResourceStatus,
-  bytesToGB,
-} from "../utils/StepTwo.utils";
+import { getAcceleratorLabel } from "../utils/StepTwo.utils";
+import { getResourceStatus, bytesToGB } from "../../Shared/utils/resources";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
 import { fetchResources } from "@/api/applications.api";
@@ -19,11 +16,8 @@ import type {
   ResourcesResponse,
   DeployOptionsComponent as Component,
 } from "@/types/api.types";
-import type {
-  ResourceItem,
-  StepTwoState,
-  StepTwoAction,
-} from "../types/StepTwo.types";
+import type { ResourceItem } from "../../Shared/types";
+import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
 // Initial state
 const INITIAL_STATE: StepTwoState = {

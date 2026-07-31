@@ -6,6 +6,3 @@ export const getAcceleratorLabel = (acceleratorKey: string): string => {
   // e.g., "nvidia-gpu" -> "NVIDIA GPU", "amd-gpu" -> "AMD GPU"
   return acceleratorKey ? "Accelerators" : "Accelerators";
 };
-
-export { getDisplayName } from "../../Shared/utils/displayHelpers";
-export { getResourceStatus, bytesToGB } from "../../Shared/utils/resources";

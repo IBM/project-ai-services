@@ -1,3 +1,4 @@
+// Returns display text for a given value from options array
 export const getDisplayName = (
   value: string | undefined,
   options: Array<{ id: string; text: string }>,
