@@ -3,7 +3,6 @@ package summarization
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
 const (
@@ -27,35 +27,27 @@ const (
 // SetAppRuntime stores the application runtime for summarization tests.
 func SetAppRuntime(string) {}
 
-// getClient returns an HTTP client configured based on the runtime.
-// Skips TLS certificate verification for both Podman (nip.io self-signed certs) and OpenShift.
-func getClient(timeout time.Duration) *http.Client {
-	// Skip TLS certificate verification for both podman (nip.io) and openshift
-	// Podman uses self-signed certificates with nip.io domains
-	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-		},
+// httpConfigForTimeout returns a common.HTTPClientConfig with the specified timeout.
+func httpConfigForTimeout(timeout time.Duration) common.HTTPClientConfig {
+	return common.HTTPClientConfig{
+		Timeout:            timeout,
+		InsecureSkipVerify: true,
+		PoolConnections:    false, // Summarization uses short-lived clients
 	}
 }
 
-// GetTestPDFPath returns the path to a test PDF file.
+// GetTestPDFPath returns the path to a test PDF file relative to this package.
 func GetTestPDFPath() string {
-	// Get the path to the test PDF from the ingestion test docs
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		return ""
 	}
 
-	// Navigate to ingestion/docs/test_doc.pdf
 	testDir := filepath.Dir(filename)
-	testPDFPath := filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
-
-	return testPDFPath
+	return filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
 }
 
-// GetTestTXTPath returns the path to a test TXT file.
+// GetTestTXTPath returns the path to a test TXT file relative to this package.
 func GetTestTXTPath() string {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -63,9 +55,7 @@ func GetTestTXTPath() string {
 	}
 
 	testDir := filepath.Dir(filename)
-	testTXTPath := filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "sample_txt.txt")
-
-	return testTXTPath
+	return filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "sample_txt.txt")
 }
 
 // JobCreatedResponse represents the response when a job is created.
@@ -135,50 +125,41 @@ type HealthCheckResponse struct {
 	Version string `json:"version,omitempty"`
 }
 
-// ErrorResponse represents an error response from the API.
-type ErrorResponse struct {
-	Error struct {
-		Code    int    `json:"code"`    // HTTP status code as number
-		Message string `json:"message"` // Error message
-		Status  string `json:"status"`  // Error status string (e.g., "UNSUPPORTED_FILE_TYPE")
-	} `json:"error,omitempty"`
-}
+// ErrorResponse is an alias to common.ErrorResponse for backward compatibility.
+type ErrorResponse = common.ErrorResponse
 
 // GetSummarizeBaseURL returns the base URL for the summarize service.
 func GetSummarizeBaseURL(port string) string {
 	return fmt.Sprintf("http://localhost:%s", port)
 }
 
-// HealthCheck performs a health check on the summarize service.
-func HealthCheck(ctx context.Context, baseURL string) error {
-	url := fmt.Sprintf("%s/health", baseURL)
+// ─────────────────────────────────────────────────────────────────────────────
+// URL helpers — centralize endpoint construction
+// ─────────────────────────────────────────────────────────────────────────────
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("health check request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("health check failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	logger.Infof("[SUMMARIZE] Health check passed")
-
-	return nil
+// healthURL constructs the health check endpoint URL.
+func healthURL(baseURL string) string {
+	return fmt.Sprintf("%s/health", baseURL)
 }
 
-// buildJobURL constructs the job creation URL with query parameters.
-func buildJobURL(baseURL, level, jobName string, stream bool) string {
-	url := fmt.Sprintf("%s/v1/summarize/jobs?stream=%t", baseURL, stream)
+// jobsURL constructs the jobs list/delete endpoint URL.
+func jobsURL(baseURL string) string {
+	return fmt.Sprintf("%s/v1/summarize/jobs", baseURL)
+}
+
+// jobURL constructs a job detail endpoint URL.
+func jobURL(baseURL, jobID string) string {
+	return fmt.Sprintf("%s/v1/summarize/jobs/%s", baseURL, jobID)
+}
+
+// jobResultURL constructs a job result endpoint URL.
+func jobResultURL(baseURL, jobID string) string {
+	return fmt.Sprintf("%s/v1/summarize/jobs/%s/result", baseURL, jobID)
+}
+
+// buildJobCreateURL constructs the job creation URL with query parameters.
+func buildJobCreateURL(baseURL, level, jobName string, stream bool) string {
+	url := fmt.Sprintf("%s?stream=%t", jobsURL(baseURL), stream)
 	if level != "" {
 		url += fmt.Sprintf("&level=%s", level)
 	}
@@ -187,6 +168,47 @@ func buildJobURL(baseURL, level, jobName string, stream bool) string {
 	}
 
 	return url
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP helpers — delegate to common utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+// doGET sends a GET request and returns the response body and status code.
+func doGET(ctx context.Context, url string) ([]byte, int, error) {
+	return common.DoGET(ctx, url, httpConfigForTimeout(getCallTimeout))
+}
+
+// doPOST sends a POST request with the given body and content type.
+func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
+	return common.DoPOST(ctx, url, body, contentType, httpConfigForTimeout(postCallTimeout))
+}
+
+// doDELETE sends a DELETE request.
+func doDELETE(ctx context.Context, url string) ([]byte, int, error) {
+	return common.DoDELETE(ctx, url, httpConfigForTimeout(getCallTimeout))
+}
+
+// HealthCheck performs a health check on the summarize service.
+func HealthCheck(ctx context.Context, baseURL string) error {
+	respBody, statusCode, err := doGET(ctx, healthURL(baseURL))
+	if err != nil {
+		return fmt.Errorf("health check request failed: %w", err)
+	}
+
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("health check failed with status %d: %s", statusCode, string(respBody))
+	}
+
+	logger.Infof("[SUMMARIZE] Health check passed")
+
+	return nil
+}
+
+// buildJobURL constructs the job creation URL with query parameters.
+// Deprecated: Use buildJobCreateURL instead. Kept for backward compatibility.
+func buildJobURL(baseURL, level, jobName string, stream bool) string {
+	return buildJobCreateURL(baseURL, level, jobName, stream)
 }
 
 // createMultipartBody creates a multipart form body with a file.
@@ -217,38 +239,21 @@ func createMultipartBody(filePath string) (*bytes.Buffer, *multipart.Writer, err
 }
 
 // sendJobRequest sends the HTTP request and returns the response body.
+// Deprecated: Use doPOST instead. Kept for backward compatibility.
 func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", contentType)
-
-	client := getClient(postCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	return respBody, resp.StatusCode, nil
+	return doPOST(ctx, url, body, contentType)
 }
 
 // CreateJobWithFile creates a new summarization job with a file upload.
 func CreateJobWithFile(ctx context.Context, baseURL, filePath, level, jobName string, stream bool) (*JobCreatedResponse, error) {
-	url := buildJobURL(baseURL, level, jobName, stream)
+	url := buildJobCreateURL(baseURL, level, jobName, stream)
 
 	body, writer, err := createMultipartBody(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	respBody, statusCode, err := sendJobRequest(ctx, url, body, writer.FormDataContentType())
+	respBody, statusCode, err := doPOST(ctx, url, body, writer.FormDataContentType())
 	if err != nil {
 		return nil, err
 	}
@@ -267,11 +272,9 @@ func CreateJobWithFile(ctx context.Context, baseURL, filePath, level, jobName st
 	return &jobResp, nil
 }
 
-// CreateJobWithText creates a new summarization job with text input.
-// Note: The API requires a file upload, so we create a temporary text file.
+// CreateJobWithText creates a job from text by creating a temporary file.
 //nolint:cyclop // Test helper function, complexity acceptable
 func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*JobCreatedResponse, error) {
-	// Create temporary file
 	tmpFile, err := createTempTextFile(text)
 	if err != nil {
 		return nil, err
@@ -303,19 +306,14 @@ func createTempTextFile(text string) (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// JobResult bundles the completed job detail and its summary text.
-// Returned by SubmitAndVerifyJob so callers need only one call for the full happy-path flow.
+// JobResult represents a completed summarization job with its summary text.
 type JobResult struct {
 	Detail  *JobDetailResponse
 	Summary string
 }
 
-// SubmitAndVerifyJob submits a file-based summarization job, waits for completion,
-// fetches the result, and returns the parsed summary.
-// filePath — absolute path to the file to summarize; use "" to fall back to text.
-// text     — used only when filePath is empty (creates a temporary text file).
-// All three create/wait/result steps are collapsed into a single call, eliminating
-// the repeated boilerplate that appeared in every happy-path spec.
+// SubmitAndVerifyJob submits a job, waits for completion, and returns the result.
+// Pass filePath for file-based jobs or text for text-based jobs (creates a temporary file).
 func SubmitAndVerifyJob(
 	ctx context.Context,
 	baseURL string,
@@ -362,10 +360,8 @@ func SubmitAndVerifyJob(
 	return &JobResult{Detail: detail, Summary: summary}, nil
 }
 
-// SubmitJobExpectingFailure submits a text-based job and waits for it to reach
-// the Failed terminal state. It returns the completed JobDetailResponse so callers
-// can assert on the Error field. An error is returned only when the job does not
-// reach a terminal state within the timeout or when the status is not Failed.
+// SubmitJobExpectingFailure submits a job and waits for it to fail.
+// Returns the job detail so callers can assert on the Error field.
 func SubmitJobExpectingFailure(
 	ctx context.Context,
 	baseURL string,
@@ -391,31 +387,17 @@ func SubmitJobExpectingFailure(
 
 // GetJobDetail retrieves the details of a specific job.
 func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailResponse, error) {
-	url := fmt.Sprintf("%s/v1/summarize/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	respBody, statusCode, err := doGET(ctx, jobURL(baseURL, jobID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code %d: %s", statusCode, string(respBody))
 	}
 
 	var jobDetail JobDetailResponse
-	if err := json.Unmarshal(body, &jobDetail); err != nil {
+	if err := json.Unmarshal(respBody, &jobDetail); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -424,31 +406,17 @@ func GetJobDetail(ctx context.Context, baseURL, jobID string) (*JobDetailRespons
 
 // GetJobResult retrieves the result of a completed job.
 func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultResponse, error) {
-	url := fmt.Sprintf("%s/v1/summarize/jobs/%s/result", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	respBody, statusCode, err := doGET(ctx, jobResultURL(baseURL, jobID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code %d: %s", statusCode, string(respBody))
 	}
 
 	var result JobResultResponse
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -501,7 +469,7 @@ func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout ti
 
 // ListJobs retrieves a list of all jobs.
 func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jobName string) (*JobsListResponse, error) {
-	url := fmt.Sprintf("%s/v1/summarize/jobs?limit=%d&offset=%d", baseURL, limit, offset)
+	url := fmt.Sprintf("%s?limit=%d&offset=%d", jobsURL(baseURL), limit, offset)
 	if status != "" {
 		url += fmt.Sprintf("&status=%s", status)
 	}
@@ -509,109 +477,67 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jo
 		url += fmt.Sprintf("&job_name=%s", jobName)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	respBody, statusCode, err := doGET(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code %d: %s", statusCode, string(respBody))
 	}
 
 	var jobsList JobsListResponse
-	if err := json.Unmarshal(body, &jobsList); err != nil {
+	if err := json.Unmarshal(respBody, &jobsList); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	return &jobsList, nil
 }
 
-// DeleteJob deletes a specific job.
-func DeleteJob(ctx context.Context, baseURL, jobID string) error {
-	url := fmt.Sprintf("%s/v1/summarize/jobs/%s", baseURL, jobID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+// deleteJobWithURL performs a DELETE request and validates the response.
+// Accepts 200 OK or 204 No Content as success.
+func deleteJobWithURL(ctx context.Context, url string, logMsg string) error {
+	_, statusCode, err := doDELETE(ctx, url)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
 
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code %d", statusCode)
 	}
 
-	logger.Infof("[SUMMARIZE] Job deleted: %s", jobID)
+	logger.Infof("[SUMMARIZE] %s", logMsg)
 
 	return nil
+}
+
+// DeleteJob deletes a specific job.
+func DeleteJob(ctx context.Context, baseURL, jobID string) error {
+	return deleteJobWithURL(ctx, jobURL(baseURL, jobID), fmt.Sprintf("Job deleted: %s", jobID))
 }
 
 // DeleteAllJobs deletes all jobs.
 func DeleteAllJobs(ctx context.Context, baseURL string) error {
-	url := fmt.Sprintf("%s/v1/summarize/jobs?confirm=true", baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := getClient(getCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
-	}
-
-	logger.Infof("[SUMMARIZE] All jobs deleted")
-
-	return nil
+	url := fmt.Sprintf("%s?confirm=true", jobsURL(baseURL))
+	return deleteJobWithURL(ctx, url, "All jobs deleted")
 }
 
 // parseErrorResponse parses the response body as an error response.
+// Delegates to common.ParseErrorResponse for backward compatibility.
 func parseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error) {
-	var errorResp ErrorResponse
-	if err := json.Unmarshal(respBody, &errorResp); err != nil {
-		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(respBody))
-	}
-
-	return &errorResp, nil
+	return common.ParseErrorResponse(respBody, statusCode)
 }
 
 // CreateJobExpectingError creates a job and returns error response if status is not 202.
 func CreateJobExpectingError(ctx context.Context, baseURL, filePath, level, jobName string, stream bool) (*ErrorResponse, int, error) {
-	url := buildJobURL(baseURL, level, jobName, stream)
+	url := buildJobCreateURL(baseURL, level, jobName, stream)
 
 	body, writer, err := createMultipartBody(filePath)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	respBody, statusCode, err := sendJobRequest(ctx, url, body, writer.FormDataContentType())
+	respBody, statusCode, err := doPOST(ctx, url, body, writer.FormDataContentType())
 	if err != nil {
 		return nil, statusCode, err
 	}
@@ -629,11 +555,9 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, level, jobN
 	return nil, statusCode, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(respBody))
 }
 
-// CreateJobWithTextExpectingError creates a job with text and returns error response if status is not 202.
-// Note: The API requires a file upload, so we create a temporary text file.
+// CreateJobWithTextExpectingError creates a job from text and expects an error response.
 //nolint:cyclop // Test helper function, complexity acceptable
 func CreateJobWithTextExpectingError(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*ErrorResponse, int, error) {
-	// Create temporary file
 	tmpFile, err := createTempTextFile(text)
 	if err != nil {
 		return nil, 0, err
@@ -668,3 +592,4 @@ func IsRateLimitError(err error) bool {
 		(strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") ||
 			strings.Contains(err.Error(), "Too many"))
 }
+

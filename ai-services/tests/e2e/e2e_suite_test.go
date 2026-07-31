@@ -1732,11 +1732,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
-
-			// Poll 'application info' until the summarize-api URL is present.
-			// WaitForApplicationInfoURLs checks for RAG-specific URLs (chat-bot-backend +
-			// similarity-api) which don't exist in the summarize template, so we poll
-			// directly — same approach as Similarity Tests.
+	
+			// Poll for summarize-api URL (WaitForApplicationInfoURLs checks for RAG-specific URLs not in summarize template).
 			const summarizePollInterval = 15 * time.Second
 			var infoOutput string
 			for {
@@ -1768,10 +1765,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[SUMMARIZE] Summarize Base URL: %s", summarizeBaseURL)
 
-			// Wait for the summarize-api health endpoint to be ready.
-			// The LLM pod needs time to load the model after start — the URL being
-			// present in 'application info' does not mean the service is accepting
-			// requests yet. Poll /health until it returns 200 (up to 15 minutes).
+			// Poll /health until service is ready (LLM model may still be loading).
 			logger.Infof("[SUMMARIZE] Waiting for summarize-api to be healthy at %s/health", summarizeBaseURL)
 			healthCtx, healthCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer healthCancel()
