@@ -29,31 +29,68 @@ These assumptions are referenced once here and not repeated below.
 ### 2.2 Runtime Flow
 
 ```text
-POST
-  → store connector config
-  → start worker
-  → worker runs first tick immediately
+── Attach (POST /v1/connectors) ─────────────────────────────────────
+  → validate + encrypt credentials
+  → INSERT active_connectors row
+  → schedule worker startup (background task)
+  → worker thread starts and runs first tick immediately
 
-PUT
-  → update connector config in DB
-  → running thread re-reads config from DB before next tick
+── Config update (PUT /v1/connectors/{id}) ──────────────────────────
+  → merge + re-encrypt changed fields
+  → UPDATE active_connectors row
+  → running worker re-reads config from DB before its next tick
 
-Each tick (connector-sourced)
-  → fetch latest connector config from DB
-  → scan source — yields (remote_path, checksum) per file
-  → compare checksums with known_checksums from connector_file_membership
-  → skip files whose checksum is already in connector_file_membership for this connector
-  → ingest only new content
-  → create-job is called with connector_id — main thread inserts into
-     connector_file_membership (keyed by checksum, carrying connector_id + doc_id)
-  → store source checksum in document metadata
-  → remove orphaned content by ref count
-  → write sync status + history
+── Each sync tick (connector-sourced) ───────────────────────────────
+  Step 1 — load state
+    → SELECT known_checksums FROM connector_file_membership
+           WHERE connector_ids @> [connector_id]
+      (all checksums this connector already owns)
 
-User-submitted files (no connector_id)
+  Step 2 — file walk + classify
+    → scanner walks remote source, computes (remote_path, checksum) per file
+    → for each file:
+        if checksum IN known_checksums:
+          → already owned by this connector — add connector_id to connector_ids
+            (idempotent JSONB upsert) and place on skip_list  ← no download
+        else:
+          → new to this connector — place on ingest_list
+
+  Step 3 — ingest new files (ingest_list)
+    → for each (remote_path, checksum) in ingest_list:
+        download file → run create_job(connector_id=connector_id)
+        on job success:
+          add_connector_to_membership(connector_id, checksum, doc_id)
+            → INSERT (checksum, [connector_id], doc_id) on first owner
+            → JSONB array append if another connector already owns checksum
+              (shared-content case — no second download)
+
+  Step 4 — orphan detection + removal
+    → orphan_checksums = known_checksums − {checksum for (_, checksum) in scanned_files}
+      (checksums this connector previously owned that are no longer on the remote source)
+    → for each orphan_checksum in orphan_checksums (after all batch ingest jobs finish):
+        remove_connector_from_membership(connector_id, orphan_checksum)
+          → removes connector_id from connector_ids array
+          → returns (remaining_owner_count, doc_id)
+        if remaining_owner_count == 0:
+          DELETE FROM connector_file_membership WHERE checksum = orphan_checksum
+          DELETE /v1/documents/{doc_id}
+
+  Step 5 — finalise tick
+    → UPDATE connector_sync_history (files_found, completed, failed, status)
+    → UPDATE active_connectors (last_sync_at, sync_status)
+
+── Detach (DELETE /v1/connectors/{id}) ──────────────────────────────
+  → guard: reject with 409 if a tick is currently running
+  → stop worker thread
+  → list all checksums owned by this connector
+  → for each checksum: remove_connector_from_membership → delete doc if last owner
+  → DELETE active_connectors row
+  → cleanup staging dirs
+
+── User-submitted files (no connector_id) ───────────────────────────
   → create-job flow detects absence of connector_id
   → dedup check against file_checksum_registry (sha256 PK) only
-  → on success: insert row into file_checksum_registry (sha256, doc_id)
+  → on success: INSERT INTO file_checksum_registry (sha256, doc_id)
   → connector_file_membership is never written for user-submitted docs
 ```
 
@@ -746,6 +783,197 @@ def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[
 
 ---
 
+### 5.3 Connector Lifecycle DB Operations
+
+This section describes the **DB-only operations** for each phase of the connector lifecycle. Transport concerns (SSH connections, boto3 calls, file downloads) are out of scope here — this is purely the sequence of reads and writes to PostgreSQL.
+
+---
+
+#### 5.3.1 Attach — `POST /v1/connectors`
+
+Goal: persist connector config so the worker can start and begin syncing.
+
+```text
+DB operations (Attach)
+────────────────────────────────────────────────────────────────────
+1. INSERT INTO active_connectors
+       (id, type, host, connection_details, allowed_extensions,
+        sync_interval_seconds, attached_at, sync_status)
+   VALUES (:connector_id, :type, :host, :encrypted_details, :exts,
+           :interval, NOW(), 'idle')
+   ON CONFLICT (id) DO NOTHING          ← 409 if already exists
+
+Result: one row in active_connectors; worker thread starts.
+connector_file_membership is empty for this connector — populated on first tick.
+```
+
+---
+
+#### 5.3.2 Sync Tick — DB operations only
+
+A tick has five DB phases. Transport (file listing, download) happens between phases 2 and 3.
+
+```text
+DB operations (Sync Tick)
+────────────────────────────────────────────────────────────────────
+
+Phase 1 — open tick record
+  INSERT INTO connector_sync_history
+      (connector_id, sync_id, started_at, sync_status)
+  VALUES (:connector_id, :next_sync_id, NOW(), 'syncing')
+
+  UPDATE active_connectors
+  SET    sync_status = 'syncing'
+  WHERE  id = :connector_id
+
+Phase 2 — load known state
+  SELECT checksum
+  FROM   connector_file_membership
+  WHERE  connector_ids @> jsonb_build_array(:connector_id::text)
+  → produces: known_checksums  (set of strings)
+
+  ┌─ scanner file walk happens here (no DB) ──────────────────────┐
+  │  yields: scanned_files = [(remote_path, checksum), ...]       │
+  └───────────────────────────────────────────────────────────────┘
+
+Phase 3 — classify files into two lists (no DB reads)
+  skip_list   = []   ← checksum IN known_checksums
+  ingest_list = []   ← checksum NOT IN known_checksums
+
+  for (remote_path, checksum) in scanned_files:
+    if checksum in known_checksums:
+      skip_list.append((remote_path, checksum))
+    else:
+      ingest_list.append((remote_path, checksum))    ← dedup: first path wins
+
+  Note: files on skip_list have their connector_id already in connector_ids —
+  no DB write is needed for them (idempotency guaranteed by existing membership row).
+
+  ┌─ download + ingest loop for ingest_list (transport + create_job) ─┐
+  │  for each (remote_path, checksum) in ingest_list:                 │
+  │    download → create_job(connector_id) → doc_id                   │
+  │    ↓ (DB write, see below)                                        │
+  └───────────────────────────────────────────────────────────────────┘
+
+Phase 4a — register each newly ingested file
+  (called per file, after each successful create_job)
+
+  INSERT INTO connector_file_membership (checksum, connector_ids, doc_id)
+  VALUES (:checksum, jsonb_build_array(:connector_id::text), :doc_id)
+  ON CONFLICT (checksum) DO UPDATE
+    SET connector_ids = connector_file_membership.connector_ids
+                     || jsonb_build_array(:connector_id::text)
+  WHERE NOT (connector_file_membership.connector_ids
+             @> jsonb_build_array(:connector_id::text))
+  -- First owner:  inserts new row.
+  -- Shared-content case (another connector already owns this checksum):
+  --   appends connector_id to array; doc_id from the existing row is reused.
+  --   The file was NOT downloaded again — the ingest was skipped upstream.
+
+  UPDATE documents
+  SET    metadata = metadata || :source_metadata   -- source_checksum, source_type, etc.
+  WHERE  doc_id   = :doc_id
+
+Phase 4b — orphan detection + removal
+  (runs once, after ALL ingest jobs for this tick have completed)
+
+  -- Compute orphan set purely in application memory:
+  scanned_checksums  = {checksum for (_, checksum) in scanned_files}
+  orphan_checksums   = known_checksums − scanned_checksums
+  -- These are checksums this connector owned at the start of the tick but whose
+  -- corresponding file is no longer present on the remote source.
+
+  for orphan_checksum in orphan_checksums:
+
+    -- Step A: remove this connector from the owners array
+    UPDATE connector_file_membership
+    SET    connector_ids = connector_ids - :connector_id
+    WHERE  checksum = :orphan_checksum
+
+    -- Step B: check remaining owners
+    SELECT jsonb_array_length(connector_ids) AS remaining, doc_id
+    FROM   connector_file_membership
+    WHERE  checksum = :orphan_checksum
+
+    -- Step C: if no owners remain, delete the row and the document
+    if remaining == 0:
+      DELETE FROM connector_file_membership
+      WHERE  checksum = :orphan_checksum
+
+      DELETE /v1/documents/{doc_id}         ← calls digitize document API
+      -- 200 / 204 / 404 all treated as success; 5xx logged and skipped
+
+Phase 5 — close tick record
+  UPDATE connector_sync_history
+  SET    finished_at     = NOW(),
+         files_found     = :files_found,
+         files_completed = :files_completed,
+         files_failed    = :files_failed,
+         sync_status     = :final_status     -- 'completed' | 'N files failed to ingest' | ...
+  WHERE  connector_id = :connector_id
+    AND  sync_id      = :sync_id
+
+  UPDATE active_connectors
+  SET    last_sync_at = NOW(),
+         sync_status  = :final_status
+  WHERE  id = :connector_id
+```
+
+**Ordering guarantee:** Phase 4b (orphan removal) runs only after Phase 4a (all ingest jobs) completes. This prevents a race where a newly ingested file appears as an orphan because its membership row has not yet been written.
+
+---
+
+#### 5.3.3 Detach — `DELETE /v1/connectors/{connector_id}`
+
+Goal: cleanly remove all connector-owned content and the connector row itself.
+
+```text
+DB operations (Detach)
+────────────────────────────────────────────────────────────────────
+
+Pre-condition check (not a DB operation)
+  if worker tick is currently running → return 409 Conflict immediately
+
+Step 1 — stop worker thread (not a DB operation)
+  stop_event.set() → thread.join(timeout=30s)
+
+Step 2 — snapshot owned checksums
+  SELECT checksum, doc_id
+  FROM   connector_file_membership
+  WHERE  connector_ids @> jsonb_build_array(:connector_id::text)
+  → produces: owned_rows = [(checksum, doc_id), ...]
+
+Step 3 — remove ownership row by row
+  for (checksum, doc_id) in owned_rows:
+
+    BEGIN
+      UPDATE connector_file_membership
+      SET    connector_ids = connector_ids - :connector_id
+      WHERE  checksum = :checksum
+
+      SELECT jsonb_array_length(connector_ids) AS remaining
+      FROM   connector_file_membership
+      WHERE  checksum = :checksum
+    COMMIT
+
+    if remaining == 0:
+      DELETE FROM connector_file_membership WHERE checksum = :checksum
+      DELETE /v1/documents/{doc_id}      ← best-effort; 200/204/404 = success
+
+Step 4 — delete connector row
+  DELETE FROM active_connectors WHERE id = :connector_id
+  -- CASCADE deletes connector_sync_history rows automatically.
+  -- Any remaining connector_file_membership rows for this connector_id
+  --   are already cleaned up in Step 3.
+
+Step 5 — cleanup staging dirs (not a DB operation)
+  rm -rf {staging_dir}/{connector_id}/
+```
+
+**Invariant:** after Step 4 completes, no row in `connector_file_membership` has `:connector_id` in its `connector_ids` array.
+
+---
+
 ## 6. Scanner Abstraction
 
 **New file:** `services/digitize/connector/base_scanner.py`
@@ -762,18 +990,18 @@ Base scanner responsibilities:
 
 Subclass responsibilities:
 
-- remote listing — yields `(remote_path, checksum)` pairs, where `remote_path` is the string path (SFTP) or object key (S3) needed by `download_to()` — the tuple is the sole carrier of the remote location; no side-channel store is needed
-- dedup check against `known_checksums` before downloading (strategy is transport-specific — see §7.1 and §7.2)
-- file download (only when checksum is not already known) — `remote_path` is taken directly from the scan tuple
-- storing the checksum in `connector_file_membership.checksum` and in `documents.metadata` after ingest
+- remote listing — yields `(remote_path, checksum)` pairs for **all** files found; classification into skip vs ingest is the worker's responsibility (see §8.4)
+- file download on demand — `remote_path` is taken directly from the tuple passed by the worker
 - connection lifecycle
+
+> **Note:** dedup classification (skip vs ingest) and orphan detection are performed in the worker's `_classify()` method (§8.4), not in the scanner. The scanner returns the full remote file list; the worker decides what to do with each entry.
 
 ### 6.2 Class diagram
 
 ```text
 BaseScanner
   ├─ connect()
-  ├─ scan(known_checksums)    → list[(remote_path, checksum)]
+  ├─ scan()    → list[(remote_path, checksum)]   # ALL remote files, no dedup filtering
   ├─ download_to(remote_path, local_path)
   └─ close()
 
@@ -798,12 +1026,12 @@ class BaseScanner(ABC):
         ...
 
     @abstractmethod
-    def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
-        """Yield (remote_path, checksum) for files not in known_checksums.
+    def scan(self) -> list[tuple[str, str]]:
+        """Return (remote_path, checksum) for ALL files found on the remote source.
 
-        Implementations must skip any file whose checksum is already present
-        in known_checksums — no download should occur for those files.
-        Returns only files that need to be ingested.
+        No dedup filtering is applied here — the full list is returned.
+        The worker's _classify() method splits the result into skip_list,
+        ingest_list, and orphan_checksums (see §8.4).
         """
         ...
 
@@ -858,16 +1086,17 @@ def _remote_md5(self, remote_file_path: str) -> str:
 SFTP scan sketch:
 
 ```python
-def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
-    """Return (remote_path, checksum) for files whose checksum is not yet in connector_file_membership.
+def scan(self) -> list[tuple[str, str]]:
+    """Return (remote_path, checksum) for ALL allowed files on the remote host.
+
+    No filtering against known_checksums is done here.
+    The worker's _classify() method determines which files to skip and which
+    to ingest based on the connector's current connector_file_membership state.
 
     remote_path is the absolute string path on the remote host.
-    It is stored in the tuple so that the worker can pass it directly to
-    download_to(remote_path, local_path) — no separate lookup is needed.
-
-    For SFTP sources the checksum is a hex MD5 digest computed on the
-    remote host via md5sum — stored in connector_file_membership.checksum
-    alongside S3 checksums (S3 ETags) with no schema difference.
+    checksum is a hex MD5 digest computed on the remote host via md5sum —
+    stored in connector_file_membership.checksum alongside S3 ETags with
+    no schema difference.
     """
     found = []
     for remote_file in self._walk_remote_tree():
@@ -875,8 +1104,6 @@ def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
             continue
         remote_path: str = remote_file.path   # extract string path from SFTPAttributes
         checksum = self._remote_md5(remote_path)
-        if checksum in known_checksums:
-            continue   # already ingested — skip download
         found.append((remote_path, checksum))
     return found
 ```
@@ -891,43 +1118,43 @@ Behavior:
 
 - Auto-detect provider (AWS S3 or IBM COS) from `endpoint_url` hostname — no separate region field needed
 - Build boto3 client per tick using `IBMCOSConnector._build_client()` (pure-Python, ppc64le compatible)
-- List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag, at no extra API cost
-- **Checksum pre-check before download:** if checksum is already in `known_checksums` → skip file entirely (zero bytes transferred)
-- Download only new files via `download_fileobj()`
+- List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag, at no extra API cost; **the full list is returned without filtering**
+- Download files on demand (only those the worker places on `ingest_list`)
 - Store checksum in `connector_file_membership.checksum` and in `documents.metadata.source_checksum`
 
-**Checksum dedup flow:**
+**Classification flow (performed by worker, not scanner):**
 
 ```
-list_objects_v2  →  (key, checksum)          # checksum = S3 ETag
+list_objects_v2  →  (key, checksum) for ALL objects   # checksum = S3 ETag
                           │
-          checksum in known_checksums?
+                    _classify(scanned_files, known_checksums)  ← in worker
+                          │
+          checksum IN known_checksums?
                     │
           YES ──────┘                    NO
            ▼                              ▼
-      skip — zero bytes             download_fileobj()
-      add connector_id to           + _HashingWriter (inline MD5)
-      existing membership row       ingest pipeline
-                                    INSERT connector_file_membership(checksum, [connector_id], doc_id)
-                                    SET documents.metadata.source_checksum = checksum
+      skip_list                      ingest_list
+      (no download,                  download_fileobj() + create_job()
+       no DB write)                  add_connector_to_membership(connector_id, checksum, doc_id)
+                                     SET documents.metadata.source_checksum = checksum
 ```
 
 S3 scan sketch:
 
 ```python
-def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
-    """Return (key, checksum) for objects whose checksum is not yet registered.
+def scan(self) -> list[tuple[str, str]]:
+    """Return (key, checksum) for ALL allowed objects in the bucket/prefix.
 
-    key is the S3 object key (remote path). It is stored as the first element
-    of the tuple so the worker can pass it directly to download_to(key, local_path)
-    — no separate lookup or metadata store is required.
+    No filtering is applied — the full list is returned.
+    The worker's _classify() method determines what to skip and what to ingest.
+
+    key is the S3 object key (remote path). checksum is the S3 ETag from
+    list_objects_v2 — stored in connector_file_membership.checksum.
     """
-    to_ingest = []
+    all_files = []
     for key, checksum in self._list_document_keys():   # checksum = S3 ETag, free from list_objects_v2
-        if checksum in known_checksums:
-            continue                                    # skip — already ingested
-        to_ingest.append((key, checksum))
-    return to_ingest
+        all_files.append((key, checksum))
+    return all_files
 
 
 def download_and_register(self, key: str, checksum: str, staging_dir: Path) -> str:
@@ -988,7 +1215,45 @@ client = boto3.Session(
 
 ### 8.1 Tick flow
 
-![Sync Worker Tick Flow](sync-worker-tick-flow.svg)
+```text
+_run_tick()
+│
+├─ [Phase 1] INSERT connector_sync_history (status='syncing')
+│            UPDATE active_connectors (sync_status='syncing')
+│
+├─ [Phase 2] known_checksums ← SELECT FROM connector_file_membership
+│                               WHERE connector_ids @> [connector_id]
+│
+│            ┌── scanner.connect() + scanner.scan() ─────────────────┐
+│            │   walks remote source, computes (remote_path, checksum)│
+│            │   per file; returns ALL remote files (no filtering)    │
+│            └─────────────────────────────────────────────────────── ┘
+│
+├─ [Phase 3] _classify(scanned_files, known_checksums)
+│            → skip_list   [(remote_path, checksum)] checksum IN known_checksums
+│            → ingest_list [(remote_path, checksum)] checksum NOT IN known_checksums
+│                          (intra-tick dedup: first path wins per checksum)
+│
+├─ [Phase 4a] _process_new_files(ingest_list)
+│             for each (remote_path, checksum) in ingest_list:
+│               download → create_job(connector_id) → doc_id
+│               add_connector_to_membership(connector_id, checksum, doc_id)
+│                 INSERT … ON CONFLICT DO UPDATE (JSONB array append)
+│               UPDATE documents.metadata (source_checksum, source_type, …)
+│
+├─ [Phase 4b] _delete_orphans(orphan_checksums)
+│   ← RUNS AFTER all Phase 4a jobs finish ←
+│             orphan_checksums = known_checksums − scanned_checksums
+│             for each orphan:
+│               remove_connector_from_membership(connector_id, orphan)
+│                 UPDATE connector_ids array  (- connector_id)
+│               if remaining_owners == 0:
+│                 DELETE FROM connector_file_membership WHERE checksum = orphan
+│                 DELETE /v1/documents/{doc_id}
+│
+└─ [Phase 5] UPDATE connector_sync_history (finished_at, counters, status)
+             UPDATE active_connectors (last_sync_at, sync_status)
+```
 
 ### 8.2 Worker rules
 
@@ -998,6 +1263,7 @@ client = boto3.Session(
 - Download and ingest are blocking operations.
 - Fatal errors mark the tick as failed.
 - Per-file failures are counted and summarized instead of failing the whole connector permanently.
+- **Phase 4b (orphan removal) always runs after Phase 4a (all ingest jobs) completes.** This prevents a file ingested in the current tick from appearing as an orphan before its membership row is written.
 
 ### 8.3 Worker stub
 
@@ -1009,26 +1275,28 @@ def _run_tick(self) -> None:
     try:
         scanner.connect()
 
-        # known_checksums: set of checksums already in connector_file_membership
-        # for this connector (array-containment query on connector_ids).
-        # Passed to scanner.scan() so the scanner can skip files whose checksum
-        # is already owned by this connector — no download occurs.
-        known_checksums = set(list_connector_checksums(self.connector_id))
+        # Phase 2: load known state from connector_file_membership.
+        # Array-containment query returns all checksums this connector owns.
+        known_checksums: set[str] = set(list_connector_checksums(self.connector_id))
 
-        # scan() returns only (remote_path, checksum) pairs not in known_checksums.
-        # remote_path is the string path (SFTP) or object key (S3) needed by
-        # download_to() — it travels with the checksum in the tuple so no
-        # additional lookup or metadata store is required at download time.
-        remote_files = scanner.scan(known_checksums)
+        # scanner.scan() walks the remote source and returns ALL (remote_path, checksum)
+        # pairs — it does NOT pre-filter against known_checksums here.
+        # _classify() does the split into skip_list / ingest_list (Phase 3).
+        scanned_files: list[tuple[str, str]] = scanner.scan()
 
-        to_ingest, orphan_checksums = self._diff(remote_files, known_checksums)
-        # _process_new_files unpacks each (remote_path, checksum) tuple and calls
-        # scanner.download_to(remote_path, local_path) directly.
-        # It also passes self.connector_id to each create-job call so the
-        # main thread calls add_connector_to_membership(connector_id, checksum, doc_id)
-        # after each job completes (see §5.1). file_checksum_registry is never touched.
-        self._process_new_files(sync_id, scanner, to_ingest)
+        # Phase 3: classify into skip_list (already owned) and ingest_list (new).
+        # Also produces orphan_checksums (owned but no longer on remote source).
+        ingest_list, orphan_checksums = self._classify(scanned_files, known_checksums)
+
+        # Phase 4a: download + ingest + register membership for each new file.
+        # Runs BEFORE orphan removal so membership rows exist before we compute orphans.
+        # Each successful job calls add_connector_to_membership(connector_id, checksum, doc_id).
+        # file_checksum_registry is never touched.
+        self._process_new_files(sync_id, scanner, ingest_list)
+
+        # Phase 4b: remove orphaned files — runs only after 4a is fully complete.
         self._delete_orphans(orphan_checksums)
+
         self._complete_tick(sync_id)
     except Exception as exc:
         self._fail_tick(sync_id, exc)
@@ -1036,56 +1304,61 @@ def _run_tick(self) -> None:
         scanner.close()
 ```
 
-### 8.4 Diff — ingest list and delete list
+### 8.4 Classify — skip list, ingest list, and orphan set
 
-`_diff` receives the scanner's output and the connector's current known-checksum set, then returns two lists:
+`_classify` (previously `_diff`) receives the full scanner output and the connector's `known_checksums` snapshot, then produces three collections:
 
-| List | Contents |
-| --- | --- |
-| `to_ingest` | `(remote_path, checksum)` pairs for files that must be downloaded and ingested |
-| `orphan_checksums` | checksums previously registered for this connector whose corresponding remote file is no longer present |
+| Collection | Type | Contents |
+| --- | --- | --- |
+| `skip_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs where checksum is already owned — **no download, no ingest** |
+| `ingest_list` | `list[tuple[str, str]]` | `(remote_path, checksum)` pairs for genuinely new files that must be downloaded and ingested |
+| `orphan_checksums` | `set[str]` | checksums this connector previously owned that are no longer present on the remote source |
 
-**Ingest list construction:**
+**Skip list:** files whose checksum is already in `known_checksums`. These are placed on `skip_list` and never reach `create_job`. Because `connector_ids` already contains this connector's ID (it is part of `known_checksums`), no DB write is required for them.
 
-`scanner.scan()` already filters out files whose checksum is in `known_checksums`, so `to_ingest` contains only genuinely new files. However, the remote source may contain duplicate files — two or more remote paths whose content is identical (same checksum). To avoid ingesting the same content twice within a single tick, `_diff` applies a second dedup pass over the raw scan result: it iterates in order and keeps only the **first** `(remote_path, checksum)` pair for each checksum; subsequent pairs with the same checksum are dropped.
+**Ingest list:** files whose checksum is NOT in `known_checksums`. Intra-tick dedup is applied: if two remote paths share the same checksum, only the **first** `(remote_path, checksum)` pair is placed on `ingest_list`; duplicates are dropped silently. This prevents double-ingestion of identical content within one tick.
 
-**Delete list construction:**
-
-The delete list is the set of checksums in `known_checksums` that were **not** seen in the current scan. These are files that were previously ingested but no longer exist on the remote source.
+**Orphan set:** computed purely in application memory as `known_checksums − scanned_checksums`. These are checksums that were registered at the start of the tick but whose file no longer exists on the remote source. Orphan removal (Phase 4b) runs **after** all Phase 4a ingest jobs complete, so a file that was just ingested this tick can never incorrectly appear as an orphan.
 
 ```python
-def _diff(
+def _classify(
     self,
-    remote_files: list[tuple[str, str]],
+    scanned_files: list[tuple[str, str]],
     known_checksums: set[str],
 ) -> tuple[list[tuple[str, str]], set[str]]:
-    """Compute the ingest list and the delete list for a single tick.
+    """Split the scanner output into (ingest_list, orphan_checksums).
 
-    Ingest list — (remote_path, checksum) pairs to download.
-      - Already excludes files whose checksum is in known_checksums
-        (scanner.scan() handled that).
-      - Within the raw scan result, if two remote paths share the same
-        checksum, only the first occurrence is kept; the rest are dropped.
-        This prevents double-ingestion of duplicate content within one tick.
+    skip_list is not returned — callers do not need it; files on skip_list
+    require no further action (membership row already up-to-date).
 
-    Delete list — checksums previously owned by this connector whose remote
-      file is no longer present in the current scan.
+    ingest_list — (remote_path, checksum) pairs to download and ingest.
+      - Checksum is NOT in known_checksums (genuinely new to this connector).
+      - Intra-tick dedup: if two remote paths share the same checksum,
+        only the first occurrence is included; subsequent duplicates are dropped.
+
+    orphan_checksums — checksums in known_checksums that are absent from
+      the current scan. Phase 4b removes connector_id from their ownership
+      arrays and deletes docs whose array becomes empty.
     """
-    seen_in_scan: set[str] = set()
+    scanned_checksums: set[str] = set()
     seen_this_tick: set[str] = set()
-    to_ingest: list[tuple[str, str]] = []
+    ingest_list: list[tuple[str, str]] = []
 
-    for remote_path, checksum in remote_files:
-        seen_in_scan.add(checksum)
-        if checksum not in seen_this_tick:   # dedup: keep first occurrence only
-            seen_this_tick.add(checksum)
-            to_ingest.append((remote_path, checksum))
+    for remote_path, checksum in scanned_files:
+        scanned_checksums.add(checksum)
+        if checksum not in known_checksums:
+            if checksum not in seen_this_tick:   # intra-tick dedup
+                seen_this_tick.add(checksum)
+                ingest_list.append((remote_path, checksum))
+        # files in known_checksums → skip_list (not returned, no action needed)
 
-    orphan_checksums = known_checksums - seen_in_scan
-    return to_ingest, orphan_checksums
+    orphan_checksums = known_checksums - scanned_checksums
+    return ingest_list, orphan_checksums
 ```
 
-> **Dedup invariant:** after `_diff`, every checksum in `to_ingest` is unique. The chosen remote path is the first path encountered during the scan walk (depth-first for SFTP, iteration order of `list_objects_v2` for S3).
+> **Dedup invariant:** after `_classify`, every checksum in `ingest_list` is unique. The chosen remote path is the first path encountered during the scan walk (depth-first for SFTP, iteration order of `list_objects_v2` for S3).
+>
+> **Ordering invariant:** `_delete_orphans(orphan_checksums)` is called only after `_process_new_files(ingest_list)` returns. This guarantees that a checksum added to `connector_file_membership` in Phase 4a is never simultaneously processed as an orphan in Phase 4b within the same tick.
 
 ---
 
@@ -1328,12 +1601,13 @@ All connector DB functions from §5.1:
 **What's to build:**
 - `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
 - `build_scanner()` factory — dispatches on `type`
-- `SFTPScanner` — Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote MD5 via `ssh.exec_command(f'md5sum "{remote_file_path}"')`, staged download
+- `SFTPScanner` — Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote MD5 via `ssh.exec_command(f'md5sum "{remote_file_path}"')`, staged download; `scan()` returns **all** files (no filtering)
 
 **How to test:**
 - Unit test `SFTPScanner` against a local mock SFTP server (e.g. `pytest-sftpserver` or `paramiko.SFTPServer` in a thread)
 - Assert extension filtering works correctly
 - Assert MD5 is computed via remote `md5sum` exec (not by streaming bytes) and matches expected digest
+- Assert `scan()` returns ALL allowed remote files without filtering against any known_checksums
 - Assert `build_scanner("ssh", config)` returns an `SFTPScanner` instance
 
 ---
@@ -1343,10 +1617,11 @@ All connector DB functions from §5.1:
 **Files touched:** `connector/s3_scanner.py`
 
 **What's to build:**
-- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, **checksum dedup pre-check** (skip objects whose checksum is already in `known_checksums`), `download_fileobj()`, staged download, checksum (S3 ETag) registered via `add_connector_to_membership()` (called by main thread on job completion) and stored in `documents.metadata.source_checksum`. `upsert_file_checksum()` must NOT be called.
+- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()`, staged download; `scan()` returns **all** allowed objects without dedup filtering; checksum (S3 ETag) registered via `add_connector_to_membership()` (called by main thread on job completion) and stored in `documents.metadata.source_checksum`. `upsert_file_checksum()` must NOT be called.
 
 **How to test:**
-- Unit test with `moto` (mock AWS) — assert listing, filtering, hash computation, and download
+- Unit test with `moto` (mock AWS) — assert listing, extension filtering, and download
+- Assert `scan()` returns ALL allowed objects without pre-filtering against known_checksums
 - Assert `build_scanner("s3", config)` returns an `S3Scanner` instance
 - Reuse same test interface as PR 4 to verify factory dispatch covers both types
 
@@ -1358,7 +1633,7 @@ All connector DB functions from §5.1:
 
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, diff, ingest new files, orphan deletion, tick finalize
-- `_diff()`: builds `to_ingest` (new files only, intra-tick checksum dedup applied — first remote path wins) and `orphan_checksums` (previously registered checksums absent from current scan) — see §8.4
+- `_classify()`: splits `scanned_files` into `ingest_list` (new files, intra-tick dedup: first path wins) and `orphan_checksums` (known checksums absent from current scan) — see §8.4; `skip_list` is implicit (not returned)
 - Pass `connector_id` to each create-job call inside `_process_new_files()`; the main thread calls `add_connector_to_membership(connector_id, checksum, doc_id)` on job completion (see §5.1) — `upsert_file_checksum` must NOT be called for connector jobs
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
@@ -1371,9 +1646,10 @@ All connector DB functions from §5.1:
 - Assert crash guard writes `"crashed: <error>"` to DB on unhandled exception
 - Assert `stop_event.set()` before a tick results in no DB writes
 - Assert mid-tick cancellation cleans up `pending_checksums` and `ingested_this_tick`
-- `_diff` — assert that when two remote paths share the same checksum only the first is included in `to_ingest`
-- `_diff` — assert that checksums absent from the current scan appear in `orphan_checksums`
-- `_diff` — assert that a checksum present in both `remote_files` and `known_checksums` does not appear in either output list (already handled by scanner, but verify the contract holds end-to-end)
+- `_classify` — assert that when two remote paths share the same checksum only the first is included in `ingest_list`
+- `_classify` — assert that checksums absent from the current scan appear in `orphan_checksums`
+- `_classify` — assert that a checksum present in both `scanned_files` and `known_checksums` does not appear in `ingest_list` and does appear in neither `ingest_list` nor `orphan_checksums`
+- Assert `_delete_orphans()` is called only after `_process_new_files()` returns (Phase 4b ordering invariant)
 
 ---
 
