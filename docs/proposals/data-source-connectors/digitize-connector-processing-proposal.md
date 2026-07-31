@@ -96,7 +96,6 @@ Before any `digitize` connector endpoint is called:
 
 ## 3. API Contract
 
-All endpoints are bearer-token protected and served over TLS.
 
 ### 3.1 `POST /v1/connectors`
 
