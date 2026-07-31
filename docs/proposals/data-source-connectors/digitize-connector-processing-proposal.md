@@ -51,8 +51,9 @@ Before any `digitize` connector endpoint is called:
         if checksum IN known_checksums:
           → already owned by this connector — skip entirely
         elif checksum IN all_checksums:
-          → already ingested by a different connector — place on cross_dup_list
-            (no download, no ingest; insert membership row with existing doc_id)
+          → already ingested by a different connector — no download, no ingest;
+            existing_doc_id = lookup_connector_content_by_checksum(checksum)
+            add_connector_to_membership(connector_id, checksum, existing_doc_id)
         else:
           → brand new to all connectors — place on ingest_list
 
@@ -62,14 +63,9 @@ Before any `digitize` connector endpoint is called:
         on job success:
           add_connector_to_membership(connector_id, checksum, doc_id)
 
-  Step 3b — register cross-connector duplicates (cross_dup_list)
-    → for each (remote_path, checksum) in cross_dup_list:
-        existing_doc_id = lookup_connector_content_by_checksum(checksum)
-        add_connector_to_membership(connector_id, checksum, existing_doc_id)
-
   Step 4 — orphan detection + removal
     → orphan_checksums = known_checksums − {checksum for (_, checksum) in scanned_files}
-    → for each orphan_checksum (after all Step 3/3b writes finish):
+    → for each orphan_checksum (after all Step 3 writes finish):
         remove_connector_from_membership(connector_id, orphan_checksum)
         if remaining_owner_count == 0:
           DELETE /v1/documents/{doc_id}
