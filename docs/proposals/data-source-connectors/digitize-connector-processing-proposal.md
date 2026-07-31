@@ -689,22 +689,23 @@ Phase 2 — load known state
   │  yields: scanned_files = [(remote_path, checksum), ...]       │
   └───────────────────────────────────────────────────────────────┘
 
-Phase 3 — classify files (no DB reads)
-  skip_list      = []   ← checksum IN known_checksums
-  ingest_list    = []   ← checksum NOT IN known_checksums AND not cross-connector
-  cross_dup_list = []   ← checksum NOT IN known_checksums BUT already in another connector
+Phase 3 — classify files + register cross-connector duplicates inline
+  skip_list   = []   ← checksum IN known_checksums
+  ingest_list = []   ← checksum NOT IN known_checksums AND not cross-connector
 
-Phase 4a-new — register each genuinely new file (after successful create_job)
+  for each (remote_path, checksum) in scanned_files (intra-tick dedup applied):
+    elif checksum IN all_checksums:
+      existing_doc_id = lookup_connector_content_by_checksum(checksum)
+      INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
+      VALUES (:checksum, :connector_id, :existing_doc_id)
+      ON CONFLICT (checksum, connector_id) DO NOTHING
+
+Phase 4a — register each genuinely new file (after successful create_job)
   INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
   VALUES (:checksum, :connector_id, :doc_id)
   ON CONFLICT (checksum, connector_id) DO NOTHING
 
   UPDATE documents SET metadata = metadata || :source_metadata WHERE doc_id = :doc_id
-
-Phase 4a-dup — register cross-connector duplicate
-  INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
-  VALUES (:checksum, :connector_id, :existing_doc_id)
-  ON CONFLICT (checksum, connector_id) DO NOTHING
 
 Phase 4b — orphan detection + removal
   (runs once, after ALL Phase 4a writes complete)
@@ -954,18 +955,16 @@ _run_tick()
 │            └──────────────────────────────────────────────────────── ┘
 │
 ├─ [Phase 3] _classify(scanned_files, known_checksums, all_checksums)
-│            → skip_list      checksum IN known_checksums (no action)
-│            → ingest_list    checksum NOT IN all_checksums (brand new)
-│            → cross_dup_list checksum IN all_checksums but NOT known_checksums
+│            → skip_list   checksum IN known_checksums (no action)
+│            → ingest_list checksum NOT IN all_checksums (brand new)
+│            → cross-connector dup: lookup_connector_content_by_checksum(checksum)
+│                                   add_connector_to_membership(connector_id, checksum, existing_doc_id)
+│                                   (DB write happens inline, no separate list)
 │
-├─ [Phase 4a-new] _process_new_files(ingest_list)
+├─ [Phase 4a] _process_new_files(ingest_list)
 │             download → create_job(connector_id) → doc_id
 │             add_connector_to_membership(connector_id, checksum, doc_id)
 │             UPDATE documents.metadata
-│
-├─ [Phase 4a-dup] _process_cross_dup_files(cross_dup_list)
-│             existing_doc_id = lookup_connector_content_by_checksum(checksum)
-│             add_connector_to_membership(connector_id, checksum, existing_doc_id)
 │
 ├─ [Phase 4b] _delete_orphans(orphan_checksums)
 │   ← RUNS AFTER all Phase 4a writes finish ←
@@ -984,7 +983,8 @@ _run_tick()
 - Download and ingest are blocking operations.
 - Fatal errors mark the tick as failed.
 - Per-file failures are counted and summarized instead of failing the whole connector.
-- **Phase 4b (orphan removal) always runs after Phase 4a (all ingest jobs) completes.**
+- Cross-connector duplicates are registered inline during Phase 3 classification — no deferred list.
+- **Phase 4b (orphan removal) always runs after Phase 4a (all new-file ingest jobs) completes.**
 
 ### 8.3 Worker stub
 
@@ -999,11 +999,10 @@ def _run_tick(self) -> None:
         all_checksums: set[str] = set(list_all_checksums())
         scanned_files: list[tuple[str, str]] = scanner.scan()
 
-        ingest_list, cross_dup_list, orphan_checksums = self._classify(
+        ingest_list, orphan_checksums = self._classify(
             scanned_files, known_checksums, all_checksums
         )
         self._process_new_files(sync_id, scanner, ingest_list)
-        self._process_cross_dup_files(cross_dup_list)
         self._delete_orphans(orphan_checksums)
         self._complete_tick(sync_id)
     except Exception as exc:
@@ -1019,10 +1018,9 @@ def _run_tick(self) -> None:
 | Collection | Type | Contents |
 | --- | --- | --- |
 | `ingest_list` | `list[tuple[str, str]]` | Brand new to all connectors — download, ingest, register |
-| `cross_dup_list` | `list[tuple[str, str]]` | Already ingested by a different connector — insert membership row only |
 | `orphan_checksums` | `set[str]` | Previously owned by this connector, no longer on remote source |
 
-Intra-tick dedup: if two remote paths share the same checksum, only the first occurrence is included in `ingest_list` or `cross_dup_list`.
+Cross-connector duplicates (`checksum IN all_checksums but NOT known_checksums`) are handled inline: `_classify` immediately calls `lookup_connector_content_by_checksum` and `add_connector_to_membership` before moving on. Intra-tick dedup still applies — only the first occurrence of a checksum triggers the DB write.
 
 ```python
 def _classify(
@@ -1030,11 +1028,10 @@ def _classify(
     scanned_files: list[tuple[str, str]],
     known_checksums: set[str],
     all_checksums: set[str],
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]], set[str]]:
+) -> tuple[list[tuple[str, str]], set[str]]:
     scanned_checksums: set[str] = set()
     seen_this_tick: set[str] = set()
     ingest_list: list[tuple[str, str]] = []
-    cross_dup_list: list[tuple[str, str]] = []
 
     for remote_path, checksum in scanned_files:
         scanned_checksums.add(checksum)
@@ -1043,14 +1040,15 @@ def _classify(
         elif checksum in all_checksums:
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
-                cross_dup_list.append((remote_path, checksum))
+                existing_doc_id = lookup_connector_content_by_checksum(checksum)
+                add_connector_to_membership(self.connector_id, checksum, existing_doc_id)
         else:
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
                 ingest_list.append((remote_path, checksum))
 
     orphan_checksums = known_checksums - scanned_checksums
-    return ingest_list, cross_dup_list, orphan_checksums
+    return ingest_list, orphan_checksums
 ```
 
 > **Ordering invariant:** `_delete_orphans(orphan_checksums)` is called only after all Phase 4a writes complete, guaranteeing a checksum registered in Phase 4a is never simultaneously processed as an orphan in Phase 4b.
