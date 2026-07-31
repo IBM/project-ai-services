@@ -89,15 +89,15 @@ These assumptions are referenced once here and not repeated below.
 
 ── User-submitted files (no connector_id) ───────────────────────────
   → create-job flow detects absence of connector_id
-  → dedup check against file_checksum_registry (sha256 PK) only
-  → on success: INSERT INTO file_checksum_registry (sha256, doc_id)
+  → dedup check against file_checksum_registry (checksum PK) only
+  → on success: INSERT INTO file_checksum_registry (checksum, doc_id)
   → connector_file_membership is never written for user-submitted docs
 ```
 
 ### 2.3 Main Components
 
 - `active_connectors`: current connector configuration and top-level sync state
-- `file_checksum_registry`: **user-submitted documents only** — keyed by `sha256`, stores a content fingerprint and the `doc_id`. **Already implemented** — table and ORM model exist. Connector code must never write to this table.
+- `file_checksum_registry`: **user-submitted documents only** — keyed by `checksum`, stores a content fingerprint and the `doc_id`. **Already implemented** — table and ORM model exist. Connector code must never write to this table.
 - `connector_file_membership`: **connector-sourced documents only** — keyed by `checksum` (PK), carries the list of connector IDs that reference this file and the `doc_id` for deletion. User-submitted docs are never written here.
 - `connector_sync_history`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
@@ -475,7 +475,7 @@ The presence of `connector_id` on a job (stored in job metadata at create time) 
 
 ```text
 ── User-submitted path ──────────────────────────────────────────────
-file_checksum_registry (sha256 PK) ─────────────────────> documents
+file_checksum_registry (checksum PK) ───────────────────> documents
 
 ── Connector-sourced path ───────────────────────────────────────────
 active_connectors
@@ -514,13 +514,13 @@ CREATE TABLE IF NOT EXISTS active_connectors (
 
 ### 4.3 `file_checksum_registry`
 
-> **Already implemented. User-submitted documents only.** The table and ORM model were merged in the de-duplication PR. The existing schema uses `sha256` as the primary key. **Connector code must never read from or write to this table.** All connector dedup is handled exclusively via `connector_file_membership`.
+> **Already implemented. User-submitted documents only.** The table and ORM model were merged in the de-duplication PR. The existing schema uses `checksum` as the primary key. **Connector code must never read from or write to this table.** All connector dedup is handled exclusively via `connector_file_membership`.
 
 Current schema (already in `init_schema.sql` and `db/models.py`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS file_checksum_registry (
-    sha256   TEXT PRIMARY KEY,
+    checksum TEXT PRIMARY KEY,
     doc_id   TEXT NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 ```
@@ -531,7 +531,7 @@ Current ORM model (already in `db/models.py`):
 class FileChecksumRegistry(Base):
     __tablename__ = "file_checksum_registry"
 
-    sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    checksum: Mapped[str] = mapped_column(Text, primary_key=True)
     doc_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("documents.doc_id", ondelete="CASCADE"),
@@ -542,9 +542,9 @@ class FileChecksumRegistry(Base):
 
 **User-submitted flow:** when a user submits a file via the API or the Digitize UI:
 
-1. Compute `sha256` of the file content.
+1. Compute MD5 checksum of the file content.
 2. Check `file_checksum_registry` — if already present, return `409 / already_exists`.
-3. On successful ingest, insert `(sha256, doc_id)` into `file_checksum_registry`.
+3. On successful ingest, insert `(checksum, doc_id)` into `file_checksum_registry`.
 
 **Connector code must not write here.** The connector path uses `connector_file_membership` exclusively.
 
@@ -684,8 +684,8 @@ The following functions already exist in `services/digitize/db/manager.py` and c
 
 | Existing function | Purpose | Used by |
 | --- | --- | --- |
-| `upsert_file_checksum(sha256, doc_id)` | Register a user-submitted doc by sha256 into `file_checksum_registry` | User-submitted create-job flow only |
-| `find_completed_document_by_hash(sha256)` | Dedup lookup against `file_checksum_registry` — returns `Document` or `None` | User-submitted create-job flow only |
+| `upsert_file_checksum(checksum, doc_id)` | Register a user-submitted doc by checksum into `file_checksum_registry` | User-submitted create-job flow only |
+| `find_completed_document_by_hash(checksum)` | Dedup lookup against `file_checksum_registry` — returns `Document` or `None` | User-submitted create-job flow only |
 
 **Create-job `connector_id` routing rule:**
 
@@ -693,7 +693,7 @@ When the create-job flow is invoked it accepts an optional `connector_id` parame
 
 | Scenario | `connector_id` | Dedup table | Registry written | Notes |
 | --- | --- | --- | --- | --- |
-| User-submitted | absent | `file_checksum_registry` | `file_checksum_registry (sha256, doc_id)` | Connector tables untouched |
+| User-submitted | absent | `file_checksum_registry` | `file_checksum_registry (checksum, doc_id)` | Connector tables untouched |
 | Connector-sourced | present | `connector_file_membership` | `connector_file_membership (checksum, connector_ids, doc_id)` | `file_checksum_registry` untouched |
 
 New connector-specific functions to add:
@@ -1530,8 +1530,8 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 **Files touched:** `init_schema.sql`, `db/models.py`, `config/settings.py`
 
 **What's already done:**
-- `file_checksum_registry` table (with `sha256` PK) exists in `init_schema.sql` — **no changes needed** to this table; it remains user-submitted only
-- `FileChecksumRegistry` ORM model exists in `db/models.py` — **no changes needed**
+- `file_checksum_registry` table exists in `init_schema.sql` — rename the `sha256` column to `checksum` (MD5); it remains user-submitted only
+- `FileChecksumRegistry` ORM model exists in `db/models.py` — rename the `sha256` field to `checksum`
 
 **What's to build:**
 - 3 new tables: `active_connectors`, `connector_file_membership`, `connector_sync_history`
@@ -1552,8 +1552,8 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 **Files touched:** `services/digitize/utils/db.py`
 
 **What's already done:**
-- `upsert_file_checksum(sha256, doc_id)` in `db/manager.py` — **do not modify**; user-submitted only
-- `find_completed_document_by_hash(sha256)` in `db/manager.py` — **do not modify**; user-submitted only
+- `upsert_file_checksum(checksum, doc_id)` in `db/manager.py` — **do not modify** beyond the parameter rename; user-submitted only
+- `find_completed_document_by_hash(checksum)` in `db/manager.py` — **do not modify** beyond the parameter rename; user-submitted only
 
 **What's to build:**
 All connector DB functions from §5.1:
