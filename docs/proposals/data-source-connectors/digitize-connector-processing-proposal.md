@@ -14,7 +14,7 @@ Before any `digitize` connector endpoint is called:
   - `s3`: `secret_access_key`
 - `digitize` encrypts those secret fields at rest using `/run/secrets/connector_encryption_key` before persisting them.
 - `/run/secrets/connector_api_token` and `/run/secrets/connector_encryption_key` are mounted before pod start.
-- The `file_checksum_registry` table and the `FileChecksumRegistry` ORM model already exist in the codebase (merged in the de-duplication PR). The table uses `sha256` as its primary key — connector code must reference this column by that name.
+- The `file_checksum_registry` table and the `FileChecksumRegistry` ORM model already exist in the codebase (merged in the de-duplication PR). This table is **user-submitted documents only** — connector code must never read from or write to it. Connector dedup is handled exclusively via `connector_file_membership` (see §4.4).
 
 These assumptions are referenced once here and not repeated below.
 
@@ -38,32 +38,34 @@ PUT
   → update connector config in DB
   → running thread re-reads config from DB before next tick
 
-Each tick
+Each tick (connector-sourced)
   → fetch latest connector config from DB
   → scan source — yields (remote_path, checksum) per file
-  → compare checksums with known_checksums from registry
-  → skip files whose checksum is already registered (zero bytes transferred)
+  → compare checksums with known_checksums from connector_file_membership
+  → skip files whose checksum is already in connector_file_membership for this connector
   → ingest only new content
   → create-job is called with connector_id — main thread inserts into
-     file_checksum_registry and connector_file_membership
+     connector_file_membership (keyed by checksum, carrying connector_id + doc_id)
   → store source checksum in document metadata
   → remove orphaned content by ref count
   → write sync status + history
 
 User-submitted files (no connector_id)
   → create-job flow detects absence of connector_id
-  → inserts into connector_file_membership with connector_id = 'user_submitted'
+  → dedup check against file_checksum_registry (sha256 PK) only
+  → on success: insert row into file_checksum_registry (sha256, doc_id)
+  → connector_file_membership is never written for user-submitted docs
 ```
 
 ### 2.3 Main Components
 
 - `active_connectors`: current connector configuration and top-level sync state
-- `file_checksum_registry`: global content registry keyed by `sha256` — stores a content fingerprint and a reference to the ingested `doc_id`. **Already implemented** — table and ORM model exist.
-- `connector_file_membership`: which connector currently references which checksum
+- `file_checksum_registry`: **user-submitted documents only** — keyed by `sha256`, stores a content fingerprint and the `doc_id`. **Already implemented** — table and ORM model exist. Connector code must never write to this table.
+- `connector_file_membership`: **connector-sourced documents only** — keyed by `checksum` (PK), carries the list of connector IDs that reference this file and the `doc_id` for deletion. User-submitted docs are never written here.
 - `connector_sync_history`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
 - `ConnectorSyncWorker`: executes periodic sync logic
-- scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5 — both stored as `sha256` in `file_checksum_registry`
+- scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5 — both stored as `checksum` in `connector_file_membership`
 
 ---
 
@@ -108,7 +110,7 @@ Common fields:
 | `prefix` | `string` | ❌ | Key prefix to scope listing — empty means bucket root |
 | `delimiter` | `string` | ❌ | Set `"/"` for non-recursive (immediate children only) |
 
-> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — the scanner stores this as the checksum in `file_checksum_registry.sha256`. If the checksum is already registered the file is **never downloaded**. The checksum is also stored in document `metadata.source_checksum` for traceability. See [§4.3](#43-file_checksum_registry) and [§7.2](#72-s3-scanner).
+> **Checksum-based dedup (connector path):** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — the scanner stores this as `checksum` in `connector_file_membership`. If the checksum is already present in `connector_file_membership` for this connector the file is **never downloaded**. The checksum is also stored in document `metadata.source_checksum` for traceability. See [§4.4](#44-connector_file_membership) and [§7.2](#72-s3-scanner).
 
 #### Example payloads
 
@@ -221,13 +223,14 @@ DELETE /v1/connectors/{connector_id}
   → check if sync tick is in progress
       if YES → 409 Conflict (no state modified)
   → stop worker
-  → list connector checksums
+  → list checksums owned by this connector (connector_file_membership WHERE connector_ids @> [connector_id])
   → for each checksum:
-       remove membership in transaction
-       count remaining refs for this checksum
-       if refs == 0:
+       remove_connector_from_membership(connector_id, checksum)
+         → removes connector_id from connector_ids array
+         → returns (remaining_owner_count, doc_id)
+       if remaining_owner_count == 0:
+         DELETE FROM connector_file_membership WHERE checksum = $1
          DELETE /v1/documents/{doc_id}
-         DELETE FROM file_checksum_registry WHERE sha256 = $1
   → delete connector row
   → cleanup staging dirs
 ```
@@ -392,6 +395,39 @@ At most one in-progress `syncing` row exists per connector.
 }
 ```
 
+### 3.7 Digitize Document & Job API — Connector Visibility Rules
+
+The Digitize APIs for documents and jobs enforce a strict visibility boundary between user-submitted content and connector-sourced content.
+
+#### Document APIs (`/v1/documents`)
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /v1/documents` | Returns **user-submitted documents only** — connector-sourced docs are excluded |
+| `GET /v1/documents/{doc_id}` | Returns the document only if it was user-submitted; returns `404` for connector-sourced docs |
+| `DELETE /v1/documents/{doc_id}` | Deletes the document only if it was user-submitted; returns `404` for connector-sourced docs |
+
+**Rationale:** connector-sourced documents are managed exclusively through their data source (S3 bucket, SFTP share). Users interact with those files by adding or removing them at the source; the next connector sync tick handles ingest or deletion automatically. Exposing connector-sourced docs via user-facing APIs would allow deletion without removal from the source, causing the file to be re-ingested on the next tick.
+
+**Implementation:** a document is identified as connector-sourced when a row exists in `connector_file_membership` for its `doc_id`. The DB query for user-facing document endpoints must add a `NOT EXISTS (SELECT 1 FROM connector_file_membership WHERE doc_id = ...)` filter (or equivalent LEFT JOIN / subquery).
+
+#### Job APIs (`/v1/jobs`)
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /v1/jobs` (list) | Returns **all jobs** — both connector-sourced and user-submitted |
+| `GET /v1/jobs/{job_id}` | Returns **all jobs** — connector job details are accessible |
+| `DELETE /v1/jobs/{job_id}` | Deletes only job records — same rules apply regardless of origin |
+
+The job list intentionally includes connector-initiated jobs so operators can observe sync progress and diagnose failures in a single view.
+
+#### Detection mechanism
+
+The presence of `connector_id` on a job (stored in job metadata at create time) is the authoritative signal:
+
+- `connector_id` present on job → connector-sourced → excluded from document APIs.
+- `connector_id` absent → user-submitted → included in document APIs.
+
 ---
 
 ## 4. Data Model
@@ -401,13 +437,22 @@ At most one in-progress `syncing` row exists per connector.
 ### 4.1 Table Relationships
 
 ```text
+── User-submitted path ──────────────────────────────────────────────
+file_checksum_registry (sha256 PK) ─────────────────────> documents
+
+── Connector-sourced path ───────────────────────────────────────────
 active_connectors
-  └─< connector_file_membership >─┐
-                                  └─ file_checksum_registry ─> documents
+  └─< connector_file_membership (checksum PK, connector_ids[], doc_id) ─> documents
 
 active_connectors
   └─< connector_sync_history
 ```
+
+The two registries are **intentionally separate**:
+- `file_checksum_registry` → user-submitted dedup only; never touched by connector code.
+- `connector_file_membership` → connector-sourced dedup only; never touched by user-submitted code.
+
+A file with the same content can legitimately exist in **both** registries — one row representing the user-uploaded copy and one row representing the connector-synced copy. This is a known and accepted duplicate; the plan is to retire the user-submitted workflow in the future at which point `file_checksum_registry` will no longer be needed (see §4.7).
 
 ### 4.2 `active_connectors`
 
@@ -432,7 +477,7 @@ CREATE TABLE IF NOT EXISTS active_connectors (
 
 ### 4.3 `file_checksum_registry`
 
-> **Already implemented.** The table and ORM model were merged in the de-duplication PR. The existing schema uses `sha256` as the primary key (not `checksum`). The connector implementation must use `sha256` as the column/field name throughout.
+> **Already implemented. User-submitted documents only.** The table and ORM model were merged in the de-duplication PR. The existing schema uses `sha256` as the primary key. **Connector code must never read from or write to this table.** All connector dedup is handled exclusively via `connector_file_membership`.
 
 Current schema (already in `init_schema.sql` and `db/models.py`):
 
@@ -458,9 +503,81 @@ class FileChecksumRegistry(Base):
     )
 ```
 
-**Connector usage:** For S3 sources the scanner stores the S3 ETag returned by `list_objects_v2` (quotes stripped) as `sha256`. For SFTP sources the scanner stores the remotely-computed MD5 hex digest as `sha256`. Both are stored in `file_checksum_registry.sha256` with no schema difference — they are treated as opaque content fingerprints.
+**User-submitted flow:** when a user submits a file via the API or the Digitize UI:
 
-> **Document metadata:** When a document row is created the scanner also writes the fingerprint into `documents.metadata` as `metadata.source_checksum`. This makes the content fingerprint visible in the document record without a registry join.
+1. Compute `sha256` of the file content.
+2. Check `file_checksum_registry` — if already present, return `409 / already_exists`.
+3. On successful ingest, insert `(sha256, doc_id)` into `file_checksum_registry`.
+
+**Connector code must not write here.** The connector path uses `connector_file_membership` exclusively.
+
+### 4.4 `connector_file_membership`
+
+**Connector-sourced documents only.** This table is the sole dedup and reference-counting store for all content ingested via connectors. User-submitted code must never write to this table.
+
+The schema uses `checksum` as the primary key. The `connector_ids` column is a JSON array of all connector IDs that currently reference this file (cross-connector shared-content tracking). `doc_id` is stored here — not in `file_checksum_registry` — so that deletion can proceed without a registry join.
+
+```sql
+CREATE TABLE IF NOT EXISTS connector_file_membership (
+    checksum      TEXT        PRIMARY KEY,
+    connector_ids JSONB       NOT NULL DEFAULT '[]',
+    doc_id        TEXT        NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cfm_doc_id
+    ON connector_file_membership (doc_id);
+```
+
+**Why `checksum` is the PK:**
+
+A given file (identified by its content checksum) can be owned by multiple connectors at once — e.g. the same PDF is stored in both an S3 bucket connector and an SFTP share connector. Rather than creating one row per `(connector_id, checksum)` pair, a single row per checksum is maintained and the `connector_ids` array is updated atomically. This makes reference counting a simple array-length check rather than a `COUNT(*)` join.
+
+**Connector IDs array invariants:**
+
+- When a connector first encounters a checksum (new content): insert a new row with `connector_ids = [connector_id]` and `doc_id` from the completed ingest job.
+- When a second connector encounters the same checksum (already ingested by another connector): append `connector_id` to `connector_ids`, reuse the existing `doc_id` — **no download, no ingest**.
+- When a connector removes a file (orphan detected): remove `connector_id` from the array. If the array becomes empty, delete the row and the associated document.
+
+**Dedup check (per tick):**
+
+```sql
+-- Known checksums for this connector: all checksums where connector_id appears in the array
+SELECT checksum
+FROM connector_file_membership
+WHERE connector_ids @> jsonb_build_array(:connector_id::text);
+```
+
+**Reference-counted delete stub:**
+
+```sql
+BEGIN;
+
+-- Remove this connector from the owners array
+UPDATE connector_file_membership
+SET connector_ids = connector_ids - :connector_id
+WHERE checksum = :checksum;
+
+-- Check how many owners remain
+SELECT jsonb_array_length(connector_ids), doc_id
+FROM connector_file_membership
+WHERE checksum = :checksum;
+
+-- If jsonb_array_length == 0: delete the row and the document
+-- DELETE FROM connector_file_membership WHERE checksum = :checksum;
+-- DELETE /v1/documents/{doc_id}
+
+COMMIT;
+```
+
+**Checksum format reference:**
+
+| Source | Value stored in `checksum` | Dedup property |
+| --- | --- | --- |
+| S3 single-part | S3 ETag = `MD5(file_bytes)` — 32-char hex, no suffix | Unique per file content (for this upload method) |
+| S3 multi-part | S3 ETag = `MD5(MD5(p₁)‖…‖MD5(pₙ))-N` — hex + `-N` suffix | Unique per (file content + part size) |
+| SFTP | `md5sum` output from remote host — 32-char hex | Unique per file content, protocol-independent |
+
+> **Document metadata:** When a document row is created the scanner also writes the fingerprint into `documents.metadata` as `metadata.source_checksum`. This makes the content fingerprint visible in the document record without a membership join.
 >
 > ```json
 > {
@@ -470,50 +587,6 @@ class FileChecksumRegistry(Base):
 >   "key": "reports/sg248590-2.pdf"
 > }
 > ```
-
-**Checksum format reference:**
-
-| Source | Value stored in `sha256` | Dedup property |
-| --- | --- | --- |
-| S3 single-part | S3 ETag = `MD5(file_bytes)` — 32-char hex, no suffix | Unique per file content (for this upload method) |
-| S3 multi-part | S3 ETag = `MD5(MD5(p₁)‖…‖MD5(pₙ))-N` — hex + `-N` suffix | Unique per (file content + part size) |
-| SFTP | `md5sum` output from remote host — 32-char hex | Unique per file content, protocol-independent |
-
-### 4.4 `connector_file_membership`
-
-Maps connectors to the checksums they currently own.
-
-```sql
-CREATE TABLE IF NOT EXISTS connector_file_membership (
-    connector_id  TEXT NOT NULL,
-    checksum      TEXT NOT NULL,
-    PRIMARY KEY (connector_id, checksum),
-    FOREIGN KEY (connector_id) REFERENCES active_connectors(id) ON DELETE CASCADE,
-    FOREIGN KEY (checksum) REFERENCES file_checksum_registry(sha256) ON DELETE CASCADE
-);
-```
-
-Deduplication and deletion rules:
-
-- Existing checksum in `file_checksum_registry` → reuse `doc_id`, add membership row only — **no download, no ingest**.
-- New checksum → download file, run ingest pipeline, insert registry row with `doc_id`, then add membership.
-- On removal, delete membership first, count remaining references for this checksum inside the same transaction, and delete the document and registry row only when the count reaches zero.
-
-#### Reference-counted delete stub
-
-```sql
-BEGIN;
-
-DELETE FROM connector_file_membership
-WHERE connector_id = $1 AND checksum = $2;
-
--- Returns 0 when this was the last owner → safe to delete document + registry row
-SELECT COUNT(*)
-FROM connector_file_membership
-WHERE checksum = $2;
-
-COMMIT;
-```
 
 ### 4.5 `connector_sync_history`
 
@@ -544,11 +617,21 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 
 ### 4.6 ORM
 
-**`FileChecksumRegistry` already exists** in `services/digitize/db/models.py`. Add the remaining three models to that file:
+**`FileChecksumRegistry` already exists** in `services/digitize/db/models.py` and remains unchanged — it covers user-submitted docs only. Add the remaining three models to that file:
 
 - `ActiveConnector` — fields: `id` (PK), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`
-- `ConnectorFileMembership` — fields: `connector_id` (FK → `active_connectors`), `checksum` (FK → `file_checksum_registry.sha256`)
+- `ConnectorFileMembership` — fields: `checksum` (PK), `connector_ids` (JSONB array), `doc_id` (FK → `documents`)
 - `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `active_connectors`), `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`
+
+### 4.7 Future: Retiring the User-Submitted Workflow
+
+The user-submitted ingestion path (upload via API or Digitize UI) is planned to be retired in a future release. When that happens, `file_checksum_registry` will no longer be needed and can be dropped. The connector-sourced path via `connector_file_membership` is the long-term dedup mechanism.
+
+Until that migration is complete:
+
+- The same file may exist as **both** a `file_checksum_registry` row (user-submitted copy) **and** a `connector_file_membership` row (connector-synced copy). This cross-origin duplicate is intentional and accepted.
+- Dedup operates strictly within each path: user-submitted files are deduped only against `file_checksum_registry`; connector files are deduped only against `connector_file_membership`. There is no cross-path dedup.
+- User-facing document and job APIs (GET, DELETE on `/v1/documents`, doc-specific GET on `/v1/jobs`) expose only user-submitted documents; connector-sourced documents are excluded from these responses (see §3).
 
 ---
 
@@ -560,19 +643,21 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 
 ### 5.1 Core functions
 
-The following functions already exist in `services/digitize/db/manager.py` and cover the per-job de-duplication path — **do not re-implement them**:
+The following functions already exist in `services/digitize/db/manager.py` and cover the user-submitted de-duplication path — **do not re-implement them, and do not call them from connector code**:
 
-| Existing function | Purpose |
-| --- | --- |
-| `upsert_file_checksum(sha256, doc_id)` | Register newly ingested content by sha256 |
-| `find_completed_document_by_hash(sha256)` | Dedup lookup — returns `Document` or `None` |
+| Existing function | Purpose | Used by |
+| --- | --- | --- |
+| `upsert_file_checksum(sha256, doc_id)` | Register a user-submitted doc by sha256 into `file_checksum_registry` | User-submitted create-job flow only |
+| `find_completed_document_by_hash(sha256)` | Dedup lookup against `file_checksum_registry` — returns `Document` or `None` | User-submitted create-job flow only |
 
-**Create-job `connector_id` threading rule:**
+**Create-job `connector_id` routing rule:**
 
-When the create-job flow is invoked it now accepts an optional `connector_id` parameter:
+When the create-job flow is invoked it accepts an optional `connector_id` parameter. The presence or absence of this parameter determines which dedup table is consulted and which registry is written:
 
-- **`connector_id` present** (connector-initiated job): the main thread — not the scanner — is responsible for inserting the row into `file_checksum_registry` (via `upsert_file_checksum`) and the row into `connector_file_membership` (via `insert_connector_membership`) immediately after the job completes successfully.
-- **`connector_id` absent** (user-submitted file): the create-job flow inserts a row into `connector_file_membership` with `connector_id = 'user_submitted'` so that every ingested file always has a membership record regardless of origin.
+| Scenario | `connector_id` | Dedup table | Registry written | Notes |
+| --- | --- | --- | --- | --- |
+| User-submitted | absent | `file_checksum_registry` | `file_checksum_registry (sha256, doc_id)` | Connector tables untouched |
+| Connector-sourced | present | `connector_file_membership` | `connector_file_membership (checksum, connector_ids, doc_id)` | `file_checksum_registry` untouched |
 
 New connector-specific functions to add:
 
@@ -585,10 +670,10 @@ New connector-specific functions to add:
 | `delete_active_connector()` | delete connector |
 | `update_connector_sync_status()` | write top-level sync state |
 | `merge_connection_details()` | key-level JSON merge for PUT |
-| `lookup_content_by_checksum(checksum)` | connector dedup lookup — returns `doc_id` or `None` |
-| `list_connector_checksums(connector_id)` | current checksums owned by this connector |
-| `insert_connector_membership(connector_id, checksum)` | add ownership row |
-| `delete_connector_membership_atomic(connector_id, checksum)` | remove ownership, return remaining ref count |
+| `lookup_connector_content_by_checksum(checksum)` | connector dedup lookup — queries `connector_file_membership`, returns `doc_id` or `None` |
+| `list_connector_checksums(connector_id)` | all checksums currently owned by this connector (array containment query on `connector_ids`) |
+| `add_connector_to_membership(connector_id, checksum, doc_id)` | insert new membership row OR append `connector_id` to existing row's `connector_ids` array |
+| `remove_connector_from_membership(connector_id, checksum)` | remove `connector_id` from `connector_ids` array; return remaining owner count and `doc_id` |
 | `insert_sync_history()` | create tick row |
 | `update_sync_history()` | finalize tick row |
 | `update_sync_history_files_syncing()` | live progress updates |
@@ -598,26 +683,65 @@ New connector-specific functions to add:
 ### 5.2 DB-layer stub
 
 ```python
-def lookup_content_by_checksum(checksum: str) -> str | None:
-    """Return doc_id if checksum is already registered, else None."""
-    return tx.scalar(
-        "SELECT doc_id FROM file_checksum_registry WHERE sha256 = :checksum",
-        {"checksum": checksum},
-    )
+def lookup_connector_content_by_checksum(checksum: str) -> str | None:
+    """Return doc_id if checksum is already in connector_file_membership, else None.
+
+    Used exclusively by connector sync workers — never by user-submitted code.
+    """
+    with session() as s:
+        row = s.execute(
+            text("SELECT doc_id FROM connector_file_membership WHERE checksum = :checksum"),
+            {"checksum": checksum},
+        ).one_or_none()
+    return row.doc_id if row else None
 
 
-def delete_connector_membership_atomic(connector_id: str, checksum: str) -> int:
-    """Delete one membership row and return remaining reference count."""
+def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -> None:
+    """Insert a new membership row or append connector_id to an existing row's connector_ids array.
+
+    - If checksum is new: INSERT (checksum, [connector_id], doc_id).
+    - If checksum already exists (shared content): append connector_id to connector_ids array.
+    """
     with transaction() as tx:
         tx.execute(
-            "DELETE FROM connector_file_membership WHERE connector_id = :cid AND checksum = :checksum",
-            {"cid": connector_id, "checksum": checksum},
+            text("""
+                INSERT INTO connector_file_membership (checksum, connector_ids, doc_id)
+                VALUES (:checksum, jsonb_build_array(:connector_id::text), :doc_id)
+                ON CONFLICT (checksum) DO UPDATE
+                  SET connector_ids = connector_file_membership.connector_ids
+                      || jsonb_build_array(EXCLUDED.connector_ids->0)
+                WHERE NOT (connector_file_membership.connector_ids
+                           @> jsonb_build_array(:connector_id::text))
+            """),
+            {"checksum": checksum, "connector_id": connector_id, "doc_id": doc_id},
         )
-        remaining = tx.scalar(
-            "SELECT COUNT(*) FROM connector_file_membership WHERE checksum = :checksum",
+
+
+def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[int, str | None]:
+    """Remove connector_id from the owners array; return (remaining_owner_count, doc_id).
+
+    Caller must delete the membership row and associated document when remaining_owner_count == 0.
+    """
+    with transaction() as tx:
+        tx.execute(
+            text("""
+                UPDATE connector_file_membership
+                SET connector_ids = connector_ids - :connector_id
+                WHERE checksum = :checksum
+            """),
+            {"connector_id": connector_id, "checksum": checksum},
+        )
+        row = tx.execute(
+            text("""
+                SELECT jsonb_array_length(connector_ids) AS remaining, doc_id
+                FROM connector_file_membership
+                WHERE checksum = :checksum
+            """),
             {"checksum": checksum},
-        )
-    return int(remaining)
+        ).one_or_none()
+    if row is None:
+        return 0, None
+    return int(row.remaining), row.doc_id
 ```
 
 ---
@@ -641,7 +765,7 @@ Subclass responsibilities:
 - remote listing — yields `(remote_path, checksum)` pairs, where `remote_path` is the string path (SFTP) or object key (S3) needed by `download_to()` — the tuple is the sole carrier of the remote location; no side-channel store is needed
 - dedup check against `known_checksums` before downloading (strategy is transport-specific — see §7.1 and §7.2)
 - file download (only when checksum is not already known) — `remote_path` is taken directly from the scan tuple
-- storing the checksum in `file_checksum_registry.sha256` and in `documents.metadata` after ingest
+- storing the checksum in `connector_file_membership.checksum` and in `documents.metadata` after ingest
 - connection lifecycle
 
 ### 6.2 Class diagram
@@ -654,8 +778,8 @@ BaseScanner
   └─ close()
 
 BaseScanner
-  ├─ SFTPScanner          (checksum = remotely-computed MD5, stored in sha256 column)
-  └─ S3Scanner            (checksum = S3 ETag from list_objects_v2, stored in sha256 column)
+  ├─ SFTPScanner          (checksum = remotely-computed MD5, stored in connector_file_membership.checksum)
+  └─ S3Scanner            (checksum = S3 ETag from list_objects_v2, stored in connector_file_membership.checksum)
 ```
 
 ### 6.3 Interface stub
@@ -718,7 +842,7 @@ Behavior:
 - compute MD5 **on the remote host** via `ssh.exec_command()` — no file bytes are transferred during hashing
 - download selected files into staging
 
-> **Note — SFTP checksum is an MD5 digest.** The checksum for SFTP files is a hex MD5 digest (e.g. `"d41d8cd98f00b204e980..."`), computed remotely via `md5sum`, stored in `file_checksum_registry.sha256`. For S3 files the same column stores the S3 ETag returned by `list_objects_v2` — both are treated uniformly as an opaque content fingerprint (see [§7.2](#72-s3-scanner)).
+> **Note — SFTP checksum is an MD5 digest.** The checksum for SFTP files is a hex MD5 digest (e.g. `"d41d8cd98f00b204e980..."`), computed remotely via `md5sum`, stored in `connector_file_membership.checksum`. For S3 files the same column stores the S3 ETag returned by `list_objects_v2` — both are treated uniformly as an opaque content fingerprint (see [§7.2](#72-s3-scanner)).
 
 MD5 is obtained by running `md5sum` on the remote side:
 
@@ -735,14 +859,14 @@ SFTP scan sketch:
 
 ```python
 def scan(self, known_checksums: set[str]) -> list[tuple[str, str]]:
-    """Return (remote_path, checksum) for files whose checksum is not yet registered.
+    """Return (remote_path, checksum) for files whose checksum is not yet in connector_file_membership.
 
     remote_path is the absolute string path on the remote host.
     It is stored in the tuple so that the worker can pass it directly to
     download_to(remote_path, local_path) — no separate lookup is needed.
 
     For SFTP sources the checksum is a hex MD5 digest computed on the
-    remote host via md5sum — stored in file_checksum_registry.sha256
+    remote host via md5sum — stored in connector_file_membership.checksum
     alongside S3 checksums (S3 ETags) with no schema difference.
     """
     found = []
@@ -770,7 +894,7 @@ Behavior:
 - List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag, at no extra API cost
 - **Checksum pre-check before download:** if checksum is already in `known_checksums` → skip file entirely (zero bytes transferred)
 - Download only new files via `download_fileobj()`
-- Store checksum in `file_checksum_registry.sha256` and in `documents.metadata.source_checksum`
+- Store checksum in `connector_file_membership.checksum` and in `documents.metadata.source_checksum`
 
 **Checksum dedup flow:**
 
@@ -782,9 +906,9 @@ list_objects_v2  →  (key, checksum)          # checksum = S3 ETag
           YES ──────┘                    NO
            ▼                              ▼
       skip — zero bytes             download_fileobj()
-      add membership only           + _HashingWriter (inline MD5)
-                                    ingest pipeline
-                                    INSERT file_checksum_registry(checksum, ...)
+      add connector_id to           + _HashingWriter (inline MD5)
+      existing membership row       ingest pipeline
+                                    INSERT connector_file_membership(checksum, [connector_id], doc_id)
                                     SET documents.metadata.source_checksum = checksum
 ```
 
@@ -816,13 +940,14 @@ def download_and_register(self, key: str, checksum: str, staging_dir: Path) -> s
             Key=key,
             Fileobj=writer,
         )
-    # checksum = S3 ETag from list_objects_v2 — stored in file_checksum_registry.sha256.
+    # checksum = S3 ETag from list_objects_v2 — stored in connector_file_membership.checksum.
     # For single-part: local MD5 == checksum (sanity check available).
     # For multi-part:  local MD5 != checksum (different formula — expected).
     doc_id = run_ingest_pipeline(local_path, connector_id=self._connector_id)
-    # registry + membership inserts are performed by the main thread via the
-    # create-job flow (connector_id is forwarded) — do NOT call upsert_file_checksum
-    # or insert_connector_membership here; they are handled after job completion.
+    # connector_file_membership insert is performed by the main thread via the
+    # create-job flow (connector_id is forwarded) — do NOT call add_connector_to_membership
+    # here; it is handled after job completion. file_checksum_registry is never touched
+    # by connector code.
     set_document_metadata(doc_id, {
         "source_checksum": checksum,
         "source_type":     "s3",
@@ -884,9 +1009,10 @@ def _run_tick(self) -> None:
     try:
         scanner.connect()
 
-        # known_checksums: set of checksums already in file_checksum_registry
-        # for this connector. Passed to scanner.scan() so the scanner can skip
-        # files whose checksum is already registered — no download occurs.
+        # known_checksums: set of checksums already in connector_file_membership
+        # for this connector (array-containment query on connector_ids).
+        # Passed to scanner.scan() so the scanner can skip files whose checksum
+        # is already owned by this connector — no download occurs.
         known_checksums = set(list_connector_checksums(self.connector_id))
 
         # scan() returns only (remote_path, checksum) pairs not in known_checksums.
@@ -899,8 +1025,8 @@ def _run_tick(self) -> None:
         # _process_new_files unpacks each (remote_path, checksum) tuple and calls
         # scanner.download_to(remote_path, local_path) directly.
         # It also passes self.connector_id to each create-job call so the
-        # main thread handles file_checksum_registry and connector_file_membership
-        # insertions after each job completes (see §5.1).
+        # main thread calls add_connector_to_membership(connector_id, checksum, doc_id)
+        # after each job completes (see §5.1). file_checksum_registry is never touched.
         self._process_new_files(sync_id, scanner, to_ingest)
         self._delete_orphans(orphan_checksums)
         self._complete_tick(sync_id)
@@ -1131,16 +1257,19 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 **Files touched:** `init_schema.sql`, `db/models.py`, `config/settings.py`
 
 **What's already done:**
-- `file_checksum_registry` table (with `sha256` PK) exists in `init_schema.sql`
-- `FileChecksumRegistry` ORM model exists in `db/models.py`
+- `file_checksum_registry` table (with `sha256` PK) exists in `init_schema.sql` — **no changes needed** to this table; it remains user-submitted only
+- `FileChecksumRegistry` ORM model exists in `db/models.py` — **no changes needed**
 
 **What's to build:**
 - 3 new tables: `active_connectors`, `connector_file_membership`, `connector_sync_history`
-- 3 new ORM models: `ActiveConnector`, `ConnectorFileMembership`, `ConnectorSyncHistory`
+  - `connector_file_membership` schema: `checksum TEXT PRIMARY KEY`, `connector_ids JSONB NOT NULL DEFAULT '[]'`, `doc_id TEXT NOT NULL REFERENCES documents(doc_id)` — no FK to `file_checksum_registry`
+- 3 new ORM models: `ActiveConnector`, `ConnectorFileMembership` (checksum PK, connector_ids JSONB, doc_id FK), `ConnectorSyncHistory`
 - Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap, `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`, written into `active_connectors.sync_interval_seconds` on connector creation)
 
 **How to test:**
 - Run `init_schema.sql` against a local/test DB and assert all 3 new tables exist with correct columns, constraints, and indexes
+- Assert `connector_file_membership` has no FK to `file_checksum_registry`
+- Assert `connector_file_membership.checksum` is the sole PK and `connector_ids` is a JSONB column
 - Unit test: instantiate ORM models and map them against the schema
 
 ---
@@ -1150,17 +1279,20 @@ Each PR is independently testable — no PR leaves things in a broken or untesta
 **Files touched:** `services/digitize/utils/db.py`
 
 **What's already done:**
-- `upsert_file_checksum(sha256, doc_id)` in `db/manager.py`
-- `find_completed_document_by_hash(sha256)` in `db/manager.py`
+- `upsert_file_checksum(sha256, doc_id)` in `db/manager.py` — **do not modify**; user-submitted only
+- `find_completed_document_by_hash(sha256)` in `db/manager.py` — **do not modify**; user-submitted only
 
 **What's to build:**
 All connector DB functions from §5.1:
-`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_content_by_checksum`, `list_connector_checksums`, `insert_connector_membership`, `delete_connector_membership_atomic`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`
+`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_active_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_connector_content_by_checksum`, `list_connector_checksums`, `add_connector_to_membership`, `remove_connector_from_membership`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`
 
 **How to test:**
 - Unit tests per function against a test DB (real or in-memory with pg_testcontainer / SQLite shim)
-- Assert `delete_connector_membership_atomic` returns correct remaining ref counts
+- Assert `add_connector_to_membership` inserts a new row on first call and appends the connector_id on subsequent calls with the same checksum
+- Assert `remove_connector_from_membership` returns `remaining=0` when the last connector is removed, and `remaining>0` when others still own the checksum
+- Assert `list_connector_checksums` uses array-containment (`@>`) and returns only checksums owned by the given connector
 - Assert `merge_connection_details` correctly merges keys without clobbering untouched fields
+- Assert that `lookup_connector_content_by_checksum` queries `connector_file_membership` and never touches `file_checksum_registry`
 
 ---
 
@@ -1174,12 +1306,18 @@ All connector DB functions from §5.1:
 - `DELETE /v1/connectors/{id}` — stub only (stops at "would stop worker" + calls DB delete), no worker logic yet
 - `GET /v1/connectors` and `GET /v1/connectors/{id}` — read from DB, strip secret fields
 - `GET /v1/connectors/{id}/sync-history` — paginated query with `limit`/`offset`
+- **Update `GET /v1/documents` and `GET /v1/documents/{doc_id}`** to exclude connector-sourced docs via `NOT EXISTS (SELECT 1 FROM connector_file_membership WHERE doc_id = ...)` filter
+- **Update `DELETE /v1/documents/{doc_id}`** to return `404` for connector-sourced docs
 
 **How to test:**
 - Integration tests using `httpx.AsyncClient` + test DB
 - Assert secrets are never returned in GET responses
 - Assert `PUT` with partial `connection_details` only overwrites provided keys
 - Assert correct HTTP status codes for 404/409/401 paths
+- Assert `GET /v1/documents` does not return docs whose `doc_id` appears in `connector_file_membership`
+- Assert `GET /v1/documents/{doc_id}` returns `404` for a connector-sourced doc
+- Assert `DELETE /v1/documents/{doc_id}` returns `404` for a connector-sourced doc
+- Assert `GET /v1/jobs` returns **all** jobs including connector-initiated ones
 
 ---
 
@@ -1205,7 +1343,7 @@ All connector DB functions from §5.1:
 **Files touched:** `connector/s3_scanner.py`
 
 **What's to build:**
-- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, **checksum dedup pre-check** (skip objects whose checksum is already in `known_checksums`), `download_fileobj()`, staged download, checksum (S3 ETag) registered via `db_manager.upsert_file_checksum()` and stored in `documents.metadata.source_checksum`
+- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, **checksum dedup pre-check** (skip objects whose checksum is already in `known_checksums`), `download_fileobj()`, staged download, checksum (S3 ETag) registered via `add_connector_to_membership()` (called by main thread on job completion) and stored in `documents.metadata.source_checksum`. `upsert_file_checksum()` must NOT be called.
 
 **How to test:**
 - Unit test with `moto` (mock AWS) — assert listing, filtering, hash computation, and download
@@ -1221,7 +1359,7 @@ All connector DB functions from §5.1:
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, diff, ingest new files, orphan deletion, tick finalize
 - `_diff()`: builds `to_ingest` (new files only, intra-tick checksum dedup applied — first remote path wins) and `orphan_checksums` (previously registered checksums absent from current scan) — see §8.4
-- Pass `connector_id` to each create-job call inside `_process_new_files()`; the main thread calls `upsert_file_checksum` + `insert_connector_membership` on job completion (see §5.1)
+- Pass `connector_id` to each create-job call inside `_process_new_files()`; the main thread calls `add_connector_to_membership(connector_id, checksum, doc_id)` on job completion (see §5.1) — `upsert_file_checksum` must NOT be called for connector jobs
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
