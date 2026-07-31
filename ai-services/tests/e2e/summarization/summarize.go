@@ -130,11 +130,6 @@ type HealthCheckResponse struct {
 // ErrorResponse is an alias to common.ErrorResponse for backward compatibility.
 type ErrorResponse = common.ErrorResponse
 
-// GetSummarizeBaseURL returns the base URL for the summarize service.
-func GetSummarizeBaseURL(port string) string {
-	return fmt.Sprintf("http://localhost:%s", port)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // URL helpers — centralize endpoint construction
 // ─────────────────────────────────────────────────────────────────────────────
