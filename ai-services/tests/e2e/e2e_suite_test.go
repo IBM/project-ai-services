@@ -65,6 +65,7 @@ var (
 	// appPsWideOutput caches the last 'application ps -o wide' result so that
 	// subsequent specs (pods existence, logs) can reuse it without a second CLI call.
 	appPsWideOutput string
+	backupAppName   string
 )
 
 func init() {
@@ -1642,7 +1643,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(resp.Status).NotTo(gomega.BeEmpty())
 				logger.Infof("[TEST] Similarity service health check passed status=%q", resp.Status)
 			})
-		
+
 		// Verify /v1/similarity-search with dense, sparse, and hybrid modes
 		ginkgo.It("Verify /v1/similarity-search endpoint by providing different search mode such as dense, sparse or hybrid",
 			func() {
@@ -1677,7 +1678,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 				results := similarity.VerifySearchModes(ctx, similarityBaseURL)
 
-				//Step 4: Every mode that returned a response must carry the correct score_type.
+				// Step 4: Every mode that returned a response must carry the correct score_type.
 				logger.Infof("[TEST] Step 4: Verifying similarity search api")
 				expectedScoreTypes := map[string]string{
 					"dense":  "cosine",
@@ -1696,7 +1697,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(results).NotTo(gomega.BeEmpty(),
 					"all search modes failed — index may be empty or similarity-api is unreachable")
 			})
-		
+	
 		// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
 		ginkgo.It("Verify Similarity search API includes time info in response headers or body in podman runtime",
 			func() {
@@ -1723,7 +1724,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(errResp.Error.Message).To(gomega.ContainSubstring("mode must be one of"))
 				logger.Infof("[TEST] invalid mode correctly rejected with: %s", errResp.Error)
 			})
-
 
 		// Verify /v1/similarity-search with rerank=true
 		ginkgo.It("Verify /v1/similarity-search endpoint by providing rerank as true",
@@ -1766,6 +1766,159 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] 400 reproduced with error: %s", errResp.Error)
 			})
 	})
+
+	ginkgo.Context("Application Backup And Restore", ginkgo.Ordered, ginkgo.Label("spyre-dependent", "app-backup-restore"), func() {
+		var (
+			digitizeDocID         string
+			digitizeDocName       string
+			digitizeDocStatus     string
+			digitizeJobID         string
+			digitizeJobStatus     string
+			preBackupPowerVCResp  string
+			preBackupSpyreGPUResp string
+			opensearchBackupFile  string
+			digitizeBackupFile    string
+		)
+
+		ginkgo.It("backs up and restores application data", func() {
+			ctx, cancel := withTimeout(60 * time.Minute)
+			defer cancel()
+
+			catalogLoginWithDiscovery(ctx, true)
+
+			infoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			digitizeBaseURL := cli.ExtractDigitizeURL(infoOutput)
+			gomega.Expect(digitizeBaseURL).NotTo(gomega.BeEmpty())
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			gomega.Expect(digitization.IngestTestDocumentViaDigitizeAPI(ctx, digitizeBaseURL, "e2e-backup-restore-ingestion")).To(gomega.Succeed())
+
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-backup-restore-digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+
+			digitizeJobID = finalStatus.JobID
+			digitizeJobStatus = finalStatus.Status
+			digitizeDocID = finalStatus.Documents[0].ID
+
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, digitizeDocID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			digitizeDocName = doc.Name
+			digitizeDocStatus = doc.Status
+
+			ragPrompts := []struct {
+				question string
+				response *string
+			}{
+				{question: "What is PowerVC?", response: &preBackupPowerVCResp},
+				{question: "How is a spyre card different from a GPU?", response: &preBackupSpyreGPUResp},
+			}
+			for _, prompt := range ragPrompts {
+				logger.Infof("[TEST] Pre-backup RAG prompt: %s", prompt.question)
+				response, askErr := rag.AskRAG(ctx, ragBaseURL, prompt.question)
+				gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+				gomega.Expect(strings.TrimSpace(response)).NotTo(gomega.BeEmpty())
+				logger.Infof("[TEST] Pre-backup RAG response for %q: %s", prompt.question, response)
+				*prompt.response = response
+			}
+
+			opensearchBackupFile = filepath.Join(tempDir, "opensearch-backup-"+runID+".tar.gz")
+			digitizeBackupFile = filepath.Join(tempDir, "digitize-backup-"+runID+".tar.gz")
+
+			_, err = cli.ApplicationBackup(ctx, cfg, appName, "opensearch", opensearchBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = cli.ApplicationBackup(ctx, cfg, appName, "digitize", digitizeBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			deleteOutput, deleteErr := cli.DeleteApp(ctx, cfg, appName, appRuntime)
+			gomega.Expect(deleteErr).NotTo(gomega.HaveOccurred())
+			gomega.Expect(deleteOutput).NotTo(gomega.BeEmpty())
+
+			// Recreate target app after backup using the original name when the suite
+			// owns the lifecycle. For caller-provided apps, restore into a fresh
+			// sibling name so OpenShift cleanup lag does not block recreation of the
+			// exact same application name immediately after delete.
+			backupAppName = appName
+			if providedAppName != "" {
+				backupAppName = appName + "-restore-" + runID
+			}
+
+			createOutput, err := cli.CreateRAGAppAndValidate(
+				ctx,
+				cfg,
+				backupAppName,
+				templateName,
+				createParams,
+				backendPort,
+				uiPort,
+				cli.CreateOptions{
+					SkipModelDownload: false,
+					ImagePullPolicy:   "IfNotPresent",
+				},
+				[]string{"backend", "ui", "db"},
+				appRuntime,
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(createOutput).NotTo(gomega.BeEmpty())
+
+			catalogLoginWithDiscovery(ctx, true)
+
+			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "opensearch", opensearchBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "digitize", digitizeBackupFile, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			restoredInfoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, backupAppName, appRuntime, 8*time.Minute, 15*time.Second)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			restoredDigitizeBaseURL := cli.ExtractDigitizeURL(restoredInfoOutput)
+			gomega.Expect(restoredDigitizeBaseURL).NotTo(gomega.BeEmpty())
+
+			restoredJobs, err := digitization.ListJobs(ctx, restoredDigitizeBaseURL, false, 20, 0, digitizeJobStatus, "digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(restoredJobs.Data).NotTo(gomega.BeEmpty())
+			jobFound := false
+			for _, job := range restoredJobs.Data {
+				if job.JobID == digitizeJobID {
+					jobFound = true
+					gomega.Expect(job.Status).To(gomega.Equal(digitizeJobStatus))
+					break
+				}
+			}
+			gomega.Expect(jobFound).To(gomega.BeTrue(), "restored digitize job %s not found", digitizeJobID)
+
+			restoredDocs, err := digitization.ListDocuments(ctx, restoredDigitizeBaseURL, 20, 0, "", digitizeDocName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(restoredDocs.Data).NotTo(gomega.BeEmpty())
+			gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(digitizeDocName))
+			gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(digitizeDocStatus))
+
+			restoredRAGBaseURL, err := cli.GetBaseURL(restoredInfoOutput, backendPort)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			for _, prompt := range ragPrompts {
+				logger.Infof("[TEST] Post-restore RAG prompt: %s", prompt.question)
+				restoredResponse, askErr := rag.AskRAG(ctx, restoredRAGBaseURL, prompt.question)
+				gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+				gomega.Expect(strings.TrimSpace(restoredResponse)).NotTo(gomega.BeEmpty())
+				logger.Infof("[TEST] Post-restore RAG response for %q: %s", prompt.question, restoredResponse)
+				gomega.Expect(restoredResponse).To(gomega.Equal(*prompt.response))
+			}
+		})
+
+	})
+  
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent"), func() {
 			if providedAppName != "" {
