@@ -59,7 +59,10 @@ Before any `digitize` connector endpoint is called:
 
   Step 3 — ingest new files (ingest_list)
     → for each (remote_path, checksum) in ingest_list:
-        download file → run create_job(connector_id=connector_id)
+        download file → run create_job(
+                            connector_id=connector_id,
+                            checksum=checksum ← pre-computed by scanner; skips re-hash in pipeline
+                        )
         on job success:
           add_connector_to_membership(connector_id, checksum, doc_id)
 
@@ -76,11 +79,11 @@ Before any `digitize` connector endpoint is called:
 
 ── Detach (DELETE /v1/connectors/{id}) ──────────────────────────────
   → guard: reject with 409 if a tick is currently running
-  → stop worker thread
   → list all checksums owned by this connector
   → for each checksum: remove_connector_from_membership → delete doc if last owner
   → DELETE connectors row
   → cleanup staging dirs
+  → stop worker thread
 ```
 
 ### 2.3 Main Components
@@ -108,8 +111,8 @@ Common fields:
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `connector_id` | `string (UUID)` | ✅ | Stable catalog ID |
+| `connector_name` | `string` | ✅ | Human-readable unique name for the connector (e.g. `"prod-sftp-reports"`). Used as a stable display label. |
 | `type` | `string` | ✅ | `ssh` or `s3` |
-| `host` | `string` | ✅ | SFTP host or S3 endpoint |
 | `allowed_extensions` | `array[string]` | ✅ | Non-matching files are ignored |
 | `connection_details` | `object` | ✅ | Type-specific fields |
 
@@ -117,16 +120,18 @@ Common fields:
 
 `connection_details` for `ssh`:
 
-| Field | Type | Required |
-| --- | --- | --- |
-| `username` | `string` | ✅ |
-| `remote_path` | `string` | ✅ |
-| `private_key` | `string` | ✅ |
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `host` | `string` | ✅ | SFTP hostname |
+| `username` | `string` | ✅ | |
+| `remote_path` | `string` | ✅ | |
+| `private_key` | `string` | ✅ | |
 
 `connection_details` for `s3`:
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `host` | `string` | ✅ | S3 endpoint hostname (e.g. `s3.us-east-1.amazonaws.com`) |
 | `endpoint_url` | `string` | ✅ | Full S3 endpoint URL. AWS S3: `https://s3.<region>.amazonaws.com`. IBM COS: `https://s3.<region>.cloud-object-storage.appdomain.cloud`. Provider and region are auto-detected from this URL — no separate `region` field needed. |
 | `bucket_name` | `string` | ✅ | |
 | `access_key_id` | `string` | ✅ | IAM key ID (AWS) or HMAC key ID (IBM COS) |
@@ -141,10 +146,11 @@ Common fields:
 ```json
 {
   "connector_id": "c7f3a2d1-...",
+  "connector_name": "prod-sftp-reports",
   "type": "ssh",
-  "host": "sftp.example.com",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
+    "host": "sftp.example.com",
     "username": "sync_user",
     "remote_path": "/exports/reports",
     "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n..."
@@ -155,10 +161,11 @@ Common fields:
 ```json
 {
   "connector_id": "a1b2c3d4-...",
+  "connector_name": "prod-s3-rag-docs",
   "type": "s3",
-  "host": "s3.us-east-1.amazonaws.com",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
+    "host": "s3.us-east-1.amazonaws.com",
     "endpoint_url": "https://s3.us-east-1.amazonaws.com",
     "bucket_name": "my-rag-documents",
     "prefix": "reports/",
@@ -174,10 +181,11 @@ IBM COS example:
 ```json
 {
   "connector_id": "b5c6d7e8-...",
+  "connector_name": "prod-cos-ai-services",
   "type": "s3",
-  "host": "s3.us.cloud-object-storage.appdomain.cloud",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
+    "host": "s3.us.cloud-object-storage.appdomain.cloud",
     "endpoint_url": "https://s3.us.cloud-object-storage.appdomain.cloud",
     "bucket_name": "ai-services",
     "access_key_id": "<hmac-key-id>",
@@ -191,7 +199,7 @@ IBM COS example:
 | Status | Meaning |
 | --- | --- |
 | `202 Accepted` | Connector created; worker start scheduled in a background task |
-| `409 Conflict` | Connector already exists |
+| `409 Conflict` | Connector already exists (`connector_id` or `connector_name` already in use) |
 
 ### 3.2 `PUT /v1/connectors/{connector_id}`
 
@@ -202,6 +210,7 @@ Rules:
 - All fields are optional.
 - Omitted fields remain unchanged.
 - `type` cannot change.
+- `connector_name` can be updated; the new value must be unique across all connectors (`409 Conflict` otherwise).
 - `connection_details` is merged by key, not replaced wholesale.
 - If credentials are included, they are re-encrypted before storage.
 - `sync_interval_seconds` cannot be set via this endpoint; change the env variable and redeploy.
@@ -277,7 +286,7 @@ Lists active connectors with non-secret configuration and current sync state.
 Returned fields include:
 
 - connector identity and config
-- `sync_status`, `last_sync_at`, `last_sync_error`, `attached_at`
+- `sync_status`, `last_sync_at`, `last_sync_error`, `attached_at`, `total_files`
 
 #### Example response
 
@@ -285,23 +294,23 @@ Returned fields include:
 [
   {
     "connector_id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+    "connector_name": "prod-sftp-reports",
     "type": "ssh",
-    "host": "sftp.example.com",
-    "allowed_extensions": [".pdf", ".docx"],
     "attached_at": "2025-01-10T08:00:00Z",
     "last_sync_at": "2025-01-15T14:32:10Z",
-    "sync_status": "idle",
+    "sync_status": "up to date",
     "last_sync_error": null,
+    "total_files": 42
   },
   {
     "connector_id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "connector_name": "prod-s3-rag-docs",
     "type": "s3",
-    "host": "s3.amazonaws.com",
-    "allowed_extensions": [".pdf", ".docx"],
     "attached_at": "2025-01-12T09:15:00Z",
     "last_sync_at": "2025-01-15T14:30:00Z",
-    "sync_status": "idle",
-    "last_sync_error": "3 files failed to ingest",
+    "sync_status": "failed",
+    "last_sync_error": "remote object listing timed out",
+    "total_files": 150
   }
 ]
 ```
@@ -310,7 +319,7 @@ Returned fields include:
 
 Returns one connector plus the latest file-processing counters:
 
-- `files_found`, `files_syncing`, `files_completed`, `files_failed`
+- `total_files`, `new_files`, `removed_files`, `failed_files`
 
 Only non-secret `connection_details` are returned.
 
@@ -319,22 +328,22 @@ Only non-secret `connection_details` are returned.
 ```json
 {
   "connector_id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+  "connector_name": "prod-sftp-reports",
   "type": "ssh",
-  "host": "sftp.example.com",
   "allowed_extensions": [".pdf", ".docx"],
   "sync_interval_seconds": 300,
   "attached_at": "2025-01-10T08:00:00Z",
   "last_sync_at": "2025-01-15T14:32:10Z",
-  "sync_status": "idle",
-  "last_sync_error": null,
+  "sync_status": "up to date",
   "connection_details": {
+    "host": "sftp.example.com",
     "username": "sync_user",
     "remote_path": "/exports/reports"
   },
-  "files_found": 42,
-  "files_syncing": 0,
-  "files_completed": 40,
-  "files_failed": 2
+  "total_files": 42,
+  "new_files": 2,
+  "removed_files": 0,
+  "failed_files": 2
 }
 ```
 
@@ -349,9 +358,9 @@ Query params:
 | `limit` | `50` | capped at `200` |
 | `offset` | `0` | zero-based |
 
-Each item contains: `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`.
+Each item contains: `sync_id`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `sync_status`.
 
-Status values: `syncing`, `completed`, `N files failed to ingest`, `N orphan deletes failed`, `failed: <reason>`.
+Status values: `syncing`, `out of sync`, `up to date`, `failed: <reason>`.
 
 At most one in-progress `syncing` row exists per connector.
 
@@ -367,30 +376,30 @@ At most one in-progress `syncing` row exists per connector.
       "sync_id": 3,
       "started_at": "2025-01-15T14:32:00Z",
       "finished_at": "2025-01-15T14:32:10Z",
-      "files_found": 42,
-      "files_syncing": 0,
-      "files_completed": 42,
-      "files_failed": 0,
-      "sync_status": "completed"
+      "total_files": 42,
+      "new_files": 0,
+      "removed_files": 0,
+      "failed_files": 0,
+      "sync_status": "up to date"
     },
     {
       "sync_id": 2,
       "started_at": "2025-01-15T14:27:00Z",
       "finished_at": "2025-01-15T14:27:18Z",
-      "files_found": 41,
-      "files_syncing": 0,
-      "files_completed": 38,
-      "files_failed": 3,
-      "sync_status": "3 files failed to ingest"
+      "total_files": 41,
+      "new_files": 3,
+      "removed_files": 0,
+      "failed_files": 3,
+      "sync_status": "out of sync"
     },
     {
       "sync_id": 1,
       "started_at": "2025-01-15T14:22:00Z",
       "finished_at": null,
-      "files_found": 0,
-      "files_syncing": 5,
-      "files_completed": 0,
-      "files_failed": 0,
+      "total_files": 0,
+      "new_files": 5,
+      "removed_files": 0,
+      "failed_files": 0,
       "sync_status": "syncing"
     }
   ]
@@ -452,11 +461,12 @@ The two registries are **intentionally separate**: a file with the same content 
 
 ### 4.2 `connectors`
 
-Stores connector config, encrypted credential blobs, and top-level sync state.
+Stores connector config, encrypted credential blobs, and top-level sync state. The list endpoint `GET /v1/connectors` reads from this table alone.
 
 ```sql
 CREATE TABLE IF NOT EXISTS connectors (
     id                      TEXT        PRIMARY KEY,
+    name                    TEXT        NOT NULL UNIQUE,
     type                    TEXT        NOT NULL,
     host                    TEXT        NOT NULL,
     connection_details      JSONB       NOT NULL DEFAULT '{}',
@@ -464,9 +474,14 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
     attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_sync_at            TIMESTAMPTZ,
-    sync_status             TEXT        NOT NULL DEFAULT 'idle',
+    sync_status             TEXT        NOT NULL DEFAULT 'up to date',
+    last_sync_error         TEXT,
+    total_files             INTEGER     NOT NULL DEFAULT 0,
     CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name
+    ON connectors (name);
 ```
 
 > **Note:** `sync_interval_seconds` is stored per-connector for future extensibility but is not accepted via the API today. On `POST`, it is populated from the `CONNECTOR_SYNC_INTERVAL_SECONDS` environment variable (default `300`). The worker reads the value from the DB before each tick.
@@ -531,10 +546,10 @@ CREATE TABLE IF NOT EXISTS connector_sync_history (
     sync_id          INTEGER     NOT NULL,
     started_at       TIMESTAMPTZ NOT NULL,
     finished_at      TIMESTAMPTZ,
-    files_found      INTEGER     NOT NULL DEFAULT 0,
-    files_syncing    INTEGER     NOT NULL DEFAULT 0,
-    files_completed  INTEGER     NOT NULL DEFAULT 0,
-    files_failed     INTEGER     NOT NULL DEFAULT 0,
+    total_files      INTEGER     NOT NULL DEFAULT 0,
+    new_files        INTEGER     NOT NULL DEFAULT 0,
+    removed_files    INTEGER     NOT NULL DEFAULT 0,
+    failed_files     INTEGER     NOT NULL DEFAULT 0,
     sync_status      TEXT        NOT NULL DEFAULT 'syncing',
     CONSTRAINT fk_csh_connector
         FOREIGN KEY (connector_id)
@@ -551,9 +566,9 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 
 `DocumentChecksum` already exists in `services/digitize/db/models.py` and remains unchanged. Add three new models:
 
-- `ActiveConnector` — fields: `id` (PK), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`
+- `ActiveConnector` — fields: `id` (PK), `name` (UNIQUE), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`
 - `ConnectorDocumentChecksum` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
-- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `sync_id`, `started_at`, `finished_at`, `files_found`, `files_syncing`, `files_completed`, `files_failed`, `sync_status`
+- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `sync_id`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `sync_status`
 
 ---
 
@@ -569,6 +584,10 @@ The DB layer stores and returns ciphertext only. Encryption happens in the API l
 | --- | --- | --- | --- |
 | User-submitted | absent | `document_checksum` | `document_checksum (checksum, doc_id)` |
 | Connector-sourced | present | `connector_document_checksum` | `connector_document_checksum (checksum, connector_id, doc_id)` |
+
+**Connector-sourced job naming convention:**
+
+Jobs created by a connector sync use the format `{connector_id} - {sync_number} - {batch_number}` as their `job_name`. For example: `sftp-prod-01 - 3 - 1`.
 
 ### 5.1 New connector DB functions
 
@@ -659,7 +678,7 @@ DB operations (Attach)
        (id, type, host, connection_details, allowed_extensions,
         sync_interval_seconds, attached_at, sync_status)
    VALUES (:connector_id, :type, :host, :encrypted_details, :exts,
-           :interval, NOW(), 'idle')
+           :interval, NOW(), 'up to date')
    ON CONFLICT (id) DO NOTHING          ← 409 if already exists
 
 Result: one row in connectors; worker thread starts.
@@ -682,30 +701,40 @@ Phase 1 — open tick record
   UPDATE connectors SET sync_status = 'syncing' WHERE id = :connector_id
 
 Phase 2 — load known state
-  SELECT checksum FROM connector_document_checksum WHERE connector_id = :connector_id
-  → produces: known_checksums
-
-  ┌─ scanner file walk happens here (no DB) ──────────────────────┐
-  │  yields: scanned_files = [(remote_path, checksum), ...]       │
-  └───────────────────────────────────────────────────────────────┘
-
-Phase 3 — classify files + register cross-connector duplicates inline
-  skip_list   = []   ← checksum IN known_checksums
-  ingest_list = []   ← checksum NOT IN known_checksums AND not cross-connector
-
-  for each (remote_path, checksum) in scanned_files (intra-tick dedup applied):
-    elif checksum IN all_checksums:
-      existing_doc_id = lookup_connector_content_by_checksum(checksum)
-      INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
-      VALUES (:checksum, :connector_id, :existing_doc_id)
-      ON CONFLICT (checksum, connector_id) DO NOTHING
-
-Phase 4a — register each genuinely new file (after successful create_job)
-  INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
-  VALUES (:checksum, :connector_id, :doc_id)
-  ON CONFLICT (checksum, connector_id) DO NOTHING
-
-  UPDATE documents SET metadata = metadata || :source_metadata WHERE doc_id = :doc_id
+  ┌─ ACQUIRE ingest_lock (process-wide) ──────────────────────────┐
+  │  SELECT checksum FROM connector_document_checksum             │
+  │         WHERE connector_id = :connector_id                    │
+  │  → produces: known_checksums                                  │
+  │                                                               │
+  │  ┌─ scanner file walk happens here (no DB) ─────────────────┐ │
+  │  │  yields: scanned_files = [(remote_path, checksum), ...]  │ │
+  │  └──────────────────────────────────────────────────────────┘ │
+  │                                                               │
+  │  Phase 3 — classify files + register cross-connector dups    │
+  │    skip_list   = []  ← checksum IN known_checksums           │
+  │    ingest_list = []  ← checksum NOT IN known_checksums AND   │
+  │                        not cross-connector                    │
+  │                                                               │
+  │    for each (remote_path, checksum) in scanned_files         │
+  │            (intra-tick dedup applied):                        │
+  │      elif checksum IN all_checksums:                          │
+  │        existing_doc_id =                                      │
+  │            lookup_connector_content_by_checksum(checksum)    │
+  │        INSERT INTO connector_document_checksum               │
+  │            (checksum, connector_id, doc_id)                  │
+  │        VALUES (:checksum, :connector_id, :existing_doc_id)   │
+  │        ON CONFLICT (checksum, connector_id) DO NOTHING       │
+  │                                                               │
+  │  Phase 4a — register each genuinely new file                 │
+  │    (after successful create_job / session creation)          │
+  │    INSERT INTO connector_document_checksum                   │
+  │        (checksum, connector_id, doc_id)                      │
+  │    VALUES (:checksum, :connector_id, :doc_id)                │
+  │    ON CONFLICT (checksum, connector_id) DO NOTHING           │
+  │                                                              │
+  │    UPDATE documents SET metadata = metadata || :source_meta  │
+  │    WHERE doc_id = :doc_id                                     │
+  └─ RELEASE ingest_lock ─────────────────────────────────────────┘
 
 Phase 4b — orphan detection + removal
   (runs once, after ALL Phase 4a writes complete)
@@ -724,8 +753,8 @@ Phase 4b — orphan detection + removal
 
 Phase 5 — close tick record
   UPDATE connector_sync_history
-  SET finished_at = NOW(), files_found = :n, files_completed = :n,
-      files_failed = :n, sync_status = :final_status
+  SET finished_at = NOW(), total_files = :n, new_files = :n,
+      removed_files = :n, failed_files = :n, sync_status = :final_status
   WHERE connector_id = :connector_id AND sync_id = :sync_id
 
   UPDATE connectors SET last_sync_at = NOW(), sync_status = :final_status
@@ -733,6 +762,8 @@ Phase 5 — close tick record
 ```
 
 **Ordering guarantee:** Phase 4b (orphan removal) runs only after Phase 4a (all ingest jobs) completes.
+
+**Concurrency lock:** A process-wide `ingest_lock` (e.g. `threading.Lock`) **must be held continuously from the `SELECT checksum` DB read in Phase 2 through the end of Phase 4a** (i.e. until all `INSERT INTO connector_document_checksum` rows for newly created sessions are committed). Without this lock, two connector workers racing on the same brand-new file would both observe it absent from `all_checksums`, both call `create_job`, and produce duplicate documents. The lock is released before Phase 4b begins so orphan removal does not block other ticks unnecessarily.
 
 ---
 
@@ -946,7 +977,8 @@ _run_tick()
 ├─ [Phase 1] INSERT connector_sync_history (status='syncing')
 │            UPDATE connectors (sync_status='syncing')
 │
-├─ [Phase 2] known_checksums ← SELECT checksum FROM connector_document_checksum
+├─ [Phase 2] ── ACQUIRE ingest_lock ────────────────────────────────────────────
+│            known_checksums ← SELECT checksum FROM connector_document_checksum
 │                               WHERE connector_id = :connector_id
 │            all_checksums   ← SELECT DISTINCT checksum FROM connector_document_checksum
 │
@@ -962,9 +994,10 @@ _run_tick()
 │                                   (DB write happens inline, no separate list)
 │
 ├─ [Phase 4a] _process_new_files(ingest_list)
-│             download → create_job(connector_id) → doc_id
+│             download → create_job(connector_id, checksum) → doc_id (session creation)
 │             add_connector_to_membership(connector_id, checksum, doc_id)
 │             UPDATE documents.metadata
+│            ── RELEASE ingest_lock (after all Phase 4a membership rows committed) ─
 │
 ├─ [Phase 4b] _delete_orphans(orphan_checksums)
 │   ← RUNS AFTER all Phase 4a writes finish ←
@@ -978,13 +1011,14 @@ _run_tick()
 ### 8.2 Worker rules
 
 - Overlapping ticks are skipped by a tick guard.
-- `files_syncing` is updated live during staging and download.
+- `new_files` is updated live during staging and download.
 - Staging uses per-tick temporary directories.
 - Download and ingest are blocking operations.
 - Fatal errors mark the tick as failed.
 - Per-file failures are counted and summarized instead of failing the whole connector.
 - Cross-connector duplicates are registered inline during Phase 3 classification — no deferred list.
 - **Phase 4b (orphan removal) always runs after Phase 4a (all new-file ingest jobs) completes.**
+- **A process-wide `ingest_lock` must be held from the Phase 2 DB read (`list_all_checksums`) through the end of Phase 4a (last `add_connector_to_membership` call, i.e. session creation complete).** This prevents two concurrent workers from both classifying the same brand-new checksum as absent and independently spawning duplicate ingest jobs.
 
 ### 8.3 Worker stub
 
@@ -995,14 +1029,20 @@ def _run_tick(self) -> None:
     scanner = build_scanner(self.config)
     try:
         scanner.connect()
-        known_checksums: set[str] = set(list_connector_checksums(self.connector_id))
-        all_checksums: set[str] = set(list_all_checksums())
         scanned_files: list[tuple[str, str]] = scanner.scan()
 
-        ingest_list, orphan_checksums = self._classify(
-            scanned_files, known_checksums, all_checksums
-        )
-        self._process_new_files(sync_id, scanner, ingest_list)
+        # Lock must be held from the DB read through the end of session creation
+        # (Phase 4a) to prevent concurrent workers from both seeing the same new
+        # checksum as absent and spawning duplicate ingest jobs.
+        with _ingest_lock:
+            known_checksums: set[str] = set(list_connector_checksums(self.connector_id))
+            all_checksums: set[str] = set(list_all_checksums())
+
+            ingest_list, orphan_checksums = self._classify(
+                scanned_files, known_checksums, all_checksums
+            )
+            self._process_new_files(sync_id, scanner, ingest_list)
+        # Lock released — orphan removal does not need it
         self._delete_orphans(orphan_checksums)
         self._complete_tick(sync_id)
     except Exception as exc:
@@ -1294,7 +1334,7 @@ All connector DB functions from §5.1:
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, classify, ingest new files, register cross-connector dups, orphan deletion, tick finalize
 - `_classify()`: see §8.4 — `skip_list` is implicit (not returned)
-- Pass `connector_id` to each create-job call; `add_connector_to_membership` called on job completion — `upsert_file_checksum` must NOT be called for connector jobs
+- Pass `connector_id` and `checksum` (pre-computed by scanner) to each create-job call; `add_connector_to_membership` called on job completion — `upsert_file_checksum` must NOT be called for connector jobs
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
