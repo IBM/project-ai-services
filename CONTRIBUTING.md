@@ -13,6 +13,7 @@ Please note we have a [code of conduct](https://github.com/IBM/project-ai-servic
 
  - To contribute code or documentation, please submit a [pull request](https://github.com/IBM/project-ai-services/pulls).
  - Always take the latest update from upstream/main before creating a pull request.
+ - Your PR title must follow the format `type: description` or `type: [TICKET-123] description`. See [PR Naming Convention](docs/PR_NAMING_CONVENTION.md) for details.
  - Ensure your changes work fine and have no syntax problems. Also, verify that it does not break the existing code flow.
  - Update the README.md or relevant documents with details of changes to the code. This includes variables change, added or updated feature, change in steps, dependencies change, etc.
  - Make use of proper commit message. Mention the issue# which you are planning to address eg: Fixes #38.
