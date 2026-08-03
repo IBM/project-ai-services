@@ -102,31 +102,6 @@ class DigitizeConfig(BaseSettings):
         description="Content sample size for chunk ID generation",
     )
 
-    # Connector sync settings
-    connector_sync_interval_seconds: int = Field(
-        default=300,
-        ge=1,
-        description="Default sync interval in seconds written to connectors on creation",
-    )
-
-    connector_worker_stop_timeout: int = Field(
-        default=30,
-        ge=1,
-        description="Seconds to wait for a connector worker thread to stop before giving up",
-    )
-
-    connector_monitor_poll_interval: int = Field(
-        default=30,
-        ge=1,
-        description="Seconds between connector-monitor health-check polls",
-    )
-
-    connector_respawn_backoff_cap: int = Field(
-        default=300,
-        ge=1,
-        description="Maximum back-off delay in seconds between connector worker respawn attempts",
-    )
-
     @property
     def staging_dir(self) -> Path:
         """Directory for staging files."""

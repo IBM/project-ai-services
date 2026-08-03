@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import (
-    BigInteger,
     Integer,
     String,
     Text,
@@ -253,7 +252,7 @@ class ConnectorSyncHistory(Base):
     """
     __tablename__ = "connector_sync_history"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     connector_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("connectors.id", ondelete="CASCADE"),
