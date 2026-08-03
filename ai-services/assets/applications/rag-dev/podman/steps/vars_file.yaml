@@ -30,7 +30,7 @@ pods:
     alias: SIMILARITY_API_PORT
 
   - name: "{{ .AppName }}--extract-api"
-    format: "index .Ports \"6001/tcp\" 0"
+    format: "index .Ports \"8001/tcp\" 0"
     default: ""
     alias: EXTRACT_API_PORT
 

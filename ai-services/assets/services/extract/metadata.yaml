@@ -64,3 +64,9 @@ about:
           - title: "Spyre acceleration cards"
             value: 4
 
+  - title: "Assets"
+    sections:
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
+
