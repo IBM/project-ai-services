@@ -16,9 +16,13 @@
 6. [CatalogProvider Integration](#6-catalogprovider-integration)
 7. [API Upload](#7-api-upload)
 8. [Custom Template Directory Structure](#8-custom-template-directory-structure)
-9. [Usage Examples](#9-usage-examples)
-10. [Backward Compatibility](#10-backward-compatibility)
-11. [Future Enhancements](#11-future-enhancements)
+9. [Template Values Reference](#9-template-values-reference)
+   - 9.1 [Shared (services and components)](#91-shared-services-and-components)
+   - 9.2 [Services](#92-services)
+   - 9.3 [Components](#93-components)
+10. [Usage Examples](#10-usage-examples)
+11. [Backward Compatibility](#11-backward-compatibility)
+12. [Future Enhancements](#12-future-enhancements)
 
 ---
 
@@ -945,9 +949,482 @@ Built-in IDs reserved at this time: `chat`, `digitize`, `similarity`, `summarize
 
 ---
 
-## 9. Usage Examples
+## 9. Template Values Reference
 
-### 9.1 Upload a custom service bundle
+> **Scope: Podman only.**  The template values, `@generate` directives, and `ai-services.io/` labels/annotations described in this section apply to the **Podman** runtime, which uses Go-template `.yaml.tmpl` files.  OpenShift custom service templates use Helm charts and a different rendering pipeline; a full reference for that runtime is deferred.
+>
+> **TODO:** document the equivalent Helm-based template values, labels, and annotations for the OpenShift runtime.
+
+This section is split into three parts:
+
+- **§9.1 Shared** — context variables and lifecycle labels available in every `.yaml.tmpl` file, regardless of whether it belongs to a service or a component.
+- **§9.2 Services** — values, annotations, injected dependency keys, and schema extensions specific to service templates.
+- **§9.3 Components** — values, annotations, and env-override patterns specific to component templates.
+
+---
+
+### 9.1 Shared (services and components)
+
+#### 9.1.1 Built-in template context variables
+
+These variables are injected directly by the template engine into every `.yaml.tmpl` file. They are **not** defined in `values.yaml` and cannot be overridden by the user.
+
+| Variable | Type | Description |
+|---|---|---|
+| `{{ .InstanceSlug }}` | string | Unique slug for the deployed instance (e.g. `chat-abc123`). Used to name pods, secrets, volumes, and services so multiple instances can co-exist. |
+| `{{ .TemplateID }}` | string | Fully qualified template identifier (e.g. `services/chat`). Stamped onto every resource as the `ai-services.io/template` label. |
+| `{{ .BaseDir }}` | string | Host filesystem base directory for the deployment (e.g. `/opt/ai-services`). Used to resolve host-path mounts such as the shared `models/` directory. |
+| `{{ .Values }}` | object | Root object for all values sourced from `values.yaml` and any user-supplied overrides. Access fields with `{{ .Values.<key> }}`. |
+
+#### 9.1.2 Lifecycle labels
+
+These labels are placed on Pod `metadata.labels` and read by the runtime to manage lifecycle, secrets, and volumes. They apply equally to service and component pods.
+
+| Label | Required | Value | Description |
+|---|---|---|---|
+| `ai-services.io/template` | **yes** | `"{{ .TemplateID }}"` | Identifies which template produced this pod or secret. Must be present on every resource emitted by a template — used for ownership tracking and cleanup. |
+| `ai-services.io/secret` | no | Secret name(s), comma-separated | Marks the listed secrets as owned by this pod. The runtime creates and deletes them alongside the pod. |
+| `ai-services.io/secret-skip-cleanup` | no | `"true"` | Prevents the named secrets from being deleted on teardown. Set alongside `ai-services.io/secret` for credentials that must survive restarts (e.g. database passwords). |
+| `ai-services.io/volume` | no | PVC / secret-volume name(s), comma-separated | Declares persistent volumes or secret-backed volumes that the runtime provisions before starting the pod and deprovisions on teardown. |
+
+#### 9.1.3 `@generate` directive
+
+A `# @generate` comment immediately before a `values.yaml` field instructs the engine to produce a value at deploy time.
+
+| Directive | Behaviour |
+|---|---|
+| `# @generate:password` | Generates a cryptographically random password before template rendering. The value is persisted so restarts reuse the same credential. |
+
+#### 9.1.4 `podTemplateExecutions` execution order
+
+The `podTemplateExecutions` list in a runtime `metadata.yaml` controls template application order. Each inner list is a batch applied in parallel; batches run sequentially.
+
+```yaml
+# General pattern — sequential layers
+podTemplateExecutions:
+  - [secret.yaml.tmpl]       # layer 1: credential secret created first
+  - [dependency.yaml.tmpl]   # layer 2: dependency pod waits for secret
+  - [service.yaml.tmpl]      # layer 3: service pod waits for dependency
+```
+
+Templates in the same inner list run concurrently:
+
+```yaml
+podTemplateExecutions:
+  - [opensearch-secret.yaml.tmpl, vllm-secret.yaml.tmpl]  # both secrets in parallel
+  - [opensearch.yaml.tmpl, vllm-server.yaml.tmpl]          # both pods in parallel
+```
+
+---
+
+### 9.2 Services
+
+#### 9.2.1 `values.yaml` — service-owned values
+
+Each service defines its own `values.yaml` with the configuration defaults for its containers. Fields that require a generated credential use the shared `@generate` directive (§9.1.3):
+
+```yaml
+# services/digitize/podman/values.yaml
+digitize:
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.34
+  log_level: "INFO"
+  database: "digitize_metadata"
+
+postgres:
+  image: icr.io/ai-services-cicd/postgres:18-4
+  username: "postgres"
+  # @generate:password
+  password: ""
+```
+
+```yaml
+# services/chat/podman/values.yaml
+ui:
+  port: ""
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.48
+backend:
+  port: ""
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.25
+  log_level: "INFO"
+  chatbot:
+    searchMode: "hybrid"
+    numChunksPostReranker: 3
+    rerank: true
+    systemPrompt: ""
+```
+
+#### 9.2.2 Labels
+
+Service pods use the shared lifecycle labels from §9.1.2. The `ai-services.io/secret` and `ai-services.io/volume` labels appear on the sub-pods (e.g. the postgres pod) that own a credential secret or a PVC, not on the main service pod itself.
+
+```yaml
+# digitize postgres sub-pod — credential secret survives teardown, PVC owned by runtime
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/secret: "digitize-db-secret-{{ .InstanceSlug }}"
+  ai-services.io/secret-skip-cleanup: "true"
+  ai-services.io/volume: "postgres-digitize-{{ .InstanceSlug }},digitize-db-secret-{{ .InstanceSlug }}"
+
+# summarize postgres sub-pod — same pattern
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/secret: "summarize-db-secret-{{ .InstanceSlug }}"
+  ai-services.io/secret-skip-cleanup: "true"
+  ai-services.io/volume: "postgres-summarize-{{ .InstanceSlug }},summarize-db-secret-{{ .InstanceSlug }}"
+
+# chat / similarity / summarize main pods — no secrets or volumes owned at pod level
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+```
+
+#### 9.2.3 Routing annotations
+
+Components run headlessly and are not directly reachable by users. Only service pods carry routing annotations — the Caddy reverse-proxy reads these to wire up UI and API endpoints for each deployed service instance.
+
+| Annotation | Description |
+|---|---|
+| `ai-services.io/routes` | Comma-separated `<containerPort>:<caddy-upstream-name>:<role>` tuples. `role` is `ui` (browser-facing) or `api` (machine-facing). |
+| `ai-services.io/ports` | Comma-separated `<hostPort>:<containerPort>` tuples. Exposes the port directly on the host, bypassing Caddy. Commented out by default — remove the comment to activate. |
+
+```yaml
+# chat — UI on 3000, API on 5000
+annotations:
+  ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api"
+  # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
+
+# digitize — UI on 4001, API on 4000
+annotations:
+  ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"
+  # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001,{{ .Values.digitize.port }}:4000"
+
+# similarity — API only on 7000
+annotations:
+  ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api"
+  # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"
+
+# summarize — API only on 6000
+annotations:
+  ai-services.io/routes: "6000:summarize-api-{{ .InstanceSlug }}:api"
+  # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"
+```
+
+#### 9.2.4 Injected dependency values (`.Values.<component>`)
+
+When a service declares dependencies in its top-level `metadata.yaml`, the engine injects connection details for each resolved component under well-known keys inside `.Values`. These keys are **read-only** and absent in component templates — they are populated by the runtime from the component's own running deployment.
+
+**LLM** (`dependencies: [{id: llm}]`)
+
+| Value path | Type | Description |
+|---|---|---|
+| `.Values.llm.host` | string | Hostname of the running LLM pod. |
+| `.Values.llm.port` | string | Container port (default `8000`). |
+| `.Values.llm.model` | string | Served model name as passed to vLLM / LiteLLM. |
+| `.Values.llm.maxModelLen` | int | Maximum token context length. |
+| `.Values.llm.maxBatchSize` | int | Maximum concurrent batch size. |
+| `.Values.llm.apiKey` | string | Optional API key; empty string when not configured. When non-empty, the secret is mounted at `/etc/secret/vllm-secret/apiKey`. |
+| `.Values.llm.instanceSlug` | string | Instance slug of the resolved LLM component (e.g. for referencing `vllm-secret-{{ .Values.llm.instanceSlug }}`). |
+
+**Embedding** (`dependencies: [{id: embedding}]`)
+
+| Value path | Type | Description |
+|---|---|---|
+| `.Values.embedding.host` | string | Hostname of the running embedding pod. |
+| `.Values.embedding.port` | string | Container port (default `8001`). |
+| `.Values.embedding.model` | string | Served embedding model name. |
+| `.Values.embedding.maxModelLen` | int | Maximum sequence length for the embedding model. |
+
+**Reranker** (`dependencies: [{id: reranker}]`)
+
+| Value path | Type | Description |
+|---|---|---|
+| `.Values.reranker.host` | string | Hostname of the running reranker pod. |
+| `.Values.reranker.port` | string | Container port (default `8002`). |
+| `.Values.reranker.model` | string | Served reranker model name. |
+
+**Vector store** (`dependencies: [{id: vector_store}]`)
+
+| Value path | Type | Description |
+|---|---|---|
+| `.Values.vector_store.host` | string | Hostname of the running vector-store pod (e.g. `opensearch-<slug>`). |
+| `.Values.vector_store.port` | string | Container port (default `9200` for OpenSearch). |
+| `.Values.vector_store.instanceSlug` | string | Instance slug of the resolved vector-store component (e.g. for referencing `opensearch-secret-{{ .Values.vector_store.instanceSlug }}`). |
+
+#### 9.2.5 `values.schema.json` — user-configurable parameters
+
+An optional `values.schema.json` (JSON Schema draft-07) alongside a service's `values.yaml` declares which fields the user can configure through the catalog UI. Fields absent from the schema are treated as internal defaults and not surfaced in the UI.
+
+Three custom `x-ui-*` extensions control form rendering:
+
+| Extension keyword | Description |
+|---|---|
+| `x-ui-only` | Field is rendered in the UI form but **not** passed into templates. Used for toggle controls that gate visibility of other fields. |
+| `x-ui-controls` | Names the field whose UI visibility this field controls. The named field is only shown when this field is `true`. |
+| `x-ui-controlled-by` | This field is hidden in the UI unless the field named here is `true`. |
+
+```json
+// services/chat/podman/values.schema.json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "backend": {
+      "type": "object",
+      "properties": {
+        "editSystemPrompt": {
+          "type": "boolean",
+          "title": "Edit system prompt for queries",
+          "x-ui-only": true,
+          "x-ui-controls": "systemPrompt"
+        },
+        "systemPrompt": {
+          "type": "string",
+          "title": "Prompt text",
+          "default": "You are a helpful, conversational AI assistant...",
+          "minLength": 10,
+          "maxLength": 5000,
+          "x-ui-controlled-by": "editSystemPrompt"
+        }
+      }
+    }
+  }
+}
+```
+
+| Built-in service | Configurable parameters |
+|---|---|
+| `chat` | `backend.systemPrompt` (gated by `backend.editSystemPrompt` toggle) |
+| `digitize` | _(empty schema — no user-configurable parameters)_ |
+| `similarity` | _(empty schema — no user-configurable parameters)_ |
+| `summarize` | _(empty schema — no user-configurable parameters)_ |
+
+#### 9.2.6 `podTemplateExecutions` — service examples
+
+Services with a bundled database follow a three-layer pattern:
+
+```yaml
+# services/digitize/podman/metadata.yaml
+podTemplateExecutions:
+  - [postgres-secret.yaml.tmpl]   # layer 1: credential secret
+  - [postgres.yaml.tmpl]          # layer 2: postgres pod
+  - [digitize.yaml.tmpl]          # layer 3: digitize service pod
+
+# services/summarize/podman/metadata.yaml
+podTemplateExecutions:
+  - [postgres-secret.yaml.tmpl]
+  - [postgres.yaml.tmpl]
+  - [summarize-api.yaml.tmpl]
+```
+
+Services without a bundled database (chat, similarity) have no `podTemplateExecutions` — a single template is applied directly.
+
+---
+
+### 9.3 Components
+
+#### 9.3.1 Built-in component catalog
+
+The following components are shipped with ai-services and can be referenced as dependencies in a service's `metadata.yaml`. Values listed apply to the **Podman** runtime; OpenShift Helm values differ and are covered by the TODO above.
+
+**LLM providers** (`component_type: llm`)
+
+| ID | Default port | `values.yaml` keys | Spyre label |
+|---|---|---|---|
+| `vllm-cpu` | `8000` | `image`, `model`, `apiKey`, `maxNumBatchedTokens`, `maxModelLen`, `maxBatchSize` | — |
+| `vllm-spyre` | `8000` | `image`, `model`, `apiKey`, `maxModelLen`, `maxBatchSize` | `ai-services.io/llm--spyre-cards: "4"` |
+| `watsonx` | `8000` | `image`, `model`, `watsonxApiKey`, `watsonxProjectId`, `watsonxUrl`, `maxModelLen`, `maxBatchSize` | — |
+
+**Embedding providers** (`component_type: embedding`)
+
+| ID | Default port | `values.yaml` keys | Spyre label |
+|---|---|---|---|
+| `vllm-cpu` | `8001` | `image`, `model`, `maxModelLen` | — |
+
+**Reranker providers** (`component_type: reranker`)
+
+| ID | Default port | `values.yaml` keys | Spyre label |
+|---|---|---|---|
+| `vllm-cpu` | `8002` | `image`, `model` | — |
+| `vllm-spyre` | `8002` | `image`, `model` | `ai-services.io/reranker--spyre-cards: "1"` |
+
+**Vector-store providers** (`component_type: vector_db`)
+
+| ID | Default port | `values.yaml` keys | Credential handling |
+|---|---|---|---|
+| `opensearch` | `9200` | `image`, `memoryLimit`, `auth.username`, `auth.password` | `@generate:password` on `auth.password`; secret persists across restarts (`secret-skip-cleanup`) |
+
+#### 9.3.2 `values.yaml` — component-owned values
+
+Each component defines its own `values.yaml`. Fields that need auto-generated credentials use the `@generate` directive (§9.1.3):
+
+```yaml
+# components/vector_db/opensearch/podman/values.yaml
+image: icr.io/ppc64le-oss/opensearch-ppc64le:3.5.0
+memoryLimit: 8Gi
+auth:
+  username: "admin"
+  # @generate:password
+  password: ""
+```
+
+```yaml
+# components/llm/vllm-cpu/podman/values.yaml
+image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
+model: ""
+apiKey: ""
+maxNumBatchedTokens: 26208
+maxModelLen: 26208
+maxBatchSize: 32
+```
+
+```yaml
+# components/llm/watsonx/podman/values.yaml
+image: "icr.io/ai-services-cicd/litellm:v1.89.3-1"
+model: "ibm/granite-4-h-small"
+watsonxApiKey: ""
+watsonxProjectId: ""
+watsonxUrl: ""
+maxModelLen: 26208
+maxBatchSize: 32
+```
+
+#### 9.3.3 Labels
+
+Component pods use the shared lifecycle labels from §9.1.2. In addition, Spyre-based component pods carry accelerator labels that the runtime uses for resource scheduling.
+
+| Label | Required | Value | Used by |
+|---|---|---|---|
+| `ai-services.io/llm--spyre-cards` | no | Quoted integer (e.g. `"4"`) | `vllm-spyre` LLM component only |
+| `ai-services.io/reranker--spyre-cards` | no | Quoted integer (e.g. `"1"`) | `vllm-spyre` reranker component only |
+
+```yaml
+# opensearch — secret and volume owned by runtime, credential persists on teardown
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/secret: "opensearch-secret-{{ .InstanceSlug }}"
+  ai-services.io/secret-skip-cleanup: "true"
+  ai-services.io/volume: "opensearch-{{ .InstanceSlug }},opensearch-secret-{{ .InstanceSlug }}"
+
+# vllm-cpu LLM — secret and volume only when an API key is set
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  {{- if .Values.apiKey }}
+  ai-services.io/secret: "vllm-secret-{{ .InstanceSlug }}"
+  ai-services.io/volume: "vllm-secret-{{ .InstanceSlug }}"
+  {{- end }}
+
+# watsonx LLM — secret always present (API key is required)
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/secret: "watsonx-secret-{{ .InstanceSlug }}"
+  ai-services.io/volume: "watsonx-secret-{{ .InstanceSlug }}"
+
+# vllm-spyre LLM — four Spyre cards required
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/llm--spyre-cards: "4"
+
+# vllm-spyre reranker — one Spyre card required
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+  ai-services.io/reranker--spyre-cards: "1"
+
+# vllm-cpu embedding / reranker-cpu — no secrets or volumes
+labels:
+  ai-services.io/template: "{{ .TemplateID }}"
+```
+
+#### 9.3.4 `io.podman.*` and OCI annotations
+
+These annotations tune low-level container behaviour and are passed straight through to the Podman runtime. They appear on component pods only — service pods do not use them.
+
+| Annotation | Used by | Value | Description |
+|---|---|---|---|
+| `io.podman.annotations.ulimit` | `vllm-cpu` LLM, `vllm-spyre` LLM, `vllm-cpu` embedding, `vllm-cpu` reranker, `vllm-spyre` reranker | `"nofile=134217728:134217728,memlock=-1:-1"` | Raises the open-file-descriptor and locked-memory ulimits required by vLLM. |
+| `io.podman.annotations.pids-limit/<container>` | `opensearch`, PostgreSQL (note: postgres pods are defined in service templates but the annotation applies to the postgres container within) | `"4096"` | Sets the PID limit for the named container within the pod. |
+| `io.podman.annotations.userns` | `vllm-spyre` LLM, `vllm-spyre` reranker | `"keep-id"` | Preserves the host user namespace mapping; required for Spyre device access. |
+| `run.oci.keep_original_groups` | `vllm-spyre` LLM, `vllm-spyre` reranker | `"1"` | Preserves host supplemental groups, enabling `/dev/vfio` access. |
+
+```yaml
+# vllm-cpu LLM / embedding / reranker-cpu — ulimit only
+annotations:
+  io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
+
+# opensearch component — PID limit on the opensearch container
+annotations:
+  io.podman.annotations.pids-limit/opensearch: "4096"
+
+# vllm-spyre LLM / reranker — full Spyre set
+annotations:
+  io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
+  io.podman.annotations.userns: "keep-id"
+  run.oci.keep_original_groups: "1"
+```
+
+#### 9.3.5 `podTemplateExecutions` — component examples
+
+Components that manage a credential secret run a two-layer pattern. Components without a secret apply a single template directly.
+
+```yaml
+# components/vector_db/opensearch/podman/metadata.yaml — two layers
+podTemplateExecutions:
+  - [opensearch-secret.yaml.tmpl]   # layer 1: credential secret
+  - [opensearch.yaml.tmpl]          # layer 2: opensearch pod
+
+# components/llm/vllm-cpu/podman/metadata.yaml — optional secret (empty if apiKey unset)
+podTemplateExecutions:
+  - [vllm-secret.yaml.tmpl]
+  - [vllm-server.yaml.tmpl]
+
+# components/llm/vllm-spyre/podman/metadata.yaml
+podTemplateExecutions:
+  - [vllm-secret.yaml.tmpl]
+  - [vllm-server.yaml.tmpl]
+
+# components/llm/watsonx/podman/metadata.yaml
+podTemplateExecutions:
+  - [watsonx-secret.yaml.tmpl]
+  - [watsonx-server.yaml.tmpl]
+
+# components/embedding/vllm-cpu and components/reranker/vllm-cpu — no secret template
+# podTemplateExecutions is omitted; the single pod template is applied directly
+```
+
+#### 9.3.6 `{{- with .env.<component> }}` — env injection override
+
+Spyre-based component templates support an env-override mechanism that lets the deployment layer inject extra environment variables into a container without modifying `values.yaml`.
+
+The Go template `with` action is scoped to a top-level `.env` map. If `.env.<component>` is absent or empty the block renders nothing; if it is a non-empty map every key–value pair is appended as an additional `env` entry.
+
+```yaml
+# vllm-spyre LLM template — env block with override hook
+env:
+  - name: MAX_MODEL_LEN
+    value: "{{ .Values.maxModelLen }}"
+  - name: MASTER_PORT
+    value: "12355"
+  {{- with .env.llm }}
+    {{- range $k, $v := . }}
+  - name: {{ $k }}
+    value: "{{ $v }}"
+    {{- end }}
+  {{- end }}
+```
+
+| Template | `.env` key |
+|---|---|
+| `components/llm/vllm-spyre/podman/templates/vllm-server.yaml.tmpl` | `.env.llm` |
+| `components/reranker/vllm-spyre/podman/templates/reranker-server.yaml.tmpl` | `.env.reranker` |
+| `applications/rag/podman/templates/vllm-server.yaml.tmpl` | `.env.instruct`, `.env.reranker` |
+| `applications/rag-dev/podman/templates/vllm-server.yaml.tmpl` | `.env.instruct` |
+
+Custom component templates may adopt the same pattern for any key name. The `.env` object is always safe to query with `with` — if the key is absent the block is silently skipped.
+
+---
+
+## 10. Usage Examples
+
+### 10.1 Upload a custom service bundle
 
 ```bash
 # Authenticate
@@ -972,7 +1449,7 @@ curl -s https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3
 # "active"
 ```
 
-### 9.2 Create an application from the custom service
+### 10.2 Create an application from the custom service
 
 The application creation endpoint (`POST /api/v1/applications/`) accepts a `CreateApplicationRequest` with `name`, `catalog_id`, `version`, and a `services` array. Each service entry requires its own `catalog_id`, `version`, and `components` list.
 
@@ -1002,7 +1479,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/applications/ \
 # Returns 202 Accepted with {"id": "<application-uuid>"}
 ```
 
-### 9.3 Attempt to use a reserved built-in ID (rejected)
+### 10.3 Attempt to use a reserved built-in ID (rejected)
 
 Uploading a bundle whose `catalog_id` matches a built-in service is rejected at validation time — the extracted directory is cleaned up and no activation occurs:
 
@@ -1025,7 +1502,7 @@ curl -s https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_03EF9Z2GH4Q7RST5
 # }
 ```
 
-### 9.4 List custom services via the catalog API
+### 10.4 List custom services via the catalog API
 
 After uploading a bundle, custom services appear alongside built-in ones. The `GET /api/v1/services` endpoint returns an array of `ServiceSummary` objects (not a wrapped object), so the `jq` filter uses `.[].id`:
 
@@ -1040,7 +1517,7 @@ curl -s https://catalog-api.<domain>/api/v1/services \
 # "my-service"   ← custom
 ```
 
-### 9.5 Dry-run validation before applying
+### 10.5 Dry-run validation before applying
 
 ```bash
 # Validate without activating — useful in CI before promoting to production
@@ -1056,7 +1533,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 ---
 
-## 10. Backward Compatibility
+## 11. Backward Compatibility
 
 | Scenario | Behaviour |
 |---|---|
@@ -1072,7 +1549,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 ---
 
-## 11. Future Enhancements
+## 12. Future Enhancements
 
 1. **Scaffolding generator** — `ai-services catalog scaffold --service my-service --runtime podman` emits a minimal but correct directory skeleton ready to be tar'd and uploaded.
 2. **Template validation command** — `dry_run=true` already supported in §7.2.1; a dedicated CLI command `ai-services catalog validate --bundle <file>` wraps this for local use.
