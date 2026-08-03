@@ -544,6 +544,10 @@ func (s *ApplicationServiceBase) insertServiceDependencies(
 
 // ListApplications retrieves a paginated list of applications with filters.
 func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListApplicationsRequest) (*types.ApplicationListResponse, error) {
+	if req.Page < 1 {
+		return nil, fmt.Errorf("page must be greater than 0")
+	}
+
 	filters := &dbrepo.ApplicationFilters{
 		DeploymentType: req.DeploymentType,
 		CatalogID:      req.CatalogID,
@@ -571,9 +575,9 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 		apps = append(apps, appData)
 	}
 
-	totalPages := (totalCount + req.PageSize - 1) / req.PageSize
-	if totalPages == 0 {
-		totalPages = 1
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
 	}
 
 	return &types.ApplicationListResponse{
