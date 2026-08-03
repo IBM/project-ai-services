@@ -35,23 +35,12 @@ from extract.utils.job import (
     stage_uploaded_file,
     validate_file_extension,
 )
-from extract.utils.schema import SchemaValidationError
+from extract.utils.schema import SchemaValidationError, fmt_dt
 
 router = APIRouter()
 logger = get_logger("jobs_router")
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
-    """Return an ISO-8601 string (UTC) or None."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +71,10 @@ async def extract_sync():
     },
     summary="Create async extraction job",
     description=(
-        "Submit a `.txt` or `.pdf` file for asynchronous entity extraction "
+        "Submit a `.txt` or `.md` file for asynchronous entity extraction "
         "against a registered schema.  Returns immediately with a `job_id`.\n\n"
         "**Form parameters:**\n"
-        "- `file` (required): A single `.txt` or `.pdf` file\n"
+        "- `file` (required): A single `.txt` or `.md` file\n"
         "- `schema_id` (required): ID of a registered extraction schema\n"
         "- `job_name` (optional): Human-readable label for the job\n"
     ),
@@ -231,8 +220,8 @@ async def list_extract_jobs(
             schema_id=row.schema_id,
             status=row.status,
             document_name=row.document_name,
-            submitted_at=_fmt_dt(row.submitted_at),
-            completed_at=_fmt_dt(row.completed_at),
+            submitted_at=fmt_dt(row.submitted_at),
+            completed_at=fmt_dt(row.completed_at),
         )
         for row in rows
     ]
@@ -285,8 +274,8 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
             digitize_doc_id=row.digitize_doc_id,
         ),
         metadata=row.job_metadata,
-        submitted_at=_fmt_dt(row.submitted_at),
-        completed_at=_fmt_dt(row.completed_at),
+        submitted_at=fmt_dt(row.submitted_at),
+        completed_at=fmt_dt(row.completed_at),
         error=row.error,
     )
 
@@ -387,8 +376,6 @@ async def get_extract_job_result(job_id: str):
     description=(
         "Delete a job record and its result file.  "
         "Returns **409 Conflict** if the job is `accepted` or `in_progress`. "
-        "Does **not** delete the digitized document in the Digitize service — "
-        "that lifecycle is managed independently via the Digitize API."
     ),
     tags=["jobs"],
 )

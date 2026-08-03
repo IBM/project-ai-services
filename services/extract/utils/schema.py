@@ -15,6 +15,7 @@ Responsibilities:
 import json
 import re
 import copy
+from datetime import timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import jsonschema
@@ -417,6 +418,8 @@ def check_extraction_budget(
 def fmt_dt(dt) -> Optional[str]:
     if dt is None:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat().replace("+00:00", "Z")
 
 # Made with Bob
