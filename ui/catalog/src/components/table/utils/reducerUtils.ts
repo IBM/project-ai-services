@@ -62,11 +62,7 @@ export function handleSharedTableAction<
     case "SHARED_RESET_COLUMN_VISIBILITY":
       return { ...state, ...resetColumnVisibility(action.defaultColumns) };
     case "SHARED_SET_FETCH_ERROR":
-      return {
-        ...state,
-        fetchError: action.payload,
-        ...(action.payload !== null ? { isLoading: false } : {}),
-      };
+      return { ...state,fetchError: action.payload };
     case "SHARED_SET_DELETING":
       return { ...state, isDeleting: action.payload };
     case "SHARED_UPDATE_ROW_STATUS":
