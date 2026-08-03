@@ -783,7 +783,7 @@ The UI populates the connector selection step by calling `GET /api/v1/connectors
 
 #### Request Body Change
 
-The [`Service`](../../ai-services/internal/pkg/catalog/apiserver/models/create_application.go) struct is extended with an optional `connectors` field:
+Datasource connectors are folded into the existing `components` array on the [`Service`](../../ai-services/internal/pkg/catalog/apiserver/models/create_application.go) struct — no separate top-level field is needed. A datasource entry uses `component_type: "datasource"` and supplies the UUID of the pre-registered datasource via a new optional `id` field on `Component`. Freshly-provisioned components (LLM, vector DB, etc.) leave `id` empty as today.
 
 ```go
 // Service represents a service configuration in the application.
@@ -791,20 +791,25 @@ type Service struct {
     CatalogID  string         `json:"catalog_id"  binding:"required"`
     Version    string         `json:"version"     binding:"required"`
     Components []Component    `json:"components"  binding:"required,dive"`
-    Connectors []ConnectorRef `json:"connectors"`  // Optional: connectors to attach post-deploy
     Params     map[string]any `json:"params"`
 }
 
-// ConnectorRef references a registered connector to attach to this service post-deploy.
-type ConnectorRef struct {
-    ConnectorType string `json:"connector_type"` // e.g. "datasource", "vector_store"
-    ConnectorID   string `json:"connector_id"`   // UUID of the registered connector
+// Component represents a component configuration for a service.
+// For remotely-managed components (e.g. datasources), ID references
+// the pre-registered record; ProviderID and Version are still required
+// for the deploy-options schema lookup but Params may be empty.
+type Component struct {
+    ID            string         `json:"id"`             // UUID of a pre-registered component (datasources only)
+    ComponentType string         `json:"component_type"  binding:"required"`
+    ProviderID    string         `json:"provider_id"     binding:"required"`
+    Version       string         `json:"version"         binding:"required"`
+    Params        map[string]any `json:"params"`
 }
 ```
 
-This mirrors how `Components[]` works: each entry declares a type and an ID. The `connector_type` field makes the assignment future-proof — when vector-store or model connectors are introduced, nothing in this structure changes.
+This keeps a single, uniform shape for all component entries. The handler distinguishes datasource components from install-time components by `component_type == "datasource"` — the same discriminator used in the database.
 
-**Which connector types a service accepts is declared in its catalog YAML** via an `accepts_connectors` list. The `deploy-options` API surfaces this to the UI so it knows which services to show a connector picker for.
+**Which component types a service accepts is declared in its catalog YAML** via an `accepts_connectors` list. The `deploy-options` API surfaces this as a `datasource` component entry (see below) so the UI knows to show a connector picker rather than a provider configuration form.
 
 **Example request body:**
 
@@ -821,28 +826,32 @@ This mirrors how `Components[]` works: each entry declares a type and an ID. The
         {
           "component_type": "llm",
           "provider_id": "watsonx",
-          "version": "1.0.0"
-        }
-      ],
-      "connectors": [
-        {
-          "connector_type": "datasource",
-          "connector_id": "550e8400-e29b-41d4-a716-446655440000"
+          "version": "1.0.0",
+          "params": { "model_id": "ibm/granite-13b-chat-v2" }
         },
         {
-          "connector_type": "datasource",
-          "connector_id": "661f9511-f30c-52e5-b827-557766551111"
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "component_type": "datasource",
+          "provider_id": "s3",
+          "version": "1"
+        },
+        {
+          "id": "661f9511-f30c-52e5-b827-557766551111",
+          "component_type": "datasource",
+          "provider_id": "ssh_sftp",
+          "version": "1"
         }
       ]
     },
     {
       "catalog_id": "summarize",
       "version": "2.0.0",
-      "components": [],
-      "connectors": [
+      "components": [
         {
-          "connector_type": "datasource",
-          "connector_id": "550e8400-e29b-41d4-a716-446655440000"
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "component_type": "datasource",
+          "provider_id": "s3",
+          "version": "1"
         }
       ]
     }
@@ -850,9 +859,10 @@ This mirrors how `Components[]` works: each entry declares a type and an ID. The
 }
 ```
 
-- `connectors` is optional per service. If omitted or empty, the service is deployed without any connector attachment.
-- Each `connector_id` must reference a registered connector of the declared `connector_type` in `Connected` status. Any ID that fails validation is returned as a `400 Bad Request` before deployment begins.
-- The same datasource can appear under multiple services (as shown above) — each produces an independent `service_dependencies` row, and the catalog uses each service's own `service_id` as the `connector_id` when calling the downstream pod.
+- Datasource entries are distinguished by `component_type: "datasource"`. The `id` field is required for these entries and must reference a pre-registered datasource in `Connected` status.
+- Non-datasource entries (LLM, vector DB, etc.) leave `id` empty, exactly as today.
+- Any `id` that fails validation (not found, wrong type, not `Connected`) is returned as `400 Bad Request` before deployment begins.
+- The same datasource `id` can appear under multiple services — each produces an independent `service_dependencies` row.
 
 #### Service Catalog YAML Change
 
@@ -865,22 +875,124 @@ accepts_connectors:
   - datasource
 ```
 
-The `DeployOptionsService` response is extended with an `accepts_connectors` field so the UI knows which services to show a connector picker for:
+Services that do not accept connectors omit the field entirely (treated as an empty list).
+
+#### Deploy-Options API Response Change
+
+**Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
+
+The `components` array within each service entry is extended: for every type listed under `accepts_connectors` in the catalog YAML, the backend appends a component object of that type to the service's `components` list. The UI uses the presence of a `datasource` component entry to decide whether to render a connector picker for that service.
+
+**Full response example (after this change):**
 
 ```json
 {
-  "id": "digitize",
-  "name": "Digitize",
-  "version": "1.2.0",
-  "accepts_connectors": ["datasource"],
-  "components": [ ... ]
+  "id": "rag",
+  "name": "Digital Assistant",
+  "version": "1.0.0",
+  "global_components": [
+    {
+      "type": "vector_db",
+      "name": "Vector store",
+      "providers": [
+        {
+          "id": "opensearch",
+          "name": "OpenSearch",
+          "description": "Distributed search and analytics engine",
+          "default": true,
+          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
+        }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "id": "digitize",
+      "name": "Digitize documents",
+      "version": "1.2.0",
+      "schema": "/api/v1/services/digitize/params",
+      "components": [
+        {
+          "type": "llm",
+          "name": "LLM Model",
+          "providers": [
+            {
+              "id": "watsonx",
+              "name": "IBM watsonx.ai Instruct",
+              "description": "Configure watsonx.ai for instruct models",
+              "schema": "/api/v1/components/llm/providers/watsonx/params"
+            },
+            {
+              "id": "vllm",
+              "name": "vLLM Instruct",
+              "description": "Deploy new instruct model on vLLM",
+              "schema": "/api/v1/components/llm/providers/vllm/params"
+            }
+          ]
+        },
+        {
+          "type": "datasource",
+          "name": "Datasource",
+          "providers": [
+            {
+              "id": "s3",
+              "name": "Amazon S3",
+              "description": "Amazon S3 bucket via AWS credentials",
+              "schema": "/api/v1/components/datasource/providers/s3/params"
+            },
+            {
+              "id": "ssh_sftp",
+              "name": "Remote SSH / SFTP",
+              "description": "Remote server accessible via SSH private key",
+              "schema": "/api/v1/components/datasource/providers/ssh_sftp/params"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat",
+      "name": "Chat",
+      "version": "2.0.0",
+      "schema": "/api/v1/services/chat/params",
+      "components": [
+        {
+          "type": "llm",
+          "name": "LLM Model",
+          "providers": [
+            {
+              "id": "watsonx",
+              "name": "IBM watsonx.ai Instruct",
+              "description": "Configure watsonx.ai for instruct models",
+              "schema": "/api/v1/components/llm/providers/watsonx/params"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
 ```
+
+The `datasource` component entry in `digitize.components` signals the UI to render a connector picker (populated from `GET /api/v1/connectors/datasources?status=Connected`) rather than a provider configuration form. The `chat` service has no `datasource` entry, so no picker is shown for it.
+
+**Updated `DeployOptionsService` response schema:**
+
+| Field        | Type   | Description                                                                                                                         |
+| ------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | string | Service identifier                                                                                                                  |
+| `name`       | string | Service display name                                                                                                                |
+| `version`    | string | Service version                                                                                                                     |
+| `schema`     | string | URL to fetch service-level parameters                                                                                               |
+| `components` | array  | Array of component objects with providers. Includes a `datasource` entry for services that declare `accepts_connectors: [datasource]` in their catalog YAML. **Extended.** |
+| `resources`  | object | Optional resource requirements for this service                                                                                     |
+
+> **Backward compatibility:** The `datasource` component entry is purely additive. Existing clients that do not read it are unaffected.
 
 #### Post-Deploy Connect Flow
 
 1. The deployment proceeds normally. Connector attachment is **not** attempted until the application reaches `Running` status.
-2. Once the application transitions to `Running`, the deployment completion callback collects the unique datasource IDs from all services' `connectors` lists and calls `PUT /api/v1/applications/:id/connectors/datasources/:datasource_id` once per unique datasource ID. The fan-out to individual services and the `service_dependencies` insertions happen inside that handler.
+2. Once the application transitions to `Running`, the deployment completion callback scans all services' `components` arrays for entries where `component_type == "datasource"`, collects the unique datasource `id` values, and calls `PUT /api/v1/applications/:id/connectors/datasources/:datasource_id` once per unique ID. The fan-out to individual services and the `service_dependencies` insertions happen inside that handler.
 3. If any downstream service call fails after one retry, the application remains `Running` (deployment was successful). The `service_dependencies` row is still inserted so the link is tracked, but the UI surfaces the failure against the specific service so the user can retrigger via a datasource update.
 
 ### 11.2 Datasource Connection Post-Creation
