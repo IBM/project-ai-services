@@ -16,6 +16,7 @@ from sqlalchemy import (
     CheckConstraint,
     Index,
     UniqueConstraint,
+    desc,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -246,7 +247,7 @@ class ConnectorDocumentChecksum(Base):
 
 class ConnectorSyncLog(Base):
     """
-    Persistent per-tick history backing the sync-history API.
+    Persistent per-tick history backing the sync-logs API.
 
     Maps to the 'connector_sync_logs' table in PostgreSQL.
     """
@@ -274,7 +275,7 @@ class ConnectorSyncLog(Base):
     )
 
     __table_args__ = (
-        Index("idx_csl_connector_started", "connector_id", "started_at"),
+        Index("idx_csl_connector_started", "connector_id", desc("started_at")),
         UniqueConstraint("connector_id", "seq", name="uq_csh_connector_seq"),
     )
 
