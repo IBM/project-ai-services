@@ -13,7 +13,7 @@ Before any `digitize` connector endpoint is called:
   - `ssh`: `private_key`
   - `s3`: `secret_access_key`
 - `digitize` encrypts those secret fields at rest using `/run/secrets/connector_encryption_key` before persisting them.
-- `/run/secrets/connector_api_token` and `/run/secrets/connector_encryption_key` are mounted before pod start.
+- `/run/secrets/connector_encryption_key` is mounted before pod start.
 - The `document_checksum` table and `DocumentChecksum` ORM model are already implemented (user-submitted documents only). Connector code must never read from or write to it — connector dedup is handled exclusively via `connector_document_checksum` (see §4).
 
 ---
@@ -131,7 +131,6 @@ Common fields:
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `host` | `string` | ✅ | S3 endpoint hostname (e.g. `s3.us-east-1.amazonaws.com`) |
 | `endpoint_url` | `string` | ✅ | Full S3 endpoint URL. AWS S3: `https://s3.<region>.amazonaws.com`. IBM COS: `https://s3.<region>.cloud-object-storage.appdomain.cloud`. Provider and region are auto-detected from this URL — no separate `region` field needed. |
 | `bucket_name` | `string` | ✅ | |
 | `access_key_id` | `string` | ✅ | IAM key ID (AWS) or HMAC key ID (IBM COS) |
@@ -139,7 +138,7 @@ Common fields:
 | `prefix` | `string` | ❌ | Key prefix to scope listing — empty means bucket root |
 | `delimiter` | `string` | ❌ | Set `"/"` for non-recursive (immediate children only) |
 
-> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — stored as `checksum` in `connector_document_checksum`. If the checksum is already present for this connector the file is **never downloaded**. The checksum is also stored in `documents.metadata.source_checksum` for traceability.
+> **Checksum-based dedup:** For S3 connectors, `list_objects_v2` returns the object ETag at no extra API cost — stored as `checksum` in `connector_document_checksum`. If the checksum is already present for this connector the file is **never downloaded**.
 
 #### Example payloads
 
@@ -165,7 +164,6 @@ Common fields:
   "type": "s3",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
-    "host": "s3.us-east-1.amazonaws.com",
     "endpoint_url": "https://s3.us-east-1.amazonaws.com",
     "bucket_name": "my-rag-documents",
     "prefix": "reports/",
@@ -185,7 +183,6 @@ IBM COS example:
   "type": "s3",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
-    "host": "s3.us.cloud-object-storage.appdomain.cloud",
     "endpoint_url": "https://s3.us.cloud-object-storage.appdomain.cloud",
     "bucket_name": "ai-services",
     "access_key_id": "<hmac-key-id>",
@@ -308,7 +305,7 @@ Returned fields include:
     "type": "s3",
     "attached_at": "2025-01-12T09:15:00Z",
     "last_sync_at": "2025-01-15T14:30:00Z",
-    "sync_status": "failed",
+    "sync_status": "out of sync",
     "last_sync_error": "remote object listing timed out",
     "total_files": 150
   }
@@ -358,9 +355,9 @@ Query params:
 | `limit` | `50` | capped at `200` |
 | `offset` | `0` | zero-based |
 
-Each item contains: `sync_id`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `sync_status`.
+Each item contains: `id`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`.
 
-Status values: `syncing`, `out of sync`, `up to date`, `failed: <reason>`.
+Status values: `started`, `completed`, `failed`.
 
 At most one in-progress `syncing` row exists per connector.
 
@@ -373,34 +370,37 @@ At most one in-progress `syncing` row exists per connector.
   "offset": 0,
   "items": [
     {
-      "sync_id": 3,
+      "id": 3,
       "started_at": "2025-01-15T14:32:00Z",
       "finished_at": "2025-01-15T14:32:10Z",
       "total_files": 42,
       "new_files": 0,
       "removed_files": 0,
       "failed_files": 0,
-      "sync_status": "up to date"
+      "status": "completed",
+      "error": ""
     },
     {
-      "sync_id": 2,
+      "id": 2,
       "started_at": "2025-01-15T14:27:00Z",
       "finished_at": "2025-01-15T14:27:18Z",
       "total_files": 41,
       "new_files": 3,
       "removed_files": 0,
       "failed_files": 3,
-      "sync_status": "out of sync"
+      "status": "failed",
+      "error": "3 files could not be processed"
     },
     {
-      "sync_id": 1,
+      "id": 1,
       "started_at": "2025-01-15T14:22:00Z",
       "finished_at": null,
       "total_files": 0,
       "new_files": 5,
       "removed_files": 0,
       "failed_files": 0,
-      "sync_status": "syncing"
+      "status": "started",
+      "error": ""
     }
   ]
 }
@@ -468,7 +468,6 @@ CREATE TABLE IF NOT EXISTS connectors (
     id                      TEXT        PRIMARY KEY,
     name                    TEXT        NOT NULL UNIQUE,
     type                    TEXT        NOT NULL,
-    host                    TEXT        NOT NULL,
     connection_details      JSONB       NOT NULL DEFAULT '{}',
     allowed_extensions      JSONB       NOT NULL DEFAULT '[]',
     sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
@@ -543,19 +542,20 @@ Persistent per-tick history backing the sync-history API.
 CREATE TABLE IF NOT EXISTS connector_sync_history (
     id               BIGSERIAL   PRIMARY KEY,
     connector_id     TEXT        NOT NULL,
-    sync_id          INTEGER     NOT NULL,
+    seq              INTEGER     NOT NULL,
     started_at       TIMESTAMPTZ NOT NULL,
     finished_at      TIMESTAMPTZ,
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
     failed_files     INTEGER     NOT NULL DEFAULT 0,
-    sync_status      TEXT        NOT NULL DEFAULT 'syncing',
+    status           TEXT        NOT NULL DEFAULT 'started',
+    error            TEXT        NOT NULL DEFAULT '',
     CONSTRAINT fk_csh_connector
         FOREIGN KEY (connector_id)
         REFERENCES connectors(id) ON DELETE CASCADE,
-    CONSTRAINT uq_csh_connector_sync
-        UNIQUE (connector_id, sync_id)
+    CONSTRAINT uq_csh_connector_seq
+        UNIQUE (connector_id, seq)
 );
 
 CREATE INDEX IF NOT EXISTS idx_csh_connector_started
@@ -566,9 +566,9 @@ CREATE INDEX IF NOT EXISTS idx_csh_connector_started
 
 `DocumentChecksum` already exists in `services/digitize/db/models.py` and remains unchanged. Add three new models:
 
-- `ActiveConnector` — fields: `id` (PK), `name` (UNIQUE), `type`, `host`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`
+- `ActiveConnector` — fields: `id` (PK), `name` (UNIQUE), `type`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`
 - `ConnectorDocumentChecksum` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
-- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `sync_id`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `sync_status`
+- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `seq`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`
 
 ---
 
@@ -675,9 +675,9 @@ This section describes the **DB-only operations** for each phase of the connecto
 DB operations (Attach)
 ────────────────────────────────────────────────────────────────────
 1. INSERT INTO connectors
-       (id, type, host, connection_details, allowed_extensions,
+       (id, type, connection_details, allowed_extensions,
         sync_interval_seconds, attached_at, sync_status)
-   VALUES (:connector_id, :type, :host, :encrypted_details, :exts,
+   VALUES (:connector_id, :type, :encrypted_details, :exts,
            :interval, NOW(), 'up to date')
    ON CONFLICT (id) DO NOTHING          ← 409 if already exists
 
