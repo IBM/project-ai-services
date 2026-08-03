@@ -179,7 +179,7 @@ class DocumentChecksum(Base):
         return f"<DocumentChecksum(checksum='{self.checksum[:20]}...', doc_id='{self.doc_id}')>"
 
 
-class ActiveConnector(Base):
+class Connector(Base):
     """
     Stores connector config, encrypted credential blobs, and top-level sync state.
 
@@ -216,7 +216,7 @@ class ActiveConnector(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ActiveConnector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.sync_status}')>"
+        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.sync_status}')>"
 
 
 class ConnectorDocumentChecksum(Base):
@@ -269,8 +269,8 @@ class ConnectorSyncLog(Base):
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # Relationships
-    connector: Mapped["ActiveConnector"] = relationship(
-        "ActiveConnector", back_populates="sync_logs"
+    connector: Mapped["Connector"] = relationship(
+        "Connector", back_populates="sync_logs"
     )
 
     __table_args__ = (
