@@ -11,7 +11,7 @@ import {
 import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { getUserInfo } from "@/services/auth";
 import { useAuthStore } from "@/store/auth.store";
 

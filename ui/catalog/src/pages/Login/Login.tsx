@@ -8,8 +8,8 @@ import {
   ToastNotification,
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
-import { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate, useLocation } from "react-router";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
 import { ROUTES } from "@/constants/endpoints.constants";
@@ -30,30 +30,25 @@ const LoginPage = () => {
   const [credentialError, setCredentialError] = useState<boolean>(false);
   const [networkError, setNetworkError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  // Mount-only by design: /login is always entered fresh (redirect or direct
+  // navigation), so we only need to read inactivity state once at mount.
+  // sessionStorage is consumed and cleared here to keep subsequent renders pure.
   const [showInactivityNotification, setShowInactivityNotification] =
-    useState<boolean>(false);
+    useState<boolean>(() => {
+      const locationState = location.state as LoginLocationState | null;
+      const isInactivityLogout =
+        locationState?.logoutReason === LogoutReason.INACTIVITY ||
+        sessionStorage.getItem(SESSION_STORAGE_KEYS.LOGOUT_REASON) ===
+          LogoutReason.INACTIVITY;
 
-  useEffect(() => {
-    const locationState = location.state as LoginLocationState | null;
-    const logoutReason = locationState?.logoutReason;
-    const storedReason = sessionStorage.getItem(
-      SESSION_STORAGE_KEYS.LOGOUT_REASON,
-    );
-
-    if (
-      logoutReason === LogoutReason.INACTIVITY ||
-      storedReason === LogoutReason.INACTIVITY
-    ) {
-      setShowInactivityNotification(true);
-
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
-
-      if (locationState) {
+      if (isInactivityLogout) {
+        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
+        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
         navigate(location.pathname, { replace: true, state: null });
       }
-    }
-  }, [location, navigate]);
+
+      return isInactivityLogout;
+    });
 
   const handleLogin = async (): Promise<void> => {
     setCredentialError(false);
