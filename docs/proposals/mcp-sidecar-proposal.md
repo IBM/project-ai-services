@@ -19,7 +19,7 @@ kind of process next to each.
 ### The topology change
 
 Nothing about the four services changes. What's added is one companion process per service,
-opted into per application.
+deployed automatically alongside every service.
 
 ```mermaid
 flowchart TB
@@ -30,7 +30,7 @@ flowchart TB
         D3["summarize-api :6000"]
         D4["similarity-api :7000"]
     end
-    subgraph "With --mcp"
+    subgraph "With MCP"
         direction LR
         E1["digitize-api :4000<br/>unchanged"] --- S1["MCP sidecar<br/>container in same pod"]
         E2["backend / chatbot :5000<br/>unchanged"] --- S2["MCP sidecar<br/>container in same pod"]
@@ -92,8 +92,8 @@ The only new concurrency to reason about lives entirely inside the sidecar's own
 This proposal adds a small, stateless Go process next to each service that turns its
 already-documented REST API into tools an AI agent can call. It's a new neighbor, not a
 modification: the service's code, threads, and event loop stay completely untouched. What actually
-changes is what sits around the service (a companion container, a label, a CLI flag) and the fact
-that its API descriptions now do real work instead of just decorating a Swagger page.
+changes is what sits around the service (a companion container and a label) and the fact that its
+API descriptions now do real work instead of just decorating a Swagger page.
 
 ## Proposed Solution
 
@@ -113,13 +113,13 @@ nothing but the tool names and descriptions we expose. This is worth stating exp
 unfamiliar with agentic tool-use will otherwise reasonably ask whether this component is making
 autonomous decisions about customer data. It is not.
 
-The sidecar is fully integrated into the existing `ai-services` CLI. Customers who already use
-`ai-services bootstrap` and `ai-services application start` to set up their environment can opt
-into MCP through flags they already know, no separate tooling to learn or install.
+The sidecar is fully integrated into the existing `ai-services` CLI. When a customer deploys a
+service, the MCP sidecar is deployed automatically alongside it. No additional flags or commands
+are required to get MCP running.
 
 ### What "plug and play" means here
 
-The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM/project-ai-services/pull/1209),
+The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM-Cloud/ibmcloud-api-mcp),
 private, read access granted by the maintainer) is a complete, tested Go MCP server that parses any
 OpenAPI spec and generates tools dynamically. Every file referenced under Implementation Details
 below lives in that external repository today, not in `ai-services`. Phase 1 vendors it into a new
@@ -178,7 +178,6 @@ flowchart LR
 
 ### Low-Level Design
 
-<<<<<<< Updated upstream
 **Component view.** What's actually inside the sidecar and how a tool call moves through it:
 
 ```mermaid
@@ -216,39 +215,6 @@ flowchart TB
     LOADER --> CONVERT
     CONVERT --> AGG
     CFG -.-> A
-=======
-```mermaid
-flowchart TD
-    A[AI Agent\nany MCP-compatible client]
-
-    A -->|tools/list - receives typed tool definitions + descriptions| B
-    A -->|tools/call - calls tool with structured arguments| B
-
-    subgraph sidecar [MCP Sidecar - one per service, generic image, env-var config]
-        B[MCP Sidecar]
-        B1[startup: fetches OPENAPI_URL\nparses spec, registers tools]
-        B2[runtime: reconstructs HTTP request\nforwards to SERVICE_URL]
-        B --- B1
-        B --- B2
-    end
-
-    subgraph services [Existing Service Containers - zero changes]
-        C1[digitize :4000]
-        C2[chatbot :5000]
-        C3[summarize :6000]
-        C4[similarity :7000]
-    end
-
-    B2 --> services
-
-    subgraph infra [Shared Infrastructure - zero changes]
-        D1[vLLM]
-        D2[Vector Store]
-        D3[Postgres]
-    end
-
-    services --> infra
->>>>>>> Stashed changes
 ```
 
 ### Per-Service Configuration
@@ -278,6 +244,19 @@ the upstream binary — requires the MCP client to fork the process directly, wh
 a containerised sidecar. HTTP transport is the only mode that makes sense here: the sidecar binds
 to a port, the CLI resolves that port when generating `~/mcp.json`, and the agent connects over the
 network. The stdio code path is removed entirely rather than left as an unused option.
+
+### MCP Sidecar Exposure via Caddy
+
+External agents reach the sidecar through Caddy. When `application start` deploys sidecars
+automatically, the CLI must also automatically register each sidecar route with Caddy's Admin API
+using the same pattern already used for service routes.
+
+Each sidecar gets one route: `<service>-mcp.<app-domain>` routes to the sidecar's port inside the
+pod (4001 for digitize, 5001 for chatbot, 6001 for summarize, 7001 for similarity). Caddy
+terminates TLS; the sidecar receives plaintext HTTP.
+
+On `application stop` and `application delete`, sidecar routes are removed from Caddy
+automatically, keeping it in sync with the running infrastructure.
 
 ### Tool Name Prefixing
 
@@ -319,39 +298,35 @@ changed between restarts, so it's visible instead of a silent surprise.
 Generating `~/mcp.json` (via `application info <name> --format mcp-json`, see CLI Integration
 below) is a manual, on-demand step today. This bites in both directions:
 
-- **Adding a service:** `application start rag --mcp` brings the new sidecar up automatically:
+- **Adding a service:** `application start` brings the new sidecar up automatically:
   `OPENAPI_URL`/`SERVICE_URL` are resolved from the application's own known config, no manual env
   vars. But the agent host's `~/mcp.json` still only lists whatever was there before. The new
   capability is invisible to the agent until someone remembers to re-run `info` and hand the
   updated file over again.
 - **Removing a service:** the mirror problem. See Sidecar Lifecycle on Delete below.
 
-**Recommendation:** have `application start --mcp` and `application mcp stop` auto-regenerate
+**Recommendation:** have `application start` and `application stop` auto-regenerate
 `~/mcp.json` as part of the same command, rather than leaving regeneration as a separate manual
 step. This resolves both directions with one design decision instead of two, and removes a step a
 customer could otherwise easily forget.
 
 ### Lifecycle at a Glance
 
-One rule governs every command below: **the sidecar exists if and only if the most recently run
-relevant command included `--mcp`.** No separate flag is stored anywhere, no state to drift out of
-sync. This diagram covers only that, whether the sidecar exists, not the service's own
-running/stopped/deleted state, which is a separate, already-existing concern:
+The sidecar starts and stops automatically with the service. No separate flag controls it. This
+diagram covers only whether the sidecar exists, not the service's own running/stopped/deleted
+state, which is a separate, already-existing concern:
 
 ```mermaid
 stateDiagram-v2
     [*] --> NoSidecar
-    NoSidecar --> SidecarRunning: --mcp passed to<br/>start (podman) / create (openshift)
+    NoSidecar --> SidecarRunning: application start<br/>(podman) / application create (openshift)
     SidecarRunning --> NoSidecar: application stop<br/>(whole app stops, sidecar goes with it)
-    SidecarRunning --> NoSidecar: application mcp stop<br/>(podman: clean · openshift: brief pod restart)
     SidecarRunning --> [*]: application delete
     NoSidecar --> [*]: application delete
 ```
 
-Read this as: the sidecar only ever comes into existence when `--mcp` is on the command, and every
-other command (`stop`, `mcp stop`, `delete`) only ever removes it, never adds it. There's no path
-back to `SidecarRunning` except explicitly passing `--mcp` again. `mcp stop` is the one place the
-two runtimes genuinely differ, clean on Podman, a brief restart on OpenShift, full reasoning below.
+Read this as: the sidecar comes into existence whenever the service starts, and every stop or
+delete removes it. There is no path to `SidecarRunning` that doesn't go through `application start`.
 
 ### Sidecar Lifecycle on Delete
 
@@ -366,15 +341,15 @@ container inside that same pod, it's already carrying that label automatically, 
 separate resource that could be missed, no tagging step to verify in Phase 3. Deleting the
 service pod deletes the sidecar with it, by construction.
 
-**The tradeoff this accepts, worth being explicit about:** `application mcp stop` (turning the
-sidecar off without stopping the service) works cleanly on **podman**, Podman allows stopping one
-container inside a pod without touching the others. On **OpenShift**, it does not: removing a
-container from a running pod means editing that pod's spec, which triggers a rolling restart of
-the whole Deployment, the service briefly restarts along with the sidecar. This was the reason an
-earlier draft of this proposal argued for a separate pod. Going with Ryan's simpler design means
-accepting that `application mcp stop` on OpenShift causes a brief service restart, not a
-zero-disruption toggle. That's a reasonable price for a simpler, more conventional design, and
-worth saying out loud rather than leaving implicit.
+**The tradeoff this accepts, worth being explicit about:** toggling the sidecar off without
+stopping the service works cleanly on **podman**, Podman allows stopping one container inside a
+pod without touching the others. On **OpenShift**, it does not: removing a container from a
+running pod means editing that pod's spec, which triggers a rolling restart of the whole
+Deployment, the service briefly restarts along with the sidecar. This was the reason an earlier
+draft of this proposal argued for a separate pod. Going with Ryan's simpler design means accepting
+that toggling later on OpenShift causes a brief service restart, not a zero-disruption toggle.
+That's a reasonable price for a simpler, more conventional design, and worth saying out loud rather
+than leaving implicit.
 
 **Whether the sidecar is "always running" genuinely differs by runtime:**
 
@@ -383,32 +358,21 @@ worth saying out loud rather than leaving implicit.
 - **On OpenShift:** yes, effectively, once deployed. Standard Kubernetes has no "pause just one
   container, keep the pod alive" primitive, every container in a Pod's spec runs for that Pod
   instance's entire lifetime. Once a pod is created with the sidecar container in its spec, that
-  sidecar runs continuously alongside the service until the whole pod is replaced, which is exactly
-  what `application mcp stop` triggers there. It cannot be paused in place.
+  sidecar runs continuously alongside the service until the whole pod is replaced. It cannot be
+  paused in place.
 
 ### Sidecar Lifecycle on Stop/Start (temporary, not delete)
 
 `application stop <name>` is reversible: the service isn't gone, just not running, so the
 cascade-delete mechanism above doesn't apply here. This is a distinct case worth a distinct rule,
-kept deliberately simple rather than adding new state to track:
+kept deliberately simple:
 
-- **Stopping always tears the sidecar down too, unconditionally, no flag required.** A sidecar
-  left running against a stopped service produces only confusing failures for the agent
-  (connection refused / timeout on every call) instead of the tool cleanly not being offered.
-  There is no scenario where leaving it up is preferable, so this isn't a decision the customer
-  needs to make. The config is regenerated at the same time, same as the add/delete cases above.
-- **Starting only brings the sidecar back if `--mcp` is passed on that specific command.** No
-  attempt to remember whether MCP was enabled before. That would require persisting and keeping
-  in sync a piece of state whose only purpose is saving the customer from retyping one flag. That's
-  a worse trade than it sounds: real ongoing complexity (where the state lives, what happens if it
-  disagrees with reality) purchased for a trivial convenience.
-
-**The rule in one sentence, applying uniformly to add / stop / start / delete, with no new state
-anywhere:** the sidecar exists if and only if the most recently run relevant command included
-`--mcp`; stopping or deleting the service always takes the sidecar down with it. This is
-comprehensive in the sense that actually matters here: no dangling sidecars, no silent failures,
-nothing that can drift out of sync, without introducing any new moving parts beyond what's
-already proposed.
+- **Stopping always tears the sidecar down too, unconditionally.** A sidecar left running against
+  a stopped service produces only confusing failures for the agent (connection refused / timeout on
+  every call) instead of the tool cleanly not being offered. There is no scenario where leaving it
+  up is preferable.
+- **Starting always brings the sidecar back automatically.** No flag required, no state to
+  remember. `application start` in v1 always starts the sidecar alongside the service.
 
 **How current state is actually surfaced:** nothing is persisted to answer "is MCP on for this
 service." `application ps` gains a new `MCP ENDPOINT` column that reports, live, whether a sidecar
@@ -416,78 +380,28 @@ pod is currently running for each service, either its address or `null`, compute
 `ps` already reports pod status. The running sidecar is the state; there's nothing separate to
 keep in sync, and no catalog database column is introduced for this.
 
-**On the remaining awareness gap:** a customer who restarts a previously MCP-enabled service
-without `--mcp` won't see an error. The service just runs normally without its sidecar, exactly as
-it did while stopped. Nothing breaks, but the customer may not expect that. The preferred approach
-is **documentation, not additional runtime machinery**: this behavior, with worked examples, belongs
-in the customer-facing docs so anyone who hits it has a clear reference. That's a better trade
-than adding state or logic to preempt every possible point of confusion, which risks compromising
-the thing we're actually trying to deliver (something simple and easy to operate).
-
-One candidate worth discussing with the dev lead, not yet decided: have `application start <name>`
-print a static, unconditional reminder when run without `--mcp`, for example: *"Started without
-MCP. Run with `--mcp` to enable AI agent tool access for this service."* Same message every time,
-no memory of prior state required, so it doesn't conflict with the rule above. Documentation should
-be the primary answer regardless of whether this ships.
-
 ## CLI Integration
 
 The sidecar is surfaced through the existing `ai-services` CLI rather than as a standalone binary.
 This keeps the customer experience in one place: the same tool used for bootstrapping and
-application management also controls MCP.
+application management also surfaces MCP status.
 
-### `application start` — opt in with a flag
+### `application start` — automatic sidecar deployment
 
-The existing `application start` command gains an `--mcp` flag. When present, the CLI starts the
-service sidecar container alongside the application container automatically. The customer does not
-need to know or set the environment variables manually. The CLI resolves `OPENAPI_URL` and
-`SERVICE_URL` from the application's known configuration.
+The sidecar is deployed automatically as part of `application start`. No flag is required. When
+the service starts, its MCP sidecar starts with it. The CLI resolves `OPENAPI_URL` and
+`SERVICE_URL` from the application's known configuration automatically.
 
 In the examples below, `my-rag-app` is the customer-assigned name given to the application when it
-was created — not the template name. A customer who deployed the RAG template and named it
-`my-rag-app` would use that name in all commands.
+was created — not the template name.
 
 ```bash
-# Start an application with its MCP sidecars (customer-assigned name)
-ai-services application start my-rag-app --runtime podman --mcp
-
-# Start without MCP (existing behaviour, unchanged)
+# Start an application — sidecar starts automatically alongside every service
 ai-services application start my-rag-app --runtime podman
 ```
 
-### `application mcp` — dedicated subcommand
-
-A new `application mcp` subcommand provides direct control over MCP sidecar lifecycle
-(`start`/`stop`) independent of the main application. Generating the agent-facing config is not a
-third subcommand here, see "`application info` — extended to cover MCP" below, it's a flag on a
-command that already resolves what's running for an application.
-
-```bash
-# Start MCP sidecars for all services in an application (uses customer-assigned name)
-ai-services application mcp start my-rag-app --runtime podman
-
-# Start MCP sidecars for specific services only
-ai-services application mcp start my-rag-app --pod chatbot --pod summarize --runtime podman
-
-# Stop the MCP sidecars without stopping the application
-ai-services application mcp stop my-rag-app --runtime podman
-```
-
-Because `mcp start` targets all services in an application at once, individual sidecars can
-succeed or fail independently. The command attempts each launch separately, reports a result per
-service, and exits non-zero if any failed:
-
-```
-chatbot     started
-summarize   started
-similarity  FAILED   port 3003 already in use
-digitize    FAILED   container image not found
-```
-
-The customer can then re-run with `--pod` to target only the failed ones without restarting the
-ones already running. Regardless of partial failures, `~/mcp.json` is regenerated at the end of
-the command to reflect only the sidecars that are actually running. The agent never receives a
-config entry pointing at a sidecar that did not start.
+`application stop` tears the sidecar down alongside the service, also automatically. There is no
+scenario where leaving a sidecar running against a stopped service is useful.
 
 ### `application info` — extended to cover MCP
 
@@ -512,25 +426,20 @@ code path instead of a parallel one.
 
 ### OpenShift: a different attach point
 
-Podman is the primary target for v1 (see Delivery Phases), but the attach point above doesn't
-carry over to OpenShift as-is, worth stating directly rather than implying one mechanism covers
-both runtimes.
+Podman is the primary target for v1 (see Delivery Phases), but the automatic attach point above
+doesn't carry over to OpenShift as-is, worth stating directly rather than implying one mechanism
+covers both runtimes.
 
-On OpenShift, `application start`/`application stop` are no-ops today regardless of MCP, they log
-and return without doing anything. `application create` is what actually deploys and waits for a
-running app, via `helm install`/`upgrade`. So on this runtime, `--mcp` attaches to `create` instead:
-the sidecar is added to the service's own pod spec as a second container, behind a conditional
-(`{{- if .Values.mcp.enabled }}`), and `--mcp` sets that value before the install/upgrade call. In
-practice this is expected to be the common path, MCP is a decision customers make once at deploy
-time, not something toggled during normal operation.
+On OpenShift, `application start`/`application stop` are no-ops today, they log and return without
+doing anything. `application create` is what actually deploys and waits for a running app, via
+`helm install`/`upgrade`. So on this runtime, the sidecar is added to the service's own pod spec
+as a second container automatically, enabled by default via `{{- if .Values.mcp.enabled }}` set to
+true before the install/upgrade call.
 
-For the less common case of enabling or disabling it later on an already-running app,
-`application mcp start`/`application mcp stop` become a `helm upgrade` toggling `mcp.enabled`. On
-this runtime that has a real cost either direction: Kubernetes can't add or remove a container from
-a running pod in place, so toggling triggers a rolling restart of that pod. Podman doesn't have
-this limitation, containers can be added to or removed from a running pod without touching the
-others in it, so the toggle-later path is only a meaningful cost on OpenShift, and only for
-customers who change their mind after initial deploy.
+Kubernetes can't add or remove a container from a running pod in place, so toggling later would
+trigger a rolling restart of that pod. Podman doesn't have this limitation — containers can be
+added to or removed from a running pod without touching the others. This difference only matters
+for the future granular control work (see Future Work).
 
 This is a proposed direction, not verified against the real chart: whether a conditional container
 in the pod spec cleanly appears and disappears across upgrades without disturbing the rest of the
@@ -538,9 +447,9 @@ release needs a Phase 3 spike before it's trusted.
 
 ### How this fits the bootstrap flow
 
-A customer setting up from scratch follows the same sequence they already know, with MCP as an
-opt-in step. The name used in each command (`my-rag-app` below) is whatever name the customer
-chose when creating the application — not the template name.
+A customer setting up from scratch follows the same sequence they already know. The name used in
+each command (`my-rag-app` below) is whatever name the customer chose when creating the application,
+not the template name.
 
 ```mermaid
 flowchart TD
@@ -551,43 +460,36 @@ flowchart TD
         B1["ai-services bootstrap configure"] --> B2["ai-services catalog configure"]
     end
 
-    subgraph NoMCP["Without --mcp"]
+    subgraph Flow["With this proposal"]
         direction TB
-        C1["ai-services application start<br/>my-rag-app"] --> C2(["Service running,<br/>no agent access"])
-    end
-
-    subgraph WithMCP["With --mcp (this proposal)"]
-        direction TB
-        D1["ai-services application start<br/>my-rag-app --mcp"] --> D2["ai-services application info<br/>my-rag-app --format mcp-json<br/>--output ~/mcp.json"] --> D3(["Service + sidecar running,<br/>agent host configured"])
+        D1["ai-services application start<br/>my-rag-app"] --> D2["ai-services application info<br/>my-rag-app --format mcp-json<br/>--output ~/mcp.json"] --> D3(["Service + sidecar running,<br/>agent host configured"])
     end
 
     Start --> B1
-    B2 --> C1
     B2 --> D1
 ```
 
-Only one command gains a flag (`--mcp` on `application start`), and one existing command gains a
-new format option (`application info --format mcp-json`). No new top-level command at all.
-Everything before that point, `bootstrap configure` and `catalog configure`, is identical either
-way.
+`application start` now always brings the sidecar up. One existing command gains a new format
+option (`application info --format mcp-json`) for generating the agent config. No new top-level
+command, no new flag on `start`.
 
 **Example Output:**
 
 ```
-$ ai-services application start my-rag-app --runtime podman --mcp
+$ ai-services application start my-rag-app --runtime podman
 Starting application 'my-rag-app'...
   chatbot      started
   digitize     started
   summarize    started
   similarity   started
 
-MCP sidecars (--mcp):
+MCP sidecars:
   chatbot      attached  → http://my-rag-app-chatbot:5001
   digitize     attached  → http://my-rag-app-digitize:4001
   summarize    attached  → http://my-rag-app-summarize:6001
   similarity   attached  → http://my-rag-app-similarity:7001
 
-Application 'my-rag-app' is running with MCP enabled.
+Application 'my-rag-app' is running.
 Run 'ai-services application info my-rag-app --format mcp-json --output ~/mcp.json' to generate an agent config.
 
 $ ai-services application info my-rag-app --format mcp-json --output ~/mcp.json
@@ -661,14 +563,14 @@ this repo. None of these are new files being written from scratch.)*
 
 ### CLI additions to `ai-services`
 
-- **`cmd/ai-services/cmd/application/mcp.go`:** new `application mcp` subcommand group with
-  `start` and `stop` subcommands. Follows the same Cobra pattern used by all other `application`
-  subcommands.
-- **`application start`:** add `--mcp` boolean flag. When set, the start flow also launches the
-  MCP sidecar container before returning.
+- **`application start`:** modified to automatically launch the MCP sidecar container alongside
+  each service. No new flag required.
+- **`application stop`:** modified to always tear the sidecar down alongside the service.
 - **`application info`:** add `--format mcp-json` and `--output <path>` flags to the existing
   command, reusing its existing pod-resolution logic to emit the `mcpServers` JSON instead of
   human-readable text.
+- **`application ps`:** add `MCP ENDPOINT` column to output, reporting the sidecar address for
+  each service or null if no sidecar is running.
 
 ### Note on OpenAPI Description Quality
 
@@ -694,7 +596,7 @@ proven thing into the existing CLI and deployment templates.
 
 **Phase 1 — Local validation.** Vendor `ibmcloud-api-mcp` into `mcp/` as a new Go module (a
 one-time copy, git history dropped, not a GitHub fork) and apply the six targeted removals. Run
-the binary locally against a running chatbot service using stdio transport and connect an MCP
+the binary locally against a running chatbot service using HTTP transport and connect an MCP
 client to confirm tools appear and calls work. No container, no CLI integration, no ICR push. This
 phase proves the core concept before any infrastructure work begins. In parallel, add the
 `ruff D103/D400/D401` docstring lint rule to `services/common/pyproject.toml`. This is low effort,
@@ -709,29 +611,33 @@ existing `Makefile`, add `.golangci.yml`, and verify `go test ./...` passes. Bui
 container locally with Podman alongside existing service containers. Publish to ICR only after the
 container is verified locally, not before.
 
-**Phase 3 — CLI integration.** Add `application mcp start/stop` subcommands, the `--mcp` flag on
-`application start`, and `--format mcp-json`/`--output` flags on `application info`, to the
-`ai-services` CLI. Wire sidecar startup into the Podman and OpenShift deployment templates. All
-four services, including digitize, ship together once the Async Operations decision is resolved
-in Phase 1.
+**Phase 3 — CLI integration.** Modify `application start` to automatically launch the MCP sidecar
+alongside each service. Add `--format mcp-json`/`--output` flags on `application info` and the
+`MCP ENDPOINT` column on `application ps` to the `ai-services` CLI. Wire sidecar startup into the
+Podman and OpenShift deployment templates. All four services, including digitize, ship together
+once the Async Operations decision is resolved in Phase 1.
 
 ## Verification Plan
 
 1. **Unit tests:** `go test ./...` passes after module rename and IBM code removal.
 2. **Tool generation:** parsing chatbot's `/openapi.json` produces one tool per operation, each
-   with a non-empty description. (Note: `--config` only emits a client launch descriptor,
-   `{"mcpServers": {...}}`, it does not list tools, that requires actually calling `tools/list`.)
+   with a non-empty description.
 3. **Tag filtering:** `--tag chat,retrieval` excludes `get_health` and `get_v1_models`.
 4. **End-to-end call:** agent calls `chat_completion` → sidecar forwards to chatbot → real response.
 5. **Container:** `podman build` succeeds; container starts and `/health` returns `{"status":"ok"}`.
-6. **CLI — start with flag:** `application start rag --mcp` launches both application and sidecar
-   containers; `application ps` shows both running.
-7. **CLI — config output:** `application info rag --format mcp-json` emits valid MCP client JSON.
-8. **Regression:** existing `application start` without `--mcp` is unchanged; all existing service
-   tests pass; no service containers are modified.
+6. **CLI — automatic start:** `application start my-rag-app` launches both application and sidecar
+   containers automatically; `application ps` shows both running with MCP endpoints populated.
+7. **CLI — config output:** `application info my-rag-app --format mcp-json` emits valid MCP client JSON.
+8. **Regression:** all existing service tests pass; no service containers are modified.
 
 ## Future Work
 
+- **Granular MCP control:** an `--mcp` flag on `application start` and dedicated
+  `application mcp start/stop` subcommands for customers who want to enable or disable MCP
+  per-service independently of the application lifecycle. This includes per-service result
+  reporting, `--pod` targeting for individual sidecars, and partial failure handling. Not required
+  for v1 since the automatic approach covers the common case, but a natural next step for teams
+  that need finer control.
 - **Thin proxy gateway:** for ISVs requiring a single MCP endpoint, a lightweight aggregator
   merges `tools/list` from all per-service sidecars and routes calls. Not required for v1 since
   most MCP hosts support multiple servers natively.
@@ -747,7 +653,7 @@ in Phase 1.
 
 ## Open Questions
 
-- **1. Description quality in practice:** should we find a way to enforce rich descriptions for our services now and future services? i.e linting 
+- **1. Description quality in practice:** should we find a way to enforce rich descriptions for our services now and future services? i.e linting
 
 - **2. Aggregation shape:** `ibmcloud-api-mcp` fronts many IBM Cloud APIs behind one server; this
   proposal instead runs one generic sidecar per service. Any operational downsides to the
@@ -771,6 +677,6 @@ in Phase 1.
   managing deployments) and isn't reusable here.
 
 
-- **4. Startup ordering:** if `application start --mcp` brings the service and its sidecar up at the
+- **4. Startup ordering:** if `application start` brings the service and its sidecar up at the
   same time, should the sidecar retry with backoff when the service isn't ready yet to serve its
   OpenAPI spec, rather than failing outright on first boot?
