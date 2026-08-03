@@ -4,20 +4,13 @@ Extract Information Service — FastAPI application.
 
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Optional
 
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, File, Form, Query, Request, UploadFile
+from fastapi import FastAPI, Request
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse, Response
-from sqlalchemy.exc import IntegrityError
-
+from fastapi.responses import JSONResponse
 from common.misc_utils import configure_uvicorn_logging, create_llm_session, get_llm_endpoint, get_logger, set_log_level, set_request_id
 from common.diagnostic_logger import setup_comprehensive_crash_handler
-from common.error_utils import http_error_responses
-from common.misc_utils import cleanup_staging_directory
-
 from extract.db.connection import check_db_connection, close_db_connections
 
 
@@ -37,9 +30,6 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-# Semaphores live in extract.state so that api/v1/jobs.py can import them
-# without creating a circular dependency (app → jobs → app).
-from extract.state import concurrency_limiter, job_limiter  # noqa: E402
 
 # Module-level model dict populated during lifespan startup.
 llm_model_dict: dict = {}
@@ -50,7 +40,7 @@ llm_model_dict: dict = {}
 # ---------------------------------------------------------------------------
 
 def ensure_directories() -> None:
-    """Create cache sub-directories if they do not already exist."""
+    """Create cache subdirectories if they do not already exist."""
     for d in [settings.extract.staging_dir, settings.extract.results_dir]:
         d.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Ensured directory: {d}")
