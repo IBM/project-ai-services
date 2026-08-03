@@ -74,7 +74,7 @@ Before any `digitize` connector endpoint is called:
           DELETE /v1/documents/{doc_id}
 
   Step 5 — finalise tick
-    → UPDATE connector_sync_history (files_found, completed, failed, status)
+    → UPDATE connector_sync_logs (total_files, new_files, removed_files, failed_files, status)
     → UPDATE connectors (last_sync_at, sync_status)
 
 ── Detach (DELETE /v1/connectors/{id}) ──────────────────────────────
@@ -90,7 +90,7 @@ Before any `digitize` connector endpoint is called:
 
 - `connectors`: current connector configuration and top-level sync state
 - `connector_document_checksum`: **connector-sourced documents only** — one row per `(checksum, connector_id)` pair; carries the `doc_id` for deletion
-- `connector_sync_history`: one row per worker tick
+- `connector_sync_logs`: one row per worker tick
 - `ConnectorWorkerManager`: owns worker thread lifecycle
 - `ConnectorSyncWorker`: executes periodic sync logic
 - Scanner implementations: transport-specific remote access for SFTP and S3; S3 scanner derives the checksum from the S3 ETag returned by `list_objects_v2`; SFTP scanner uses a remotely-computed MD5 — both stored as `checksum` in `connector_document_checksum`
@@ -454,7 +454,7 @@ connectors
   └─< connector_document_checksum (connector_id, checksum, doc_id) ─> documents
 
 connectors
-  └─< connector_sync_history
+  └─< connector_sync_logs
 ```
 
 The two registries are **intentionally separate**: a file with the same content can legitimately exist in both — one row representing the user-uploaded copy and one row representing the connector-synced copy.
@@ -534,12 +534,12 @@ CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
 > }
 > ```
 
-### 4.4 `connector_sync_history`
+### 4.4 `connector_sync_logs`
 
 Persistent per-tick history backing the sync-history API.
 
 ```sql
-CREATE TABLE IF NOT EXISTS connector_sync_history (
+CREATE TABLE IF NOT EXISTS connector_sync_logs (
     id               BIGSERIAL   PRIMARY KEY,
     connector_id     TEXT        NOT NULL,
     seq              INTEGER     NOT NULL,
@@ -558,23 +558,23 @@ CREATE TABLE IF NOT EXISTS connector_sync_history (
         UNIQUE (connector_id, seq)
 );
 
-CREATE INDEX IF NOT EXISTS idx_csh_connector_started
-    ON connector_sync_history (connector_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_csl_connector_started
+    ON connector_sync_logs (connector_id, started_at DESC);
 ```
 
 ### 4.5 ORM
 
-`DocumentChecksum` already exists in `services/digitize/db/models.py` and remains unchanged. Add three new models:
+`DocumentChecksum` already exists in `services/digitize/db/models.py` and remains unchanged. Three new models were added to the same file:
 
-- `ActiveConnector` — fields: `id` (PK), `name` (UNIQUE), `type`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`
-- `ConnectorDocumentChecksum` — fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
-- `ConnectorSyncHistory` — fields: `id` (PK), `connector_id` (FK → `connectors`), `seq`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`
+- `Connector` — maps to `connectors`; fields: `id` (PK), `name` (UNIQUE), `type`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`; has a one-to-many relationship `sync_logs → ConnectorSyncLog`
+- `ConnectorDocumentChecksum` — maps to `connector_document_checksum`; fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
+- `ConnectorSyncLog` — maps to `connector_sync_logs`; fields: `id` (PK, autoincrement), `connector_id` (FK → `connectors`, CASCADE DELETE), `seq`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`; unique constraint `uq_csh_connector_seq (connector_id, seq)`
 
 ---
 
 ## 5. Database Operations Layer
 
-**Modified file:** `services/digitize/utils/db.py`
+**Modified file:** `services/digitize/db/manager.py`
 
 The DB layer stores and returns ciphertext only. Encryption happens in the API layer; decryption happens in scanners.
 
@@ -613,54 +613,53 @@ Jobs created by a connector sync use the format `{connector_id} - {sync_number} 
 
 ### 5.2 DB-layer stub
 
+All connector DB functions are implemented as `@staticmethod` methods on `DatabaseManager` in `services/digitize/db/manager.py`, using the shared `get_db_session()` context manager from `services/digitize/db/connection.py`. The pattern mirrors the existing job/document methods in that file:
+
 ```python
+@staticmethod
 def lookup_connector_content_by_checksum(checksum: str) -> str | None:
     """Return doc_id if checksum is already in connector_document_checksum, else None."""
-    with session() as s:
-        row = s.execute(
-            text("SELECT doc_id FROM connector_document_checksum WHERE checksum = :checksum LIMIT 1"),
-            {"checksum": checksum},
+    with get_db_session() as session:
+        row = session.execute(
+            select(ConnectorDocumentChecksum.doc_id)
+            .where(ConnectorDocumentChecksum.checksum == checksum)
+            .limit(1)
         ).one_or_none()
-    return row.doc_id if row else None
+    return row[0] if row else None
 
 
+@staticmethod
 def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -> None:
     """Insert a new (checksum, connector_id, doc_id) row; no-op if already exists."""
-    with transaction() as tx:
-        tx.execute(
-            text("""
-                INSERT INTO connector_document_checksum (checksum, connector_id, doc_id)
-                VALUES (:checksum, :connector_id, :doc_id)
-                ON CONFLICT (checksum, connector_id) DO NOTHING
-            """),
-            {"checksum": checksum, "connector_id": connector_id, "doc_id": doc_id},
+    with get_db_session() as session:
+        stmt = (
+            insert(ConnectorDocumentChecksum)
+            .values(checksum=checksum, connector_id=connector_id, doc_id=doc_id)
+            .on_conflict_do_nothing(index_elements=["checksum", "connector_id"])
         )
+        session.execute(stmt)
 
 
+@staticmethod
 def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[int, str | None]:
     """Delete the (checksum, connector_id) row; return (remaining_owner_count, doc_id)."""
-    with transaction() as tx:
-        deleted = tx.execute(
-            text("""
-                DELETE FROM connector_document_checksum
-                WHERE checksum     = :checksum
-                  AND connector_id = :connector_id
-                RETURNING doc_id
-            """),
-            {"connector_id": connector_id, "checksum": checksum},
+    with get_db_session() as session:
+        deleted = session.execute(
+            delete(ConnectorDocumentChecksum)
+            .where(
+                ConnectorDocumentChecksum.checksum == checksum,
+                ConnectorDocumentChecksum.connector_id == connector_id,
+            )
+            .returning(ConnectorDocumentChecksum.doc_id)
         ).one_or_none()
         if deleted is None:
             return 0, None
-        doc_id = deleted.doc_id
-        row = tx.execute(
-            text("""
-                SELECT COUNT(*) AS remaining
-                FROM connector_document_checksum
-                WHERE checksum = :checksum
-            """),
-            {"checksum": checksum},
-        ).one()
-    return int(row.remaining), doc_id
+        doc_id = deleted[0]
+        remaining = session.scalar(
+            select(func.count())
+            .where(ConnectorDocumentChecksum.checksum == checksum)
+        ) or 0
+    return remaining, doc_id
 ```
 
 ### 5.3 Connector Lifecycle DB Operations
@@ -694,9 +693,9 @@ DB operations (Sync Tick)
 ────────────────────────────────────────────────────────────────────
 
 Phase 1 — open tick record
-  INSERT INTO connector_sync_history
-      (connector_id, sync_id, started_at, sync_status)
-  VALUES (:connector_id, :next_sync_id, NOW(), 'syncing')
+  INSERT INTO connector_sync_logs
+      (connector_id, seq, started_at, status)
+  VALUES (:connector_id, :next_seq, NOW(), 'started')
 
   UPDATE connectors SET sync_status = 'syncing' WHERE id = :connector_id
 
@@ -752,10 +751,10 @@ Phase 4b — orphan detection + removal
       DELETE /v1/documents/{orphan_doc_id}   ← 200/204/404 = success; 5xx logged and skipped
 
 Phase 5 — close tick record
-  UPDATE connector_sync_history
+  UPDATE connector_sync_logs
   SET finished_at = NOW(), total_files = :n, new_files = :n,
-      removed_files = :n, failed_files = :n, sync_status = :final_status
-  WHERE connector_id = :connector_id AND sync_id = :sync_id
+      removed_files = :n, failed_files = :n, status = :final_status
+  WHERE connector_id = :connector_id AND seq = :seq
 
   UPDATE connectors SET last_sync_at = NOW(), sync_status = :final_status
   WHERE id = :connector_id
@@ -793,7 +792,7 @@ Step 3 — remove ownership row by row
 
 Step 4 — delete connector row
   DELETE FROM connectors WHERE id = :connector_id
-  -- CASCADE deletes connector_sync_history rows automatically.
+  -- CASCADE deletes connector_sync_logs rows automatically.
 
 Step 5 — cleanup staging dirs (not a DB operation)
   rm -rf {staging_dir}/{connector_id}/
@@ -805,7 +804,7 @@ Step 5 — cleanup staging dirs (not a DB operation)
 
 ## 6. Scanner Abstraction
 
-**New file:** `services/digitize/connector/base_scanner.py`
+**New file:** `services/digitize/connectors/base_scanner.py`
 
 ### 6.1 Responsibility split
 
@@ -859,7 +858,7 @@ class BaseScanner(ABC):
 
 ### 6.4 Factory dispatch
 
-Factory dispatch lives in `services/digitize/connector/scanner.py`:
+Factory dispatch lives in `services/digitize/connectors/scanner.py`:
 
 - `ssh` → `SFTPScanner`
 - `s3` → `S3Scanner`
@@ -870,7 +869,7 @@ Factory dispatch lives in `services/digitize/connector/scanner.py`:
 
 ### 7.1 SFTP scanner
 
-**New file:** `services/digitize/connector/sftp_scanner.py`
+**New file:** `services/digitize/connectors/sftp_scanner.py`
 
 Behavior:
 
@@ -906,7 +905,7 @@ def scan(self) -> list[tuple[str, str]]:
 
 ### 7.2 S3 scanner
 
-**New file:** `services/digitize/connector/s3_scanner.py`
+**New file:** `services/digitize/connectors/s3_scanner.py`
 
 **Detailed design:** [S3 Scanner — Detailed Design Proposal](./s3-scanner-proposal.md)
 
@@ -965,7 +964,7 @@ client = boto3.Session(
 
 ## 8. Sync Worker
 
-**New file:** `services/digitize/connector/sync_worker.py`
+**New file:** `services/digitize/connectors/sync_worker.py`
 
 `ConnectorSyncWorker` owns the end-to-end sync loop for one connector.
 
@@ -974,7 +973,7 @@ client = boto3.Session(
 ```text
 _run_tick()
 │
-├─ [Phase 1] INSERT connector_sync_history (status='syncing')
+├─ [Phase 1] INSERT connector_sync_logs (status='started')
 │            UPDATE connectors (sync_status='syncing')
 │
 ├─ [Phase 2] ── ACQUIRE ingest_lock ────────────────────────────────────────────
@@ -1004,7 +1003,7 @@ _run_tick()
 │             orphan_checksums = known_checksums − scanned_checksums
 │             remove_connector_from_membership → if remaining==0: DELETE /v1/documents/{doc_id}
 │
-└─ [Phase 5] UPDATE connector_sync_history (finished_at, counters, status)
+└─ [Phase 5] UPDATE connector_sync_logs (finished_at, counters, status)
              UPDATE connectors (last_sync_at, sync_status)
 ```
 
@@ -1097,7 +1096,7 @@ def _classify(
 
 ## 9. Worker Manager
 
-**New file:** `services/digitize/connector/worker_manager.py`
+**New file:** `services/digitize/connectors/worker_manager.py`
 
 `ConnectorWorkerManager` owns worker thread lifecycle.
 
@@ -1237,14 +1236,16 @@ Each PR is independently testable.
 
 ### PR 1 — DB Schema + ORM Models + Settings
 
-**Files touched:** `init_schema.sql`, `db/models.py`, `config/settings.py`
+**Files touched:** `services/digitize/db/scripts/init_schema.sql`, `services/digitize/db/models.py`, `services/digitize/settings.py`
 
-**What's to build:**
-- 3 new tables: `connectors`, `connector_document_checksum`, `connector_sync_history`
+**What was built:**
+- 3 new tables: `connectors`, `connector_document_checksum`, `connector_sync_logs`
   - `connector_document_checksum` schema: `checksum TEXT NOT NULL`, `connector_id TEXT NOT NULL`, `doc_id TEXT NOT NULL`, `PRIMARY KEY (checksum, connector_id)` — no FK constraints, no `ON DELETE CASCADE`
   - Index `idx_cdc_connector_id` (B-tree on `connector_id`) — see §4.3 for rationale
-- 3 new ORM models: `ActiveConnector`, `ConnectorDocumentChecksum`, `ConnectorSyncHistory`
-- Settings entries: staging directory, worker stop timeout, monitor poll interval, respawn back-off cap, `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`)
+  - `connector_sync_logs` index: `idx_csl_connector_started` on `(connector_id, started_at DESC)`
+- 3 new ORM models added to `services/digitize/db/models.py`: `Connector`, `ConnectorDocumentChecksum`, `ConnectorSyncLog`
+  - `Connector.sync_interval_seconds` stores the value populated from `CONNECTOR_SYNC_INTERVAL_SECONDS` (default `300`) at attach time
+- `settings.py` (`services/digitize/settings.py`) already contains `DigitizeConfig` with `staging_dir` property; no new connector-specific settings class was needed — connector sync interval is read from the env var directly at attach time
 
 **How to test:**
 - Run `init_schema.sql` against a test DB and assert all 3 new tables exist with correct columns, constraints, and indexes
@@ -1256,7 +1257,7 @@ Each PR is independently testable.
 
 ### PR 2 — DB Operations Layer
 
-**Files touched:** `services/digitize/utils/db.py`
+**Files touched:** `services/digitize/db/manager.py`
 
 **What's to build:**
 All connector DB functions from §5.1:
@@ -1297,7 +1298,7 @@ All connector DB functions from §5.1:
 
 ### PR 4 — Scanner Abstraction + SFTP Scanner
 
-**Files touched:** `connector/base_scanner.py`, `connector/scanner.py`, `connector/sftp_scanner.py`
+**Files touched:** `connectors/base_scanner.py`, `connectors/scanner.py`, `connectors/sftp_scanner.py`
 
 **What's to build:**
 - `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
@@ -1315,7 +1316,7 @@ All connector DB functions from §5.1:
 
 ### PR 5 — S3 Scanner
 
-**Files touched:** `connector/s3_scanner.py`
+**Files touched:** `connectors/s3_scanner.py`
 
 **What's to build:**
 - `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()`, staged download; `scan()` returns **all** allowed objects without dedup filtering; checksum (S3 ETag) registered via `add_connector_to_membership()` on job completion; `set_document_metadata()` stores checksum and key. `upsert_file_checksum()` must NOT be called.
@@ -1329,7 +1330,7 @@ All connector DB functions from §5.1:
 
 ### PR 6 — Sync Worker
 
-**Files touched:** `connector/sync_worker.py`
+**Files touched:** `connectors/sync_worker.py`
 
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, classify, ingest new files, register cross-connector dups, orphan deletion, tick finalize
@@ -1354,7 +1355,7 @@ All connector DB functions from §5.1:
 
 ### PR 7 — Worker Manager + Lifespan Recovery + Monitor
 
-**Files touched:** `connector/worker_manager.py`, `main.py` (lifespan hook)
+**Files touched:** `connectors/worker_manager.py`, `app.py` (lifespan hook)
 
 **What's to build:**
 - `ConnectorWorkerManager` singleton: `start_worker()`, `stop_worker()`, `_workers` map
