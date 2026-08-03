@@ -302,7 +302,7 @@ Returns the full schema record including the normalized `json_schema`, `examples
 | 404 Not Found | No schema with this ID. |
 | 500 Internal Server Error | Database failure. |
 
-**Sample response (201):**
+**Sample response (201) with user provided json schema:**
 
 ```json
 {
@@ -350,6 +350,57 @@ Returns the full schema record including the normalized `json_schema`, `examples
   "created_at": "2026-07-07T09:30:00Z"
 }
 ```
+
+**Sample response (201) with schema inferred from examples:**
+
+```json
+{
+  "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
+  "name": "invoice-extraction",
+  "description": "Extracts core commercial fields from invoices",
+  "is_schema_inferred": true,
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "invoice_number": {"type": "string"},
+      "invoice_date":   {"type": "string", "format": "date"},
+      "vendor_name":    {"type": "string"},
+      "total_amount":   {"type": "number"},
+      "currency":       {"type": "string"},
+      "tax":            {"type": "number"}
+    },
+    "required": ["invoice_number", "vendor_name", "total_amount", "currency"]
+  },
+  "examples": [
+    {
+      "text": "INVOICE #INV-2041 ... ABC GmbH ... TOTAL: EUR 1,204.50 .... tax: EUR 42",
+      "output": {
+        "invoice_number": "INV-2041",
+        "vendor_name": "ABC GmbH",
+        "total_amount": 1204.50,
+        "currency": "EUR",
+        "tax": 42
+      }
+    },
+    {
+      "text": "INVOICE #INV-4543 ...24 Jul 2026.... ABC GmbH ... TOTAL: EUR 1,300",
+      "output": {
+        "invoice_number": "INV-4543",
+        "invoice_date": "24-07-2026",
+        "vendor_name": "ABC GmbH",
+        "total_amount": 1300,
+        "currency": "EUR"
+      }
+    }
+  ],
+  "custom_prompt": null,
+  "schema_tokens": 118,
+  "examples_tokens": 74,
+  "prompt tokens": 0,
+  "created_at": "2026-07-07T09:30:00Z"
+}
+```
+
 ### 5.4 DELETE /v1/schemas/{schema_id}
 
 Deletes the schema. Since jobs hold a foreign key to schemas (`ON DELETE RESTRICT`), deletion is rejected while **any** job — active or historical — references the schema. Users must delete referencing jobs first (individually or via bulk job delete).
