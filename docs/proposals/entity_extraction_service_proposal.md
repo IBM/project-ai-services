@@ -14,11 +14,10 @@ The service follows the architectural patterns already established:
 
 Two execution paths are provided:
 
-| Path                    | Endpoint                | Use case                                                                                                                                                                   |
-|:------------------------|:------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Synchronous**         | `POST /v1/extract`      | Raw text submitted inline. Blocking call, immediate JSON result.                                                                                                           |
-| **Asynchronous (jobs)** | `POST /v1/extract/jobs` | File uploads (`.pdf`, `.txt`, `.doc`). PDF and .docx files are digitized internally via the Digitize Documents REST API before extraction. Returns a `job_id` for polling. |
->Note: In case the digitize service is not present, the service will only entertain jobs with .txt files. Pdf and .docx files will be denied with a bad request.
+| Path                    | Endpoint                | Use case                                                         |
+|:------------------------|:------------------------|:-----------------------------------------------------------------|
+| **Synchronous**         | `POST /v1/extract`      | Raw text submitted inline. Blocking call, immediate JSON result. |
+| **Asynchronous (jobs)** | `POST /v1/extract/jobs` | File uploads (`.txt`, `.md`).  Returns a `job_id` for polling.   |
 
 A central component of the design is the **Schema Registry**: a PostgreSQL-backed store of immutable extraction schemas. Users register a JSON schema (optionally with few-shot examples and a custom prompt) once, receive a `schema_id`, and reference it in every extraction request. This decouples schema management from extraction execution and lets the same schema be reused across sync and async paths.
 
@@ -26,14 +25,14 @@ A central component of the design is the **Schema Registry**: a PostgreSQL-backe
 
 | Concept diagram element                                       | Design realization                                                                                                                                            |
 |:--------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Input: text (e.g., digitized invoice from Digitize service)   | Sync `text` field; async worker fetches digitized content via `GET /v1/documents/{id}/content` on the digitize service                                        |
+| Input: text (e.g., digitized invoice from Digitize service)   | Sync `text` field/ async `file` .txt or .md                                                                                                                   |
 | Input: JSON schema with `"required": true` properties         | Registered schema in the Schema Registry (`json_schema` column, JSON Schema draft 2020-12)                                                                    |
 | Input (optional): single-shot examples (text–JSON pairs)      | `examples` array stored per schema in the registry                                                                                                            |
 | Config: Version                                               | Not managed by the service — schemas are immutable and unversioned (see Non-Goals). Users encode versions in the schema `name` if needed (e.g., `invoice-v2`) |
 | Config: LLM (granite-3.3-8b-instruct / mistral-small-3.1-24b) | `MODEL_NAME` env var (service default)                                                                                                                        |
 | Config (optional): custom prompt                              | `custom_prompt` column per schema, appended to the system prompt                                                                                              |
 | Output: JSON populated according to input schema              | `data.extraction` in the response, validated server-side against the registered schema                                                                        |
-| Output: pointer to input text                                 | `data.source` block (digitize `doc_id` for async, input word/token stats for sync)                                                                            |
+| Output: pointer to input text                                 | `data.source` block ( input word/token stats for sync)                                                                            |
 | External dependency: OpenAI-compatible inferencing endpoint   | Existing vLLM endpoint (`OPENAI_BASE_URL`), shared semaphore                                                                                                  |
 | SLAs: throughput / latency                                    | Governed by concurrency limits and the hard context-window guard (Section 6); to be quantified during performance testing                                     |
 
@@ -44,7 +43,7 @@ A central component of the design is the **Schema Registry**: a PostgreSQL-backe
 - **Horizontal scaling:** Like the digitize and summarize services, this service is architected for single-replica deployment. Multi-replica deployments introduce contention on the vLLM inference engine and are out of scope.
 - **UI:** No user interface is included in this document. The service is API-only. 
 - **Schema versioning and mutation:** Schemas are **immutable**. There is no `PUT`/`PATCH` on schemas and no version chain. To change a schema, the user registers a new schema under a new name and deletes the old one when it is no longer referenced.
-- **Document conversion / OCR:** The service does not implement PDF parsing or conversion. All non-plaintext formats are delegated to the Digitize Documents service over its REST API.
+- **Document conversion / OCR:** The service does not implement PDF parsing or conversion.
 - **Chunked extraction of over-limit documents:** Inputs that exceed the model context window are rejected with a hard, diagnosable error rather than processed via chunk-and-merge. A merge strategy for extraction results is materially harder than for summaries (conflicting scalar values, entity deduplication) and is deferred to Future Enhancements.
 - **Multi-file jobs:** Each async job processes exactly one file. Clients submit one job per file.
 
@@ -79,29 +78,29 @@ graph LR
 
 **Key interactions:**
 
-- The **sync path** never touches the digitize service or the jobs table. It tokenizes, guards the context window, calls vLLM, validates, and returns.
-- The **async worker** orchestrates: stage file → (PDF only) digitize via REST → fetch digitized content → guard → extract → validate → persist result.
+- The **sync path** never touches the jobs table. It tokenizes, guards the context window, calls vLLM, validates, and returns.
+- The **async worker** orchestrates: stage file  → guard → extract → validate → persist result.
 - Both paths share the global vLLM connection semaphore (Section 8).
-- The service is exposed externally on **port 7000** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
+- The service is exposed externally on **port 9500** (configurable), avoiding collision with digitize (4000) and the AI-Services backend server.
 
 ---
 
 ## 4. Endpoints
 
-| Method | Endpoint                           | Description                                                                   |
-|:---|:-----------------------------------|:------------------------------------------------------------------------------|
-| **POST** | `/v1/schemas`                      | Register a new immutable extraction schema. Returns `schema_id`.              |
-| **GET** | `/v1/schemas`                      | List registered schemas with pagination and name filter.                      |
-| **GET** | `/v1/schemas/{schema_id}`          | Retrieve a specific schema definition and its examples.                       |
-| **DELETE** | `/v1/schemas/{schema_id}`          | Delete a schema. Rejected if any job references it.                           |
-| **DELETE** | `/v1/schemas`                      | Bulk delete all schemas. Requires `confirm=true`.                             |
-| **POST** | `/v1/extract`                      | Synchronous extraction on inline text against a registered schema.            |
-| **POST** | `/v1/extract/jobs`                 | Submit a file (`.txt`/`.pdf`/`.docx`) for async extraction. Returns `job_id`. |
-| **GET** | `/v1/extract/jobs`                 | List extraction jobs with pagination and filters.                             |
-| **GET** | `/v1/extract/jobs/{job_id}`        | Get detailed status of a specific job.                                        |
-| **GET** | `/v1/extract/jobs/{job_id}/result` | Retrieve the extraction result as a sub-resource of the job.                  |
-| **DELETE** | `/v1/extract/jobs/{job_id}`        | Delete a job record and its result file.                                      |
-| **DELETE** | `/v1/extract/jobs`                 | Bulk delete all jobs and results. Requires `confirm=true`.                    |
+| Method | Endpoint                           | Description                                                          |
+|:---|:-----------------------------------|:---------------------------------------------------------------------|
+| **POST** | `/v1/schemas`                      | Register a new immutable extraction schema. Returns `schema_id`.     |
+| **GET** | `/v1/schemas`                      | List registered schemas with pagination and name filter.             |
+| **GET** | `/v1/schemas/{schema_id}`          | Retrieve a specific schema definition and its examples.              |
+| **DELETE** | `/v1/schemas/{schema_id}`          | Delete a schema. Rejected if any job references it.                  |
+| **DELETE** | `/v1/schemas`                      | Bulk delete all schemas. Requires `confirm=true`.                    |
+| **POST** | `/v1/extract`                      | Synchronous extraction on inline text against a registered schema.   |
+| **POST** | `/v1/extract/jobs`                 | Submit a file (`.txt`/`.md`) for async extraction. Returns `job_id`. |
+| **GET** | `/v1/extract/jobs`                 | List extraction jobs with pagination and filters.                    |
+| **GET** | `/v1/extract/jobs/{job_id}`        | Get detailed status of a specific job.                               |
+| **GET** | `/v1/extract/jobs/{job_id}/result` | Retrieve the extraction result as a sub-resource of the job.         |
+| **DELETE** | `/v1/extract/jobs/{job_id}`        | Delete a job record and its result file.                             |
+| **DELETE** | `/v1/extract/jobs`                 | Bulk delete all jobs and results. Requires `confirm=true`.           |
 
 
 ---
@@ -310,7 +309,7 @@ Returns the full schema record including the normalized `json_schema`, `examples
   "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
   "name": "invoice-extraction",
   "description": "Extracts core commercial fields from invoices", 
-  "inferred_schema": false,
+  "is_schema_inferred": false,
   "json_schema": {
     "type": "object",
     "properties": {
@@ -461,7 +460,7 @@ curl -X POST http://localhost:7000/v1/extract \
 }
 ```
 
-> `data.source` is the sync-path realization of the concept diagram's "pointer to input text" output. On the async path this block instead carries the digitize `doc_id` (Section 10.4), which is a durable pointer to the cached digitized content.
+> `data.source` is the sync-path realization of the concept diagram's "pointer to input text" output. 
 
 **Sample error (413) with token diagnostics:**
 
@@ -492,18 +491,18 @@ curl -X POST http://localhost:7000/v1/extract \
 
 **Form parameters:**
 
-| Parameter   | Type   | Required | Description                        |
-|:------------|:-------|:---------|:-----------------------------------|
-| `file`      | file   | Yes      | Exactly one `.txt` or `.pdf` file. |
-| `schema_id` | string | Yes      | ID of a registered schema.         |
-| `job_name`  | string | No       | Optional human-readable label.     |
+| Parameter   | Type   | Required | Description                       |
+|:------------|:-------|:---------|:----------------------------------|
+| `file`      | file   | Yes      | Exactly one `.txt` or `.md` file. |
+| `schema_id` | string | Yes      | ID of a registered schema.        |
+| `job_name`  | string | No       | Optional human-readable label.    |
 
 **Validation rules:**
 
 - Exactly one file per request (multiple files → `400`).
-- Extension must be `.txt` or `.pdf`; PDF magic bytes are checked (corrupt/mislabeled → `415`).
+- Extension must be `.txt` or `.md`; (corrupt/mislabeled → `415`).
 - `schema_id` must exist (else `404`).
-- No word/page limit is enforced at submission time — the context-window guard runs *after* digitization, when the true text is known. Over-limit documents fail the job with full token diagnostics rather than being rejected blind at upload.
+- No word/page limit is enforced at submission time — the context-window guard runs in the background task. Over-limit documents fail the job with full token diagnostics rather than being rejected blind at upload.
 
 **Processing flow (request thread):**
 
@@ -512,12 +511,12 @@ curl -X POST http://localhost:7000/v1/extract \
 3. Generate `job_id` (UUID).
 4. Stage the file to `/var/cache/extract/staging/{job_id}/`.
 5. Insert a row into `extract_jobs` with status `accepted`.
-6. Launch background processing via FastAPI `BackgroundTasks` (offloading to the worker as in the digitize design).
+6. Launch background processing via FastAPI `BackgroundTasks` 
 7. Return `202 Accepted` with `{ "job_id": "..." }`.
 
 **Background worker:**
 
-1. Acquire `job_limiter`; update row → `status='in_progress'`, `metadata.phase='digitizing'` (PDF) or `'extracting'` (TXT).
+1. Acquire `job_limiter`; update row → `status='in_progress'`, or `'extracting'`.
 2. **TXT path:** read the staged file (UTF-8 decode).
 3. Tokenize; run the hard context-window guard. On breach → `status='failed'`, `error='CONTEXT_SCHEMA_SHARE'`, diagnostics in `metadata`.
 4. `metadata.phase='extracting'`: build prompt, acquire `concurrency_limiter`, call vLLM.
@@ -535,7 +534,7 @@ curl -X POST http://localhost:7000/v1/extract \
 | 202 Accepted               | Job created.                                                                                                                                             |
 | 400 Bad Request            | Missing file, multiple files, or missing `schema_id`,                                                                                                    |
 | 404 Not Found              | Unknown `schema_id`.                                                                                                                                     |
-| 415 Unsupported Media Type | Not a valid `.txt` or `.pdf`.                                                                                                                            |
+| 415 Unsupported Media Type | Not a valid `.txt` or `.md`.                                                                                                                             |
 | 422 Unprocessable Entity   | Validation failed, Model output failed schema validation after retry. Error includes missing required properties and the raw model output for debugging. |
 | 429 Too Many Requests      | Job concurrency at capacity.                                                                                                                             |
 | 500 Internal Server Error  | Unexpected failure.                                                                                                                                      |
@@ -544,7 +543,7 @@ curl -X POST http://localhost:7000/v1/extract \
 
 ```bash
 curl -X POST http://localhost:7000/v1/extract/jobs \
-  -F "file=@contract_2026.pdf" \
+  -F "file=@contract_2026.txt" \
   -F "schema_id=9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02" \
   -F "job_name=Q3 vendor contract"
 ```
@@ -587,7 +586,7 @@ curl -X POST http://localhost:7000/v1/extract/jobs \
             "job_name": "Q3 vendor contract",
             "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
             "status": "completed",
-            "document_name": "contract_2026.pdf",
+            "document_name": "contract_2026.txt",
             "submitted_at": "2026-07-07T10:15:00Z",
             "completed_at": "2026-07-07T10:19:42Z"
         }
@@ -612,11 +611,11 @@ curl -X POST http://localhost:7000/v1/extract/jobs \
     "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
     "status": "in_progress",
     "document": {
-        "name": "contract_2026.pdf",
+        "name": "contract_2026.txt",
         "source_type": "txt"
     },
     "metadata": {
-        "phase": "digitizing"
+        "phase": "extracting"
     },
     "submitted_at": "2026-07-07T10:15:00Z",
     "completed_at": null,
@@ -658,7 +657,6 @@ SUCCESSFUL JOB RESULT:
         "processing_time_ms": 262400,
         "validation_attempts": 1,
         "timing_in_secs": {
-            "digitizing": 245.0,
             "extracting": 14.2,
             "validating": 0.2
         }
@@ -692,7 +690,6 @@ FAILED JOB RESULT:
         "processing_time_ms": 262400,
         "validation_attempts": 1,
         "timing_in_secs": {
-            "digitizing": 245.0,
             "extracting": 14.2,
             "validating": 0.2
         }
@@ -806,7 +803,7 @@ job_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_jobs)  # default:
 | `job_limiter` | Async jobs | 4 (configurable) | Caps background workers; bounds staging disk usage.               |
 | `concurrency_limiter` | Global | 32 | Caps total concurrent vLLM connections across sync + async paths. |
 
-The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` for each LLM call. Because each job makes at most 2 LLM calls (extraction + one validation retry) and holds no vLLM slot while digitizing or polling, async jobs consume very little of the vLLM budget — the sync path stays responsive even at full job concurrency.
+The semaphores are nested: a worker holds a `job_limiter` slot for the whole job lifetime, and briefly acquires `concurrency_limiter` for each LLM call. Because each job makes at most 2 LLM calls (extraction + one validation retry) and holds no vLLM slot while polling, async jobs consume very little of the vLLM budget — the sync path stays responsive even at full job concurrency.
 
 ---
 
@@ -899,14 +896,14 @@ sequenceDiagram
 
     User->>API: POST /v1/extract/jobs (file, schema_id)
     API->>PG: Validate schema_id exists
-    Note over API: Validation: single file, .txt/.pdf,<br/>job_limiter capacity check
+    Note over API: Validation: single file, .txt/.md,<br/>job_limiter capacity check
     API->>FS: Stage file to staging/{job_id}/
     API->>PG: INSERT extract_jobs (status: accepted)
     API->>Worker: BackgroundTask(job_id)
     API-->>User: 202 Accepted {job_id}
 
     activate Worker
-    Worker->>PG: status=in_progress, phase=digitizing
+    Worker->>PG: status=in_progress
 
     
     alt File is TXT or MD
@@ -955,7 +952,7 @@ File-based storage is retained only for:
 /var/cache/extract/
 ├── staging/
 │   └── {job_id}/
-│       └── contract_2026.pdf
+│       └── contract_2026.txt
 └── results/
     └── {job_id}_result.json
 ```
@@ -977,7 +974,7 @@ class ExtractionSchema(Base):
     json_schema    = Column(JSONB, nullable=False)      # normalized draft 2020-12
     examples       = Column(JSONB, nullable=True)       # [{"text": ..., "output": ...}]
     custom_prompt  = Column(Text, nullable=True)
-    inferred_schema= Column(Bool, nullable=False, default=False)
+    is_schema_inferred= Column(Bool, nullable=False, default=False)
 
     # Token counts cached at registration (Section 7.1)
     schema_tokens   = Column(Integer, nullable=False)
@@ -1017,7 +1014,7 @@ class ExtractJob(Base):
 
     # Document info (inlined — one job = one document, as in summarize)
     document_name       = Column(String(500), nullable=False)
-    source_type         = Column(String(10), nullable=False)   # 'txt' | 'pdf'
+    source_type         = Column(String(10), nullable=False)   # 'txt' | 'md'
     document_word_count = Column(Integer, nullable=True)
 
 
@@ -1029,7 +1026,7 @@ class ExtractJob(Base):
     __table_args__ = (
         CheckConstraint("status IN ('accepted','in_progress','completed','failed')",
                         name='chk_extract_job_status'),
-        CheckConstraint("source_type IN ('txt','pdf')",
+        CheckConstraint("source_type IN ('txt','md')",
                         name='chk_extract_source_type'),
         Index('idx_extract_jobs_submitted_at_status', 'submitted_at', 'status'),
         Index('idx_extract_jobs_schema_id', 'schema_id'),
@@ -1049,7 +1046,6 @@ class ExtractJob(Base):
         "reserved_output_tokens": 2960
     },
     "timing_in_secs": {
-        "digitizing": 245.0,
         "extracting": 14.2,
         "validating": 0.2
     },
@@ -1091,7 +1087,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     json_schema           JSONB NOT NULL,
     examples              JSONB,
     custom_prompt         TEXT,
-    inferred_schema       BOOLEAN NOT NULL DEFAULT FALSE,
+    is_schema_inferred       BOOLEAN NOT NULL DEFAULT FALSE,
     schema_tokens         INTEGER NOT NULL,
     examples_tokens       INTEGER NOT NULL DEFAULT 0,
     custom_prompt_tokens  INTEGER NOT NULL DEFAULT 0
@@ -1112,7 +1108,7 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     metadata            JSONB,
     updated_at          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_extract_job_status  CHECK (status IN ('accepted','in_progress','completed','failed')),
-    CONSTRAINT chk_extract_source_type CHECK (source_type IN ('txt','pdf'))
+    CONSTRAINT chk_extract_source_type CHECK (source_type IN ('txt','md'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status
@@ -1187,40 +1183,40 @@ Adapted from the digitize/summarize pattern for PostgreSQL:
 
 ## 13. Test Cases
 
-| Test Case                                     | Input | Expected Result |
-|:----------------------------------------------|:---|:---|
+| Test Case                                     | Input                           | Expected Result |
+|:----------------------------------------------|:--------------------------------|:---|
 | Register valid schema                         | Valid name + schema + 1 example | 201 with `schema_id` |
 | Register with `"required": true` tags         | Per-property boolean convention | 201; `GET` returns normalized `required` array |
-| Duplicate schema name                         | Existing name | 409 `CONFLICT` |
-| Invalid JSON schema                           | Root `type: array` | 400 `INVALID_SCHEMA` |
-| Example fails own schema                      | `output` missing required prop | 400 identifying example index |
-| Oversized schema                              | > 64 KB serialized | 400 `SCHEMA_TOO_LARGE` |
-| Get schema                                    | Valid `schema_id` | 200 with normalized schema + examples |
-| Delete unreferenced schema                    | No jobs reference it | 204 |
-| Delete referenced schema                      | Jobs exist (any status) | 409 listing referencing job IDs |
-| Sync extract, valid                           | text + `schema_id` | 200, extraction validates against schema |
-| Sync extract, unknown schema                  | Random UUID | 404 |
-| Sync extract, over limit                      | Text exceeding context budget | 413 with full token diagnostics |
-| Sync extract, invalid output twice            | Adversarial text | 422 with validation errors + raw output |
-| Sync extract, required field absent from text | Text lacking a required value | 422 after bounded retry (no hallucinated value) |
-| Semaphore exhausted | 32 vLLM slots busy | 429 `RATE_LIMIT_EXCEEDED` |
-| Async TXT job | 1 `.txt` + `schema_id` | 202; completes without digitize call |
-| Multiple files | 2 files in one request | 400 `INVALID_REQUEST` |
-| Job progress phases | Poll during PDF job | `phase` transitions digitizing → extracting → validating |
-| Get result (in progress) | Active `job_id` | 202 Accepted |
-| Get result (completed) | Completed `job_id` | 200 with extraction + usage + timings |
-| Delete active job | In-progress `job_id` | 409 `RESOURCE_LOCKED` |
-| Delete completed job | Completed `job_id` | 204; result file removed |
-| Bulk delete (active job) | In-progress job exists | 409 `RESOURCE_LOCKED` |
-| Bulk delete (confirm=true) | No active jobs | 204; rows + results + staging removed |
-| Recovery after crash | Kill container mid-extraction | On restart, zombie marked `failed`, staging cleaned |
-| Job listing by schema | `?schema_id=...` | 200, only matching jobs |
+| Duplicate schema name                         | Existing name                   | 409 `CONFLICT` |
+| Invalid JSON schema                           | Root `type: array`              | 400 `INVALID_SCHEMA` |
+| Example fails own schema                      | `output` missing required prop  | 400 identifying example index |
+| Oversized schema                              | > 64 KB serialized              | 400 `SCHEMA_TOO_LARGE` |
+| Get schema                                    | Valid `schema_id`               | 200 with normalized schema + examples |
+| Delete unreferenced schema                    | No jobs reference it            | 204 |
+| Delete referenced schema                      | Jobs exist (any status)         | 409 listing referencing job IDs |
+| Sync extract, valid                           | text + `schema_id`              | 200, extraction validates against schema |
+| Sync extract, unknown schema                  | Random UUID                     | 404 |
+| Sync extract, over limit                      | Text exceeding context budget   | 413 with full token diagnostics |
+| Sync extract, invalid output twice            | Adversarial text                | 422 with validation errors + raw output |
+| Sync extract, required field absent from text | Text lacking a required value   | 422 after bounded retry (no hallucinated value) |
+| Semaphore exhausted | 32 vLLM slots busy              | 429 `RATE_LIMIT_EXCEEDED` |
+| Async TXT job | 1 `.txt` + `schema_id`          | 202;  |
+| Multiple files | 2 files in one request          | 400 `INVALID_REQUEST` |
+| Job progress phases | Poll during job                 | `phase` transitions extracting → validating |
+| Get result (in progress) | Active `job_id`                 | 202 Accepted |
+| Get result (completed) | Completed `job_id`              | 200 with extraction + usage + timings |
+| Delete active job | In-progress `job_id`            | 409 `RESOURCE_LOCKED` |
+| Delete completed job | Completed `job_id`              | 204; result file removed |
+| Bulk delete (active job) | In-progress job exists          | 409 `RESOURCE_LOCKED` |
+| Bulk delete (confirm=true) | No active jobs                  | 204; rows + results + staging removed |
+| Recovery after crash | Kill container mid-extraction   | On restart, zombie marked `failed`, staging cleaned |
+| Job listing by schema | `?schema_id=...`                | 200, only matching jobs |
 
 ---
 
 ## 15. Future Enhancements
 
-1. **Chunked extraction for over-limit documents:** split the digitized text (paragraph-boundary greedy packing, as in the summarize chunker), extract candidates per chunk, then consolidate via a merge LLM call with conflict-resolution rules (first-occurrence wins for scalars, union + dedup for arrays). Deferred because merge correctness for extraction is materially harder than for summaries.
+1. **Chunked extraction for over-limit documents:** split the file text (paragraph-boundary greedy packing, as in the summarize chunker), extract candidates per chunk, then consolidate via a merge LLM call with conflict-resolution rules (first-occurrence wins for scalars, union + dedup for arrays). Deferred because merge correctness for extraction is materially harder than for summaries.
 2. **Lenient/partial mode:** an opt-in `strict=false` flag returning best-effort extractions with a `warnings` array instead of 422/failure, for consumers that prefer recall over guarantees.
 3. **Schema versioning:** promote the registry from immutable-unversioned to immutable-versioned (`name` + monotonically increasing `version`, edits create new versions), once real usage shows churn patterns.
 4**Sync request auditing:** optional persistence of sync extraction requests/results for compliance use cases.
