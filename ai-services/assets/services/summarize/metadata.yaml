@@ -63,6 +63,7 @@ about:
             value: "60.00 GB"
           - title: "Spyre acceleration cards"
             value: 4
+
   - title: "Assets"
     sections:
       - title: "Source code"
