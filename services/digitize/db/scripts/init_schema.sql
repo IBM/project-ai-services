@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS connector_document_checksum (
 CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
     ON connector_document_checksum (connector_id);
 
-CREATE TABLE IF NOT EXISTS connector_sync_history (
+CREATE TABLE IF NOT EXISTS connector_sync_logs (
     id               BIGSERIAL   PRIMARY KEY,
     connector_id     TEXT        NOT NULL,
     seq              INTEGER     NOT NULL,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_history (
 CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);
 CREATE INDEX IF NOT EXISTS idx_documents_job_id ON documents(job_id);
 CREATE INDEX IF NOT EXISTS idx_documents_submitted_at_status ON documents(submitted_at DESC, status);
-CREATE INDEX IF NOT EXISTS idx_csh_connector_started ON connector_sync_history (connector_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_csl_connector_started ON connector_sync_logs (connector_id, started_at DESC);
 
 -- Create trigger function (OR REPLACE makes it idempotent)
 CREATE OR REPLACE FUNCTION update_updated_at_column()

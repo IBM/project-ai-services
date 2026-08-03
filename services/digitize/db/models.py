@@ -204,8 +204,8 @@ class ActiveConnector(Base):
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Relationships
-    sync_history: Mapped[List["ConnectorSyncHistory"]] = relationship(
-        "ConnectorSyncHistory",
+    sync_logs: Mapped[List["ConnectorSyncLog"]] = relationship(
+        "ConnectorSyncLog",
         back_populates="connector",
         lazy="select",
         cascade="all, delete-orphan",
@@ -244,13 +244,13 @@ class ConnectorDocumentChecksum(Base):
         return f"<ConnectorDocumentChecksum(checksum='{self.checksum[:20]}...', connector_id='{self.connector_id}')>"
 
 
-class ConnectorSyncHistory(Base):
+class ConnectorSyncLog(Base):
     """
     Persistent per-tick history backing the sync-history API.
 
-    Maps to the 'connector_sync_history' table in PostgreSQL.
+    Maps to the 'connector_sync_logs' table in PostgreSQL.
     """
-    __tablename__ = "connector_sync_history"
+    __tablename__ = "connector_sync_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     connector_id: Mapped[str] = mapped_column(
@@ -270,15 +270,15 @@ class ConnectorSyncHistory(Base):
 
     # Relationships
     connector: Mapped["ActiveConnector"] = relationship(
-        "ActiveConnector", back_populates="sync_history"
+        "ActiveConnector", back_populates="sync_logs"
     )
 
     __table_args__ = (
-        Index("idx_csh_connector_started", "connector_id", "started_at"),
+        Index("idx_csl_connector_started", "connector_id", "started_at"),
         UniqueConstraint("connector_id", "seq", name="uq_csh_connector_seq"),
     )
 
     def __repr__(self) -> str:
-        return f"<ConnectorSyncHistory(id={self.id}, connector_id='{self.connector_id}', seq={self.seq})>"
+        return f"<ConnectorSyncLog(id={self.id}, connector_id='{self.connector_id}', seq={self.seq})>"
 
 # Made with Bob
