@@ -29,6 +29,7 @@ set_log_level(settings.common.app.log_level)
 
 from translate.db.connection import check_db_connection, close_db_connections
 from translate.utils.recovery import recover_zombie_jobs
+from translate.workers.concurrency import concurrency_manager
 
 logger = get_logger("translate_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -80,6 +81,10 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"❌ Database check failed: {exc}", exc_info=True)
         raise RuntimeError(f"Database connection required but failed: {exc}")
+
+    # Initialise semaphores inside the running event loop.
+    concurrency_manager.initialize()
+    logger.info("✅ Concurrency semaphores initialized")
 
     # Ensure cache directories exist.
     _ensure_cache_directories()
