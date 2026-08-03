@@ -119,7 +119,7 @@ into MCP through flags they already know, no separate tooling to learn or instal
 
 ### What "plug and play" means here
 
-The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM-Cloud/ibmcloud-api-mcp),
+The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM/project-ai-services/pull/1209),
 private, read access granted by the maintainer) is a complete, tested Go MCP server that parses any
 OpenAPI spec and generates tools dynamically. Every file referenced under Implementation Details
 below lives in that external repository today, not in `ai-services`. Phase 1 vendors it into a new
@@ -178,6 +178,7 @@ flowchart LR
 
 ### Low-Level Design
 
+<<<<<<< Updated upstream
 **Component view.** What's actually inside the sidecar and how a tool call moves through it:
 
 ```mermaid
@@ -215,6 +216,39 @@ flowchart TB
     LOADER --> CONVERT
     CONVERT --> AGG
     CFG -.-> A
+=======
+```mermaid
+flowchart TD
+    A[AI Agent\nany MCP-compatible client]
+
+    A -->|tools/list - receives typed tool definitions + descriptions| B
+    A -->|tools/call - calls tool with structured arguments| B
+
+    subgraph sidecar [MCP Sidecar - one per service, generic image, env-var config]
+        B[MCP Sidecar]
+        B1[startup: fetches OPENAPI_URL\nparses spec, registers tools]
+        B2[runtime: reconstructs HTTP request\nforwards to SERVICE_URL]
+        B --- B1
+        B --- B2
+    end
+
+    subgraph services [Existing Service Containers - zero changes]
+        C1[digitize :4000]
+        C2[chatbot :5000]
+        C3[summarize :6000]
+        C4[similarity :7000]
+    end
+
+    B2 --> services
+
+    subgraph infra [Shared Infrastructure - zero changes]
+        D1[vLLM]
+        D2[Vector Store]
+        D3[Postgres]
+    end
+
+    services --> infra
+>>>>>>> Stashed changes
 ```
 
 ### Per-Service Configuration
