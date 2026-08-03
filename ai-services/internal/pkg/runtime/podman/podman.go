@@ -122,22 +122,22 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 // cancellation signals from the caller to propagate (e.g. mid-deployment deletion).
 func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, context.CancelFunc) {
 	// Child of pc.Context so the podman connection value is present.
-	mergedCtx, cancel := context.WithCancel(pc.Context)
+	ctx, cancel := context.WithCancel(pc.Context)
 
-	// Mirror cancellation from the caller into the merged context.
-	// The mergedCtx.Done() case handles normal exit: once CreatePod returns,
-	// its defer cancel() fires and closes mergedCtx, allowing this goroutine
+	// Mirror cancellation from the caller into the derived context.
+	// The ctx.Done() case handles normal exit: once CreatePod returns,
+	// its defer cancel() fires and closes ctx, allowing this goroutine
 	// to exit cleanly without leaking.
 	go func() {
 		select {
 		case <-callerCtx.Done():
 			cancel()
-		case <-mergedCtx.Done():
+		case <-ctx.Done():
 			// CreatePod returned normally (defer cancel() fired) — nothing to do.
 		}
 	}()
 
-	return mergedCtx, cancel
+	return ctx, cancel
 }
 
 func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
