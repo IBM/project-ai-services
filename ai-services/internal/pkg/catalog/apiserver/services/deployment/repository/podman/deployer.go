@@ -126,15 +126,13 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 5: Update application status to Running.
 	// Skip if the context was cancelled — deletion is now in charge of the status.
-	if ctx.Err() != nil {
-		return nil
-	}
+	if ctx.Err() == nil {
+		if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully"); err != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Running: %v\n", err)
+		}
 
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully"); err != nil {
-		logger.ErrorfCtx(ctx, "Failed to update application status to Running: %v\n", err)
+		logger.InfofCtx(ctx, "Deployment completed successfully for '%s'\n", plan.ApplicationName)
 	}
-
-	logger.InfofCtx(ctx, "Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
 }

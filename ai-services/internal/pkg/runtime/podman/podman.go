@@ -125,12 +125,15 @@ func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, c
 	mergedCtx, cancel := context.WithCancel(pc.Context)
 
 	// Mirror cancellation from the caller into the merged context.
+	// The mergedCtx.Done() case handles normal exit: once CreatePod returns,
+	// its defer cancel() fires and closes mergedCtx, allowing this goroutine
+	// to exit cleanly without leaking.
 	go func() {
 		select {
 		case <-callerCtx.Done():
 			cancel()
 		case <-mergedCtx.Done():
-			// merged context was cancelled by someone else — nothing to do
+			// CreatePod returned normally (defer cancel() fired) — nothing to do.
 		}
 	}()
 
