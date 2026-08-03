@@ -2,13 +2,13 @@
 Extract Information Service — FastAPI application.
 """
 
-import asyncio
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Query, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import IntegrityError
@@ -16,10 +16,19 @@ from sqlalchemy.exc import IntegrityError
 from common.misc_utils import configure_uvicorn_logging, create_llm_session, get_llm_endpoint, get_logger, set_log_level, set_request_id
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.error_utils import http_error_responses
+from common.misc_utils import cleanup_staging_directory
 
 from extract.db.connection import check_db_connection, close_db_connections
 
-from extract.utils.schema import SchemaValidationError
+
+from extract.utils.schema import (
+    SchemaValidationError,
+    check_schema_share_in_context,
+    compute_token_counts,
+    normalize_schema,
+    validate_examples,
+    validate_json_schema_structure
+)
 from extract.settings import settings
 
 set_log_level(settings.common.app.log_level)
@@ -28,11 +37,9 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-# Global vLLM concurrency limiter (shared by sync + async extraction paths).
-concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_size)
-
-# Async job admission semaphore (caps background workers).
-job_limiter = asyncio.BoundedSemaphore(settings.extract.max_concurrent_jobs)
+# Semaphores live in extract.state so that api/v1/jobs.py can import them
+# without creating a circular dependency (app → jobs → app).
+from extract.state import concurrency_limiter, job_limiter  # noqa: E402
 
 # Module-level model dict populated during lifespan startup.
 llm_model_dict: dict = {}
