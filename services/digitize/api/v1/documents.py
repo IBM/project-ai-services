@@ -3,6 +3,11 @@ Document-related API endpoints.
 
 Handles document listing, retrieval, content access, and deletion.
 Extracted from the monolithic app.py following the digitize-api-sample pattern.
+
+Connector visibility rules:
+  - GET  /v1/documents        — user-submitted only (connector-sourced excluded)
+  - GET  /v1/documents/{id}   — 404 for connector-sourced docs
+  - DELETE /v1/documents/{id} — 404 for connector-sourced docs
 """
 
 import json
@@ -65,6 +70,7 @@ async def list_documents(
             name=name,
             limit=limit,
             offset=offset,
+            exclude_connector_sourced=True,
         )
 
         logger.debug(
@@ -103,7 +109,13 @@ async def get_document_metadata(
     details: bool = Query(False, description="Include detailed metadata (pages, tables, timing)"),
 ):
     try:
-        from digitize.utils.db import get_document
+        from digitize.utils.db import get_document, is_connector_sourced_document
+
+        if is_connector_sourced_document(doc_id):
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Document with ID '{doc_id}' not found",
+            )
 
         return get_document(doc_id, include_details=details)
     except FileNotFoundError as exc:
@@ -163,21 +175,31 @@ async def get_document_content(doc_id: str):
 async def delete_document(doc_id: str):
     """
     Delete a single document — follows the 'Always-Clean-VDB' strategy:
-    1. Fetch metadata
-    2. Active-job guard
-    3. VDB cleanup (high priority)
-    4. File & metadata cleanup
-    5. Database record removal
+    1. Connector guard  — 404 for connector-sourced docs
+    2. Fetch metadata
+    3. Active-job guard
+    4. VDB cleanup (high priority)
+    5. File & metadata cleanup
+    6. Database record removal
     """
     try:
-        # 1. Fetch metadata (best-effort).
+        # 1. Connector guard — connector-sourced docs cannot be deleted via this API.
+        from digitize.utils.db import is_connector_sourced_document
+
+        if is_connector_sourced_document(doc_id):
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Document with ID '{doc_id}' not found",
+            )
+
+        # 2. Fetch metadata (best-effort).
         doc_metadata = None
         try:
             doc_metadata = dg_util.get_document(doc_id, include_details=False)
         except FileNotFoundError:
             logger.error(f"Metadata for {doc_id} not found. Proceeding with VDB cleanup.")
 
-        # 2. Active-job guard.
+        # 3. Active-job guard.
         if doc_metadata:
             if dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id):
                 APIError.raise_error(
@@ -185,7 +207,7 @@ async def delete_document(doc_id: str):
                     f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted",
                 )
 
-        # 3. VDB cleanup.
+        # 4. VDB cleanup.
         try:
             import common.db_utils as db
 
@@ -199,7 +221,7 @@ async def delete_document(doc_id: str):
                 f"Document metadata deleted but VDB cleanup failed: {exc}",
             )
 
-        # 4. File cleanup.
+        # 5. File cleanup.
         if doc_metadata:
             try:
                 storage_manager.delete_document_content(
@@ -213,7 +235,7 @@ async def delete_document(doc_id: str):
                     f"Search data removed but files remain: {exc}",
                 )
 
-        # 5. Database record removal.
+        # 6. Database record removal.
         try:
             from digitize.db.manager import db_manager
 

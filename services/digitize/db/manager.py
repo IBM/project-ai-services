@@ -432,7 +432,8 @@ class DatabaseManager:
         status: Optional[str] = None,
         name: Optional[str] = None,
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
+        exclude_connector_sourced: bool = False,
     ) -> tuple[List[Document], int]:
         """
         Retrieve all documents with optional filtering and pagination.
@@ -442,6 +443,8 @@ class DatabaseManager:
             name: Filter by document name (partial match)
             limit: Maximum number of documents to return
             offset: Number of documents to skip
+            exclude_connector_sourced: When True, omit docs that appear in
+                connector_document_checksum (connector-sourced documents).
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -460,7 +463,14 @@ class DatabaseManager:
                     filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
-                
+                if exclude_connector_sourced:
+                    # Exclude connector-sourced documents via NOT EXISTS subquery.
+                    filters.append(
+                        ~select(ConnectorDocumentChecksum.doc_id)
+                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
+                        .exists()
+                    )
+
                 if filters:
                     stmt = stmt.where(and_(*filters))
                 

@@ -470,11 +470,34 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
         raise
 
 
+def is_connector_sourced_document(doc_id: str) -> bool:
+    """
+    Return True if *doc_id* appears in connector_document_checksum (i.e. is
+    connector-sourced and must not be exposed via user-facing document APIs).
+    """
+    try:
+        with get_db_session() as session:
+            from sqlalchemy import exists
+
+            stmt = select(
+                exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
+            )
+            return bool(session.scalar(stmt))
+    except Exception as exc:
+        logger.error(
+            f"DB error in is_connector_sourced_document({doc_id!r}): {exc}",
+            exc_info=True,
+        )
+        # Safe default: do not block on error — treat as user-submitted.
+        return False
+
+
 def get_all_documents_paginated(
     status: Optional[str] = None,
     name: Optional[str] = None,
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    exclude_connector_sourced: bool = False,
 ) -> tuple[List[dict], int]:
     """
     Get all documents from database.
@@ -484,6 +507,8 @@ def get_all_documents_paginated(
         name: Filter by document name (partial match)
         limit: Maximum number of documents to return
         offset: Number of documents to skip
+        exclude_connector_sourced: When True, omit docs whose doc_id appears
+            in connector_document_checksum (connector-sourced documents)
 
     Returns:
         Tuple of (list of document dictionaries, total count)
@@ -497,7 +522,8 @@ def get_all_documents_paginated(
             status=status,
             name=name,
             limit=limit,
-            offset=offset
+            offset=offset,
+            exclude_connector_sourced=exclude_connector_sourced,
         )
 
         # Convert SQLAlchemy models to dictionaries
