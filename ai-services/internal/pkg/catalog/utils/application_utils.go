@@ -15,7 +15,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+<<<<<<< HEAD
 // HandleDeploymentStepError updates the application status to Error and logs the failure.
+=======
+>>>>>>> 3f4dc48d (Adding delete API support)
 func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, stepContext string, err error) {
 	errMsg := fmt.Sprintf("%s: %v", stepContext, err)
 	if updateErr := UpdateApplicationStatus(ctx, appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
@@ -32,7 +35,7 @@ func AppNamespace(appID uuid.UUID) string {
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
 // e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
 func HelmReleaseName(appID uuid.UUID, id string) string {
-	return id + "-" + appID.String()[:8]
+	return strings.ReplaceAll(id, "_", "-") + "-" + appID.String()[:8]
 }
 
 // DeployingStatusMessage returns the human-readable deploying status message.

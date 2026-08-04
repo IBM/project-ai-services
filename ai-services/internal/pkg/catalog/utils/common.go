@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -10,12 +11,15 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	helmchart "helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 )
+
+const uninstallHelmTimeout = 5 * time.Minute
 
 var (
 	ErrCatalogPodNotFound = fmt.Errorf("no catalog pod found")
@@ -126,6 +130,26 @@ func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 	}
 
 	return loader.LoadFiles(files)
+}
+
+func HelmUninstall(ctx context.Context, namespace, release string) error {
+	helmClient, err := helm.NewHelm(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to create Helm client: %w", err)
+	}
+
+	exists, err := helmClient.IsReleaseExist(release)
+	if err != nil {
+		return fmt.Errorf("failed to check release existence: %w", err)
+	}
+
+	if !exists {
+		logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
+
+		return nil
+	}
+
+	return helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout})
 }
 
 // Made with Bob

@@ -19,8 +19,8 @@ type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
 
-func (s *OpenShiftApplicationService) DeleteApplication(_ context.Context, _ uuid.UUID, _ string, _ bool) (*DeleteApplicationResponse, error) {
-	return nil, errOpenShiftNotSupported
+func (s *OpenShiftApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
+	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData, runtimeTypes.RuntimeTypeOpenShift)
 }
 
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
