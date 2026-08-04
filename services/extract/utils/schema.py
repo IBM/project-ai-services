@@ -388,33 +388,18 @@ def infer_schema_from_examples(examples: List[Dict[str, Any]]) -> Dict[str, Any]
 
     Algorithm:
     1. For each example's ``output`` dict, derive a type node per field
-       recursively (nested dicts become nested ``type: object`` sub-schemas).
-    2. Merge type nodes across examples; raise SchemaValidationError if the
-       same field has conflicting types.
+       recursively (nested dicts become nested ``type: object`` sub-schemas,
+       non-empty lists infer ``items`` from their elements).
+    2. Merge type nodes across examples: identical nodes pass through,
+       ``integer`` + ``number`` widens to ``number``, ``null`` + any type
+       produces a nullable type, and two ``object`` nodes have their
+       ``properties`` unioned and ``required`` arrays intersected.
+       Irreconcilable type conflicts raise SchemaValidationError.
     3. Fields present in **all** examples are added to ``required``.
 
-    Raises SchemaValidationError if no examples are provided or a type
-    conflict is detected.
+    Raises SchemaValidationError if no examples are provided, an example
+    output is not a non-empty dict, or a type conflict is detected.
     """
-    """
-        Infer a JSON Schema draft 2020-12 ``type: object`` from example outputs.
-
-        *examples* is a list of raw example dicts (each having an ``output`` key).
-
-        Algorithm:
-        1. For each example's ``output`` dict, derive a type node per field
-           recursively (nested dicts become nested ``type: object`` sub-schemas,
-           non-empty lists infer ``items`` from their elements).
-        2. Merge type nodes across examples: identical nodes pass through,
-           ``integer`` + ``number`` widens to ``number``, ``null`` + any type
-           produces a nullable type, and two ``object`` nodes have their
-           ``properties`` unioned and ``required`` arrays intersected.
-           Irreconcilable type conflicts raise SchemaValidationError.
-        3. Fields present in **all** examples are added to ``required``.
-
-        Raises SchemaValidationError if no examples are provided, an example
-        output is not a non-empty dict, or a type conflict is detected.
-        """
     if not examples:
         raise SchemaValidationError(
             "INFERENCE_NO_EXAMPLES",

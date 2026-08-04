@@ -48,7 +48,7 @@ class ExtractionSchema(Base):
     examples: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     custom_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # True when json_schema was inferred from examples rather than supplied
+    # True when json_schema is inferred from examples rather than supplied
     # explicitly by the caller.
     is_schema_inferred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
