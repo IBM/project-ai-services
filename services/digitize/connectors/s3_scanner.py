@@ -232,10 +232,17 @@ class S3Scanner(BaseScanner):
         """
         Construct a boto3 S3 client from the connector config.
 
-        endpoint_url is always forwarded when present.
-        addressing_style is set per provider so requests land correctly:
-          - AWS S3  : "virtual"  (https://<bucket>.s3.<region>.amazonaws.com/<key>)
-          - IBM COS : "path"     (https://<host>/<bucket>/<key>)
+        The region is always derived from endpoint_url (via effective_region) for
+        correct SigV4 signing, but endpoint_url is only forwarded to boto3 for
+        IBM COS / S3-compatible stores — never for AWS S3.
+
+        AWS S3: endpoint_url must NOT be passed to boto3.  When an explicit URL
+        is supplied boto3 prepends the bucket name to the full hostname, producing
+        a malformed double-domain URL that AWS rejects with 301 Moved Permanently.
+        boto3 auto-resolves the correct virtual-hosted endpoint from region_name.
+
+        IBM COS: endpoint_url must be forwarded so boto3 knows the COS host.
+        Path-style addressing is used because COS requires it.
         """
         session = boto3.Session(
             aws_access_key_id=self._cfg.access_key_id or None,
@@ -243,7 +250,7 @@ class S3Scanner(BaseScanner):
             region_name=self._cfg.effective_region,
         )
 
-        addressing_style = "virtual" if self._cfg.is_aws else "path"
+        addressing_style = "auto" if self._cfg.is_aws else "path"
 
         client_kwargs: dict = {
             "service_name": "s3",
@@ -256,7 +263,10 @@ class S3Scanner(BaseScanner):
             "verify": self._cfg.verify_ssl,
         }
 
-        if self._cfg.endpoint_url:
+        # Forward endpoint_url only for non-AWS providers.
+        # For AWS the region extracted from endpoint_url is passed via
+        # region_name above — the URL itself is intentionally withheld.
+        if self._cfg.endpoint_url and not self._cfg.is_aws:
             client_kwargs["endpoint_url"] = self._cfg.endpoint_url
 
         return session.client(**client_kwargs)
