@@ -547,6 +547,9 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	if req.Page < 1 {
 		return nil, fmt.Errorf("page must be greater than 0")
 	}
+	if req.PageSize < 1 {
+		return nil, fmt.Errorf("pageSize must be greater than 0")
+	}
 
 	filters := &dbrepo.ApplicationFilters{
 		DeploymentType: req.DeploymentType,
@@ -576,7 +579,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	}
 
 	totalPages := 0
-	if totalCount > 0 && req.PageSize > 0 {
+	if totalCount > 0 {
 		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
 	}
 
