@@ -157,6 +157,56 @@ class TestS3ConnectorConfig:
         with pytest.raises(ValueError, match="bucket_name"):
             S3ConnectorConfig(bucket_name="  ", access_key_id="a", secret_access_key="b")
 
+    def test_endpoint_url_without_scheme_raises(self):
+        with pytest.raises(ValueError, match="https://"):
+            _make_config(endpoint_url="s3.us-east-1.amazonaws.com")
+
+    def test_endpoint_url_with_scheme_accepted(self):
+        cfg = _make_config(endpoint_url="https://s3.us-east-1.amazonaws.com")
+        assert cfg.endpoint_url == "https://s3.us-east-1.amazonaws.com"
+
+    def test_endpoint_url_empty_accepted(self):
+        cfg = _make_config(endpoint_url="")
+        assert cfg.endpoint_url == ""
+
+    def test_allowed_extensions_without_dot_raises(self):
+        with pytest.raises(ValueError, match="'.'"):
+            _make_config(allowed_extensions=["pdf", ".docx"])
+
+    def test_allowed_extensions_valid(self):
+        cfg = _make_config(allowed_extensions=[".PDF", ".docx"])
+        assert cfg.allowed_extensions == [".pdf", ".docx"]
+
+    def test_cos_requires_access_key_id(self):
+        """IBM COS endpoint without access_key_id must raise."""
+        with pytest.raises(ValueError, match="access_key_id"):
+            S3ConnectorConfig(
+                bucket_name="b",
+                endpoint_url="https://s3.us-south.cloud-object-storage.appdomain.cloud",
+                access_key_id="",
+                secret_access_key="secret",
+            )
+
+    def test_cos_requires_secret_access_key(self):
+        """IBM COS endpoint without secret_access_key must raise."""
+        with pytest.raises(ValueError, match="secret_access_key"):
+            S3ConnectorConfig(
+                bucket_name="b",
+                endpoint_url="https://s3.us-south.cloud-object-storage.appdomain.cloud",
+                access_key_id="key",
+                secret_access_key="",
+            )
+
+    def test_aws_allows_empty_credentials(self):
+        """AWS S3 with empty credentials is valid — boto3 uses instance profile."""
+        cfg = S3ConnectorConfig(
+            bucket_name="b",
+            endpoint_url="",
+            access_key_id="",
+            secret_access_key="",
+        )
+        assert cfg.is_aws is True
+
 
 # ---------------------------------------------------------------------------
 # _HashingWriter
@@ -201,13 +251,25 @@ class TestHashingWriter:
 # ---------------------------------------------------------------------------
 
 class TestS3ScannerConnect:
-    def test_connect_builds_client(self):
-        cfg = _make_config()
-        scanner = S3Scanner(cfg)
+    def test_connect_builds_client_and_preflight(self):
+        """connect() must build the client AND call head_bucket for pre-flight."""
+        scanner = S3Scanner(_make_config())
         mock_client = MagicMock()
         with patch.object(scanner, "_build_client", return_value=mock_client):
             scanner.connect()
         assert scanner._client is mock_client
+        mock_client.head_bucket.assert_called_once_with(Bucket="test-bucket")
+
+    def test_connect_raises_connection_error_on_bad_credentials(self):
+        """connect() must raise ConnectionError (not silently succeed) on auth failure."""
+        scanner = S3Scanner(_make_config())
+        mock_client = MagicMock()
+        mock_client.head_bucket.side_effect = _make_client_error("403")
+        with patch.object(scanner, "_build_client", return_value=mock_client):
+            with pytest.raises(ConnectionError, match="403"):
+                scanner.connect()
+        # client must be reset to None so scanner is not left in a connected state
+        assert scanner._client is None
 
     def test_close_resets_client(self):
         cfg = _make_config()

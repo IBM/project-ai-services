@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,26 +87,29 @@ class S3ConnectorConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Required fields
     bucket_name: str = Field(
         description="S3 / COS bucket to sync documents from.",
     )
     access_key_id: str = Field(
         default="",
-        description="IAM key ID (AWS) or HMAC key ID (IBM COS).",
+        description=(
+            "IAM key ID (AWS) or HMAC key ID (IBM COS)."
+        ),
     )
     secret_access_key: str = Field(
         default="",
-        description="IAM secret (AWS) or HMAC secret (IBM COS). Stored encrypted at rest.",
+        description=(
+            "IAM secret (AWS) or HMAC secret (IBM COS)."
+        ),
     )
-
-    # Optional fields
     endpoint_url: str = Field(
         default="",
         description=(
             "Full S3 endpoint URL pointing to IBM COS or AWS S3 source."
         ),
     )
+
+    # Optional fields
     prefix: str = Field(
         default="",
         description="Key prefix to scope listing.  Empty = bucket root.",
@@ -178,10 +181,64 @@ class S3ConnectorConfig(BaseSettings):
         # Resolve IBM COS cross-region alias → canonical SigV4 region.
         return _COS_CROSSREGION_ALIAS.get(region, region)
 
-    @model_validator(mode="after")
-    def _check_bucket(self) -> "S3ConnectorConfig":
-        if not self.bucket_name.strip():
+    @field_validator("bucket_name")
+    @classmethod
+    def _check_bucket(cls, v: str) -> str:
+        if not v.strip():
             raise ValueError("bucket_name must not be empty.")
+        return v
+
+    @field_validator("endpoint_url")
+    @classmethod
+    def _check_endpoint_url(cls, v: str) -> str:
+        """Reject endpoint_url values that are missing the URL scheme.
+
+        A bare hostname like ``s3.us-east-1.amazonaws.com`` is a common typo
+        that passes silently but causes boto3 to produce malformed requests
+        (301 from AWS, connection errors from COS).  Require ``https://`` or
+        ``http://`` when a value is supplied.
+        """
+        if v and not v.startswith(("https://", "http://")):
+            raise ValueError(
+                f"endpoint_url must start with 'https://' or 'http://', got: {v!r}"
+            )
+        return v
+
+    @field_validator("allowed_extensions")
+    @classmethod
+    def _check_extensions(cls, v: list[str]) -> list[str]:
+        """Reject extension values that are missing the leading dot.
+
+        ``os.path.splitext`` always returns extensions with a leading dot
+        (e.g. ``'.pdf'``).  An entry like ``'pdf'`` would silently match
+        nothing during listing — fail early with a clear message instead.
+        """
+        bad = [e for e in v if not e.startswith(".")]
+        if bad:
+            raise ValueError(
+                f"Each allowed_extension must start with '.', got: {bad!r}. "
+                f"Use '.pdf' not 'pdf'."
+            )
+        return [e.lower() for e in v]
+
+    @model_validator(mode="after")
+    def _check_credentials(self) -> "S3ConnectorConfig":
+        """Require explicit credentials when the provider is IBM COS.
+
+        AWS S3 can resolve credentials from the environment (instance profile,
+        ECS task role, ~/.aws/credentials, etc.) so empty strings are valid.
+        IBM COS has no ambient credential chain — access_key_id and
+        secret_access_key are always required when endpoint_url is a COS host.
+        """
+        if not self.is_aws:
+            if not self.access_key_id.strip():
+                raise ValueError(
+                    "access_key_id is required for IBM COS connectors."
+                )
+            if not self.secret_access_key.strip():
+                raise ValueError(
+                    "secret_access_key is required for IBM COS connectors."
+                )
         return self
 
     @classmethod

@@ -116,8 +116,24 @@ class S3Scanner(BaseScanner):
     # ------------------------------------------------------------------ #
 
     def connect(self) -> None:
-        """Build the boto3 S3 client.  Must be called before scan() / download_to()."""
+        """Build the boto3 S3 client and verify the bucket is reachable.
+
+        Runs ``head_bucket`` as a pre-flight check immediately after building
+        the client so credential or endpoint errors are raised here — at the
+        point the caller expects a connection to be established — rather than
+        surfacing later inside scan() or download_to().
+
+        Raises
+        ------
+        ConnectionError
+            If the bucket is unreachable or credentials are rejected.
+        """
         self._client = self._build_client()
+        try:
+            self._head_bucket(self._client)
+        except ConnectionError:
+            self._client = None
+            raise
         logger.info(
             f"[s3_scanner] Connected — bucket={self._cfg.bucket_name}, "
             f"provider={self._cfg.provider}, region={self._cfg.effective_region}, "
@@ -284,12 +300,14 @@ class S3Scanner(BaseScanner):
         """
         paginator = self._client.get_paginator("list_objects_v2")
 
+        # Prefix="" is safe to pass — S3 treats it as "no prefix" (bucket root).
+        # Delimiter="" must NOT be passed — S3/COS treats an empty string as a
+        # live delimiter, unlike omitting the key entirely which means "recurse".
         paginate_kwargs: dict = {
             "Bucket": self._cfg.bucket_name,
             "Prefix": self._cfg.prefix,
+            **({"Delimiter": self._cfg.delimiter} if self._cfg.delimiter else {}),
         }
-        if self._cfg.delimiter:
-            paginate_kwargs["Delimiter"] = self._cfg.delimiter
 
         allowed = frozenset(ext.lower() for ext in self._cfg.allowed_extensions)
 
@@ -323,19 +341,40 @@ class S3Scanner(BaseScanner):
         Return True if the bucket is reachable with the configured credentials.
 
         Calls ``head_bucket`` which requires only s3:ListBucket permission and
-        transfers no object data.
+        transfers no object data.  Uses the existing client when already
+        connected, otherwise builds a temporary one.
         """
         try:
-            client = self._client or self._build_client()
+            self._head_bucket(self._client or self._build_client())
+            return True
+        except ConnectionError:
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Private helpers                                                      #
+    # ------------------------------------------------------------------ #
+
+    def _head_bucket(self, client) -> None:
+        """Call head_bucket and raise ConnectionError on failure.
+
+        Shared by connect() (raises) and test_connection() (catches and
+        returns bool).  Keeps the bucket-reachability check in one place.
+
+        Raises
+        ------
+        ConnectionError
+            Wraps botocore.exceptions.ClientError with bucket name and HTTP
+            code in the message.
+        """
+        try:
             client.head_bucket(Bucket=self._cfg.bucket_name)
             logger.info(
-                f"[s3_scanner] Connection test passed — "
-                f"bucket={self._cfg.bucket_name}"
+                "[s3_scanner] head_bucket OK — bucket=%s",
+                self._cfg.bucket_name,
             )
-            return True
         except botocore.exceptions.ClientError as exc:
             code = exc.response["Error"]["Code"]
-            logger.error(
-                f"[s3_scanner] Connection test failed (code={code}): {exc}"
-            )
-            return False
+            raise ConnectionError(
+                f"[s3_scanner] Cannot reach bucket '{self._cfg.bucket_name}' "
+                f"(code={code}): {exc}"
+            ) from exc

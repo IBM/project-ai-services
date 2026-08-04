@@ -90,7 +90,7 @@ class BaseScanner(ABC):
         checksum sets and decide which files to ingest, which to skip, and
         which are orphans.
 
-        ``remote_path`` is the canonical address used to re-download the file
+        ``remote_path`` is the canonical address used to download the file
         (S3 object key, SFTP absolute path, etc.).
 
         ``checksum`` is the content fingerprint:
