@@ -112,19 +112,22 @@ func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
 	valuesPath := filepath.Join(catalogPath, runtimeStr, "values.yaml")
 
-	// Read and process @generate annotations in values.yaml once, before walking
-	valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
-	}
-	processedValuesData, err := utils.ProcessGenerateAnnotationsFromYAML(valuesData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process generate annotations: %w", err)
+	// Read and process @generate annotations in values.yaml once, before walking (only if the file exists)
+	var processedValuesData []byte
+	if _, err := fs.Stat(&assets.CatalogFS, valuesPath); err == nil {
+		valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
+		}
+		processedValuesData, err = utils.ProcessGenerateAnnotationsFromYAML(valuesData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process generate annotations: %w", err)
+		}
 	}
 
 	fmt.Println(string(processedValuesData))
 
-	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
