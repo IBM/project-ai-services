@@ -57,6 +57,7 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 	installClient.CreateNamespace = true
 	installClient.WaitStrategy = kube.StatusWatcherStrategy
 	installClient.Timeout = opts.Timeout
+	installClient.SkipSchemaValidation = true
 
 	// Perform helm install
 	_, err := installClient.Run(chart, opts.Values)
@@ -81,6 +82,7 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.Timeout = opts.Timeout
 	upgradeClient.ForceConflicts = true
 	upgradeClient.RollbackOnFailure = true
+	upgradeClient.SkipSchemaValidation = true
 
 	// Perform helm upgrade
 	_, err := upgradeClient.Run(release, chart, opts.Values)
