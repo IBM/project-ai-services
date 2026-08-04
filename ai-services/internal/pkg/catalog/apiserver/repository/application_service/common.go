@@ -576,7 +576,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	}
 
 	totalPages := 0
-	if totalCount > 0 {
+	if totalCount > 0 && req.PageSize > 0 {
 		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
 	}
 
