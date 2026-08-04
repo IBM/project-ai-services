@@ -344,7 +344,7 @@ Only non-secret `connection_details` are returned.
 }
 ```
 
-### 3.6 `GET /v1/connectors/{connector_id}/sync-logs`
+### 3.6 `GET /v1/connectors/{connector_id}/syncs`
 
 Returns paginated tick history.
 
@@ -536,7 +536,7 @@ CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
 
 ### 4.4 `connector_sync_logs`
 
-Persistent per-tick history backing the sync-logs API.
+Persistent per-tick history backing the syncs API.
 
 ```sql
 CREATE TABLE IF NOT EXISTS connector_sync_logs (
@@ -1286,7 +1286,7 @@ All connector DB functions from §5.1:
 - `PUT /v1/connectors/{id}` — partial update, re-encrypt if credentials included, call `upsert_connector`, return `200`
 - `DELETE /v1/connectors/{id}` — stub only (stops at "would stop worker" + calls DB delete), no worker logic yet
 - `GET /v1/connectors` and `GET /v1/connectors/{id}` — read from DB, strip secret fields
-- `GET /v1/connectors/{id}/sync-logs` — paginated query with `limit`/`offset`
+- `GET /v1/connectors/{id}/syncs` — paginated query with `limit`/`offset`
 - **Update `GET /v1/documents` and `GET /v1/documents/{doc_id}`** to exclude connector-sourced docs via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = ...)` filter
 - **Update `DELETE /v1/documents/{doc_id}`** to return `404` for connector-sourced docs
 
