@@ -378,6 +378,12 @@ func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	return nil, fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) ListServingRuntimes(filters map[string][]string) ([]types.ServingRuntime, error) {
+	logger.Errorf("unsupported method called!")
+
+	return nil, fmt.Errorf("unsupported method")
+}
+
 func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	logger.Errorf("unsupported method called!")
 

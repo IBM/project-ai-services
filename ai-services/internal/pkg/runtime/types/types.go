@@ -66,3 +66,9 @@ type PodResources struct {
 	MemUsage   uint64   // Memory usage in bytes
 	SpyreCards []string // List of Spyre card PCI addresses
 }
+
+// ServingRuntime represents a KServe ServingRuntime resource (serving.kserve.io/v1alpha1).
+type ServingRuntime struct {
+	Name   string
+	Labels map[string]string
+}

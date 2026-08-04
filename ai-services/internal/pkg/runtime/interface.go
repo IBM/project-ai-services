@@ -42,6 +42,9 @@ type Runtime interface {
 	// Network operations
 	ListRoutes(labelSelector string) ([]types.Route, error)
 
+	// ServingRuntime operations
+	ListServingRuntimes(filters map[string][]string) ([]types.ServingRuntime, error)
+
 	// PVC operations
 	DeletePVCs(appLabel string) error
 

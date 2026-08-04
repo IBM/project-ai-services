@@ -72,7 +72,7 @@ type ApplicationServiceBase struct {
 	Provider              *catalog.CatalogProvider
 	DeploymentPlanner     *deployment.DeploymentPlanner
 	DeploymentExecutor    *deployment.DeploymentExecutor
-	DeletionService       *deletion.DeletionService
+	DeletionExecutor      *deletion.DeletionExecutor
 	Validator             *validators.ApplicationValidator
 }
 
