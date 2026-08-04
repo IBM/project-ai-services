@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "digitize-ui"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-for: "true"
+spec:
+  port:
+    targetPort: 4001
+  to:
+    kind: Service
+    name: "digitize-ui"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge

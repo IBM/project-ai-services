@@ -8,14 +8,17 @@ import {
 } from "../utils/StepTwo.utils";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
-import { fetchResources } from "@/api/digitalAssistants";
+import { fetchResources } from "@/api/applications.api";
 import {
   useBatchProviderParams,
   useMultiTypeProviderParams,
 } from "@/hooks/useProviderParams";
 import { getResourceSharingKey } from "@/utils/resourceSharing";
 import { useDeployStore } from "@/store/deploy.store";
-import type { ResourcesResponse, Component } from "@/types/digitalAssistants";
+import type {
+  ResourcesResponse,
+  DeployOptionsComponent as Component,
+} from "@/types/api.types";
 import type {
   ResourceItem,
   StepTwoState,

@@ -14,7 +14,7 @@ import type {
   ComponentConfig,
 } from "./types.ts";
 import { ACTION_TYPES } from "./types.ts";
-import { deployApplication } from "@/services/deployment.api.ts";
+import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "@/utils/serviceDeploymentTransform.ts";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
@@ -358,19 +358,14 @@ export const ServicesDeployFlow = ({
     dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: null });
 
     try {
-      // Pass cached provider schemas to avoid redundant API calls
       const deploymentPayload = await transformToDeploymentPayload(
         state.formData,
         deployOptions,
-        providerSchemas, // Pass cached schemas from store
-        state.selectedServiceId, // Pass serviceId for correct cache key lookup
+        providerSchemas,
+        state.selectedServiceId,
       );
 
-      // Add deployment_type property required by deployApplication API
-      await deployApplication({
-        ...deploymentPayload,
-        deployment_type: "service" as const,
-      });
+      await deployApplication(deploymentPayload);
 
       onSubmit();
       dispatch({ type: ACTION_TYPES.RESET_STATE });

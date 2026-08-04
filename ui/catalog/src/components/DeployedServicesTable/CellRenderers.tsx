@@ -10,7 +10,7 @@ import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
 import styles from "./DeployedServices.module.scss";
-import type { DeploymentDetails } from "@/types/digitalAssistants";
+import type { DeploymentDetails } from "@/types/api.types";
 
 // Status configuration
 const STATUS_CONFIG = {

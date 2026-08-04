@@ -6,9 +6,15 @@ import type {
   ArchitectureDetailsResponse,
   DeployOptionsResponse,
   ResourcesResponse,
-} from "@/types/digitalAssistants";
+  ProviderSchema,
+} from "@/types/api.types";
 
 interface ProviderParamsCache {
+  data: ProviderSchema;
+  fetchedAt: number;
+}
+
+interface ServiceParamsCache {
   data: Record<string, unknown>;
   fetchedAt: number;
 }
@@ -56,7 +62,7 @@ interface DeployState {
   providerParams: Record<string, ProviderParamsCache>;
 
   // Service params cache - persisted with 1-hour cache
-  serviceParams: Record<string, ProviderParamsCache>;
+  serviceParams: Record<string, ServiceParamsCache>;
 
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
@@ -98,12 +104,12 @@ interface DeployState {
   setProviderParams: (
     componentType: string,
     providerId: string,
-    data: Record<string, unknown>,
+    data: ProviderSchema,
   ) => void;
   getProviderParams: (
     componentType: string,
     providerId: string,
-  ) => Record<string, unknown> | null;
+  ) => ProviderSchema | null;
   clearProviderParams: () => void;
 
   // Service params actions

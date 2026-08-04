@@ -3,9 +3,9 @@ import { Button, Grid, Column, Layer, Link, SkeletonText } from "@carbon/react";
 import { Deploy, Code, PlayOutline } from "@carbon/icons-react";
 import styles from "../DigitalAssistants.module.scss";
 import { useDeployStore } from "@/store/deploy.store";
-import { fetchArchitectureDetails } from "@/api/digitalAssistants";
+import { fetchArchitectureDetails } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
-import type { AboutSection } from "@/types/digitalAssistants";
+import type { AboutSection } from "@/types/api.types";
 
 interface AboutTabProps {
   onDeployClick: () => void;

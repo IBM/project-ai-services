@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { fetchDeployOptions } from "@/api/digitalAssistants";
+import { fetchDeployOptions } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 
 /**

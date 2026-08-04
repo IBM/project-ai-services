@@ -1,0 +1,1 @@
+- Access the {{ .SERVICE_NAME }} API at https://{{ .API_ROUTE }}

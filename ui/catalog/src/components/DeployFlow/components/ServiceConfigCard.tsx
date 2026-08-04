@@ -14,7 +14,7 @@ import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../utils/StepTwo.utils";
 import type { useBatchProviderParams } from "@/hooks/useProviderParams";
 import { DynamicSchemaFields } from "./DynamicSchemaFields";
-import type { Component } from "@/types/digitalAssistants";
+import type { DeployOptionsComponent as Component } from "@/types/api.types";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import { useServiceParams } from "@/hooks/useServiceParams";
 import { shouldShowParam } from "@/utils/paramFilter";

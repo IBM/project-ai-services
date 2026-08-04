@@ -3,7 +3,7 @@
  * Creates initial form data structure dynamically from deploy options API response
  */
 
-import type { DeployOptionsResponse } from "@/types/digitalAssistants";
+import type { DeployOptionsResponse } from "@/types/api.types";
 import type {
   DeployFormData,
   ComponentConfig,

@@ -12,8 +12,9 @@ import type {
   DeployFlowState,
   DeployFlowAction,
 } from "./types.ts";
+import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
-import { deployApplication, fetchServices } from "@/api/digitalAssistants";
+import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "@/utils/deploymentTransform";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
@@ -244,7 +245,7 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
 
     try {
       // Transform cached params to plain data objects (strip fetchedAt timestamps)
-      const providerParamsData: Record<string, Record<string, unknown>> = {};
+      const providerParamsData: Record<string, ProviderSchema> = {};
       for (const [key, cache] of Object.entries(providerParams)) {
         providerParamsData[key] = cache.data;
       }

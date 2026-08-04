@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
-import { fetchServices } from "@/services/deployment.api";
+import { fetchServices } from "@/api/applications.api";
 
 /**
  * Custom hook to fetch and cache available services

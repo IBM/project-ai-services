@@ -1,7 +1,4 @@
-import type {
-  ServiceDeployOptions,
-  LLMOption,
-} from "@/services/deployment.api";
+import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
 
 export interface ServicesDeployFlowProps {
   open: boolean;
