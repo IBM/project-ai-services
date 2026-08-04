@@ -299,7 +299,7 @@ class TestInferSchemaFromExamples:
     def test_list_value_infers_array_type(self):
         examples = [{"text": "t", "output": {"tags": ["a", "b"]}}]
         schema = infer_schema_from_examples(examples)
-        assert schema["properties"]["tags"] == {"type": "array"}
+        assert schema["properties"]["tags"] == {'type': 'array', 'items': {'type': 'string'}}
 
     # ------------------------------------------------------------------
     # Nested dict (recursive)
@@ -407,12 +407,11 @@ class TestInferSchemaFromExamples:
     # Empty output dict
     # ------------------------------------------------------------------
 
-    def test_empty_output_dict_produces_empty_schema(self):
+    def test_empty_output_dict_raises_error(self):
         examples = [{"text": "t", "output": {}}]
-        schema = infer_schema_from_examples(examples)
-        assert schema["type"] == "object"
-        assert schema["properties"] == {}
-        assert "required" not in schema
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        assert exc_info.value.code == "INFERENCE_EMPTY_EXAMPLE"
 
     # ------------------------------------------------------------------
     # Schema structure is valid draft 2020-12

@@ -264,14 +264,59 @@ def _merge_type_nodes(
     different examples.
 
     - Identical nodes are returned as-is.
-    - Two ``type: object`` nodes have their ``properties`` merged recursively.
-    - Differing ``type`` values raise SchemaValidationError.
+    - Already-nullable list types (e.g. ``["integer", "null"]``) are
+      unwrapped to their base type, merged normally, then re-wrapped
+      with null if either side was nullable.
+    - ``null`` + any concrete type produces a nullable type
+      (e.g. ``{"type": ["string", "null"]}``).
+    - ``integer`` + ``number`` widens to ``number``.
+    - Two ``type: object`` nodes have their ``properties`` unioned and
+      their ``required`` arrays intersected.
+    - Two ``type: array`` nodes have their ``items`` merged recursively.
+    - All other type mismatches raise SchemaValidationError.
     """
     if existing == incoming:
         return existing
 
     existing_type = existing.get("type")
     incoming_type = incoming.get("type")
+
+    # --- already-nullable list type on either side → unwrap, merge base, re-wrap ---
+    existing_is_list = isinstance(existing_type, list)
+    incoming_is_list = isinstance(incoming_type, list)
+
+    if existing_is_list or incoming_is_list:
+        existing_has_null = existing_is_list and "null" in existing_type
+        incoming_has_null = incoming_is_list and "null" in incoming_type
+
+        if existing_is_list:
+            existing_base = [t for t in existing_type if t != "null"]
+            existing_base = existing_base[0] if len(existing_base) == 1 else existing_base
+        else:
+            existing_base = existing_type
+
+        if incoming_is_list:
+            incoming_base = [t for t in incoming_type if t != "null"]
+            incoming_base = incoming_base[0] if len(incoming_base) == 1 else incoming_base
+        else:
+            incoming_base = incoming_type
+
+        base_existing = dict(existing)
+        base_existing["type"] = existing_base
+        base_incoming = dict(incoming)
+        base_incoming["type"] = incoming_base
+
+        merged = _merge_type_nodes(base_existing, base_incoming, field_path)
+
+        if existing_has_null or incoming_has_null:
+            merged_type = merged.get("type")
+            if isinstance(merged_type, list):
+                if "null" not in merged_type:
+                    merged["type"] = merged_type + ["null"]
+            else:
+                merged["type"] = [merged_type, "null"]
+
+        return merged
 
     # --- null + any concrete type → nullable ---
     if existing_type == "null" or incoming_type == "null":
@@ -320,8 +365,6 @@ def _merge_type_nodes(
                 existing_items, incoming_items, f"{field_path}[]"
             )
             return {"type": "array", "items": merged_items}
-        # One or both sides have no items (inferred from empty list);
-        # keep whichever has type information.
         return {"type": "array", "items": existing_items or incoming_items}
 
     # --- irreconcilable conflict ---
