@@ -31,9 +31,11 @@
    - 6.5 [Delete Datasource](#65-delete-datasource)
    - 6.6 [List Supported Datasource Provider Types](#66-list-supported-datasource-provider-types)
    - 6.7 [Get Datasource Provider Input Schema](#67-get-datasource-provider-input-schema)
-   - 6.8 [Connect Datasource to Application](#68-connect-datasource-to-application)
-   - 6.9 [Disconnect Datasource from Application](#69-disconnect-datasource-from-application)
-   - 6.10 [Get Datasource Status for Application](#610-get-datasource-status-for-application)
+   - 6.8 [Test Datasource Connection](#68-test-datasource-connection)
+   - 6.9 [Get Connected Services for Datasource](#69-get-connected-services-for-datasource)
+   - 6.10 [Connect Datasource to Application](#610-connect-datasource-to-application)
+   - 6.11 [Disconnect Datasource from Application](#611-disconnect-datasource-from-application)
+   - 6.12 [Get Datasource Status for Application](#612-get-datasource-status-for-application)
 7. [Digitize Service Integration](#7-digitize-service-integration)
    - 7.1 [Connector API Overview](#71-connector-api-overview)
    - 7.2 [Connect Flow](#72-connect-flow)
@@ -213,8 +215,10 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 | `GET`    | `/connectors/datasources`                                   | List all datasources (paginated, filterable by status)                                     |
 | `GET`    | `/connectors/datasources/:id`                               | Get a single datasource by ID                                                              |
 | `POST`   | `/connectors/datasources`                                   | Create a new datasource (validates connectivity first)                                     |
-| `PUT`    | `/connectors/datasources/:id`                               | Update datasource metadata / credentials                                                   |
+| `PUT`    | `/connectors/datasources/:id`                               | Update datasource credentials                                                              |
 | `DELETE` | `/connectors/datasources/:id`                               | Delete a datasource (only if not connected to any application)                             |
+| `POST`   | `/connectors/datasources/:id/test`                          | Test connectivity for an existing datasource using its stored credentials                  |
+| `GET`    | `/connectors/datasources/:id/services`                      | List all services connected to a datasource with sync status                               |
 | `GET`    | `/components?type=datasource`                               | List all supported datasource provider types (reuses existing API)                         |
 | `GET`    | `/components/:component_type/providers/:provider_id/params` | Get the input schema for a provider (reuses existing API; use `component_type=datasource`) |
 
@@ -474,7 +478,91 @@ The schema is derived from the datasource provider's `RequiredFields()` and `Sen
 }
 ```
 
-### 6.8 Connect Datasource to Application
+### 6.8 Test Datasource Connection
+
+**`POST /api/v1/connectors/datasources/:id/test`**
+
+Tests connectivity for an existing datasource using its stored credentials. No credentials are accepted in the request body — the catalog decrypts the stored metadata and delegates to `provider.TestConnection`. No record is created or modified regardless of outcome.
+
+**Request body:** None.
+
+**Response `200 OK`:** Connection succeeded.
+
+```json
+{ "status": "ok" }
+```
+
+**Response `422 Unprocessable Entity`:** Connection failed.
+
+```json
+{
+  "status": "failed",
+  "error": "connection test failed: dial tcp 192.168.1.100:22: connection refused"
+}
+```
+
+**Response `404 Not Found`:**
+
+```json
+{ "error": "datasource not found" }
+```
+
+---
+
+### 6.9 Get Connected Services for Datasource
+
+**`GET /api/v1/connectors/datasources/:id/services`**
+
+Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each service's Digitize pod.
+
+**Response `200 OK`:**
+
+```json
+{
+  "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
+  "services": [
+    {
+      "service_id": "svc-uuid-1",
+      "service_name": "Digitize",
+      "service_type": "digitize",
+      "application_id": "app-uuid-1",
+      "application_name": "My RAG App",
+      "sync_status": "up to date",
+      "last_sync_at": "2026-06-01T11:00:00Z"
+    },
+    {
+      "service_id": "svc-uuid-2",
+      "service_name": "Digitize",
+      "service_type": "digitize",
+      "application_id": "app-uuid-2",
+      "application_name": "My Summarise App",
+      "sync_status": "out of sync",
+      "last_sync_at": "2026-06-01T09:00:00Z"
+    }
+  ]
+}
+```
+
+| Field                     | Source                         | Description                                                                          |
+| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| `datasource_id`           | path param                     | The datasource component UUID                                                        |
+| `services[].service_id`   | catalog (`services.id`)        | ID of the connected service                                                          |
+| `services[].service_name` | catalog (`services.name`)      | Display name of the service                                                          |
+| `services[].service_type` | catalog (`services.type`)      | Catalog type of the service, e.g. `"digitize"`                                       |
+| `services[].application_id`   | catalog (`applications.id`)   | ID of the application the service belongs to                                     |
+| `services[].application_name` | catalog (`applications.name`) | Display name of the application                                                  |
+| `services[].sync_status`  | Digitize (`GET /v1/connectors/:connectorid`) | Current sync state for this service: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
+| `services[].last_sync_at` | Digitize (`GET /v1/connectors/:connectorid`) | Timestamp of the last completed sync for this service, or `null`             |
+
+**Response `404 Not Found`:**
+
+```json
+{ "error": "datasource not found" }
+```
+
+---
+
+### 6.10 Connect Datasource to Application
 
 **`PUT /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
@@ -510,7 +598,7 @@ Creates a link in `application_datasources` and calls `POST /v1/connectors` on t
 }
 ```
 
-### 6.9 Disconnect Datasource from Application
+### 6.11 Disconnect Datasource from Application
 
 **`DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
@@ -524,7 +612,7 @@ Removes the link from `application_datasources` and calls `DELETE /v1/connectors
 { "error": "datasource is not connected to this application" }
 ```
 
-### 6.10 Get Datasource Status for Application
+### 6.12 Get Datasource Status for Application
 
 **`GET /api/v1/applications/:id/connectors/datasources/:datasource_id`**
 
@@ -716,7 +804,17 @@ When `DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id` is 
 }
 ```
 
-### 7.5 Status Fetch Flow
+### 7.5 Connected Services Fetch Flow
+
+When `GET /api/v1/connectors/datasources/:id/services` is called:
+
+1. Return `404` if no record exists in `components` for the given `id`.
+2. Query `service_dependencies` joined with `services` and `applications` to find all services linked to this datasource, collecting `service_id`, `service_name`, `service_type`, `application_id`, `application_name`.
+3. For each linked service, call `GET /v1/connectors/<component_id>` on its downstream Digitize pod, where `component_id` is the datasource's `components.id`. Extract `sync_status` and `last_sync_at` from the response.
+4. If the Digitize call fails for a service, set `sync_status: null` and `last_sync_at: null` for that entry and continue — do not fail the entire request.
+5. Return the assembled list.
+
+### 7.6 Application-Scoped Status Fetch Flow
 
 When `GET /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
 
