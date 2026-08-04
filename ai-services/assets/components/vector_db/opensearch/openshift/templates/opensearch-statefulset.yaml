@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/name: vectordb
 spec:
+  replicas: {{ .Values.replicas }}
   serviceName: "opensearch-headless"
   podManagementPolicy: Parallel
   persistentVolumeClaimRetentionPolicy:
@@ -36,7 +37,7 @@ spec:
                   apiVersion: v1
                   fieldPath: metadata.name
             - name: cluster.initial_master_nodes
-              value: "opensearch-0"
+              value: "{{ range $i := until (int .Values.opensearch.replicas) }}{{ if $i }},{{ end }}opensearch-{{ $i }}{{ end }}"
             - name: discovery.seed_hosts
               value: opensearch-headless
             - name: network.host
