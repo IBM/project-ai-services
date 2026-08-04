@@ -13,7 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -30,53 +29,6 @@ import (
 // deployment, pod-status, and resource-inspection logic.
 type PodmanApplicationService struct {
 	ApplicationServiceBase
-}
-
-// ListApplications retrieves a paginated list of applications with filters.
-func (s *PodmanApplicationService) ListApplications(ctx context.Context, req ListApplicationsRequest) (*types.ApplicationListResponse, error) {
-	filters := &dbrepo.ApplicationFilters{
-		DeploymentType: req.DeploymentType,
-		CatalogID:      req.CatalogID,
-		Limit:          req.PageSize,
-		Offset:         (req.Page - 1) * req.PageSize,
-	}
-
-	totalCount, err := s.AppRepo.GetCount(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application count: %w", err)
-	}
-
-	applications, err := s.AppRepo.GetAll(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve applications: %w", err)
-	}
-
-	apps := make([]types.Application, 0, len(applications))
-	for _, app := range applications {
-		appData, err := s.buildApplication(app)
-		if err != nil {
-			return nil, err
-		}
-
-		apps = append(apps, appData)
-	}
-
-	totalPages := (totalCount + req.PageSize - 1) / req.PageSize
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	return &types.ApplicationListResponse{
-		Data: apps,
-		Pagination: types.PaginationMetadata{
-			Page:       req.Page,
-			PageSize:   req.PageSize,
-			TotalItems: totalCount,
-			TotalPages: totalPages,
-			HasNext:    req.Page < totalPages,
-			HasPrev:    req.Page > 1,
-		},
-	}, nil
 }
 
 // DeleteApplication initiates async deletion of an application and returns immediately.

@@ -11,10 +11,10 @@ import (
 
 var errOpenShiftNotSupported = errors.New("OpenShift runtime is not yet supported")
 
-type OpenShiftApplicationService struct{}
-
-func (s *OpenShiftApplicationService) ListApplications(_ context.Context, _ ListApplicationsRequest) (*types.ApplicationListResponse, error) {
-	return nil, errOpenShiftNotSupported
+// OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
+// It embeds ApplicationServiceBase for all shared DB operations.
+type OpenShiftApplicationService struct {
+	ApplicationServiceBase
 }
 
 func (s *OpenShiftApplicationService) DeleteApplication(_ context.Context, _ uuid.UUID, _ string, _ bool) (*DeleteApplicationResponse, error) {
@@ -26,10 +26,6 @@ func (s *OpenShiftApplicationService) CreateApplication(_ context.Context, _ api
 }
 
 func (s *OpenShiftApplicationService) UpdateApplication(_ context.Context, _ uuid.UUID, _, _ string) (*types.Application, error) {
-	return nil, errOpenShiftNotSupported
-}
-
-func (s *OpenShiftApplicationService) GetApplicationByID(_ context.Context, _ uuid.UUID) (*types.Application, error) {
 	return nil, errOpenShiftNotSupported
 }
 
