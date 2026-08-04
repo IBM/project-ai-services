@@ -18,10 +18,6 @@ type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
 
-func (s *OpenShiftApplicationService) ListApplications(_ context.Context, _ ListApplicationsRequest) (*types.ApplicationListResponse, error) {
-	return nil, errOpenShiftNotSupported
-}
-
 func (s *OpenShiftApplicationService) DeleteApplication(_ context.Context, _ uuid.UUID, _ string, _ bool) (*DeleteApplicationResponse, error) {
 	return nil, errOpenShiftNotSupported
 }
