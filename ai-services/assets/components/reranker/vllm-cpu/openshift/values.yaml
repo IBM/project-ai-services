@@ -1,11 +1,9 @@
-reranker:
-  storageUri: hf://BAAI/bge-reranker-v2-m3
-  model:
-    name: BAAI/bge-reranker-v2-m3
-  resources:
-    requests:
-      cpu: "8"
-      memory: "4Gi"
-    limits:
-      cpu: "8"
-      memory: "4Gi"
+storageUri: hf://BAAI/bge-reranker-v2-m3
+model: BAAI/bge-reranker-v2-m3
+resources:
+  requests:
+    cpu: "8"
+    memory: "4Gi"
+  limits:
+    cpu: "8"
+    memory: "4Gi"

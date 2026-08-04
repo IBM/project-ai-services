@@ -8,7 +8,7 @@ metadata:
   labels:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
@@ -22,13 +22,13 @@ spec:
         name: vLLM
       resources:
         requests:
-          cpu: {{ .Values.embedding.resources.requests.cpu | quote }}
-          memory: {{ .Values.embedding.resources.requests.memory | quote }}
+          cpu: {{ .Values.resources.requests.cpu | quote }}
+          memory: {{ .Values.resources.requests.memory | quote }}
         limits:
-          cpu: {{ .Values.embedding.resources.limits.cpu | quote }}
-          memory: {{ .Values.embedding.resources.limits.memory | quote }}
+          cpu: {{ .Values.resources.limits.cpu | quote }}
+          memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
-      storageUri: {{ .Values.embedding.storageUri }}
+      storageUri: {{ .Values.storageUri }}
       args:
-        - --served-model-name={{ .Values.embedding.model.name }}
-        - --max-model-len={{ .Values.embedding.model.maxModelLen }}
+        - --served-model-name={{ .Values.model }}
+        - --max-model-len=512

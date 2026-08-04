@@ -154,23 +154,7 @@ func deployCatalogHelm(ctx context.Context, chartData chart.Charter, timeout tim
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	// Check if the catalog release exists
-	releaseExists, err := helmClient.IsReleaseExist(catalogconstants.CatalogAppName)
-	if err != nil {
-		s.Fail("failed to check existing release")
-
-		return fmt.Errorf("failed to check existing release: %w", err)
-	}
-
-	if !releaseExists {
-		logger.Infof("Release '%s' does not exist, proceeding with install...", catalogconstants.CatalogAppName)
-		err = helmClient.Install(catalogconstants.CatalogAppName, chartData, &helm.InstallOpts{Values: values, Timeout: timeout})
-	} else {
-		logger.Infof("Release '%s' already exists, proceeding with upgrade...", catalogconstants.CatalogAppName)
-		err = helmClient.Upgrade(catalogconstants.CatalogAppName, chartData, &helm.UpgradeOpts{Values: values, Timeout: timeout})
-	}
-
-	if err != nil {
+	if err := helmClient.InstallOrUpgrade(catalogconstants.CatalogAppName, chartData, values, timeout); err != nil {
 		s.Fail("failed to deploy catalog")
 
 		return fmt.Errorf("failed to deploy catalog: %w", err)

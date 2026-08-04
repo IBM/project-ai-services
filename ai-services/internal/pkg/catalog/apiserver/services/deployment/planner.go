@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
@@ -81,9 +82,11 @@ func (p *DeploymentPlanner) PlanDeployment(
 		}
 	}
 
-	// Calculate and allocate Spyre cards after all components are planned
-	if err := p.calculateAndAllocateSpyreCards(ctx, plan); err != nil {
-		return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
+	// Calculate and allocate Spyre cards after all components are planned. Only needed for Podman.
+	if runtimeType == runtimeTypes.RuntimeTypePodman.String() {
+		if err := p.calculateAndAllocateSpyreCards(ctx, plan); err != nil {
+			return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
+		}
 	}
 
 	return plan, nil
