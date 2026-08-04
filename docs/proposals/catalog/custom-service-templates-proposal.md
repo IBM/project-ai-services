@@ -16,13 +16,14 @@
 6. [CatalogProvider Integration](#6-catalogprovider-integration)
 7. [API Upload](#7-api-upload)
 8. [Custom Template Directory Structure](#8-custom-template-directory-structure)
-9. [Template Values Reference](#9-template-values-reference)
-   - 9.1 [Shared (services and components)](#91-shared-services-and-components)
-   - 9.2 [Services](#92-services)
-   - 9.3 [Components](#93-components)
-10. [Usage Examples](#10-usage-examples)
-11. [Backward Compatibility](#11-backward-compatibility)
-12. [Future Enhancements](#12-future-enhancements)
+9. [Remote Deployment](#9-remote-deployment)
+10. [Template Values Reference](#10-template-values-reference)
+    - 10.1 [Shared (services and components)](#101-shared-services-and-components)
+    - 10.2 [Services](#102-services)
+    - 10.3 [Components](#103-components)
+11. [Usage Examples](#11-usage-examples)
+12. [Backward Compatibility](#12-backward-compatibility)
+13. [Future Enhancements](#13-future-enhancements)
 
 ---
 
@@ -949,7 +950,13 @@ Built-in IDs reserved at this time: `chat`, `digitize`, `similarity`, `summarize
 
 ---
 
-## 9. Template Values Reference
+## 9. Remote Deployment
+
+The control-plane catalog server acts as the authoritative bundle registry. Custom service assets are uploaded once to the control plane and stored there. Remote agents do not need to read assets directly — the control-plane catalog backend orchestrates all template resolution and service rendering on their behalf. No `.tar.gz` retention is required; only the extracted asset files are kept on the control-plane volume.
+
+---
+
+## 10. Template Values Reference
 
 > **Scope: Podman only.**  The template values, `@generate` directives, and `ai-services.io/` labels/annotations described in this section apply to the **Podman** runtime, which uses Go-template `.yaml.tmpl` files.  OpenShift custom service templates use Helm charts and a different rendering pipeline; a full reference for that runtime is deferred.
 >
@@ -1422,7 +1429,7 @@ Custom component templates may adopt the same pattern for any key name. The `.en
 
 ---
 
-## 10. Usage Examples
+## 11. Usage Examples
 
 ### 10.1 Upload a custom service bundle
 
@@ -1533,7 +1540,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 ---
 
-## 11. Backward Compatibility
+## 12. Backward Compatibility
 
 | Scenario | Behaviour |
 |---|---|
@@ -1549,7 +1556,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 ---
 
-## 12. Future Enhancements
+## 13. Future Enhancements
 
 1. **Scaffolding generator** — `ai-services catalog scaffold --service my-service --runtime podman` emits a minimal but correct directory skeleton ready to be tar'd and uploaded.
 2. **Template validation command** — `dry_run=true` already supported in §7.2.1; a dedicated CLI command `ai-services catalog validate --bundle <file>` wraps this for local use.
@@ -1558,27 +1565,4 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 5. **Version compatibility checks** — validate that a custom service's `version` satisfies any `>=x.y.z` constraint declared by the built-in architecture that references it.
 6. **Role-based upload access** — introduce a `catalog-editor` JWT role that can upload bundles but cannot perform `DELETE /applications` or other destructive operations.
 7. **Component support in bundles** — when `components/` is promoted from reserved to active in the bundle processor, users can ship custom component providers (e.g. a private LLM backend) alongside their services in the same archive.
-8. **Multi-VM deployment — Approach A: control-plane catalog server with existing worker agents** *(Recommended)* — a **hub-and-spoke** topology in which a single control-plane catalog server acts as the authoritative bundle registry. A worker agent is already present on each VM as part of the existing platform deployment. This agent can be extended to fetch bundles from the control plane on demand — specifically at the point when an Application creation is requested — with no shared storage infrastructure, no object store dependency, and no background synchronisation required.
 
-   **How it works:**
-
-   - A customer uploads a bundle once to the **control-plane catalog server** using the same `POST /api/v1/catalog/bundles` API defined in this proposal.
-   - When a request to **create an Application** arrives at a VM, the existing worker agent checks whether the required bundle is already present in its local bundle volume.
-   - If the bundle is not present locally, the agent queries the control-plane catalog server for the bundle, fetches the `.tar.gz` archive over HTTPS, extracts it to its local volume, and triggers `CatalogProvider.Reload()` — the same hot-reload path already defined in this proposal.
-   - The Application creation then proceeds using the locally loaded service template. There is no background polling or push notification — bundles are fetched **lazily, only when needed**.
-   - The local catalog process on each VM uses the extracted files via `FilesystemCatalogFS` — no new loading mechanism is needed on the VM side.
-
-   **Storage implication for the current design:**
-
-   Today, `BundleService.ProcessBundle` discards the original `.tar.gz` after extraction — only the extracted files are kept on the volume. For Approach A to work, the control-plane server must be able to serve the original archive to agents that request it. This means the **raw `.tar.gz` must also be retained** on the control-plane volume alongside the extracted directory. A `raw_archive` sub-path (e.g. `/data/catalog-bundles/raw/<name>.tar.gz`) or a dedicated `raw_path` column in `catalog_bundles` pointing to the stored archive would be sufficient. This is a minor additive change to `BundleService` that does not affect current single-VM behaviour.
-
-9. **Multi-VM deployment — Approach B: object storage backing** — an alternative for environments that already operate object storage infrastructure. Rather than routing bundle fetches through the control plane, a shared object store (S3, MinIO, or IBM COS) acts as the distribution layer. All VMs read bundles directly from the bucket; no agent involvement is required for bundle delivery.
-
-   The design deliberately isolates all bundle I/O behind two thin interfaces, making this straightforward to introduce later:
-
-   - **Read path** — `CatalogFS` interface (`§5.2`). `FilesystemCatalogFS` today calls `os.Open`. An `ObjectStoreCatalogFS` would implement the same three methods (`Open`, `ReadFile`, `ReadDir`) against an object-store prefix. `CatalogProvider`, `loadCatalogItems`, and every existing handler are completely unaware of the change.
-   - **Write path** — `BundleService.ProcessBundle`. Swapping the write target to an object store bucket is a single-function change. The DB row already stores `catalog_type`, `catalog_id`, `name`, and `version`; adding an `object_key` column requires only a minor migration.
-
-   Object-store reads have latency, so `CatalogProvider` would cache bundle files to a local staging directory at startup and after each hot-reload, then serve from that cache — preserving the zero-latency template rendering that `FilesystemCatalogFS` provides today. For **OpenShift multi-replica** deployments this approach also eliminates the need for `ReadWriteMany` PVCs.
-
-   **Relationship to Approach A:** the two approaches are not mutually exclusive. A future architecture could use the control plane as the upload target and object storage as the distribution medium that worker agents pull from, combining the simplicity of Approach A with the scalability of Approach B.
