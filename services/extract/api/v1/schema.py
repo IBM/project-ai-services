@@ -230,6 +230,7 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
         schema_id=row.schema_id,
         name=row.name,
         description=row.description,
+        is_schema_inferred=row.is_schema_inferred,
         json_schema=row.json_schema,
         examples=row.examples,
         custom_prompt=row.custom_prompt,

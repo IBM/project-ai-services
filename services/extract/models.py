@@ -107,6 +107,7 @@ class SchemaDetailResponse(BaseModel):
     schema_id: str
     name: str
     description: Optional[str] = None
+    is_schema_inferred: bool = False
     json_schema: Dict[str, Any]
     examples: Optional[List[Dict[str, Any]]] = None
     custom_prompt: Optional[str] = None
