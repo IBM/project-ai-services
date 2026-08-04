@@ -390,7 +390,12 @@ logger = get_logger("cleanup")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
-def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
+def cleanup_staging_directory(
+    job_id: str,
+    staging_base_dir: Path,
+    *,
+    ignore_errors: bool = False,
+) -> bool:
     """
     Clean up the staging directory for a specific job.
 
@@ -400,6 +405,10 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
     Args:
         job_id: Unique identifier of the job
         staging_base_dir: Base directory where staging directories are created
+        ignore_errors: When True, per-file errors inside the tree are silently
+            swallowed (passed directly to ``shutil.rmtree``). Useful for
+            best-effort cleanup where leaving partial remnants is acceptable
+            (e.g. connector staging directories on DELETE).
 
     Returns:
         True if cleanup was successful or directory didn't exist, False if cleanup failed
@@ -412,7 +421,7 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
         return True
 
     try:
-        shutil.rmtree(staging_dir)
+        shutil.rmtree(staging_dir, ignore_errors=ignore_errors)
         logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
         return True
     except Exception as e:

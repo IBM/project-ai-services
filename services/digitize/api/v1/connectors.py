@@ -17,7 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 
-from common.misc_utils import get_logger
+from common.misc_utils import cleanup_staging_directory, get_logger
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from digitize.connectors.models import (
     ConnectorCreateRequest,
@@ -225,8 +225,6 @@ async def delete_connector(connector_id: str):
     5. Delete the connector row
     6. Best-effort staging dir cleanup
     """
-    import shutil
-
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -267,8 +265,11 @@ async def delete_connector(connector_id: str):
                 "— row may have already been removed"
             )
 
-        # Best-effort staging directory cleanup
-        _cleanup_staging(connector_id)
+        # Best-effort sweep of any residual batch staging directories.
+        # Normal teardown: per-batch dirs are already gone (cleaned up in
+        # _process_new_files finally blocks). This glob catches anything left
+        # behind by a mid-tick crash: staging/connectors/<connector_id>-*
+        _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} detached and deleted")
         return None
@@ -296,19 +297,24 @@ def _best_effort_delete_document(doc_id: str) -> None:
         )
 
 
-def _cleanup_staging(connector_id: str) -> None:
-    """Remove the per-connector staging directory, best-effort."""
-    import shutil
+def _sweep_connector_staging(connector_id: str, staging_connectors_dir) -> None:
+    """
+    Remove any residual batch staging directories for *connector_id*.
 
-    try:
-        staging_path = settings.digitize.staging_dir / "connectors" / connector_id
-        if staging_path.exists():
-            shutil.rmtree(staging_path, ignore_errors=True)
-            logger.debug(f"Cleaned up staging dir for connector {connector_id!r}")
-    except Exception as exc:
-        logger.warning(
-            f"Staging dir cleanup failed for connector {connector_id!r}: {exc}"
-        )
+    Per-batch dirs are named ``<connector_id>-<job_id>-<batch_number>`` and are
+    cleaned up inline after each ingest.  This sweep only has work to do when a
+    worker crashed mid-tick and left a directory behind.
+    """
+    from pathlib import Path
+
+    base = Path(staging_connectors_dir)
+    if not base.exists():
+        return
+    prefix = f"{connector_id}-"
+    for entry in base.iterdir():
+        if entry.is_dir() and entry.name.startswith(prefix):
+            cleanup_staging_directory(entry.name, base, ignore_errors=True)
+            logger.debug(f"Swept residual staging dir {entry.name!r} for connector {connector_id!r}")
 
 
 # ---------------------------------------------------------------------------
