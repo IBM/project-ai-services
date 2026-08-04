@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     json_schema           JSONB NOT NULL,
     examples              JSONB,
     custom_prompt         TEXT,
+    is_schema_inferred    BOOLEAN NOT NULL DEFAULT FALSE,
     schema_tokens         INTEGER NOT NULL,
     examples_tokens       INTEGER NOT NULL DEFAULT 0,
     custom_prompt_tokens  INTEGER NOT NULL DEFAULT 0,

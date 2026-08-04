@@ -15,7 +15,7 @@ Responsibilities:
 import json
 import re
 import copy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import jsonschema
 from jsonschema import Draft202012Validator
@@ -191,6 +191,234 @@ def validate_json_schema_structure(json_schema: Dict[str, Any]) -> None:
             f"The root of json_schema must be 'type: object'; got {root_type!r}.",
             status=400,
         )
+
+
+# ---------------------------------------------------------------------------
+# Schema inference from examples
+# ---------------------------------------------------------------------------
+
+def _infer_object_schema(value: dict) -> Dict[str, Any]:
+    """
+    Infer a ``type: object`` sub-schema from a single dict value.
+
+    Every key present in *value* is added to ``required`` (the all-present
+    default). When multiple examples are merged, ``_merge_type_nodes``
+    intersects the ``required`` arrays so only universally-present keys
+    remain required.
+    """
+    properties = {k: _python_type_to_json_schema(v) for k, v in value.items()}
+    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+    if properties:
+        schema["required"] = list(value.keys())
+    return schema
+
+
+def _infer_array_schema(value: list) -> Dict[str, Any]:
+    """
+    Infer a ``type: array`` schema from a list value.
+
+    If the list is non-empty, ``items`` is derived by inferring a schema from
+    each element and merging them (so ``[1, 2.5]`` yields
+    ``items: {type: number}``).  Empty lists produce an unconstrained array.
+    """
+    if not value:
+        return {"type": "array"}
+
+    items_schema = _python_type_to_json_schema(value[0])
+    for element in value[1:]:
+        items_schema = _merge_type_nodes(
+            items_schema, _python_type_to_json_schema(element), "[]"
+        )
+    return {"type": "array", "items": items_schema}
+
+
+def _python_type_to_json_schema(value: Any) -> Dict[str, Any]:
+    """Return the JSON Schema type node for a single Python *value*."""
+    # bool must be checked before int because bool is a subclass of int.
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string"}
+    if isinstance(value, list):
+        return _infer_array_schema(value)
+    if isinstance(value, dict):
+        return _infer_object_schema(value)
+    if value is None:
+        return {"type": "null"}
+    # Fallback for unexpected types.
+    return {}
+
+
+def _merge_type_nodes(
+    existing: Dict[str, Any],
+    incoming: Dict[str, Any],
+    field_path: str,
+) -> Dict[str, Any]:
+    """
+    Merge two JSON Schema type nodes for the same field seen in two
+    different examples.
+
+    - Identical nodes are returned as-is.
+    - Two ``type: object`` nodes have their ``properties`` merged recursively.
+    - Differing ``type`` values raise SchemaValidationError.
+    """
+    if existing == incoming:
+        return existing
+
+    existing_type = existing.get("type")
+    incoming_type = incoming.get("type")
+
+    # --- null + any concrete type → nullable ---
+    if existing_type == "null" or incoming_type == "null":
+        non_null = incoming if existing_type == "null" else existing
+        non_null_type = non_null.get("type")
+        if non_null_type is None:
+            return non_null
+        result = dict(non_null)
+        if isinstance(non_null_type, list):
+            if "null" not in non_null_type:
+                result["type"] = non_null_type + ["null"]
+        else:
+            result["type"] = [non_null_type, "null"]
+        return result
+
+    # --- integer + number → number ---
+    if {existing_type, incoming_type} == {"integer", "number"}:
+        return {"type": "number"}
+
+    # --- object + object → union properties, intersect required ---
+    if existing_type == "object" and incoming_type == "object":
+        merged_props: Dict[str, Any] = dict(existing.get("properties", {}))
+        for key, inc_prop in incoming.get("properties", {}).items():
+            if key in merged_props:
+                merged_props[key] = _merge_type_nodes(
+                    merged_props[key], inc_prop, f"{field_path}.{key}"
+                )
+            else:
+                merged_props[key] = inc_prop
+
+        existing_req = set(existing.get("required", []))
+        incoming_req = set(incoming.get("required", []))
+        merged_required = sorted(existing_req & incoming_req)
+
+        result = {"type": "object", "properties": merged_props}
+        if merged_required:
+            result["required"] = merged_required
+        return result
+
+    # --- array + array → merge items ---
+    if existing_type == "array" and incoming_type == "array":
+        existing_items = existing.get("items")
+        incoming_items = incoming.get("items")
+        if existing_items and incoming_items:
+            merged_items = _merge_type_nodes(
+                existing_items, incoming_items, f"{field_path}[]"
+            )
+            return {"type": "array", "items": merged_items}
+        # One or both sides have no items (inferred from empty list);
+        # keep whichever has type information.
+        return {"type": "array", "items": existing_items or incoming_items}
+
+    # --- irreconcilable conflict ---
+    if existing_type != incoming_type:
+        raise SchemaValidationError(
+            "SCHEMA_INFERENCE_CONFLICT",
+            (
+                f"Cannot infer schema: field {field_path!r} has conflicting types "
+                f"across examples ({existing_type!r} vs {incoming_type!r})."
+            ),
+            status=400,
+        )
+
+    return existing
+
+
+def infer_schema_from_examples(examples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Infer a JSON Schema draft 2020-12 ``type: object`` from example outputs.
+
+    *examples* is a list of raw example dicts (each having an ``output`` key).
+
+    Algorithm:
+    1. For each example's ``output`` dict, derive a type node per field
+       recursively (nested dicts become nested ``type: object`` sub-schemas).
+    2. Merge type nodes across examples; raise SchemaValidationError if the
+       same field has conflicting types.
+    3. Fields present in **all** examples are added to ``required``.
+
+    Raises SchemaValidationError if no examples are provided or a type
+    conflict is detected.
+    """
+    """
+        Infer a JSON Schema draft 2020-12 ``type: object`` from example outputs.
+
+        *examples* is a list of raw example dicts (each having an ``output`` key).
+
+        Algorithm:
+        1. For each example's ``output`` dict, derive a type node per field
+           recursively (nested dicts become nested ``type: object`` sub-schemas,
+           non-empty lists infer ``items`` from their elements).
+        2. Merge type nodes across examples: identical nodes pass through,
+           ``integer`` + ``number`` widens to ``number``, ``null`` + any type
+           produces a nullable type, and two ``object`` nodes have their
+           ``properties`` unioned and ``required`` arrays intersected.
+           Irreconcilable type conflicts raise SchemaValidationError.
+        3. Fields present in **all** examples are added to ``required``.
+
+        Raises SchemaValidationError if no examples are provided, an example
+        output is not a non-empty dict, or a type conflict is detected.
+        """
+    if not examples:
+        raise SchemaValidationError(
+            "INFERENCE_NO_EXAMPLES",
+            "Cannot infer schema: no examples provided. "
+            "Supply at least one example or provide json_schema explicitly.",
+            status=400,
+        )
+
+    field_schemas: Dict[str, Any] = {}
+    field_counts: Dict[str, int] = {}
+    total = len(examples)
+
+    for idx, example in enumerate(examples):
+        output = example.get("output", {})
+        if not isinstance(output, dict):
+            raise SchemaValidationError(
+                "INFERENCE_INVALID_EXAMPLE",
+                f"examples[{idx}].output must be an object for schema inference.",
+                status=400,
+            )
+        if not output:
+            raise SchemaValidationError(
+                "INFERENCE_EMPTY_EXAMPLE",
+                f"examples[{idx}].output must be a non-empty object for schema "
+                f"inference.",
+                status=400,
+            )
+        for key, value in output.items():
+            incoming_node = _python_type_to_json_schema(value)
+            if key in field_schemas:
+                field_schemas[key] = _merge_type_nodes(
+                    field_schemas[key], incoming_node, key
+                )
+            else:
+                field_schemas[key] = incoming_node
+            field_counts[key] = field_counts.get(key, 0) + 1
+
+    required = [k for k, count in field_counts.items() if count == total]
+
+    schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": field_schemas,
+    }
+    if required:
+        schema["required"] = required
+
+    return schema
 
 
 # ---------------------------------------------------------------------------
