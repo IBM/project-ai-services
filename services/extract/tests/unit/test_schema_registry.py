@@ -19,6 +19,7 @@ def _mock_schema_row(
     schema_id="schema-001",
     name="invoice-extraction",
     description="Test schema",
+    is_schema_inferred=False,
     json_schema=None,
     examples=None,
     custom_prompt=None,
@@ -31,6 +32,7 @@ def _mock_schema_row(
     row.schema_id = schema_id
     row.name = name
     row.description = description
+    row.is_schema_inferred = is_schema_inferred
     row.json_schema = json_schema or {
         "type": "object",
         "properties": {"name": {"type": "string"}},
