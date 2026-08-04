@@ -125,8 +125,6 @@ func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 		}
 	}
 
-	fmt.Println(string(processedValuesData))
-
 	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
