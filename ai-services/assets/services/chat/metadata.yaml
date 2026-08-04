@@ -1,7 +1,7 @@
 # Service identification
 id: chat
-name: "Question and Answer"
-description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
+name: "Question and answer"
+description: "Provides accurate, context-aware responses to user queries. Enables automated customer support, knowledge base interactions, and conversational assistance across various domains."
 type: service
 
 # Certification and support
@@ -18,3 +18,77 @@ dependencies:
   - id: llm
 
 standalone: false
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Large language model (LLM)"
+        value: "granite-3.3-8b-instruct"
+      - title: "Inference backend"
+        values:
+          - "RedHat AI Inference with Spyre"
+          - "AI Inference on CPU"
+          - "IBM watsonx.ai on IBM Cloud"
+      - title: "Embedding model"
+        value: "granite-embedding-278m-multilingual"
+      - title: "Reranker model"
+        value: "bge-reranker-v2-m3"
+      - title: "Vector store"
+        value: "OpenSearch"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "Question in natural language"
+      - title: "Outputs"
+        values:
+          - "Answer to the input question"
+          - "If augmented with documents from the knowledge base: list of excerpts from the knowledge base, along with pointers from the knowledge base"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for LLM-based Q&A capabilities)"
+          - "Find similar items (required for augmenting the prompt to the LLM with knowledge from the knowledge base)"
+
+  - title: "Content and format support"
+    sections:
+      - title: "Languages"
+        values:
+          - "English"
+          - "French"
+          - "German"
+          - "Italian"
+      - title: "Content"
+        values:
+          - "Text"
+          - "Tables"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per 5 concurrent users"
+        values:
+          - title: "Compute"
+            value: "12 CPU cores"
+          - title: "Memory"
+            value: "113.50 GB"
+          - title: "Storage"
+            value: "80.00 GB"
+          - title: "Spyre acceleration cards"
+            value: 5
+
+  - title: "Assets"
+    sections:
+      - title: "Architectures"
+        values:
+          - "Digital assistant"
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
+
+# Made with Bob

@@ -1,3 +1,4 @@
+import re
 import litellm
 from litellm.integrations.custom_logger import CustomLogger
 
@@ -24,9 +25,8 @@ class TokenizeTranslator(CustomLogger):
                 model = litellm.os.environ.get("INSTRUCT_MODEL")
                 data["model_id"] = model.split("/", 1)[1]
                 data["project_id"] = litellm.os.environ.get("WATSONX_PROJECT_ID")
-                data["parameters"] = {
-                    "return_tokens": True
-                } 
+                data["parameters"] = {"return_tokens": True}
+        
         print(f"Translated data: {data}")
         return data
 
@@ -57,6 +57,56 @@ class TokenizeTranslator(CustomLogger):
                     pass
         print(f"Translated response: {response}")
         return response
+
+    async def async_post_call_failure_hook(self, request_data, original_exception, user_api_key_dict, traceback_str):
+        try:
+            request_route = getattr(user_api_key_dict, "request_route", None) or ""
+            call_type = request_data.get("call_type", "") if isinstance(request_data, dict) else ""
+            
+            print(f"FAILURE - Route: {request_route}, Type: {call_type}, Error: {type(original_exception).__name__}")
+            
+            # Only handle failures for pass_through_endpoint and /tokenize route
+            is_pass_through = call_type == "pass_through_endpoint"
+            is_tokenize_route = request_route == "/tokenize"
+            
+            if not (is_pass_through and is_tokenize_route):
+                return None # Return None to let the original exception propagate naturally
+            
+            status_code = None
+            error_message = str(original_exception)
+            
+            if hasattr(original_exception, "status_code"):
+                status_code = original_exception.status_code
+            elif isinstance(original_exception, Exception):
+                match = re.search(r'\b([4-5]\d{2})\b', error_message)
+                if match:
+                    status_code = int(match.group(1))
+                else:
+                    error_lower = error_message.lower()
+                    if "unauthorized" in error_lower or "authentication" in error_lower:
+                        status_code = 401
+                    elif "forbidden" in error_lower or "permission" in error_lower:
+                        status_code = 403
+                    elif "not found" in error_lower:
+                        status_code = 404
+                    elif "bad request" in error_lower or "invalid" in error_lower:
+                        status_code = 400
+                    elif "timeout" in error_lower:
+                        status_code = 504
+            
+            if status_code:
+                print(f"Propagating status {status_code} from WatsonX")
+                from fastapi import HTTPException
+                # Return a FastAPI HTTPException to safely translate the client response code
+                return HTTPException(
+                    status_code=status_code,
+                    detail=error_message
+                )
+            
+        except Exception as e:
+            print(f"Error in exception handler: {e}")
+        
+        return None
 
 # Instantiate it so the config can import it
 translator_instance = TokenizeTranslator()

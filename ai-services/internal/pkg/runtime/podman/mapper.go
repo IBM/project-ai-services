@@ -1,6 +1,8 @@
 package podman
 
 import (
+	"strings"
+
 	"github.com/containers/podman/v5/libpod/define"
 	podmanTypes "github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -146,6 +148,16 @@ func toInspectContainer(input *define.InspectContainerData) *types.Container {
 	if input.Config != nil && input.Config.Healthcheck != nil {
 		container.HealthcheckStartPeriod = input.Config.Healthcheck.StartPeriod
 	}
+
+	envMap := make(map[string]string)
+	const envLen = 2
+	for _, env := range input.Config.Env {
+		values := strings.Split(env, "=")
+		if len(values) == envLen {
+			envMap[values[0]] = values[1]
+		}
+	}
+	container.Env = envMap
 
 	return container
 }

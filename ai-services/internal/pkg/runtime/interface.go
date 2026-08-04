@@ -26,9 +26,12 @@ type Runtime interface {
 	// Secret operations
 	ListSecrets(filters map[string][]string) ([]string, error)
 	DeleteSecret(name string) error
+	SecretExists(nameOrID string) (bool, error)
+	UpdateSecret(name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations
 	DeleteVolume(name string) error
+	VolumeExists(nameOrID string) (bool, error)
 
 	// Container operations
 	// ListContainers(filters map[string][]string) ([]types.Container, error)
@@ -37,7 +40,7 @@ type Runtime interface {
 	ContainerLogs(containerNameOrID string) error
 
 	// Network operations
-	ListRoutes() ([]types.Route, error)
+	ListRoutes(labelSelector string) ([]types.Route, error)
 
 	// PVC operations
 	DeletePVCs(appLabel string) error

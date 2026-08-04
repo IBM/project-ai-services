@@ -1,9 +1,11 @@
 package proxy
 
+import "context"
+
 // ProxyManager defines the interface for managing reverse proxy routes.
 type ProxyManager interface {
 	// RegisterRoute registers a new route with the proxy
-	RegisterRoute(route Route) error
+	RegisterRoute(ctx context.Context, route Route) error
 
 	// UnregisterRoute removes a route from the proxy by its ID
 	UnregisterRoute(routeID string) error

@@ -7,8 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// dirPerm defines default directory permissions.
-const dirPerm = 0o755 // read/write/execute for owner, read/execute for group and others
+const dirPerm os.FileMode = 0o755
 
 // CleanupTemp removes temporary directories created during test runs.
 func CleanupTemp(tempDir string) error {
@@ -27,7 +26,7 @@ func CleanupTemp(tempDir string) error {
 	return nil
 }
 
-// CollectArtifacts collects test artifacts (logs, configs, etc.) from the temp directory.
+// CollectArtifacts collects test artifacts from tempDir into artifactDir.
 func CollectArtifacts(tempDir, artifactDir string) error {
 	if tempDir == "" || artifactDir == "" {
 		return nil
@@ -37,7 +36,6 @@ func CollectArtifacts(tempDir, artifactDir string) error {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
-	// Copy relevant files from tempDir to artifactDir.
 	logger.Infof("[CLEANUP] Artifacts collected to: %s", artifactDir)
 
 	return nil

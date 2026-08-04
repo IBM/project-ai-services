@@ -119,7 +119,8 @@ func ValidateWildcardCertificate(certPath string) error {
 
 // ExtractDomainFromCertificate extracts the base domain from a wildcard certificate.
 // For wildcard certificates (*.example.com), it returns the base domain (example.com).
-// This function requires a wildcard certificate to support multiple service subdomains.
+// This function assumes the certificate has already been validated (including wildcard check)
+// by ValidateWildcardCertificate before calling this function.
 func ExtractDomainFromCertificate(certPath string) (string, error) {
 	cert, err := LoadCertificate(certPath)
 	if err != nil {
@@ -127,6 +128,7 @@ func ExtractDomainFromCertificate(certPath string) (string, error) {
 	}
 
 	// Check Subject Alternative Names (SANs) for wildcard domains
+	// Certificate is pre-validated, so we know a wildcard exists
 	for _, san := range cert.DNSNames {
 		if strings.HasPrefix(san, wildcardPrefix) {
 			// Extract base domain from wildcard (*.example.com → example.com)
@@ -137,7 +139,7 @@ func ExtractDomainFromCertificate(certPath string) (string, error) {
 		}
 	}
 
-	// Check Common Name for wildcard
+	// Check Common Name for wildcard as fallback
 	if cert.Subject.CommonName != "" && strings.HasPrefix(cert.Subject.CommonName, wildcardPrefix) {
 		domain := strings.TrimPrefix(cert.Subject.CommonName, wildcardPrefix)
 		if domain != "" {
@@ -145,18 +147,8 @@ func ExtractDomainFromCertificate(certPath string) (string, error) {
 		}
 	}
 
-	// Build error message with available domains for debugging
-	var availableDomains []string
-	availableDomains = append(availableDomains, cert.DNSNames...)
-	if cert.Subject.CommonName != "" {
-		availableDomains = append(availableDomains, cert.Subject.CommonName)
-	}
-
-	if len(availableDomains) > 0 {
-		return "", fmt.Errorf("certificate must contain a wildcard domain (%sexample.com) to support multiple service subdomains. Found non-wildcard domains: %v", wildcardPrefix, availableDomains)
-	}
-
-	return "", fmt.Errorf("certificate must contain a wildcard domain (%sexample.com) to support multiple service subdomains. No domains found in certificate", wildcardPrefix)
+	// This should not happen if certificate was properly validated
+	return "", fmt.Errorf("failed to extract domain from certificate")
 }
 
 // LoadUserCertificates validates staged certificate files on the host and updates Caddy to load them from container-visible paths.

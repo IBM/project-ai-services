@@ -1,7 +1,9 @@
 package templates
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -72,7 +74,7 @@ func displayServiceParameters(provider *catalog.CatalogProvider, serviceID strin
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := provider.GetServiceParams(serviceID)
+	schema, err := provider.GetServiceParams(context.Background(), serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -107,7 +109,7 @@ func displayServiceInArchitecture(provider *catalog.CatalogProvider, serviceID s
 	}
 
 	// Display service parameters
-	schema, err := provider.GetServiceParams(serviceID)
+	schema, err := provider.GetServiceParams(context.Background(), serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -142,7 +144,7 @@ func displayComponentsParameters(provider *catalog.CatalogProvider, dependencies
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := provider.GetComponentProviderParams(comp.ComponentType, comp.ID)
+				schema, err := provider.GetComponentProviderParams(context.Background(), comp.ComponentType, comp.ID)
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}
@@ -166,6 +168,7 @@ func displaySchemaParameters(schema map[string]any, prefix string) {
 }
 
 // displayPropertiesRecursive recursively displays properties, handling nested objects.
+// It skips fields marked with "x-ui-only": true (UI-only fields with no CLI meaning).
 func displayPropertiesRecursive(properties map[string]any, prefix string) {
 	for paramName, propValue := range properties {
 		prop, ok := propValue.(map[string]any)
@@ -173,8 +176,13 @@ func displayPropertiesRecursive(properties map[string]any, prefix string) {
 			continue
 		}
 
+		// Skip fields explicitly marked as UI-only
+		if uiOnly, _ := prop["x-ui-only"].(bool); uiOnly {
+			continue
+		}
+
 		propType, _ := prop["type"].(string)
-		description, _ := prop["description"].(string)
+		description := cleanDescription(prop["description"])
 
 		// If this is an object type with nested properties, recurse into it
 		if propType == "object" {
@@ -192,4 +200,21 @@ func displayPropertiesRecursive(properties map[string]any, prefix string) {
 			logger.Infof("  %s.%s: %s", prefix, paramName, description)
 		}
 	}
+}
+
+// cleanDescription normalises a JSON schema description for CLI display:
+// it collapses newlines to spaces and strips markdown bold markers.
+func cleanDescription(raw any) string {
+	s, _ := raw.(string)
+	if s == "" {
+		return ""
+	}
+
+	// Collapse newlines (and surrounding whitespace) to a single space
+	s = strings.Join(strings.Fields(s), " ")
+
+	// Strip markdown bold: **text** → text
+	s = strings.ReplaceAll(s, "**", "")
+
+	return s
 }

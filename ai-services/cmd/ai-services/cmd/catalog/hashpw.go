@@ -1,9 +1,6 @@
 package catalog
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -11,11 +8,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/term"
-
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
 const (
@@ -24,24 +20,26 @@ const (
 
 func NewHashpwCmd() *cobra.Command {
 	var (
-		fromStdin  bool
-		noConfirm  bool
-		iterations = 100000 // NIST recommended minimum
+		fromStdin   bool
+		noConfirm   bool
+		iterations  = 100000 // NIST recommended minimum
+		runtimeType string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "hashpw",
 		Short: "Generate a password hash",
-		Long: `Reads a password securely and prints a PBKDF2 hash to stdout.
-
-Examples:
-  # Interactive (hidden input, with confirmation)
-  ai-services catalog hashpw --iterations 150000
+		Long:  `Reads a password securely and prints a PBKDF2 hash to stdout.`,
+		Example: `  # Interactive (hidden input, with confirmation)
+  ai-services catalog hashpw --iterations 150000 --runtime podman
 
   # Non-interactive (CI): read from stdin
   printf '%s\n' 'S3cureP@ss!' | ai-services catalog hashpw --stdin --iterations 150000
 
 Tip: Avoid passing plain passwords as CLI args (they can leak via process list).`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return common.InitAndValidateRuntimeFlag(runtimeType)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pw, err := getPassword(fromStdin, noConfirm, cmd)
 			if err != nil {
@@ -52,7 +50,7 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 				return err
 			}
 
-			hash, err := hashPasswordPBKDF2(pw, iterations)
+			hash, err := catalogutils.HashPasswordPBKDF2(pw, iterations)
 			if err != nil {
 				return fmt.Errorf("pbkdf2: %w", err)
 			}
@@ -61,13 +59,14 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 				return fmt.Errorf("write output: %w", err)
 			}
 
-			return nil
+			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 	}
 
 	cmd.Flags().IntVar(&iterations, "iterations", iterations, "PBKDF2 iterations (100000+ recommended)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read password from stdin (non-interactive)")
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "skip confirmation prompt")
+	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	return cmd
 }
@@ -134,21 +133,4 @@ func readHidden(prompt string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(b)), nil
-}
-
-func hashPasswordPBKDF2(password string, iteration int) (string, error) {
-	salt := make([]byte, constants.Pbkdf2SaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-
-	hash := pbkdf2.Key([]byte(password), salt, iteration, constants.Pbkdf2KeyLen, sha256.New)
-
-	// Format: iterations.salt.hash (base64 encoded)
-	encoded := fmt.Sprintf("%d.%s.%s",
-		iteration,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(hash))
-
-	return encoded, nil
 }

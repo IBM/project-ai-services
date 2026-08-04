@@ -33,6 +33,8 @@ type Credentials struct {
 	// AccessTokenExpiry is the UTC time at which the access token expires.
 	// A zero value means the expiry is unknown and the token should be refreshed.
 	AccessTokenExpiry time.Time `json:"access_token_expiry,omitempty"`
+	// Insecure indicates whether to skip TLS certificate verification.
+	Insecure bool `json:"insecure,omitempty"`
 }
 
 // configFilePath returns the absolute path to the credentials file.

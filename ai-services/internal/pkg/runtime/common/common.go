@@ -56,7 +56,7 @@ func getPodStatus(r runtime.Runtime, pInfo *types.Pod) (string, string) {
 			cInfo, err := r.InspectContainer(container.ID)
 			if err != nil {
 				// skip container if inspect failed
-				logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err, logger.VerbosityLevelDebug)
+				logger.Debugf("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err)
 
 				continue
 			}

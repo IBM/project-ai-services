@@ -93,7 +93,7 @@ class DatabaseManager:
                     # Eagerly access all attributes to load them before session closes
                     _ = (job.job_id, job.job_name, job.level, job.status,
                          job.submitted_at, job.completed_at, job.error,
-                         job.metadata, job.updated_at)
+                         job.job_metadata, job.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(job)
                     logger.debug(f"Retrieved job from database: {job_id}")
@@ -166,7 +166,8 @@ class DatabaseManager:
             status: Optional[JobStatus] = None,
             completed_at: Optional[datetime] = None,
             error: Optional[str] = None,
-            metadata : Optional[Dict[str, Any]] = None
+            metadata : Optional[Dict[str, Any]] = None,
+            job_type: Optional[SummarizationType] = None
     ) -> bool:
         """
         Update job fields in the database.
@@ -177,6 +178,7 @@ class DatabaseManager:
             completed_at: Completion timestamp
             error: Error message
             metadata: Updated metadata
+            job_type: Job type (direct or chunked)
 
         Returns:
             True if update successful, False otherwise
@@ -192,6 +194,8 @@ class DatabaseManager:
                     updates["error"] = error
                 if metadata is not None:
                     updates["job_metadata"] = metadata
+                if job_type is not None:
+                    updates["job_type"] = job_type.value
 
                 if not updates:
                     logger.debug(f"No updates provided for job {job_id}")
@@ -267,6 +271,9 @@ class DatabaseManager:
                     stmt = stmt.where(SummarizeJob.job_type == job_type)
 
                 jobs = list(session.scalars(stmt).all())
+                # Expunge all jobs from session to prevent DetachedInstanceError
+                for job in jobs:
+                    session.expunge(job)
                 logger.debug(f"Retrieved {len(jobs)} active jobs")
                 return jobs
         except SQLAlchemyError as e:
@@ -275,6 +282,28 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
+
+    @staticmethod
+    def delete_all_jobs() -> bool:
+        """
+        Delete all jobs from the database.
+        Used for bulk cleanup operations.
+        
+        Returns:
+            True if deletion successful, False otherwise
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(SummarizeJob)
+                result = session.execute(stmt)
+                logger.info(f"Deleted {result.rowcount} jobs from database")
+                return True
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
+            return False
 
 
 # Singleton instance for easy access

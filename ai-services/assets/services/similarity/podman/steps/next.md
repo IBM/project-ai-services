@@ -1,1 +1,0 @@
-- Use the Similarity Search API at http://{{ .HOST_IP }}:{{ .SIMILARITY_API_PORT }}.

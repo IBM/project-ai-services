@@ -33,7 +33,7 @@ var ApplicationCmd = &cobra.Command{
 		}
 
 		vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-		logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+		logger.Debugf("Using runtime: %s\n", rt)
 
 		return nil
 	},
@@ -50,6 +50,8 @@ func init() {
 	ApplicationCmd.AddCommand(infoCmd)
 	ApplicationCmd.AddCommand(logsCmd)
 	ApplicationCmd.AddCommand(model.ModelCmd)
+	ApplicationCmd.AddCommand(restoreCmd)
+	ApplicationCmd.AddCommand(backupCmd)
 
 	// Add runtime flag as required
 	ApplicationCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))

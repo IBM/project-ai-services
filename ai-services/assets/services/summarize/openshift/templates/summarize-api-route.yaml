@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "summarize-api"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/endpoint-type: api
+spec:
+  port:
+    targetPort: 6000
+  to:
+    kind: Service
+    name: "summarize-api"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge

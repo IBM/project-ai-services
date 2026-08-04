@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
+  build: {
+    cssMinify: 'esbuild',
+  },
   plugins: [react()],
   resolve: {
     alias: {
@@ -14,6 +17,7 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8080",
         changeOrigin: true,
+        secure: false,
       },
     },
   },

@@ -10,6 +10,7 @@ metadata:
   annotations:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 spec:
+  restartPolicy: always
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"

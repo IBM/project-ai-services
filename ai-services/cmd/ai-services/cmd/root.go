@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/mustgather"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -22,7 +23,7 @@ var RootCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		// Ensures logs flush after each command run
-		logger.Infoln("Logger initialized (PersistentPreRun)", logger.VerbosityLevelDebug)
+		logger.Debugln("Logger initialized (PersistentPreRun)")
 
 		return nil
 	},
@@ -46,4 +47,5 @@ func init() {
 	RootCmd.AddCommand(bootstrap.BootstrapCmd())
 	RootCmd.AddCommand(application.ApplicationCmd)
 	RootCmd.AddCommand(catalog.CatalogCmd())
+	RootCmd.AddCommand(mustgather.MustGatherCmd())
 }

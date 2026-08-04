@@ -44,3 +44,10 @@
   width: 100%;
   max-width: none;
 }
+
+.toastNotification {
+  position: fixed;
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-05;
+  z-index: 9999;
+}

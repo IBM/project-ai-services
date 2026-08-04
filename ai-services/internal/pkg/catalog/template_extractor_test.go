@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"testing"
 	texttemplate "text/template"
@@ -50,7 +51,7 @@ spec:
 		return nil
 	}
 
-	err = provider.ProcessTemplates(templates, values, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, values, "test-instance", processor)
 	require.NoError(t, err)
 
 	// Verify the template was processed
@@ -109,7 +110,7 @@ spec:
 		return nil
 	}
 
-	err = provider.ProcessTemplates(templates, nil, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, nil, "test-instance", processor)
 	require.NoError(t, err)
 	assert.Equal(t, 2, processedCount)
 }
@@ -137,7 +138,7 @@ metadata:
 		return nil
 	}
 
-	err = provider.ProcessTemplates(templates, nil, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, nil, "test-instance", processor)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process")
 }
@@ -162,7 +163,7 @@ this is not valid yaml: [[[
 		return nil
 	}
 
-	err = provider.ProcessTemplates(templates, nil, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, nil, "test-instance", processor)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process")
 }
@@ -194,7 +195,7 @@ spec:
 		return expectedError
 	}
 
-	err = provider.ProcessTemplates(templates, nil, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, nil, "test-instance", processor)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process template test-template")
 	assert.ErrorIs(t, err, expectedError)
@@ -237,7 +238,7 @@ this is invalid yaml
 		return nil
 	}
 
-	err = provider.ProcessTemplates(templates, nil, "test-instance", processor)
+	err = provider.ProcessTemplates(context.Background(), templates, nil, "test-instance", processor)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process")
 	// Good template should still be processed
@@ -273,7 +274,7 @@ spec:
 
 	imageSet := make(map[string]bool)
 
-	err = provider.CollectImagesFromTemplates(templates, nil, imageSet)
+	err = provider.CollectImagesFromTemplates(context.Background(), templates, nil, imageSet)
 	require.NoError(t, err)
 
 	// Verify all images were collected
@@ -305,7 +306,7 @@ spec:
 
 	imageSet := make(map[string]bool)
 
-	err = provider.CollectImagesFromTemplates(templates, nil, imageSet)
+	err = provider.CollectImagesFromTemplates(context.Background(), templates, nil, imageSet)
 	require.NoError(t, err)
 	assert.Empty(t, imageSet)
 }
@@ -349,7 +350,7 @@ spec:
 
 	imageSet := make(map[string]bool)
 
-	err = provider.CollectImagesFromTemplates(templates, nil, imageSet)
+	err = provider.CollectImagesFromTemplates(context.Background(), templates, nil, imageSet)
 	require.NoError(t, err)
 
 	// Should only have one entry despite two templates using the same image
@@ -389,7 +390,7 @@ spec:
 
 	imageSet := make(map[string]bool)
 
-	err = provider.CollectImagesFromTemplates(templates, values, imageSet)
+	err = provider.CollectImagesFromTemplates(context.Background(), templates, values, imageSet)
 	require.NoError(t, err)
 
 	assert.Len(t, imageSet, 2)
@@ -415,7 +416,7 @@ invalid yaml content [[[
 
 	imageSet := make(map[string]bool)
 
-	err = provider.CollectImagesFromTemplates(templates, nil, imageSet)
+	err = provider.CollectImagesFromTemplates(context.Background(), templates, nil, imageSet)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process")
 }
@@ -481,7 +482,7 @@ spec:
 		"image": "registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0",
 	}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 	require.NoError(t, err)
 
 	// Should have 4 + 1 = 5 total Spyre cards
@@ -514,7 +515,7 @@ spec:
 
 	values := map[string]any{}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 	require.NoError(t, err)
 
 	// Should have 0 Spyre cards
@@ -552,7 +553,7 @@ spec:
 
 	values := map[string]any{}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 	require.NoError(t, err)
 
 	// Should have 2 + 3 + 1 = 6 total Spyre cards
@@ -584,7 +585,7 @@ spec:
 
 	values := map[string]any{}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 
 	// Should return an error
 	assert.Error(t, err)
@@ -650,7 +651,7 @@ spec:
 
 	values := map[string]any{}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 	require.NoError(t, err)
 
 	// Should have 4 + 0 + 2 = 6 total Spyre cards
@@ -683,7 +684,7 @@ spec:
 
 	values := map[string]any{}
 
-	totalCards, err := provider.CollectSpyreCardsFromTemplates(templates, values)
+	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
 
 	// Should return an error
 	assert.Error(t, err)

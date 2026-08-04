@@ -1,0 +1,14 @@
+containers:
+  - name: "ui"
+    format: ".Status"
+    alias: UI_STATUS
+
+  - name: "backend"
+    format: ".Status"
+    alias: BACKEND_STATUS
+
+hosts:
+  - fetch: CATALOG_UI_ROUTE
+    type: route
+  - fetch: CATALOG_API_ROUTE
+    type: route

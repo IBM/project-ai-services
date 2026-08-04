@@ -21,6 +21,26 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
+      initContainers:
+        - name: digitize-db-init
+          image: "{{ .Values.digitize.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "db/scripts/init_db.py"
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.digitize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
       containers:
         - name: digitize-api
           image: "{{ .Values.digitize.image }}"

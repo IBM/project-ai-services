@@ -27,15 +27,17 @@ class LanguageCodes:
         ITALIAN: "it",
         FRENCH: "fr"
     }
-    
+
+    _SUPPORTED: frozenset = frozenset({"EN", "DE", "IT", "FR"})
+
     @classmethod
-    def supported_languages(cls) -> list[str]:
-        """Get list of supported language codes.
+    def supported_languages(cls) -> frozenset:
+        """Get set of supported language codes.
         
         Returns:
-            List of supported language codes (e.g., ['EN', 'DE', 'IT', 'FR'])
+            frozenset of supported language codes (e.g., {'EN', 'DE', 'IT', 'FR'})
         """
-        return [cls.ENGLISH, cls.GERMAN, cls.ITALIAN, cls.FRENCH]
+        return cls._SUPPORTED
     
 def to_sentence_splitter_lang(lingua_code: str) -> str:
     """

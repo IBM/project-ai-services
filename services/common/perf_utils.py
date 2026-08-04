@@ -1,12 +1,11 @@
 import threading
 import time
 from datetime import datetime
-from collections import OrderedDict
 from common.misc_utils import get_request_id
 
 class PerfMetricsRegistry:
     def __init__(self, max_size=1000):
-        self._metrics = OrderedDict()
+        self._metrics = {}
         self._max_size = max_size
         self._lock = threading.Lock()
 
@@ -25,7 +24,7 @@ class PerfMetricsRegistry:
             
             # Remove oldest entry if we exceed max_size
             if len(self._metrics) > self._max_size:
-                self._metrics.popitem(last=False)  # Remove oldest (FIFO)
+                del self._metrics[next(iter(self._metrics))]  # Remove oldest (FIFO)
 
     def get_metrics(self):
         """Return all metrics as a list"""

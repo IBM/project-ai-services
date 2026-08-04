@@ -1,5 +1,6 @@
 @use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/type";
+@use "@carbon/react/scss/breakpoint";
 
 // Ensure PageHeader stays below SidePanel overlay (overlay is z-index: 6000)
 :global(.c4p--page-header) {
@@ -11,11 +12,42 @@
   margin-top: spacing.$spacing-07;
 }
 
+.layoutContainer {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+
+  // Desktop: side-by-side layout
+  @include breakpoint.breakpoint-up(lg) {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: spacing.$spacing-05;
-  padding-bottom: spacing.$spacing-05;
+  padding: spacing.$spacing-04;
+
+  // Mobile/Tablet: full width, normal flow
+  width: 100%;
+
+  // Desktop: fixed width, sticky with scrollbar
+  @include breakpoint.breakpoint-up(lg) {
+    width: 16rem; // 256px
+    flex-shrink: 0;
+    position: sticky;
+    top: spacing.$spacing-05;
+    align-self: flex-start;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto; // Sidebar scrollbar only
+    overflow-x: hidden;
+  }
+
+  :global(.cds--accordion__title) {
+    @include type.type-style("heading-01");
+  }
 }
 
 .filterHeader {
@@ -29,17 +61,35 @@
   @include type.type-style("heading-01");
 }
 
-.sidebar {
-  :global(.cds--accordion__title) {
-    @include type.type-style("heading-01");
+.contentArea {
+  // Mobile/Tablet: full width, normal flow
+  width: 100%;
+
+  // Desktop: flexible width, natural flow (no constraints)
+  @include breakpoint.breakpoint-up(lg) {
+    flex: 1;
+    min-width: 0; // Prevents flex item from overflowing
+    padding-left: spacing.$spacing-03;
   }
 }
 
 .cardsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
   column-gap: spacing.$spacing-05;
   row-gap: spacing.$spacing-05;
+
+  // Mobile: 1 card per row
+  grid-template-columns: 1fr;
+
+  // Tablet: 2 cards per row
+  @include breakpoint.breakpoint-up(md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  // Desktop: 3 cards per row
+  @include breakpoint.breakpoint-up(lg) {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .emptyState {

@@ -1,0 +1,105 @@
+"""
+Digitization pipeline entry-point.
+
+Drives the single-document digitization job lifecycle:
+convert → mark status → emit output file.
+"""
+from common.misc_utils import *
+from pathlib import Path
+from common.misc_utils import get_utc_timestamp, generate_file_checksum
+from digitize.models import JobStatus, DocStatus, OutputFormat
+from digitize.parsing.pdf import get_pdf_page_count, get_document_page_count
+from digitize.parsing.converter import convert_document_format
+from digitize.utils.db import get_status_manager
+from concurrent.futures import ProcessPoolExecutor
+
+logger = get_logger("digitize")
+
+def digitize(
+    directory_path: Path,
+    job_id: str,
+    doc_id_dict: dict,
+    output_format: OutputFormat,
+    file_checksum_dict: dict | None = None,  # filename -> "sha256:..." pre-computed at upload
+):
+    """
+    Digitize a single document file (PDF or DOCX) in the staging directory.
+
+    Args:
+        directory_path: Path to staging directory containing exactly one document
+                        (pre-validated and staged by app.py)
+        job_id: Job identifier for StatusManager
+        doc_id_dict: Mapping from filename to document ID
+        output_format: "json", "md", or "txt"
+        file_checksum_dict: Pre-computed SHA-256 checksums keyed by filename.
+                            When provided the hash is reused rather than
+                            re-reading the file from disk to recompute it.
+
+    Raises:
+        Exception: If conversion fails
+
+    Returns:
+        None
+    """
+    # All validations are done at API level in app.py
+    # Files are pre-staged and doc_id_dict is pre-created
+
+    # Initialize database-first status manager
+    status_mgr = get_status_manager(job_id) if job_id else None
+
+    # Prepare output/cache path
+    out_path = setup_digitized_doc_dir()
+
+    # Get the single document file from staging directory (PDF or DOCX)
+    documents = list(directory_path.glob("*.pdf")) + list(directory_path.glob("*.docx"))
+    file_path = documents[0]
+    filename = file_path.name
+    doc_id = doc_id_dict[filename]
+
+    try:
+        # Mark document/job as IN_PROGRESS
+        if status_mgr:
+            logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
+            status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
+
+        # Convert document
+        # Run conversion inside a single process worker
+        with ProcessPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                convert_document_format,
+                str(file_path),
+                out_path,
+                doc_id,
+                output_format
+            )
+
+            output_file, conversion_time = future.result()
+
+        # Collect metadata (page count may be 0 for DOCX)
+        page_count = get_document_page_count(str(file_path))
+
+        # Mark COMPLETED
+        if status_mgr:
+            logger.debug(f"Conversion Done: updating doc & job metadata for document: {doc_id}")
+            file_hash = (
+                file_checksum_dict.get(filename)
+                if file_checksum_dict
+                else generate_file_checksum(file_path.read_bytes())
+            )
+            status_mgr.update_doc_metadata(doc_id, {
+                "status": DocStatus.COMPLETED,
+                "pages": page_count,
+                "completed_at": get_utc_timestamp(),
+                "timing_in_secs": {"digitizing": round(conversion_time, 2)},
+                "file_hash": file_hash,
+            })
+            status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
+
+    except Exception as e:
+        # Mark FAILED
+        logger.error(f"Conversion failed for {filename}: {str(e)}", exc_info=True)
+        if status_mgr:
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to convert document: {str(e)}")
+            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Digitization failed: {str(e)}")
+        raise

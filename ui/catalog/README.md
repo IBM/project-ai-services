@@ -158,3 +158,13 @@ Environment variables must be prefixed with:
 ```
 VITE_
 ```
+
+## Known Dependency Notes
+
+### `react-table` override in `package.json`
+
+`@carbon/ibm-products` depends internally on `react-table@7.8.0`, which is the last release of the v7 line and does not declare React 19 peer support. The `overrides` block forces React 19 for `react-table` to silence the `ERESOLVE` warning during `npm install`.
+
+`react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
+
+---

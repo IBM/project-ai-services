@@ -1,0 +1,27 @@
+# Trivy Vulnerability Whitelist
+# CVEs listed here will be ignored during security scans
+
+# Docker/Moby CVEs - All fixed in v29.3.1, Current: v28.5.2
+# Cannot upgrade: Module path changed from github.com/docker/docker to github.com/moby/moby/v2
+# Podman v5 still requires old path. Will resolve with Podman v6 migration.
+# Risk: LOW - We use Podman exclusively, not Docker daemon. Docker only imported for type definitions.
+
+# CVE-2026-34040 - Authorization Plugin Bypass (CRITICAL)
+# Vulnerable: Docker daemon AuthZ plugin system | Not used in our codebase
+CVE-2026-34040
+
+# CVE-2026-42306 - Docker CP Race Condition (HIGH)
+# Vulnerable: docker cp mount setup | We don't use docker cp command
+CVE-2026-42306
+
+# CVE-2026-41567 - Malicious Image Archive Upload (CRITICAL)
+# Vulnerable: Docker daemon archive upload | We don't use Docker daemon operations
+CVE-2026-41567
+
+# CVE-2026-33997 - Plugin Privilege Validation Bypass (HIGH)
+# Vulnerable: docker plugin install | We don't use Docker plugins
+CVE-2026-33997
+
+# CVE-2026-41568 - Docker CP Mountpoint Race (HIGH)
+# Vulnerable: docker cp mountpoint creation | We don't use docker cp command
+CVE-2026-41568

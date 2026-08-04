@@ -9,7 +9,8 @@ COPY requirements.txt .
 
 RUN dnf update ${DNF_FLAGS} -y \
   && dnf install ${DNF_FLAGS} -y gcc \
-  python3.12-pip python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
+  python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
+  && curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 - \
   && python3.12 -m venv ${VIRTUAL_ENV} \
   && ARCH=$(uname -m) \
   && if [ "$ARCH" = "ppc64le" ]; then \
@@ -50,7 +51,7 @@ COPY --from=tools_builder /opt/venv /opt/venv
 COPY --from=servicereport_builder /rpms/ /tmp/rpms/
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-  microdnf install ${DNF_FLAGS} -y python3.12 jq && \
+  microdnf install ${DNF_FLAGS} -y python3.12 jq tar && \
   ARCH=$(uname -m) && \
   if [ "$ARCH" = "ppc64le" ]; then \
   echo "Installing ServiceReport for ppc64le..." && \

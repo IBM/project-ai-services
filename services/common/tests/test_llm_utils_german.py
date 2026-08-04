@@ -8,33 +8,40 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 
+def _make_lang_config(system_prompt, query_system_prompt):
+    cfg = Mock()
+    cfg.system_prompt = system_prompt
+    cfg.query_system_prompt = query_system_prompt
+    return cfg
+
+
+DE_SYSTEM_PROMPT = "Sie sind ein hilfreicher Assistent."
+DE_QUERY_SYSTEM_PROMPT = (
+    "Sitzungssprache: Deutsch\n\n"
+    "Abgerufener Kontext:\n{context}\n\n"
+    "Suchanfrage:\n{rephrased_query}"
+)
+EN_SYSTEM_PROMPT = "You are a helpful assistant."
+EN_QUERY_SYSTEM_PROMPT = "Session language: English\n\n{context}\n\n{rephrased_query}"
+
+
 @pytest.mark.unit
 class TestQueryVLLMPayloadGermanSupport:
     """Tests for German language support in query_vllm_payload function."""
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_uses_german_system_prompt_for_de_language(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test uses German system prompt when language is DE."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.german.query_system_prompt = (
-            "Sitzungssprache: Deutsch\n\n"
-            "Abgerufener Kontext:\n{context}\n\n"
-            "Suchanfrage:\n{rephrased_query}"
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            DE_SYSTEM_PROMPT, DE_QUERY_SYSTEM_PROMPT
         )
-        mock_settings.chatbot.english.system_prompt = "You are a helpful assistant."
-        mock_settings.chatbot.english.query_system_prompt = "Session language: English\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
         mock_tokenize.return_value = [0] * 10
         mock_truncate.return_value = []
         mock_resolve_len.return_value = 4096
@@ -58,30 +65,24 @@ class TestQueryVLLMPayloadGermanSupport:
         messages = payload["messages"]
         assert len(messages) >= 2
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "Sie sind ein hilfreicher Assistent."
+        assert messages[0]["content"] == DE_SYSTEM_PROMPT
         
         # Verify German query system prompt is used
         assert any("Sitzungssprache: Deutsch" in msg["content"] for msg in messages if msg["role"] == "system")
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_uses_english_system_prompt_for_en_language(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test uses English system prompt when language is EN."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.english.system_prompt = "You are a helpful assistant."
-        mock_settings.chatbot.english.query_system_prompt = "Session language: English\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.german.query_system_prompt = "Sitzungssprache: Deutsch\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            EN_SYSTEM_PROMPT, EN_QUERY_SYSTEM_PROMPT
+        )
         mock_tokenize.return_value = [0] * 10
         mock_truncate.return_value = []
         mock_resolve_len.return_value = 4096
@@ -104,29 +105,25 @@ class TestQueryVLLMPayloadGermanSupport:
         # Verify English system prompt is used
         messages = payload["messages"]
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a helpful assistant."
+        assert messages[0]["content"] == EN_SYSTEM_PROMPT
         
         # Verify English query system prompt is used
         assert any("Session language: English" in msg["content"] for msg in messages if msg["role"] == "system")
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_fallback_to_english_for_unsupported_language(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test falls back to English for unsupported language codes."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.english.system_prompt = "You are a helpful assistant."
-        mock_settings.chatbot.english.query_system_prompt = "Session language: English\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
+        # get_rag_language_config already handles the fallback; simulate it returning English
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            EN_SYSTEM_PROMPT, EN_QUERY_SYSTEM_PROMPT
+        )
         mock_tokenize.return_value = [0] * 10
         mock_truncate.return_value = []
         mock_resolve_len.return_value = 4096
@@ -149,29 +146,24 @@ class TestQueryVLLMPayloadGermanSupport:
         # Should fallback to English
         messages = payload["messages"]
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a helpful assistant."
+        assert messages[0]["content"] == EN_SYSTEM_PROMPT
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_german_query_system_prompt_formatting(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test German query system prompt is formatted correctly with context and query."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.german.query_system_prompt = (
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            DE_SYSTEM_PROMPT,
             "Sitzungssprache: Deutsch\n\n"
             "Abgerufener Kontext:\n{context}\n\n"
             "Suchanfrage:\n{rephrased_query}"
         )
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
         mock_tokenize.return_value = [0] * 10
         mock_truncate.return_value = []
         mock_resolve_len.return_value = 4096
@@ -209,22 +201,19 @@ class TestQueryVLLMPayloadGermanSupport:
         assert "Suchanfrage:" in query_system_msg["content"]
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_german_with_conversation_history(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test German prompt includes conversation history."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.german.query_system_prompt = "Sitzungssprache: Deutsch\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            DE_SYSTEM_PROMPT,
+            "Sitzungssprache: Deutsch\n\n{context}\n\n{rephrased_query}"
+        )
         mock_tokenize.return_value = [0] * 10
         
         # Mock truncated history
@@ -265,22 +254,19 @@ class TestLanguageSwitchingInQueryVLLMPayload:
     """Tests for language switching behavior in query_vllm_payload."""
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('chatbot.settings.settings')
+    @patch('chatbot.settings.get_rag_language_config')
     @patch('common.llm_utils.tokenize_with_llm')
     @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_consistent_language_across_calls(
-        self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
+        self, mock_truncate, mock_tokenize, mock_get_lang_cfg, mock_resolve_len
     ):
         """Test language remains consistent across multiple calls with same lang parameter."""
         from common.llm_utils import query_vllm_payload
         
-        # Setup mocks
-        mock_settings.chatbot.german.system_prompt = "Sie sind ein hilfreicher Assistent."
-        mock_settings.chatbot.german.query_system_prompt = "Sitzungssprache: Deutsch\n\n{context}\n\n{rephrased_query}"
-        mock_settings.chatbot.initial_system_token_overhead = 50
-        mock_settings.chatbot.rag_system_token_overhead = 50
-        mock_settings.chatbot.history_token_budget = 500
-        
+        mock_get_lang_cfg.return_value = _make_lang_config(
+            DE_SYSTEM_PROMPT,
+            "Sitzungssprache: Deutsch\n\n{context}\n\n{rephrased_query}"
+        )
         mock_tokenize.return_value = [0] * 10
         mock_truncate.return_value = []
         mock_resolve_len.return_value = 4096

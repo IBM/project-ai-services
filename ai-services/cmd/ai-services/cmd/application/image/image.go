@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -9,8 +10,8 @@ import (
 )
 
 var (
-	templateName       string
-	experimentalImages bool
+	templateName string
+	legacyImage  bool
 )
 
 var ImageCmd = &cobra.Command{
@@ -30,7 +31,7 @@ func getCatalogImages(templateID string) ([]string, error) {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	images, err := provider.GetCatalogImages(templateID)
+	images, err := provider.GetCatalogImages(context.Background(), templateID)
 	if err != nil {
 		return nil, err
 	}
@@ -43,5 +44,5 @@ func init() {
 	ImageCmd.AddCommand(pullCmd)
 	ImageCmd.PersistentFlags().StringVarP(&templateName, "template", "t", "", "Application template name (Required)")
 	_ = ImageCmd.MarkPersistentFlagRequired("template")
-	ImageCmd.PersistentFlags().BoolVar(&experimentalImages, "experimental", false, "Use experimental catalog-based image listing")
+	ImageCmd.PersistentFlags().BoolVar(&legacyImage, "legacy", false, "Use legacy application image implementation")
 }

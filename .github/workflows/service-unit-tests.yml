@@ -2,11 +2,16 @@ name: Services Unit Tests
 
 on:
   pull_request:
-    branches:
-      - main
     paths:
       - 'services/**'
       - '.github/workflows/service-unit-tests.yml'
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -31,7 +36,7 @@ jobs:
         run: |
           # Set PYTHONPATH to include services directory for common module imports
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-          pytest common/tests/ digitize/tests/ chatbot/tests/ summarize/tests/ similarity/tests/ \
+          pytest common/tests/ digitize/tests/ chatbot/tests/ summarize/tests/ similarity/tests/ extract/tests/ \
             --cov=. \
             --cov-report=html:htmlcov \
             --cov-report=term-missing \

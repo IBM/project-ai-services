@@ -12,7 +12,8 @@ import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout } from "@/services/auth";
+import { getUserInfo } from "@/services/auth";
+import { useAuthStore } from "@/store/auth.store";
 
 type AppHeaderProps =
   | {
@@ -64,17 +65,20 @@ const AppHeader = (props: AppHeaderProps) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const userIconRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
+  const userInfo = useAuthStore((state) => state.userInfo);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch (err) {
-      console.error("Logout API failed:", err);
-    } finally {
-      dispatch({ type: "CLOSE_LOGOUT_MODAL" });
-      navigate("/logout", { replace: true });
-    }
+  const handleLogout = () => {
+    dispatch({ type: "CLOSE_LOGOUT_MODAL" });
+    navigate("/logout", { replace: true });
   };
+
+  useEffect(() => {
+    if (!minimal && !userInfo) {
+      getUserInfo().catch((err) => {
+        console.error("Failed to fetch user info:", err);
+      });
+    }
+  }, [minimal, userInfo]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -100,7 +104,7 @@ const AppHeader = (props: AppHeaderProps) => {
   return (
     <Theme theme="g100">
       <div className={styles.appHeader}>
-        <Header aria-label="IBM AI Foundation for Power">
+        <Header aria-label="AI Services">
           {!minimal && (
             <HeaderMenuButton
               aria-label="Open menu"
@@ -114,11 +118,11 @@ const AppHeader = (props: AppHeaderProps) => {
           )}
 
           <HeaderName
-            prefix="IBM"
+            prefix=""
             onClick={() => navigate("/")}
             className={styles.headerName}
           >
-            AI Foundation for Power
+            AI Services
           </HeaderName>
 
           {!minimal && (
@@ -138,7 +142,7 @@ const AppHeader = (props: AppHeaderProps) => {
                 <div>
                   <div className={styles.userprofile}>
                     <div>
-                      <strong>Admin</strong>
+                      <strong>{userInfo?.name || "User"}</strong>
                     </div>
                     <div className={styles.usercircle}>
                       <User size={16} />
@@ -163,8 +167,7 @@ const AppHeader = (props: AppHeaderProps) => {
                   size="sm"
                   primaryButtonText="Log out"
                   secondaryButtonText="Cancel"
-                  modalHeading="Are you sure you want to log out of IBM AI
-                    Foundation for Power?"
+                  modalHeading="Are you sure you want to log out of AI Services?"
                   onRequestClose={() => {
                     dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                   }}

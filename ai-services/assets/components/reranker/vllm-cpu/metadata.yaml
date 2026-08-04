@@ -1,9 +1,9 @@
 # Component identification
 type: component
 id: vllm-cpu
-name: "vLLM CPU Reranker"
+name: "AI Inference on CPU"
 description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to
 component_type: reranker
-component_name: "Reranker Model"
+component_name: "Reranker model"

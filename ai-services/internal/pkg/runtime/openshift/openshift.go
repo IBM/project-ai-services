@@ -3,6 +3,7 @@ package openshift
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -19,8 +21,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -50,6 +54,9 @@ func init() {
 const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
 )
+
+// spyreResourceName is the Kubernetes extended resource name advertised by the Spyre operator.
+const spyreResourceName = "ibm.com/spyre_pf"
 
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
@@ -337,8 +344,11 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 }
 
 // ListRoutes lists all routes in the namespace.
-func (kc *OpenshiftClient) ListRoutes() ([]types.Route, error) {
-	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{})
+// ListRoutes lists routes in the namespace. Pass an empty string to list all routes.
+func (kc *OpenshiftClient) ListRoutes(labelSelector string) ([]types.Route, error) {
+	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routes: %w", err)
 	}
@@ -362,7 +372,7 @@ func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
 			continue
 		}
 
-		logger.Infof("Deleted PVC '%s'\n", pvc.Name, logger.VerbosityLevelDebug)
+		logger.Debugf("Deleted PVC '%s'\n", pvc.Name)
 	}
 
 	return nil
@@ -436,26 +446,266 @@ func (kc *OpenshiftClient) DeleteSecret(name string) error {
 	return nil
 }
 
+func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
+	_, err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("failed to check secret existence: %w", err)
+	}
+
+	return true, nil
+}
+
+func (kc *OpenshiftClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
+	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
+
+	existing, err := secretClient.Get(kc.Ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get existing secret: %w", err)
+	}
+
+	for k, v := range data {
+		existing.Data[k] = v
+	}
+
+	_, err = secretClient.Update(kc.Ctx, existing, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update secret: %w", err)
+	}
+
+	if err := kc.rolloutRestartDeployment(deploymentName); err != nil {
+		return fmt.Errorf("failed to restart deployment after secret update: %w", err)
+	}
+
+	const (
+		pollInterval = 5 * time.Second
+		pollTimeout  = 5 * time.Minute
+	)
+
+	deadline := time.Now().Add(pollTimeout)
+	for time.Now().Before(deadline) {
+		ready, err := kc.isDeploymentReady(deploymentName)
+		if err != nil {
+			return fmt.Errorf("failed to check deployment readiness: %w", err)
+		}
+		if ready {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timed out waiting for deployment %q to become ready after secret update", deploymentName)
+}
+
 func (kc *OpenshiftClient) DeleteVolume(name string) error {
 	logger.Warningln("Not implemented")
 
 	return nil
 }
 
-// GetSystemInfo returns empty system information for OpenShift runtime.
-// Resource information is managed by Kubernetes/OpenShift and not directly accessible.
+func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
+	logger.Warningln("Not implemented")
+
+	return false, nil
+}
+
+// GetSystemInfo returns cluster-level CPU, memory, and Spyre card availability.
+//
+// CPU and memory totals/available are fetched via Thanos PromQL:
+//   - Total CPUs    : sum(kube_node_status_capacity{resource="cpu"})
+//   - Available CPUs: sum(kube_node_status_allocatable{resource="cpu"})
+//   - Total memory  : sum(kube_node_status_capacity{resource="memory"})
+//   - Available mem : sum(kube_node_status_allocatable{resource="memory"})
+//
+// Spyre card counts are read directly from the Kubernetes API — see getSpyreCardInfo.
 func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
-	return &models.SystemInfo{
+	sysInfo := &models.SystemInfo{
 		Accelerators: make(map[string]*models.AcceleratorInfo),
+	}
+
+	// --- CPU ---
+	totalCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="cpu"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query total CPU capacity: %w", err)
+	}
+
+	availCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="cpu"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query allocatable CPU: %w", err)
+	}
+
+	sysInfo.CPU = &models.CPUInfo{
+		Total:     int(totalCPU),
+		Available: availCPU,
+	}
+
+	// --- Memory ---
+	totalMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="memory"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query total memory capacity: %w", err)
+	}
+
+	availMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="memory"})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query allocatable memory: %w", err)
+	}
+
+	sysInfo.Memory = &models.MemoryInfo{
+		TotalBytes:     int64(totalMem),
+		AvailableBytes: int64(availMem),
+	}
+
+	// --- Spyre cards ---
+	// Read directly from node capacity/allocatable so the count is accurate
+	// even when Thanos has not yet scraped the custom resource metric.
+	spyreInfo, err := kc.getSpyreCardInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve Spyre card info: %w", err)
+	}
+	if spyreInfo != nil {
+		sysInfo.Accelerators[spyreResourceName] = spyreInfo
+	}
+
+	return sysInfo, nil
+}
+
+// getSpyreCardInfo returns the total and available ibm.com/spyre_pf count for
+// the cluster.
+//
+// Total is read from node.Status.Capacity — the raw hardware count advertised
+// by the Spyre device plugin.
+//
+// Available is computed as:
+//
+//	Total − (Thanos: sum of ibm.com/spyre_pf requests across all non-infra containers)
+//
+// The in-use count is fetched via Thanos using:
+//
+//	sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})
+func (kc *OpenshiftClient) getSpyreCardInfo() (*models.AcceleratorInfo, error) {
+	totalSpyre, err := kc.sumSpyreCapacity()
+	if err != nil {
+		return nil, err
+	}
+
+	if totalSpyre == 0 {
+		return nil, nil //nolint:nilnil // no Spyre cards present — caller omits the key
+	}
+
+	usedSpyre, err := kc.sumSpyreInUse()
+	if err != nil {
+		return nil, err
+	}
+
+	available := totalSpyre - usedSpyre
+	if available < 0 {
+		available = 0
+	}
+
+	return &models.AcceleratorInfo{
+		Total:     int(totalSpyre),
+		Available: int(available),
 	}, nil
+}
+
+// sumSpyreCapacity sums ibm.com/spyre_pf Capacity across all cluster nodes.
+func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
+	nodeList, err := kc.KubeClient.CoreV1().Nodes().List(kc.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var total int64
+
+	for i := range nodeList.Items {
+		if qty, ok := nodeList.Items[i].Status.Capacity[corev1.ResourceName(spyreResourceName)]; ok {
+			total += qty.Value()
+		}
+	}
+
+	return total, nil
+}
+
+// sumSpyreInUse queries Thanos for the total number of ibm.com/spyre_pf units
+// currently requested by all non-infra containers cluster-wide.
+//
+// PromQL: sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""}).
+func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
+	used, err := queryThanos(kc.Ctx, `sum(kube_pod_container_resource_requests{resource="ibm_com_spyre_pf",container!=""})`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query Spyre cards in use: %w", err)
+	}
+
+	return int64(used), nil
 }
 
 // GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
 // For OpenShift, this is not yet implemented and returns empty values.
 func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
 	return &types.PodResources{
-		CPUCores:   0,
+		CPU:        0,
 		MemUsage:   0,
 		SpyreCards: []string{},
 	}, nil
+}
+
+// isDeploymentReady reports whether a rollout of the named deployment has fully completed.
+func (kc *OpenshiftClient) isDeploymentReady(name string) (bool, error) {
+	deployment, err := kc.KubeClient.AppsV1().Deployments(kc.Namespace).Get(kc.Ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to get deployment %q: %w", name, err)
+	}
+
+	desired := int32(0)
+	if deployment.Spec.Replicas != nil {
+		desired = *deployment.Spec.Replicas
+	}
+
+	s := deployment.Status
+
+	if s.ObservedGeneration < deployment.Generation {
+		return false, nil
+	}
+
+	return s.UpdatedReplicas == desired &&
+		s.Replicas == desired &&
+		s.AvailableReplicas == desired, nil
+}
+
+// rolloutRestartDeployment triggers a rollout restart for the named deployment by
+// patching the pod template annotation "kubectl.kubernetes.io/restartedAt", which is
+// the same mechanism used by `kubectl rollout restart deployment <name>`.
+func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"annotations": map[string]string{
+						"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal restart patch: %w", err)
+	}
+
+	_, err = kc.KubeClient.AppsV1().Deployments(kc.Namespace).Patch(
+		kc.Ctx,
+		name,
+		k8stypes.MergePatchType,
+		data,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to restart deployment %q: %w", name, err)
+	}
+
+	return nil
 }

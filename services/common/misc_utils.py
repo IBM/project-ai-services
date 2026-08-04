@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+import sys
 import shutil
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def get_logger(name):
         # Add the filter to inject request_id
         logger.addFilter(RequestIDFilter())
 
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(LOG_LEVEL)
 
         # Use custom formatter that conditionally includes request_id
@@ -186,13 +187,37 @@ _model_max_len_cache: dict[tuple[str, str], int] = {}
 
 
 def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len: int, api_key: str | None = None) -> int:
-    """Resolve model max length from /v1/models using exact model-name matching."""
-    from common.llm_utils import query_vllm_models
-    
+    """Resolve model max length, trying three sources in priority order:
+
+    1. ``/model/info`` (LiteLLM proxy) — reads ``model_info.max_tokens`` for the
+       entry whose ``model_name`` matches *model_name*.
+    2. ``/v1/models`` (vLLM / OpenAI-compatible) — reads ``max_model_len`` for the
+       entry whose ``id`` matches *model_name*.
+    3. *fallback_max_model_len* — the caller-supplied default.
+
+    Results are cached per ``(endpoint, model_name)`` pair so that subsequent
+    calls within the same process incur no network round-trips.
+    """
+    from common.llm_utils import query_litellm_model_info, query_vllm_models
+
     cache_key = (endpoint, model_name)
     if cache_key in _model_max_len_cache:
         return _model_max_len_cache[cache_key]
 
+    # --- 1. Try /model/info (LiteLLM) ---
+    try:
+        resp_json = query_litellm_model_info(endpoint, api_key)
+        for entry in resp_json.get("data", []):
+            if entry.get("model_name") == model_name:
+                max_tokens = entry.get("model_info", {}).get("max_tokens")
+                if isinstance(max_tokens, int) and max_tokens > 0:
+                    _model_max_len_cache[cache_key] = max_tokens
+                    return max_tokens
+                break
+    except Exception:
+        pass
+
+    # --- 2. Try /v1/models (vLLM / OpenAI-compatible) ---
     try:
         resp_json = query_vllm_models(endpoint, api_key)
         for model_info in resp_json.get("data", []):
@@ -205,15 +230,17 @@ def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len
     except Exception:
         pass
 
+    # --- 3. Fallback ---
     _model_max_len_cache[cache_key] = fallback_max_model_len
     return fallback_max_model_len
 
 
 
-def get_model_endpoints():
+def get_embedding_endpoint():
+    """Get embedding model endpoint configuration."""
     from common.settings import settings
 
-    emb_model_dict = {
+    return {
         'emb_endpoint': settings.embedding.endpoint,
         'emb_model':    settings.embedding.model,
         'max_model_len': resolve_model_max_len(
@@ -223,7 +250,12 @@ def get_model_endpoints():
         ),
     }
 
-    llm_model_dict = {
+
+def get_llm_endpoint():
+    """Get LLM model endpoint configuration."""
+    from common.settings import settings
+
+    return {
         'llm_endpoint': settings.llm.endpoint,
         'llm_model':    settings.llm.model,
         'max_model_len': resolve_model_max_len(
@@ -234,12 +266,17 @@ def get_model_endpoints():
         ),
     }
 
-    reranker_model_dict = {
+
+def get_reranker_endpoint():
+    """Get reranker model endpoint configuration."""
+    from common.settings import settings
+
+    return {
         'reranker_endpoint': settings.reranker.endpoint,
         'reranker_model':    settings.reranker.model,
     }
 
-    return emb_model_dict, llm_model_dict, reranker_model_dict
+
 
 def setup_digitized_doc_dir():
     from digitize.settings import settings
@@ -247,12 +284,28 @@ def setup_digitized_doc_dir():
     os.makedirs(settings.digitize.digitized_docs_dir, exist_ok=True)
     return settings.digitize.digitized_docs_dir
 
-def generate_file_checksum(file):
+def generate_file_checksum(file) -> str:
+    """Compute a prefixed SHA-256 hex digest of a file.
+
+    Accepts either a file path (str or Path) or raw bytes.  When passed bytes
+    the entire content is hashed in one shot; when passed a path the file is
+    read in chunks so arbitrarily large files can be processed without loading
+    them entirely into memory.
+
+    The ``sha256:`` prefix makes the algorithm explicit in stored values so
+    the hash algorithm can be upgraded in future without ambiguity.
+
+    Returns:
+        String in the form ``'sha256:<64-char-hex>'``.
+    """
     sha256 = hashlib.sha256()
-    with open(file, 'rb') as f:
-        for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+    if isinstance(file, (bytes, bytearray)):
+        sha256.update(file)
+    else:
+        with open(file, 'rb') as f:
+            for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
+                sha256.update(chunk)
+    return f"sha256:{sha256.hexdigest()}"
 
 def verify_checksum(file, checksum_file):
     file_sha256 = generate_file_checksum(file)

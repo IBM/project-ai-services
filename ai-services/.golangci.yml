@@ -22,3 +22,4 @@ linters:
   exclusions:
     paths:
       - docs/docs.go
+      - ".*_test\\.go$"

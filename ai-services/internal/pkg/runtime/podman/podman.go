@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -30,7 +31,8 @@ import (
 )
 
 const (
-	logChannelBufferSize = 50
+	logChannelBufferSize      = 50
+	execCommandFixedArgsCount = 2 // "exec" and containerID
 )
 
 type PodmanClient struct {
@@ -44,7 +46,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	euid := os.Geteuid()
 	if euid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
 		uid := os.Getuid()
-		logger.Infof("Running as non-root user %d, setting XDG_RUNTIME_DIR", uid, logger.VerbosityLevelDebug)
+		logger.Debugf("Running as non-root user %d, setting XDG_RUNTIME_DIR", uid)
 		if err := os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid)); err != nil {
 			return nil, fmt.Errorf("failed to set XDG_RUNTIME_DIR: %w", err)
 		}
@@ -370,7 +372,7 @@ func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, e
 	return exitCode, nil
 }
 
-func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
+func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
@@ -400,6 +402,10 @@ func (pc *PodmanClient) DeleteVolume(name string) error {
 	return nil
 }
 
+func (pc *PodmanClient) VolumeExists(nameOrID string) (bool, error) {
+	return volumes.Exists(pc.Context, nameOrID, nil)
+}
+
 func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
 	var listOpts secrets.ListOptions
 	if len(filters) >= 1 {
@@ -419,6 +425,16 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 	return secretIDorNames, nil
 }
 
+func (pc *PodmanClient) SecretExists(nameOrID string) (bool, error) {
+	return secrets.Exists(pc.Context, nameOrID)
+}
+
+func (pc *PodmanClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
+}
+
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman
@@ -436,19 +452,19 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 
 	// Extract CPU and memory information
 	if info.Host != nil {
-		totalCores := int(info.Host.CPUs)
+		totalCPUs := int(info.Host.CPUs)
 		idlePercent := 0.0
 
 		if info.Host.CPUUtilization != nil {
 			idlePercent = info.Host.CPUUtilization.IdlePercent
 		}
 
-		// Calculate available cores: available_cores = (total_cores * idle_percent) / 100
-		availableCores := (float64(totalCores) * idlePercent) / constants.PercentageDivisor
+		// Calculate available CPUs: available = (total * idle_percent) / 100
+		availableCPUs := (float64(totalCPUs) * idlePercent) / constants.PercentageDivisor
 
 		sysInfo.CPU = &models.CPUInfo{
-			TotalCores:     totalCores,
-			AvailableCores: availableCores,
+			Total:     totalCPUs,
+			Available: availableCPUs,
 		}
 
 		sysInfo.Memory = &models.MemoryInfo{
@@ -458,19 +474,19 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// Populate accelerator information (Spyre cards)
-	sysInfo.Accelerators = getAcceleratorInfo()
+	sysInfo.Accelerators = getAcceleratorInfo(pc.Context)
 
 	return sysInfo, nil
 }
 
 // getAcceleratorInfo retrieves accelerator availability information for Podman.
-func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
+func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo {
 	accelerators := make(map[string]*models.AcceleratorInfo)
 
 	// Get total Spyre cards
-	totalCards, err := spyre.ListCards()
+	totalCards, err := spyre.ListCards(ctx)
 	if err != nil {
-		logger.Errorf("Could not list Spyre cards: %v", err)
+		logger.ErrorfCtx(ctx, "Could not list Spyre cards: %v", err)
 		// Return empty map when error occurs
 		return accelerators
 	}
@@ -482,9 +498,9 @@ func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
 	}
 
 	// Get available Spyre cards
-	availableCards, err := spyre.FindFreeCards()
+	availableCards, err := spyre.FindFreeCards(ctx)
 	if err != nil {
-		logger.Errorf("Could not find available Spyre cards: %v", err)
+		logger.ErrorfCtx(ctx, "Could not find available Spyre cards: %v", err)
 		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
 			Total:     totalCount,
 			Available: 0,
@@ -513,7 +529,7 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 
 	if len(podInspect.Containers) == 0 {
 		return &types.PodResources{
-			CPUCores:   0,
+			CPU:        0,
 			MemUsage:   0,
 			SpyreCards: []string{},
 		}, nil
@@ -526,7 +542,7 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 // aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
 func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
 	var totalMemUsage uint64
-	var totalCPUCores float64
+	var totalCPUs float64
 	spyreCards := []string{}
 
 	for _, container := range podInspect.Containers {
@@ -555,9 +571,9 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 			totalMemUsage += stats.MemUsage
 
 			// Accumulate CPU usage
-			// The CPU field is a percentage (e.g., 150.0 = 1.5 cores)
-			// Convert percentage to cores by dividing by 100
-			totalCPUCores += stats.CPU / constants.PercentageDivisor
+			// The CPU field is a percentage (e.g., 150.0 = 1.5 CPUs)
+			// Convert percentage to CPUs by dividing by 100
+			totalCPUs += stats.CPU / constants.PercentageDivisor
 		}
 
 		// Inspect container to get Spyre card annotations
@@ -571,7 +587,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 	}
 
 	return &types.PodResources{
-		CPUCores:   totalCPUCores,
+		CPU:        totalCPUs,
 		MemUsage:   totalMemUsage,
 		SpyreCards: spyreCards,
 	}, nil
@@ -597,4 +613,143 @@ func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards
 			}
 		}
 	}
+}
+
+// ExecInContainer executes a command in a container using podman exec command.
+// Note: Using exec.Command instead of SDK because the SDK's exec API is complex
+// and requires handlers.ExecCreateConfig which is not easily accessible.
+func (pc *PodmanClient) ExecInContainer(containerID string, cmd []string) error {
+	// Build podman exec command
+	args := make([]string, 0, execCommandFixedArgsCount+len(cmd))
+	args = append(args, "exec", containerID)
+	args = append(args, cmd...)
+
+	execCmd := exec.CommandContext(pc.Context, "podman", args...)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("command failed: %w, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// ExecInContainerWithOutput executes a command in a container and returns the output.
+func (pc *PodmanClient) ExecInContainerWithOutput(containerID string, cmd []string) (string, error) {
+	// Build podman exec command
+	args := make([]string, 0, execCommandFixedArgsCount+len(cmd))
+	args = append(args, "exec", containerID)
+	args = append(args, cmd...)
+
+	execCmd := exec.CommandContext(pc.Context, "podman", args...)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("command failed: %w, output: %s", err, string(output))
+	}
+
+	return string(output), nil
+}
+
+// ExecInContainerWithEnv executes a command in a container with environment variables.
+// This is used to pass sensitive data like passwords without exposing them in process lists.
+// Environment variables are set inline in the shell command to avoid exposure.
+func (pc *PodmanClient) ExecInContainerWithEnv(containerID string, env map[string]string, script string) error {
+	// Build environment variable assignments for the shell
+	envVars := make([]string, 0, len(env))
+	for key, value := range env {
+		// Use single quotes to prevent shell expansion, escape any single quotes in the value
+		escapedValue := strings.ReplaceAll(value, "'", "'\\''")
+		envVars = append(envVars, fmt.Sprintf("%s='%s'", key, escapedValue))
+	}
+
+	// Combine env vars with the script
+	fullScript := strings.Join(envVars, " ") + " " + script
+
+	return pc.ExecInContainer(containerID, []string{"sh", "-c", fullScript})
+}
+
+// CopyDirToContainer copies a directory to a container using podman cp command.
+// Note: Using exec.Command instead of SDK because the SDK's copy API requires
+// tar archive handling which is complex.
+func (pc *PodmanClient) CopyDirToContainer(containerID, srcDir, destDir string) error {
+	// Verify source directory exists
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return fmt.Errorf("source directory does not exist: %s", srcDir)
+	}
+
+	// Use podman cp command to copy directory
+	// Format: podman cp <src>/. <container>:<dest>
+	// The "/." ensures we copy the contents of the directory, not the directory itself
+	cpCmd := exec.CommandContext(pc.Context, "podman", "cp", srcDir+"/.", fmt.Sprintf("%s:%s", containerID, destDir))
+	output, err := cpCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to copy directory: %w, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// CreateSidecarContainer creates a sidecar container in the specified pod.
+// Returns the container ID of the created sidecar.
+func (pc *PodmanClient) CreateSidecarContainer(podID, sidecarName, image string, command []string) (string, error) {
+	s := &specgen.SpecGenerator{
+		ContainerBasicConfig: specgen.ContainerBasicConfig{
+			Name:    sidecarName,
+			Remove:  utils.BoolPtr(true), // Auto-remove container when stopped
+			Command: command,
+			Pod:     podID,
+		},
+		ContainerStorageConfig: specgen.ContainerStorageConfig{
+			Image: image,
+		},
+		ContainerHealthCheckConfig: specgen.ContainerHealthCheckConfig{
+			// Set HealthConfig to nil to disable health checks
+			HealthConfig: nil,
+			// Set HealthLogDestination to /tmp to satisfy directory requirement
+			HealthLogDestination: "/tmp",
+		},
+	}
+
+	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create sidecar container: %w", err)
+	}
+
+	containerID := createResponse.ID
+	if err := containers.Start(pc.Context, containerID, nil); err != nil {
+		return "", fmt.Errorf("failed to start sidecar container: %w", err)
+	}
+
+	return containerID, nil
+}
+
+// StopContainer stops a container by ID.
+func (pc *PodmanClient) StopContainer(containerID string) error {
+	return containers.Stop(pc.Context, containerID, nil)
+}
+
+// SidecarExecutor is a function type that performs operations using a sidecar container.
+type SidecarExecutor func(ctx context.Context, containerID string) error
+
+// ManageSidecarLifecycle manages the complete lifecycle of a sidecar container.
+// It creates the sidecar, executes the provided function, and ensures cleanup.
+func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string, command []string, executor SidecarExecutor) error {
+	// Create and start sidecar container
+	containerID, err := pc.CreateSidecarContainer(podID, sidecarName, image, command)
+	if err != nil {
+		return fmt.Errorf("failed to create and start sidecar: %w", err)
+	}
+
+	// Ensure cleanup happens
+	defer func() {
+		logger.Infoln("Cleaning up sidecar container...")
+		stopErr := pc.StopContainer(containerID)
+		if stopErr != nil {
+			logger.Warningf("Failed to stop sidecar container %s: %v\n", containerID, stopErr)
+		}
+		// Note: Container has Remove=true, so it will be auto-removed when stopped
+		logger.Infoln("Sidecar container cleanup completed")
+	}()
+
+	// Execute the provided function with the sidecar
+	return executor(pc.Context, containerID)
 }

@@ -66,12 +66,9 @@ const SolutionDetailPanel = ({
         <div className={styles.header}>
           <p className={styles.description}>{solutionData.description}</p>
           <div className={styles.tags}>
-            <Tag type="outline" size="sm">
-              by IBM Power
-            </Tag>
-            {solutionData.architectures.map((arch, index) => (
+            {solutionData.tag.map((tagItem, index) => (
               <Tag type="gray" size="sm" key={index}>
-                {arch}
+                {tagItem}
               </Tag>
             ))}
             {isCertified && (
@@ -135,28 +132,19 @@ const SolutionDetailPanel = ({
                   </p>
                 )}
                 <Layer withBackground className={styles.storyCard}>
-                  <div className={styles.storyCardContent}>
-                    <div className={styles.storyCardImage}>
-                      <img
-                        src={solutionData.featuredArticle.imagePath}
-                        alt={solutionData.featuredArticle.title}
-                        className={styles.storyImage}
-                      />
-                    </div>
-                    <div className={styles.storyCardText}>
-                      <h5 className={styles.storyCardTitle}>
-                        {solutionData.featuredArticle.title}
-                      </h5>
-                      <Link
-                        href={solutionData.featuredArticle.articleUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        renderIcon={DataViewAlt}
-                        className={styles.storyLink}
-                      >
-                        Read
-                      </Link>
-                    </div>
+                  <div className={styles.storyCardText}>
+                    <h5 className={styles.storyCardTitle}>
+                      {solutionData.featuredArticle.title}
+                    </h5>
+                    <Link
+                      href={solutionData.featuredArticle.articleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      renderIcon={DataViewAlt}
+                      className={styles.storyLink}
+                    >
+                      Read
+                    </Link>
                   </div>
                 </Layer>
                 {solutionData.featuredArticle.description && (

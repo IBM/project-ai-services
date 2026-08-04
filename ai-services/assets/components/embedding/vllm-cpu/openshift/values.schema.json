@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Embedding model",
+      "description": "Embedding model",
+      "oneOf": [
+        {
+          "const": "ibm-granite/granite-embedding-278m-multilingual",
+          "title": "granite-embedding-278m-multilingual",
+          "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Cross-lingual semantic search, Multilingual document retrieval, International content matching\n\n**Strengths:** Excellent multilingual support, Efficient 278M parameter model, Strong performance across diverse languages"
+        }
+      ],
+      "default": "ibm-granite/granite-embedding-278m-multilingual"
+    }
+  }
+}

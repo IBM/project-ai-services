@@ -35,7 +35,7 @@ func AuthMiddleware(tokenMgr *auth.TokenManager, blacklist repository.TokenBlack
 
 			return
 		}
-		if blacklist.Contains(raw, constants.TokenTypeAccess) {
+		if blacklist.Contains(c.Request.Context(), raw, constants.TokenTypeAccess) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token revoked"})
 
 			return

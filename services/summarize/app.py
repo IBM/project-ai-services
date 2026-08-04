@@ -8,18 +8,29 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
 from summarize.db_operations import create_job_with_db
 from summarize.settings import settings
-from summarize.models import SummarizationType
+from summarize.models import (
+    SummarizationType,
+    JobsListResponse,
+    JobCreatedResponse,
+    JobDetailResponse,
+    JobResultResponse,
+    PaginationInfo,
+    DocumentInfo,
+    JobState,
+    JobStatus,
+    JobMetadata
+)
 
 set_log_level(settings.common.app.log_level)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, tokenize_with_llm
-from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
+from common.misc_utils import get_llm_endpoint, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
 from common.error_utils import http_error_responses
@@ -42,6 +53,9 @@ from summarize.job_utils import (
     ensure_directories,
     validate_file_extension,
     stage_uploaded_file,
+    read_result_file,
+    delete_job_files,
+    delete_all_job_files,
 )
 from summarize.db.connection import check_db_connection, close_db_connections
 from common.misc_utils import cleanup_staging_directory
@@ -56,8 +70,8 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_siz
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    initialize_models()
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    initialize_models()
     
     # Check database connection and initialize schema (required for operation)
     try:
@@ -85,7 +99,12 @@ async def lifespan(app):
     logger.info("Ensuring cache directories exist...")
     ensure_directories()
 
-    # TODO: Scan for orphan jobs and mark them as failed
+    # Scan for zombie jobs and mark them as failed
+    logger.info("Running zombie job recovery scan...")
+    from summarize.job_utils import recover_zombie_jobs
+    recovered = recover_zombie_jobs()
+    if recovered > 0:
+        logger.warning(f"Recovered {recovered} zombie job(s) from previous session")
     
     yield
 
@@ -157,7 +176,7 @@ async def summarize_exception_handler(request: Request, exc: SummarizeException)
 
 def initialize_models():
     global llm_model_dict
-    _, llm_model_dict,_  = get_model_endpoints()
+    llm_model_dict = get_llm_endpoint()
 
 async def locked_stream(stream_g):
     """Wrap a vLLM SSE generator, releasing the concurrency semaphore when the stream ends."""
@@ -576,6 +595,13 @@ async def process_summarization_job(job_id: str, level):
             logger.info(f"Using CHUNKED strategy (exceeds context window)")
             strategy = "chunked"
             
+            # Update job_type to chunked in database
+            db_repo.update_job(
+                job_id,
+                job_type=SummarizationType.CHUNKED
+            )
+            logger.info(f"Updated job {job_id} type to CHUNKED in database")
+            
             # Split into chunks
             chunks = await asyncio.to_thread(
                 split_text_into_chunks,
@@ -700,40 +726,65 @@ async def process_summarization_job(job_id: str, level):
                         True
                     )
                     
-                    async with concurrency_limiter:  # Global vLLM limit
-                        chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
-                            query_vllm_summarize,
-                            llm_endpoint=llm_endpoint,
-                            messages=chunk_messages,
-                            model=llm_model,
-                            max_tokens=chunk_info['max_tokens'],
-                            temperature=settings.summarize.summarization_temperature,
-                        )
-                    
-                    if isinstance(chunk_result, dict) and "error" in chunk_result:
-                        raise Exception(f"LLM error on chunk {chunk_index}: {chunk_result.get('error')}")
-                    
-                    chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
-                    
-                    # Update progress with lock
-                    async with metadata_lock:
-                        total_input_tokens += chunk_in_tokens
-                        total_output_tokens += chunk_out_tokens
+                    try:
+                        async with concurrency_limiter:  # Global vLLM limit
+                            chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
+                                query_vllm_summarize,
+                                llm_endpoint=llm_endpoint,
+                                messages=chunk_messages,
+                                model=llm_model,
+                                max_tokens=chunk_info['max_tokens'],
+                                temperature=settings.summarize.summarization_temperature,
+                            )
                         
-                        # Update database progress
-                        job_record = db_repo.get_job_by_id(job_id)
-                        if job_record:
-                            current_metadata = job_record.job_metadata or {}
-                            current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
-                            db_repo.update_job(job_id, metadata=current_metadata)
-                    
-                    logger.debug(f"Completed chunk {chunk_index + 1}/{num_chunks}")
-                    logger.debug(f"Chunk summary: {chunk_summary}")
-                    return chunk_summary
-            
-            # Process all chunks in parallel
-            tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-            chunk_summaries = await asyncio.gather(*tasks)
+                        if isinstance(chunk_result, dict) and "error" in chunk_result:
+                            raise Exception(f"LLM error on chunk {chunk_index + 1}: {chunk_result.get('error')}")
+                        
+                        chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
+                        
+                        # Update progress with lock
+                        async with metadata_lock:
+                            total_input_tokens += chunk_in_tokens
+                            total_output_tokens += chunk_out_tokens
+                            
+                            # Update database progress
+                            job_record = db_repo.get_job_by_id(job_id)
+                            if job_record:
+                                current_metadata = job_record.job_metadata or {}
+                                current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
+                                db_repo.update_job(job_id, metadata=current_metadata)
+                        
+                        logger.debug(f"Completed chunk {chunk_index + 1}/{num_chunks}")
+                        logger.debug(f"Chunk summary: {chunk_summary}")
+                        return chunk_summary
+
+                    except asyncio.CancelledError:
+                        # Sibling cancellation — propagate silently so the task ends cleanly
+                        logger.error(f"Chunk {chunk_index + 1} cancelled due to sibling failure")
+                        raise
+
+                    except Exception as chunk_exc:
+                        logger.error(
+                            f"Chunk {chunk_index + 1}/{num_chunks} failed for job {job_id}: {chunk_exc}",
+                            exc_info=True
+                        )
+                        raise
+
+            # Process all chunks in parallel.
+            # Use explicit tasks so that when one chunk fails we can cancel the siblings
+            # immediately rather than waiting for them to finish naturally.
+            tasks = [asyncio.create_task(process_chunk(chunk, i), name=f"chunk-{i}")
+                     for i, chunk in enumerate(chunks)]
+            try:
+                chunk_summaries = await asyncio.gather(*tasks)
+            except Exception:
+                # Cancel every task that is still running
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                # Wait for all cancellations to settle so semaphore slots are freed
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
             
             # Merge step
             logger.info(f"Merging {len(chunk_summaries)} chunk summaries")
@@ -865,6 +916,7 @@ async def process_summarization_job(job_id: str, level):
 @app.post(
     "/v1/summarize/jobs",
     status_code=202,
+    response_model=JobCreatedResponse,
     responses={
         202: {"description": "Job created successfully"},
         400: http_error_responses[400],
@@ -962,11 +1014,8 @@ async def create_summarization_job(
         # Launch background processing (stub for now)
         background_tasks.add_task(process_summarization_job, job_id, level)
         
-        # Return 202 Accepted with job_id
-        return JSONResponse(
-            status_code=202,
-            content={"job_id": job_id}
-        )
+        # Return 202 Accepted with job_id using JobCreatedResponse
+        return JobCreatedResponse(job_id=job_id)
         
     except SummarizeException as se:
         raise se
@@ -976,6 +1025,386 @@ async def create_summarization_job(
             500,
             "INTERNAL_SERVER_ERROR",
             f"Failed to create summarization job: {str(e)}"
+        )
+
+
+@app.get(
+    "/v1/summarize/jobs",
+    response_model=JobsListResponse,
+    responses={
+        200: {"description": "Paginated job list"},
+        400: http_error_responses[400],
+        500: http_error_responses[500],
+    },
+    summary="List all summarization jobs",
+    description=(
+        "Retrieve all summarization jobs with optional filtering and pagination.\n\n"
+        "**Query parameters:**\n"
+        "- `latest` (bool): Return only the most recent job. Default: false\n"
+        "- `limit` (int): Records per page (1-100). Default: 20\n"
+        "- `offset` (int): Records to skip. Default: 0\n"
+        "- `status` (string): Filter by status: 'accepted', 'in_progress', 'completed', 'failed'\n"
+    ),
+    response_description="Paginated list of jobs with metadata",
+    tags=["jobs"],
+)
+async def list_jobs(
+    latest: Optional[bool] = None,
+    limit: int = 20,
+    offset: int = 0,
+    status: Optional[str] = None,
+):
+    """List all summarization jobs with pagination and filters."""
+    try:
+        # Validate limit parameter
+        if limit < 1 or limit > 100:
+            raise SummarizeException(
+                400,
+                "INVALID_PARAMETER",
+                "Limit must be between 1 and 100"
+            )
+        
+        # Validate offset parameter
+        if offset < 0:
+            raise SummarizeException(
+                400,
+                "INVALID_PARAMETER",
+                "Offset must be non-negative"
+            )
+        
+        # Validate and parse status parameter
+        status_filter = None
+        if status:
+            try:
+                status_filter = JobStatus(status.lower())
+            except ValueError:
+                raise SummarizeException(
+                    400,
+                    "INVALID_PARAMETER",
+                    f"Invalid status value. Must be one of: accepted, in_progress, completed, failed"
+                )
+        
+        # Handle latest flag
+        if latest:
+            limit = 1
+            offset = 0
+        
+        # Get jobs from database
+        from summarize.db.manager import db_repo
+        jobs, total = db_repo.get_all_jobs(
+            status=status_filter,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Format response using JobsListResponse with JobState objects
+        job_list = []
+        for job in jobs:
+            # Convert status string to JobStatus enum if needed
+            job_status = job.status if isinstance(job.status, JobStatus) else JobStatus(job.status)
+
+            
+            # Create JobState object
+            job_state = JobState(
+                job_id=job.job_id,
+                job_name=job.job_name,
+                status=job_status,
+                submitted_at=job.submitted_at.isoformat() if job.submitted_at else "",
+                completed_at=job.completed_at.isoformat() if job.completed_at else None,
+                updated_at=job.updated_at.isoformat() if hasattr(job, 'updated_at') and job.updated_at else None,
+                document_name=job.document_name if hasattr(job, 'document_name') else None,
+                document_word_count=job.document_word_count if hasattr(job, 'document_word_count') else 0,
+                level=job.level if hasattr(job, 'level') else None,
+                job_type=job.job_type if hasattr(job, 'job_type') else None,
+                error=job.error if hasattr(job, 'error') else None
+            )
+            job_list.append(job_state)
+        
+        return JobsListResponse(
+            pagination=PaginationInfo(total=total, limit=limit, offset=offset),
+            data=job_list
+        )
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Error listing jobs: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            "Failed to retrieve jobs"
+        )
+
+
+@app.get(
+    "/v1/summarize/jobs/{job_id}",
+    response_model=JobDetailResponse,
+    responses={
+        200: {"description": "Job details"},
+        404: http_error_responses[404],
+        500: http_error_responses[500],
+    },
+    summary="Get job details",
+    description="Retrieve detailed status and metadata of a specific summarization job.",
+    response_description="Full job details including document info and metadata",
+    tags=["jobs"],
+)
+async def get_job_details(job_id: str):
+    """Get detailed information about a specific job."""
+    try:
+        # Get job from database
+        from summarize.db.manager import db_repo
+        job = db_repo.get_job_by_id(job_id)
+        
+        if not job:
+            raise SummarizeException(
+                404,
+                "RESOURCE_NOT_FOUND",
+                f"Job {job_id} not found"
+            )
+        
+        # Format response using JobDetailResponse
+        document = DocumentInfo(
+            name=job.document_name or "",
+            status=job.status
+        )
+        
+        # Convert status string to JobStatus enum if needed
+        job_status = job.status if isinstance(job.status, JobStatus) else JobStatus(job.status)
+        
+        return JobDetailResponse(
+            job_id=job.job_id,
+            job_name=job.job_name,
+            status=job_status,
+            submitted_at=job.submitted_at.isoformat() if job.submitted_at else "",
+            completed_at=job.completed_at.isoformat() if job.completed_at else None,
+            document=document,
+            error=job.error,
+            metadata=job.job_metadata if job.job_metadata else None
+        )
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Error retrieving job {job_id}: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            f"Failed to retrieve job details"
+        )
+
+
+@app.get(
+    "/v1/summarize/jobs/{job_id}/result",
+    response_model=JobResultResponse,
+    responses={
+        200: {"description": "Summary result"},
+        202: {"description": "Job still in progress"},
+        404: http_error_responses[404],
+        500: http_error_responses[500],
+    },
+    summary="Get summarization result",
+    description=(
+        "Retrieve the completed summary and result metadata for a job.\n\n"
+        "Returns 202 Accepted if the job is still in progress.\n"
+        "Returns 404 if the job doesn't exist or result is not available."
+    ),
+    response_description="Summarization result with usage statistics",
+    tags=["jobs"],
+)
+async def get_job_result(job_id: str):
+    """Get the summarization result for a completed job."""
+    try:
+        # Get job from database
+        from summarize.db.manager import db_repo
+        job = db_repo.get_job_by_id(job_id)
+        
+        if not job:
+            raise SummarizeException(
+                404,
+                "RESOURCE_NOT_FOUND",
+                f"Job {job_id} not found"
+            )
+        
+        # Check job status
+        if job.status in ['accepted', 'in_progress']:
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "message": "Job is still in progress",
+                    "job_id": job_id,
+                    "status": job.status
+                }
+            )
+        
+        if job.status == 'failed':
+            raise SummarizeException(
+                404,
+                "RESOURCE_NOT_FOUND",
+                f"Job failed: {job.error or 'Unknown error'}"
+            )
+        
+        # Read result file
+        result_data = read_result_file(job_id)
+        
+        if not result_data:
+            logger.error(f"Result file missing for completed job {job_id}")
+            raise SummarizeException(
+                500,
+                "INTERNAL_SERVER_ERROR",
+                "Result file not found"
+            )
+        
+        # Use JobResultResponse to structure the response
+        return JobResultResponse(
+            data=result_data.get("data", {}),
+            meta=result_data.get("meta", {}),
+            usage=result_data.get("usage", {})
+        )
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Error retrieving result for job {job_id}: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            "Failed to retrieve job result"
+        )
+
+
+@app.delete(
+    "/v1/summarize/jobs/{job_id}",
+    status_code=204,
+    responses={
+        204: {"description": "Job and associated data deleted"},
+        404: http_error_responses[404],
+        409: {"description": "Job is still active (accepted or in_progress)"},
+        500: http_error_responses[500],
+    },
+    summary="Delete a job",
+    description=(
+        "Delete a specific job record and its associated result file.\n\n"
+        "Only completed or failed jobs can be deleted. "
+        "Attempting to delete an active job (accepted or in_progress) returns 409 Conflict."
+    ),
+    response_description="Job deleted successfully",
+    tags=["jobs"],
+)
+async def delete_job(job_id: str):
+    """Delete a specific job and its associated files."""
+    try:
+        # Get job from database
+        from summarize.db.manager import db_repo
+        job = db_repo.get_job_by_id(job_id)
+        
+        if not job:
+            raise SummarizeException(
+                404,
+                "RESOURCE_NOT_FOUND",
+                f"Job {job_id} not found"
+            )
+        
+        # Check if job is active
+        if job.status in ['accepted', 'in_progress']:
+            raise SummarizeException(
+                409,
+                "RESOURCE_LOCKED",
+                f"Cannot delete active job. Current status: {job.status}"
+            )
+        
+        # Delete files (result and staging)
+        delete_job_files(job_id)
+        
+        # Delete from database
+        success = db_repo.delete_job(job_id)
+        
+        if not success:
+            raise SummarizeException(
+                500,
+                "INTERNAL_SERVER_ERROR",
+                "Failed to delete job from database"
+            )
+        
+        logger.info(f"Deleted job {job_id}")
+        return Response(status_code=204)
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Error deleting job {job_id}: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            "Failed to delete job"
+        )
+
+
+@app.delete(
+    "/v1/summarize/jobs",
+    status_code=204,
+    responses={
+        204: {"description": "All jobs and data deleted"},
+        400: http_error_responses[400],
+        409: {"description": "Active jobs exist"},
+        500: http_error_responses[500],
+    },
+    summary="Bulk delete all jobs",
+    description=(
+        "Delete all job records, result files, and staging data.\n\n"
+        "**Query parameters:**\n"
+        "- `confirm` (bool, required): Must be 'true' to proceed with bulk deletion\n\n"
+        "Returns 409 Conflict if any active jobs (accepted or in_progress) exist."
+    ),
+    response_description="All jobs deleted successfully",
+    tags=["jobs"],
+)
+async def bulk_delete_jobs(confirm: Optional[bool] = None):
+    """Delete all jobs and associated files."""
+    try:
+        # Validate confirm parameter
+        if confirm is not True:
+            raise SummarizeException(
+                400,
+                "INVALID_REQUEST",
+                "Bulk delete requires confirm=true query parameter"
+            )
+        
+        # Check for active jobs
+        from summarize.db.manager import db_repo
+        active_jobs = db_repo.get_active_jobs()
+        
+        if active_jobs:
+            raise SummarizeException(
+                409,
+                "RESOURCE_LOCKED",
+                f"Cannot delete: {len(active_jobs)} active job(s) exist"
+            )
+        
+        # Delete all files
+        delete_all_job_files()
+        
+        # Delete all jobs from database
+        success = db_repo.delete_all_jobs()
+        
+        if not success:
+            raise SummarizeException(
+                500,
+                "INTERNAL_SERVER_ERROR",
+                "Failed to delete jobs from database"
+            )
+        
+        logger.info("Bulk deleted all jobs")
+        return Response(status_code=204)
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Error in bulk delete: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            "Failed to delete all jobs"
         )
 
 

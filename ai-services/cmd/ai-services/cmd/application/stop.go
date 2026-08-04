@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	stopPodNames     []string
-	experimentalStop bool
+	stopPodNames []string
+	legacyStop   bool
 )
 
 var stopCmd = &cobra.Command{
@@ -22,11 +22,26 @@ var stopCmd = &cobra.Command{
 	Short: "Stops the running application",
 	Long: `Stops a running application by name.
 
-Arguments
-  [name]: Application name (required)
+Arguments:
+  [name] : Application name (required)
 
-Note: Supported for podman runtime only.
+Note:
+  - Supported for podman runtime only.
 `,
+	Example: `  # Stop an application
+  ai-services application stop rag --runtime podman
+
+  # Stop specific pods in an application
+  ai-services application stop rag --pod pod1 --pod pod2 --runtime podman
+
+  # Stop specific pods using comma-separated list
+  ai-services application stop rag --pod pod1,pod2 --runtime podman
+
+  # Stop with auto-accept confirmation prompts
+  ai-services application stop rag --yes --runtime podman
+
+  # Stop using legacy implementation
+  ai-services application stop rag --legacy --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
@@ -45,9 +60,8 @@ Note: Supported for podman runtime only.
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// When experimentalStop is true and runtime is podman, validate application name using catalog API
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalStop && rt == types.RuntimeTypePodman {
+		// For podman runtime with default mode, validate application name using catalog API
+		if !legacyStop && rt == types.RuntimeTypePodman {
 			appClient, err := catalogClient.NewApplicationClient()
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
@@ -65,10 +79,10 @@ Note: Supported for podman runtime only.
 		}
 
 		opts := appTypes.StopOptions{
-			Name:         applicationName,
-			PodNames:     stopPodNames,
-			AutoYes:      autoYes,
-			Experimental: experimentalStop,
+			Name:     applicationName,
+			PodNames: stopPodNames,
+			AutoYes:  autoYes,
+			Legacy:   legacyStop,
 		}
 
 		return app.Stop(opts)
@@ -78,5 +92,5 @@ Note: Supported for podman runtime only.
 func init() {
 	stopCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to stop (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 	stopCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
-	stopCmd.Flags().BoolVar(&experimentalStop, "experimental", false, "Include experimental application stop")
+	stopCmd.Flags().BoolVar(&legacyStop, "legacy", false, "Use legacy application stop implementation")
 }

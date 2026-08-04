@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -15,21 +16,22 @@ var (
 	ModelCmd = &cobra.Command{
 		Use:   "model",
 		Short: "Manage application models",
-		Long:  ``,
-		Args:  cobra.MaximumNArgs(0),
+		Long: `Manage AI models for application templates.
+This command provides subcommands to list and download models required by application templates.`,
+		Args: cobra.MaximumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 
-	hiddenTemplates    bool
-	experimentalModels bool
+	hiddenTemplates bool
+	legacyModel     bool
 )
 
 func init() {
 	ModelCmd.AddCommand(listCmd)
 	ModelCmd.AddCommand(downloadCmd)
-	ModelCmd.PersistentFlags().BoolVar(&experimentalModels, "experimental", false, "Use experimental catalog-based model listing")
+	ModelCmd.PersistentFlags().BoolVar(&legacyModel, "legacy", false, "Use legacy application model implementation")
 }
 
 func models(template string) ([]string, error) {
@@ -54,7 +56,7 @@ func getCatalogModels(templateID string, excludeComponentProviders ...string) ([
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	models, err := provider.GetCatalogModels(templateID, excludeComponentProviders...)
+	models, err := provider.GetCatalogModels(context.Background(), templateID, excludeComponentProviders...)
 	if err != nil {
 		return nil, err
 	}

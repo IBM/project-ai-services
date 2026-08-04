@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "catalog-ui"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: catalog-ui
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: catalog-ui
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image }}"
+          resources:
+            requests:
+              memory: "{{ .Values.ui.resources.requests.memory }}"
+              cpu: "{{ .Values.ui.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.ui.resources.limits.memory }}"
+              cpu: "{{ .Values.ui.resources.limits.cpu }}"
+          env:
+            - name: BACKEND_HOST
+              value: "catalog-api"
+            - name: BACKEND_PORT
+              value: "8080"
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3

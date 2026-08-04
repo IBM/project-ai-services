@@ -35,7 +35,7 @@ func (f *RuntimeFactory) GetRuntimeType() types.RuntimeType {
 func CreateRuntime(runtimeType types.RuntimeType, namespace string) (Runtime, error) {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
-		logger.Infof("Initializing Podman runtime\n", logger.VerbosityLevelDebug)
+		logger.Debugf("Initializing Podman runtime\n")
 		client, err := podman.NewPodmanClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Podman client: %w", err)
@@ -44,7 +44,7 @@ func CreateRuntime(runtimeType types.RuntimeType, namespace string) (Runtime, er
 		return client, nil
 
 	case types.RuntimeTypeOpenShift:
-		logger.Infof("Initializing OpenShift runtime\n", logger.VerbosityLevelDebug)
+		logger.Debugf("Initializing OpenShift runtime\n")
 		client, err := openshift.NewOpenshiftClientWithNamespace(namespace)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenShift client: %w", err)

@@ -20,9 +20,9 @@ const (
 	specialChars   = "@#$%^*-_+"
 
 	// Annotation parsing constants.
-	minAnnotationParts     = 2
-	annotationPartsWithOpt = 3
-	keyValueParts          = 2
+	minAnnotationParts   = 2
+	keyValueParts        = 2
+	maxPasswordTypeParts = 2 // max parts when splitting "password options"
 )
 
 // passwordOptions contains options for password generation.
@@ -36,7 +36,7 @@ type passwordOptions struct {
 
 // GenerateRandomPassword generates a cryptographically secure random password with default settings.
 // The password will be 16 characters long and include uppercase, lowercase, digits, and special characters.
-// The first character will always be alphanumeric (not a special character).
+// At least one character from each enabled category is guaranteed to be present.
 // TODO: This is currently being used in Catalog for DB password which should be later moved to use new @generate annotation.
 func GenerateRandomPassword() (string, error) {
 	return generateRandomPasswordWithOptions(passwordOptions{
@@ -50,41 +50,112 @@ func GenerateRandomPassword() (string, error) {
 
 // generateRandomPasswordWithOptions generates a cryptographically secure random password
 // with the specified options using crypto/rand.
+// Guarantees at least one character from each enabled category.
 func generateRandomPasswordWithOptions(opts passwordOptions) (string, error) {
-	if opts.Length <= 0 {
-		return "", fmt.Errorf("password length must be greater than 0")
+	if err := validatePasswordOptions(opts); err != nil {
+		return "", err
 	}
 
-	charset := buildPasswordCharset(opts, true)
-	if charset == "" {
-		return "", fmt.Errorf("at least one character type must be enabled")
-	}
+	requiredSets := buildRequiredCharsets(opts)
+	fullCharset := buildPasswordCharset(opts)
 
-	firstCharset := buildPasswordCharset(opts, false)
-	if firstCharset == "" {
-		firstCharset = charset
-	}
-
-	password := make([]byte, opts.Length)
-
-	firstChar, err := randomCharsetByte(firstCharset)
+	password, err := generatePasswordBytes(opts.Length, requiredSets, fullCharset)
 	if err != nil {
 		return "", err
 	}
-	password[0] = firstChar
 
-	for i := 1; i < opts.Length; i++ {
-		char, err := randomCharsetByte(charset)
-		if err != nil {
-			return "", err
-		}
-		password[i] = char
-	}
+	ensureFirstCharNotSpecial(password, opts)
 
 	return string(password), nil
 }
 
-func buildPasswordCharset(opts passwordOptions, includeSpecial bool) string {
+// validatePasswordOptions validates the password generation options.
+func validatePasswordOptions(opts passwordOptions) error {
+	if opts.Length <= 0 {
+		return fmt.Errorf("password length must be greater than 0")
+	}
+
+	requiredSets := buildRequiredCharsets(opts)
+	if len(requiredSets) == 0 {
+		return fmt.Errorf("at least one character type must be enabled")
+	}
+
+	if opts.Length < len(requiredSets) {
+		return fmt.Errorf("password length (%d) must be at least %d to satisfy all character requirements", opts.Length, len(requiredSets))
+	}
+
+	return nil
+}
+
+// generatePasswordBytes generates password bytes with guaranteed character requirements.
+func generatePasswordBytes(length int, requiredSets []string, fullCharset string) ([]byte, error) {
+	password := make([]byte, length)
+
+	// Place one character from each required set
+	for i, charset := range requiredSets {
+		char, err := randomCharFromSet(charset)
+		if err != nil {
+			return nil, err
+		}
+		password[i] = char
+	}
+
+	// Fill remaining positions with random characters
+	for i := len(requiredSets); i < length; i++ {
+		char, err := randomCharFromSet(fullCharset)
+		if err != nil {
+			return nil, err
+		}
+		password[i] = char
+	}
+
+	// Shuffle to avoid predictable patterns
+	if err := shuffleBytes(password); err != nil {
+		return nil, err
+	}
+
+	return password, nil
+}
+
+// ensureFirstCharNotSpecial ensures the first character is not special when non-special types exist.
+func ensureFirstCharNotSpecial(password []byte, opts passwordOptions) {
+	hasNonSpecial := opts.Lower || opts.Upper || opts.Digits
+	if !opts.Special || !hasNonSpecial || !isSpecialChar(password[0]) {
+		return
+	}
+
+	// Find first non-special character and swap
+	for i := 1; i < len(password); i++ {
+		if !isSpecialChar(password[i]) {
+			password[0], password[i] = password[i], password[0]
+
+			break
+		}
+	}
+}
+
+// buildRequiredCharsets returns a slice of character sets that must have at least one character.
+func buildRequiredCharsets(opts passwordOptions) []string {
+	var sets []string
+
+	if opts.Lower {
+		sets = append(sets, lowercaseChars)
+	}
+	if opts.Upper {
+		sets = append(sets, uppercaseChars)
+	}
+	if opts.Digits {
+		sets = append(sets, digitChars)
+	}
+	if opts.Special {
+		sets = append(sets, specialChars)
+	}
+
+	return sets
+}
+
+// buildPasswordCharset builds the complete character set based on options.
+func buildPasswordCharset(opts passwordOptions) string {
 	var charset strings.Builder
 
 	if opts.Lower {
@@ -96,21 +167,49 @@ func buildPasswordCharset(opts passwordOptions, includeSpecial bool) string {
 	if opts.Digits {
 		charset.WriteString(digitChars)
 	}
-	if includeSpecial && opts.Special {
+	if opts.Special {
 		charset.WriteString(specialChars)
 	}
 
 	return charset.String()
 }
 
-func randomCharsetByte(charset string) (byte, error) {
+// randomCharFromSet returns a random character from the given character set.
+func randomCharFromSet(charset string) (byte, error) {
+	if len(charset) == 0 {
+		return 0, fmt.Errorf("charset cannot be empty")
+	}
+
 	charsetLen := big.NewInt(int64(len(charset)))
 	randomIndex, err := rand.Int(rand.Reader, charsetLen)
 	if err != nil {
-		return 0, fmt.Errorf("failed to generate random password: %w", err)
+		return 0, fmt.Errorf("failed to generate random character: %w", err)
 	}
 
 	return charset[randomIndex.Int64()], nil
+}
+
+// shuffleBytes performs a Fisher-Yates shuffle on the byte slice using crypto/rand.
+func shuffleBytes(data []byte) error {
+	n := len(data)
+	for i := n - 1; i > 0; i-- {
+		// Generate random index from 0 to i (inclusive)
+		maxIdx := big.NewInt(int64(i + 1))
+		randomIdx, err := rand.Int(rand.Reader, maxIdx)
+		if err != nil {
+			return fmt.Errorf("failed to shuffle password: %w", err)
+		}
+
+		j := randomIdx.Int64()
+		data[i], data[j] = data[j], data[i]
+	}
+
+	return nil
+}
+
+// isSpecialChar checks if a byte is a special character.
+func isSpecialChar(b byte) bool {
+	return strings.ContainsRune(specialChars, rune(b))
 }
 
 // ProcessGenerateAnnotationsFromYAML processes @generate annotations in raw YAML data.
@@ -157,7 +256,6 @@ func ProcessGenerateAnnotationsFromYAML(yamlData []byte) ([]byte, error) {
 }
 
 // hasGenerateAnnotation checks if a yaml.Node has a @generate annotation in its HeadComment.
-// Similar to isHidden in util.go.
 func hasGenerateAnnotation(n *yaml.Node) bool {
 	if n == nil {
 		return false
@@ -168,7 +266,6 @@ func hasGenerateAnnotation(n *yaml.Node) bool {
 
 // extractGenerateAnnotation extracts the @generate annotation from a yaml.Node's HeadComment.
 // Returns the full annotation string (e.g., "@generate:password" or "@generate:password length=24").
-// Similar to getDescription in util.go.
 func extractGenerateAnnotation(n *yaml.Node) string {
 	if n == nil {
 		return ""
@@ -202,52 +299,86 @@ func parsePasswordOptions(annotation string) (passwordOptions, error) {
 		Special: true,
 	}
 
-	// Remove @generate:password prefix
-	parts := strings.SplitN(annotation, ":", annotationPartsWithOpt)
-	if len(parts) < minAnnotationParts || parts[1] != "password" {
+	// Remove @generate: prefix and split the rest
+	if !strings.HasPrefix(annotation, "@generate:") {
 		return opts, fmt.Errorf("invalid annotation format: %s", annotation)
 	}
 
-	// If there's a third part, parse the options
-	if len(parts) == annotationPartsWithOpt {
-		parseOptions(parts[2], &opts)
+	// Get everything after @generate:
+	rest := strings.TrimPrefix(annotation, "@generate:")
+	rest = strings.TrimSpace(rest)
+
+	// Split by space to separate "password" from options
+	parts := strings.SplitN(rest, " ", maxPasswordTypeParts)
+	if len(parts) == 0 || parts[0] != "password" {
+		return opts, fmt.Errorf("invalid annotation format: %s", annotation)
+	}
+
+	// If there are options, parse them
+	if len(parts) == maxPasswordTypeParts {
+		if err := parseOptions(parts[1], &opts); err != nil {
+			return opts, err
+		}
 	}
 
 	return opts, nil
 }
 
 // parseOptions parses key=value pairs and updates password options.
-func parseOptions(optStr string, opts *passwordOptions) {
+func parseOptions(optStr string, opts *passwordOptions) error {
 	pairs := strings.SplitSeq(optStr, ",")
 	for pair := range pairs {
 		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
 		kv := strings.SplitN(pair, "=", keyValueParts)
 		if len(kv) != keyValueParts {
-			continue
+			return fmt.Errorf("invalid option format: %s (expected key=value)", pair)
 		}
 
 		key := strings.TrimSpace(kv[0])
 		value := strings.TrimSpace(kv[1])
-		applyOption(key, value, opts)
+
+		if err := applyOption(key, value, opts); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
 // applyOption applies a single option to password options.
-func applyOption(key, value string, opts *passwordOptions) {
+func applyOption(key, value string, opts *passwordOptions) error {
 	switch key {
 	case "length":
-		if length, err := strconv.Atoi(value); err == nil {
-			opts.Length = length
+		length, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid length value: %s", value)
 		}
+		if length <= 0 {
+			return fmt.Errorf("length must be greater than 0")
+		}
+		opts.Length = length
+
 	case "lower":
 		opts.Lower = value == "true"
+
 	case "upper":
 		opts.Upper = value == "true"
+
 	case "digits":
 		opts.Digits = value == "true"
+
 	case "special":
 		opts.Special = value == "true"
+
+	default:
+		return fmt.Errorf("unknown option: %s", key)
 	}
+
+	return nil
 }
 
 // generateValue generates a value based on the annotation string.
@@ -266,6 +397,7 @@ func generateValue(annotation string) (string, error) {
 		}
 
 		return generateRandomPasswordWithOptions(opts)
+
 	default:
 		return "", fmt.Errorf("unsupported annotation type: %s", annotationType)
 	}

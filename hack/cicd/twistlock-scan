@@ -22,6 +22,7 @@ pipeline {
     }
 
     stages {
+        
         stage('Clone AI Services') {
             steps {
                 script {
@@ -92,12 +93,19 @@ def generateImageList() {
     echo 'Generating image list for scanning...'
 
     def imageMap = [
-        [name: 'rag', path: 'spyre-rag/src/'],
-        [name: 'rag-ui', path: 'spyre-rag/ui/'],
+        [name: 'chatbot-service', path: 'services/chatbot/'],
+        [name: 'digitize-service', path: 'services/digitize/'],
+        [name: 'summarize-service', path: 'services/summarize/'],
+        [name: 'similarity-service', path: 'services/similarity/'],
+        [name: 'chatbot-ui', path: 'ui/chatbot/'],
         [name: 'tools', path: 'images/tools/'],
+        [name: 'caddy', path: 'images/caddy/'],
+        [name: 'litellm', path: 'images/litellm/'],
+        [name: 'postgres', path: 'images/postgres/'],
+        [name: 'service-base', path: 'images/service-base/'],
         [name: 'ai-services', path: 'ai-services/'],
-        [name: 'catalog-ui', path: 'catalog-ui/'],
-        [name: 'digitize-ui', path: 'digitize-ui/']
+        [name: 'catalog-ui', path: 'ui/catalog/'],
+        [name: 'digitize-ui', path: 'ui/digitize/']
     ]
 
     def images = []
@@ -113,9 +121,17 @@ def generateImageList() {
 
 def getImageWithTag(String imagePath, String imageName) {
     def icrImage = ''
-    dir("${REPO_DIR}/${imagePath}") {
-        def tag = sh(script: 'make image-tag', returnStdout: true).trim()
-        icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+    if (imagePath.startsWith('services/')) {
+        def serviceName = imagePath.split('/')[1]
+        dir("${REPO_DIR}/services") {
+            def tag = sh(script: "make image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+        }
+    } else {
+        dir("${REPO_DIR}/${imagePath}") {
+            def tag = sh(script: 'make image-tag', returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+        }
     }
     return icrImage
 }

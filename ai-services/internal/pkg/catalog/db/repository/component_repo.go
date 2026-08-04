@@ -125,7 +125,7 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, pgx.ErrNoRows
+			return nil, nil
 		}
 
 		return nil, fmt.Errorf("failed to get component: %w", err)
@@ -303,7 +303,7 @@ func (r *componentRepo) Update(ctx context.Context, component *models.Component)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return pgx.ErrNoRows
+			return nil
 		}
 
 		return fmt.Errorf("failed to update component: %w", err)
@@ -320,13 +320,9 @@ func (r *componentRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status m
 		WHERE id = $3
 	`
 
-	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	_, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
 	if err != nil {
 		return fmt.Errorf("failed to update component status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -350,13 +346,9 @@ func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpo
 		}
 	}
 
-	result, err := r.pool.Exec(ctx, query, endpointsJSON, id)
+	_, err = r.pool.Exec(ctx, query, endpointsJSON, id)
 	if err != nil {
 		return fmt.Errorf("failed to update component endpoints: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -366,13 +358,9 @@ func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpo
 func (r *componentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM components WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	_, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete component: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil

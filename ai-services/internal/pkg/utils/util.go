@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"os"
@@ -521,8 +524,15 @@ func GetModelsPath() string {
 // ValidateBaseDir validates that the base directory exists or can be created.
 // It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {
-	// Clean the path and append ai-services subdirectory
-	baseDir = filepath.Join(filepath.Clean(baseDir), "ai-services")
+	// Resolve relative paths to absolute paths to prevent Podman from mounting
+	//the wrong (or empty) host directory.
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
+
+	// Clean the absolute path and append ai-services subdirectory
+	baseDir = filepath.Join(filepath.Clean(absBase), "ai-services")
 
 	// Check if directory exists or can be created
 	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
@@ -576,6 +586,95 @@ func getPodmanURIAsRoot() (string, error) {
 	), nil
 }
 
+// GetAuthFilePath determines the auth.json file path based on the current user.
+// Returns the path to the Podman auth.json file for container registry authentication.
+func GetAuthFilePath() (string, error) {
+	if os.Geteuid() == 0 {
+		return "/run/user/0/containers/auth.json", nil
+	}
+
+	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
+}
+
+// ExtractTarGz extracts a tar.gz file to a destination directory.
+func ExtractTarGz(srcFile, destDir string) error {
+	file, err := os.Open(srcFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = gzr.Close()
+	}()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := extractTarEntry(tr, header, destDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractTarEntry extracts a single tar entry.
+func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
+	// Get the absolute path of the destination directory
+	destPath, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for destination: %w", err)
+	}
+
+	// Join the paths. filepath.Join automatically calls filepath.Clean
+	target := filepath.Join(destPath, header.Name)
+
+	// ZIP SLIP FIX: Check if the resolved target path falls outside the destination directory
+	if !strings.HasPrefix(target, destPath+string(os.PathSeparator)) && target != destPath {
+		return fmt.Errorf("illegal file path in archive: %s", header.Name)
+	}
+
+	switch header.Typeflag {
+	case tar.TypeDir:
+		if err := os.MkdirAll(target, constants.DirPerm); err != nil {
+			return err
+		}
+	case tar.TypeReg:
+		if err := os.MkdirAll(filepath.Dir(target), constants.DirPerm); err != nil {
+			return err
+		}
+
+		outFile, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = outFile.Close()
+		}()
+
+		if _, err := io.Copy(outFile, tr); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
@@ -590,4 +689,57 @@ func ParseErrorResponse(resp *resty.Response) string {
 	}
 
 	return resp.String()
+}
+
+// GetNumericValFromMap safely extracts a numeric value from a map as an integer, returning 0 if not found or not a number.
+// Handles both int and float64 types from JSON unmarshaling.
+func GetNumericValFromMap(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case float64:
+			return int(v)
+		case int64:
+			return int(v)
+		}
+	}
+
+	return 0
+}
+
+// FormatBytes renders a byte count as a human-readable string (GiB / MiB / KiB / B).
+func FormatBytes(b int64) string {
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
+// DirStats walks dir and returns total byte size and file count.
+func DirStats(dir string) (totalBytes int64, fileCount int) {
+	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		totalBytes += info.Size()
+		fileCount++
+
+		return nil
+	})
+
+	return totalBytes, fileCount
 }

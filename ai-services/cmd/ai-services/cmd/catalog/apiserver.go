@@ -7,16 +7,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
@@ -52,7 +52,7 @@ func loadDBConfig() (db.Config, error) {
 func getOrGenerateSecretKey() (string, error) {
 	secretKey := os.Getenv("AUTH_JWT_SECRET")
 	if len(secretKey) == 0 {
-		fmt.Println("** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
+		logger.DebuglnCtx(context.Background(), "** WARNING: AUTH_JWT_SECRET environment variable not set. This is not recommended for production use. **")
 		byteSecretKey, err := auth.GenerateRandomSecretKey(defaultRandomSecretKeyLength)
 		if err != nil {
 			return "", err
@@ -95,13 +95,27 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	componentRepo := repository.NewComponentRepository(pool)
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
 
+	// Initialize sync service for background DB-Pod synchronization
+	syncService, err := sync.NewSyncService(
+		applicationRepo,
+		serviceRepo,
+		componentRepo,
+		serviceDependencyRepo,
+		sync.DefaultSyncInterval,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
+	defer syncService.Stop(ctx)
+
 	catalogProvider, err := catalog.NewCatalogProvider()
 	if err != nil {
 		return fmt.Errorf("failed to initialize catalog provider: %w", err)
 	}
 
 	// Initialize application service with all required repositories
-	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider)
+	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
@@ -128,17 +142,27 @@ func NewAPIServerCmd() *cobra.Command {
 	apiserverCmd := &cobra.Command{
 		Use:   "apiserver",
 		Short: "Manage AI Services API server",
-		Long:  `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
+		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
+		Example: `  # Start the API server with default settings
+	 ai-services catalog apiserver --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start the API server on a custom port
+	 ai-services catalog apiserver --port 9090 --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with custom admin username
+	 ai-services catalog apiserver --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with custom token TTL settings
+	 ai-services catalog apiserver --access-token-ttl 30m --refresh-token-ttl 48h --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with all custom settings
+	 ai-services catalog apiserver --port 9090 --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --access-token-ttl 30m --refresh-token-ttl 48h --runtime podman
+
+Note:
+  - Requires database connection via environment variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)
+  - AUTH_JWT_SECRET environment variable is recommended for production use`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			rt := types.RuntimeType(runtimeType)
-			if !rt.Valid() {
-				return fmt.Errorf("invalid runtime type: %s (must be '%s' or '%s')", runtimeType, types.RuntimeTypePodman, types.RuntimeTypeOpenShift)
-			}
-
-			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-			return nil
+			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash)
@@ -150,7 +174,7 @@ func NewAPIServerCmd() *cobra.Command {
 	apiserverCmd.Flags().DurationVarP(&defaultRefreshTokenTTL, "refresh-token-ttl", "", defaultRefreshTokenTTL, "Time-to-live for refresh tokens")
 	apiserverCmd.Flags().StringVar(&adminUserName, "admin-username", "admin", "Username for the default admin user")
 	apiserverCmd.Flags().StringVar(&adminPasswordHash, "admin-password-hash", "", "Precomputed hash of the password for the default admin user")
-	apiserverCmd.Flags().StringVar(&runtimeType, "runtime", string(types.RuntimeTypePodman), fmt.Sprintf("Runtime to use (options: %s, %s)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	common.ConfigureRuntimeFlag(apiserverCmd, &runtimeType)
 
 	return apiserverCmd
 }

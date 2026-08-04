@@ -10,10 +10,12 @@ type ApplicationListResponse struct {
 type Application struct {
 	ID             string               `json:"id"`
 	Name           string               `json:"name"`
+	CatalogID      string               `json:"catalog_id"`
 	DeploymentType string               `json:"deployment_type"`
 	Type           string               `json:"type"`
 	Status         string               `json:"status"`
 	Message        string               `json:"message"`
+	Version        string               `json:"version"`
 	Services       []ApplicationService `json:"services,omitempty"`
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
@@ -23,6 +25,7 @@ type Application struct {
 type ApplicationService struct {
 	ID        string                 `json:"id"`
 	Type      string                 `json:"type"`
+	CatalogID string                 `json:"catalog_id,omitempty"`
 	Status    string                 `json:"status,omitempty"`
 	Message   string                 `json:"message"`
 	Endpoints []map[string]any       `json:"endpoints,omitempty"`
@@ -36,8 +39,16 @@ type ApplicationService struct {
 type ServiceComponentResp struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
-	Provider string         `json:"provider"`
+	Provider ProviderInfo   `json:"provider"`
+	Status   string         `json:"status,omitempty"`
+	Message  string         `json:"message,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// ProviderInfo represents provider information with ID and name.
+type ProviderInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // PaginationMetadata represents pagination information in the response.
@@ -59,8 +70,8 @@ type ApplicationResourcesResponse struct {
 
 // ApplicationCPUInfo represents CPU allocation and usage for an application.
 type ApplicationCPUInfo struct {
-	TotalCores float64 `json:"total_cores"` // Total allocated CPU cores
-	UsedCores  float64 `json:"used_cores"`  // Actually used CPU cores
+	Total float64 `json:"total_cpu"` // Total allocated CPUs
+	Used  float64 `json:"used_cpu"`  // Actually used CPUs
 }
 
 // ApplicationMemInfo represents memory allocation and usage for an application.

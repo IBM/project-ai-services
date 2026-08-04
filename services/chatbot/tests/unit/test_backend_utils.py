@@ -18,32 +18,34 @@ class TestSearchOnly:
         mock_settings.chatbot.similarity_service_url = similarity_url
         monkeypatch.setattr("chatbot.backend_utils.settings", mock_settings)
 
+    def _mock_session(self, monkeypatch, mock_response):
+        """Patch get_similarity_session to return a mock session with the given response."""
+        from chatbot import backend_utils
+        mock_post = Mock(return_value=mock_response)
+        mock_session = Mock()
+        mock_session.post = mock_post
+        monkeypatch.setattr("chatbot.backend_utils.get_similarity_session", lambda: mock_session)
+        return mock_post
+
     def test_delegates_to_similarity_service_api_with_correct_params(self, monkeypatch):
         """search_only must call similarity service API with correct parameters."""
         from chatbot import backend_utils
 
         self._patch_settings(monkeypatch, threshold=0.0, search_mode="hybrid", rerank=True)
 
-        # Mock the requests.post call
         mock_response = Mock()
         mock_response.json.return_value = {
             "score_type": "relevance",
             "results": []
         }
         mock_response.raise_for_status = Mock()
-        mock_post = Mock(return_value=mock_response)
-        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+        mock_response.headers = {}
+        mock_post = self._mock_session(monkeypatch, mock_response)
 
         backend_utils.search_only(
             question="q",
-            emb_model="m",
-            emb_endpoint="http://emb",
-            max_tokens=512,
-            reranker_model="r",
-            reranker_endpoint="http://rerank",
             top_k=10,
             top_r=5,
-            vectorstore=Mock(),
         )
 
         # Verify the API was called with correct parameters
@@ -56,8 +58,8 @@ class TestSearchOnly:
         assert json_payload["top_k"] == 10
         assert json_payload["rerank"] is True
 
-    def test_returns_perf_stat_dict_with_api_timing(self, monkeypatch):
-        """search_only must return perf_stat_dict with API call timing."""
+    def test_returns_perf_stat_dict_with_timing_from_headers(self, monkeypatch):
+        """search_only must return perf_stat_dict with timing from similarity service headers."""
         from chatbot import backend_utils
 
         self._patch_settings(monkeypatch, threshold=0.0)
@@ -66,17 +68,22 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": [doc]}
         mock_response.raise_for_status = Mock()
-        mock_post = Mock(return_value=mock_response)
-        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+        # Mock response headers with timing information
+        mock_response.headers = {
+            "X-Retrieve-Time": "0.123",
+            "X-Rerank-Time": "0.045"
+        }
+        self._mock_session(monkeypatch, mock_response)
 
         _, perf_stat_dict = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=5, vectorstore=Mock(),
+            question="q", top_k=10, top_r=5,
         )
 
-        assert "similarity_api_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_api_time"] >= 0
+        # Verify timing metrics from headers are included
+        assert "retrieve_time" in perf_stat_dict
+        assert perf_stat_dict["retrieve_time"] == 0.123
+        assert "rerank_time" in perf_stat_dict
+        assert perf_stat_dict["rerank_time"] == 0.045
 
     def test_applies_top_r_cutoff(self, monkeypatch):
         """search_only must truncate to top_r documents after retrieval."""
@@ -89,13 +96,11 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
-        mock_post = Mock(return_value=mock_response)
-        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+        mock_response.headers = {}
+        self._mock_session(monkeypatch, mock_response)
 
         filtered_docs, _ = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=3, vectorstore=Mock(),
+            question="q", top_k=10, top_r=3,
         )
 
         assert len(filtered_docs) == 3
@@ -114,13 +119,11 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
-        mock_post = Mock(return_value=mock_response)
-        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+        mock_response.headers = {}
+        self._mock_session(monkeypatch, mock_response)
 
         filtered_docs, _ = backend_utils.search_only(
-            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
-            reranker_model="r", reranker_endpoint="http://rerank",
-            top_k=10, top_r=10, vectorstore=Mock(),
+            question="q", top_k=10, top_r=10,
         )
 
         assert len(filtered_docs) == 1

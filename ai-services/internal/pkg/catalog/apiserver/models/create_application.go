@@ -21,7 +21,6 @@ type Service struct {
 type Component struct {
 	ComponentType string         `json:"component_type" binding:"required"`
 	ProviderID    string         `json:"provider_id" binding:"required"`
-	InstanceID    string         `json:"instance_id"`
 	Version       string         `json:"version" binding:"required"`
 	Params        map[string]any `json:"params"`
 }

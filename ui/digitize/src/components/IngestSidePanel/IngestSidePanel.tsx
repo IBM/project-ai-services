@@ -251,7 +251,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
           <p className={styles.fileUploaderDescription}>
             Supported file types are .pdf and .docx.
             <br /><br />
-            Supported languages are English and German.
+            Supported languages are English, German, French and Italian.
             <br /><br />
             Supported contents are text and tables.
           </p>

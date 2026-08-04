@@ -3,15 +3,15 @@
 package client
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/httpclient"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 // Client is an authenticated HTTP client for the catalog API server.
 type Client struct {
 	serverURL  string
-	httpClient *httpclient.HTTPClient
+	httpClient *resty.Client
 	creds      config.Credentials
 }
 
@@ -45,15 +45,27 @@ type UserInfo struct {
 // New creates a Client using credentials loaded from the local config file.
 // It refreshes the access token only when it is about to expire (within
 // tokenRefreshSkew of its expiry time); otherwise the stored token is reused.
+// The insecure flag from stored credentials determines whether TLS verification is performed.
 func New() (*Client, error) {
 	creds, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
 
+	restyClient := resty.New().
+		SetBaseURL(creds.ServerURL).
+		SetAuthToken(creds.AccessToken)
+
+	// Configure TLS settings based on the insecure flag from credentials
+	if creds.Insecure {
+		restyClient.SetTLSClientConfig(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+	}
+
 	c := &Client{
 		serverURL:  creds.ServerURL,
-		httpClient: httpclient.New(creds.ServerURL),
+		httpClient: restyClient,
 		creds:      creds,
 	}
 
@@ -91,10 +103,20 @@ func (c *Client) accessTokenNeedsRefresh() bool {
 
 // NewWithLogin creates a Client by performing a fresh login with username/password.
 // The resulting tokens are saved to the local config file.
-func NewWithLogin(serverURL, username, password string) (*Client, error) {
+// If insecure is true, TLS certificate verification will be skipped.
+func NewWithLogin(serverURL, username, password string, insecure bool) (*Client, error) {
+	restyClient := resty.New().SetBaseURL(serverURL)
+
+	// Configure TLS settings based on the insecure flag
+	if insecure {
+		restyClient.SetTLSClientConfig(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+	}
+
 	c := &Client{
 		serverURL:  serverURL,
-		httpClient: httpclient.New(serverURL),
+		httpClient: restyClient,
 	}
 
 	resp, err := c.Login(username, password)
@@ -106,7 +128,11 @@ func NewWithLogin(serverURL, username, password string) (*Client, error) {
 		ServerURL:    serverURL,
 		AccessToken:  resp.AccessToken,
 		RefreshToken: resp.RefreshToken,
+		Insecure:     insecure,
 	}
+
+	// Update the auth token in the resty client
+	c.httpClient.SetAuthToken(resp.AccessToken)
 
 	// Best-effort: record the expiry so future calls can skip unnecessary refreshes.
 	if exp, err := jwtExpiry(resp.AccessToken); err == nil {
@@ -123,14 +149,16 @@ func NewWithLogin(serverURL, username, password string) (*Client, error) {
 // Login calls POST /api/v1/auth/login and returns the token pair.
 func (c *Client) Login(username, password string) (LoginResponse, error) {
 	var resp LoginResponse
-	err := c.httpClient.Do(httpclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/api/v1/auth/login",
-		Payload:  map[string]string{"username": username, "password": password},
-		Out:      &resp,
-	})
+	httpResp, err := c.httpClient.R().
+		SetBody(map[string]string{"username": username, "password": password}).
+		SetResult(&resp).
+		Post("/api/v1/auth/login")
 	if err != nil {
-		return LoginResponse{}, err
+		return LoginResponse{}, fmt.Errorf("login request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return LoginResponse{}, fmt.Errorf("login failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
 	}
 
 	return resp, nil
@@ -140,18 +168,23 @@ func (c *Client) Login(username, password string) (LoginResponse, error) {
 // and updates the in-memory credentials (and persists them to disk).
 func (c *Client) RefreshToken() error {
 	var resp LoginResponse
-	err := c.httpClient.Do(httpclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/api/v1/auth/refresh",
-		Payload:  map[string]string{"refresh_token": c.creds.RefreshToken},
-		Out:      &resp,
-	})
+	httpResp, err := c.httpClient.R().
+		SetBody(map[string]string{"refresh_token": c.creds.RefreshToken}).
+		SetResult(&resp).
+		Post("/api/v1/auth/refresh")
 	if err != nil {
-		return err
+		return fmt.Errorf("refresh token request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return fmt.Errorf("refresh token failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
 	}
 
 	c.creds.AccessToken = resp.AccessToken
 	c.creds.RefreshToken = resp.RefreshToken
+
+	// Update the auth token in the resty client
+	c.httpClient.SetAuthToken(resp.AccessToken)
 
 	// Record the new expiry so subsequent calls can avoid unnecessary refreshes.
 	if exp, err := jwtExpiry(resp.AccessToken); err == nil {
@@ -166,14 +199,15 @@ func (c *Client) RefreshToken() error {
 // Me calls GET /api/v1/auth/me and returns the current user info.
 func (c *Client) Me() (UserInfo, error) {
 	var info UserInfo
-	err := c.httpClient.Do(httpclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/api/v1/auth/me",
-		Headers:  map[string]string{"Authorization": "Bearer " + c.creds.AccessToken},
-		Out:      &info,
-	})
+	httpResp, err := c.httpClient.R().
+		SetResult(&info).
+		Get("/api/v1/auth/me")
 	if err != nil {
-		return UserInfo{}, err
+		return UserInfo{}, fmt.Errorf("get user info request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return UserInfo{}, fmt.Errorf("get user info failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
 	}
 
 	return info, nil
@@ -183,14 +217,9 @@ func (c *Client) Me() (UserInfo, error) {
 // then removes the local credentials file.
 func (c *Client) Logout() error {
 	// Best-effort server-side logout; ignore errors (token may already be expired).
-	_ = c.httpClient.Do(httpclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/api/v1/auth/logout",
-		Headers: map[string]string{
-			"Authorization":   "Bearer " + c.creds.AccessToken,
-			"X-Refresh-Token": c.creds.RefreshToken,
-		},
-	})
+	_, _ = c.httpClient.R().
+		SetHeader("X-Refresh-Token", c.creds.RefreshToken).
+		Post("/api/v1/auth/logout")
 
 	return config.Delete()
 }
@@ -203,6 +232,11 @@ func (c *Client) AccessToken() string {
 // ServerURL returns the server URL the client is connected to.
 func (c *Client) ServerURL() string {
 	return c.serverURL
+}
+
+// HTTPClient returns the underlying resty client for making custom requests.
+func (c *Client) HTTPClient() *resty.Client {
+	return c.httpClient
 }
 
 // ---------------------------------------------------------------------------

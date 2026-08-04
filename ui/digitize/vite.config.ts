@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
   return {
+    build: {
+      cssMinify: 'esbuild',
+    },
     plugins: [react()],
     resolve: {
       alias: {
@@ -20,13 +23,6 @@ export default defineConfig(({ mode }) => {
         '@utils': path.resolve(__dirname, './src/utils'),
         '@constants': path.resolve(__dirname, './src/constants'),
       },
-    },
-    css: {
-      preprocessorOptions: {
-        scss: {
-          api: 'modern-compiler' // or "modern"
-        }
-      }
     },
     server: {
       port: parseInt(env.VITE_PORT) || 4001,

@@ -13,10 +13,10 @@ import (
 )
 
 var (
-	skipLogs          bool
-	startPodNames     []string
-	autoYes           bool
-	experimentalStart bool
+	skipLogs      bool
+	startPodNames []string
+	autoYes       bool
+	legacyStart   bool
 )
 
 var startCmd = &cobra.Command{
@@ -24,13 +24,33 @@ var startCmd = &cobra.Command{
 	Short: "Start an application",
 	Long: `Starts an application by name.
 
-Arguments
-  [name]: Application name (required)
+Arguments:
+  [name] : Application name (required)
 
-Note: Logs are streamed only when a single pod is specified, and only after the pod has started.
-
-Note: Supported for podman runtime only.
+Note:
+  - Logs are streamed only when a single pod is specified, and only after the pod has started.
+  - Supported for podman runtime only.
 `,
+	Example: `  # Start an application
+  ai-services application start rag --runtime podman
+
+  # Start an application and skip logs
+  ai-services application start rag --skip-logs --runtime podman
+
+  # Start specific pods in an application
+  ai-services application start rag --pod pod1 --pod pod2 --runtime podman
+
+  # Start specific pods using comma-separated list
+  ai-services application start rag --pod pod1,pod2 --runtime podman
+
+  # Start a single pod and view logs
+  ai-services application start rag --pod mypod --runtime podman
+
+  # Start with auto-accept confirmation prompts
+  ai-services application start rag --yes --runtime podman
+
+  # Start using legacy implementation
+  ai-services application start rag --legacy --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
@@ -49,9 +69,8 @@ Note: Supported for podman runtime only.
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// When experimentalStart is true and runtime is podman, validate application name using catalog API
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalStart && rt == types.RuntimeTypePodman {
+		// For podman runtime with default mode, validate application name using catalog API
+		if !legacyStart && rt == types.RuntimeTypePodman {
 			appClient, err := catalogClient.NewApplicationClient()
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
@@ -70,11 +89,11 @@ Note: Supported for podman runtime only.
 
 		// start application with options
 		opts := appTypes.StartOptions{
-			Name:         applicationName,
-			PodNames:     startPodNames,
-			AutoYes:      autoYes,
-			SkipLogs:     skipLogs,
-			Experimental: experimentalStart,
+			Name:     applicationName,
+			PodNames: startPodNames,
+			AutoYes:  autoYes,
+			SkipLogs: skipLogs,
+			Legacy:   legacyStart,
 		}
 
 		return app.Start(opts)
@@ -82,7 +101,7 @@ Note: Supported for podman runtime only.
 }
 
 func init() {
-	startCmd.Flags().BoolVar(&experimentalStart, "experimental", false, "Include experimental application start")
+	startCmd.Flags().BoolVar(&legacyStart, "legacy", false, "Use legacy application start implementation")
 	startCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to start (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 	startCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")

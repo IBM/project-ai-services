@@ -13,30 +13,35 @@ import styles from "./DigitalAssistants.module.scss";
 
 // Status configuration
 const STATUS_CONFIG = {
+  Initializing: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
+  Downloading: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
+  Deploying: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
   Running: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: styles.statusTagSuccess,
   },
+  Deleting: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
   Error: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: styles.statusTagError,
-  },
-  Stopped: {
-    tagType: "gray" as const,
-    icon: PauseOutline,
-    className: styles.statusTagSecondary,
-  },
-  "Deploying...": {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  "Deleting...": {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
   },
 } as const;
 
@@ -51,31 +56,69 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
+  rowData?: { status?: string; type?: string };
 }
 
-export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={styles.deleteMenuItem}>
-          <span>Delete</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-      onClick={() => {
+export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  const canDelete =
+    rowData?.status === "Running" || rowData?.status === "Error";
+
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={styles.deleteMenuItem}>
+            <span>Delete</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={!canDelete}
+        onClick={() => {
+          dispatch({
+            type: ACTION_TYPES.OPEN_DELETE_DIALOG,
+            payload: rowId,
+          });
+        }}
+      />
+    </OverflowMenu>
+  );
+};
+
+export const NameCell = ({
+  value,
+  rowId,
+  dispatch,
+  rowData,
+}: CellRendererProps) => {
+  const status = rowData?.status?.toLowerCase() || "";
+  const isRunning = status === "running";
+
+  if (!isRunning) {
+    return <span className={styles.nameText}>{String(value)}</span>;
+  }
+
+  return (
+    <Link
+      href="#"
+      onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+        e.preventDefault();
         dispatch({
-          type: ACTION_TYPES.OPEN_DELETE_DIALOG,
-          payload: rowId,
+          type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+          payload: {
+            id: rowId,
+            name: String(value),
+            status: rowData?.status || "Unknown",
+            type: rowData?.type || "Digital assistant",
+            resources: [],
+          },
         });
       }}
-    />
-  </OverflowMenu>
-);
-
-export const NameCell = ({ value }: CellRendererProps) => (
-  <Link href="#">{String(value)}</Link>
-);
+    >
+      {String(value)}
+    </Link>
+  );
+};
 
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);
@@ -95,23 +138,46 @@ export const StatusCell = ({ value }: CellRendererProps) => {
   );
 };
 
-export const MessageCell = ({ value }: CellRendererProps) => {
+export const MessageCell = ({ value, rowData }: CellRendererProps) => {
   const message = String(value || "");
+  const status = rowData?.status || "";
 
-  if (!message) {
-    return <span>{message}</span>;
+  // Hide message if status is Running or if message is empty
+  if (status === "Running" || !message) {
+    return <span></span>;
   }
 
-  const isError = message.toLowerCase().includes("error");
-  const MessageIcon = isError ? ErrorFilled : InProgress;
+  let MessageIcon;
+  let iconClass;
+
+  // First check row status for accurate icon selection
+  if (status === "Error") {
+    MessageIcon = ErrorFilled;
+    iconClass = styles.messageIconError;
+  } else {
+    // Fall back to checking message content for other statuses
+    const messageLower = message.toLowerCase();
+    const isError =
+      messageLower.includes("error") || messageLower.includes("failed");
+    const isSuccess =
+      messageLower.includes("success") || messageLower.includes("completed");
+
+    if (isError) {
+      MessageIcon = ErrorFilled;
+      iconClass = styles.messageIconError;
+    } else if (isSuccess) {
+      MessageIcon = CheckmarkFilled;
+      iconClass = styles.messageIconSuccess;
+    } else {
+      MessageIcon = InProgress;
+      iconClass = styles.messageIconInfo;
+    }
+  }
 
   return (
     <div className={styles.messageWithIcon}>
-      <MessageIcon
-        size={16}
-        className={isError ? styles.messageIconError : styles.messageIconInfo}
-      />
-      <span>{message}</span>
+      <MessageIcon size={16} className={iconClass} />
+      <span className={styles.messageText}>{message}</span>
     </div>
   );
 };

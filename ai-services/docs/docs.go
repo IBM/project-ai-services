@@ -907,7 +907,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries without endpoints and pod templates.",
+                "description": "Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries including standalone flag without endpoints and pod templates.",
                 "produces": [
                     "application/json"
                 ],
@@ -1116,9 +1116,6 @@ const docTemplate = `{
                 "component_type": {
                     "type": "string"
                 },
-                "instance_id": {
-                    "type": "string"
-                },
                 "params": {
                     "type": "object",
                     "additionalProperties": {}
@@ -1211,6 +1208,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
             "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -1240,18 +1240,21 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo": {
             "type": "object",
             "properties": {
-                "total_cores": {
-                    "description": "Total allocated CPU cores",
+                "total_cpu": {
+                    "description": "Total allocated CPUs",
                     "type": "number"
                 },
-                "used_cores": {
-                    "description": "Actually used CPU cores",
+                "used_cpu": {
+                    "description": "Actually used CPUs",
                     "type": "number"
                 }
             }
@@ -1329,6 +1332,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
             "type": "object",
             "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
                 "components": {
                     "type": "array",
                     "items": {
@@ -1621,6 +1627,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources": {
             "type": "object",
             "properties": {
@@ -1687,11 +1704,17 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "message": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
                 },
                 "provider": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
+                },
+                "status": {
                     "type": "string"
                 },
                 "type": {
@@ -1733,6 +1756,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "standalone": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1775,10 +1801,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
             "type": "object",
             "properties": {
-                "available_cores": {
+                "available_cpu": {
                     "type": "number"
                 },
-                "total_cores": {
+                "total_cpu": {
                     "type": "integer"
                 }
             }

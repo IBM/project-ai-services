@@ -86,3 +86,10 @@
   align-items: center;
   margin-top: auto;
 }
+
+.tags {
+  display: flex;
+  gap: spacing.$spacing-03;
+  align-items: center;
+  flex-wrap: wrap;
+}

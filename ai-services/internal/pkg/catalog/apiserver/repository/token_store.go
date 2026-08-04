@@ -14,8 +14,8 @@ import (
 // TokenBlacklist defines the interface for managing revoked tokens. It allows adding tokens to the blacklist
 // with their expiry times and checking if a token is currently blacklisted.
 type TokenBlacklist interface {
-	Add(token string, tokenType string, exp time.Time)
-	Contains(token string, tokenType string) bool
+	Add(ctx context.Context, token string, tokenType string, exp time.Time)
+	Contains(ctx context.Context, token string, tokenType string) bool
 	Stop()
 }
 
@@ -47,23 +47,21 @@ func NewDBTokenBlacklist(repo repository.TokenBlacklistRepository) *DBTokenBlack
 
 // Add adds a token to the blacklist with its expiry time.
 // The token is hashed using SHA-256 before storage for security.
-func (b *DBTokenBlacklist) Add(token string, tokenType string, exp time.Time) {
-	ctx := context.Background()
+func (b *DBTokenBlacklist) Add(ctx context.Context, token string, tokenType string, exp time.Time) {
 	tokenHash := HashToken(token)
 
 	if err := b.repo.Add(ctx, tokenHash, models.TokenType(tokenType), exp); err != nil {
-		logger.Errorf("failed to add token to blacklist: %v", err)
+		logger.ErrorfCtx(ctx, "failed to add token to blacklist: %v", err)
 	}
 }
 
 // Contains checks if the provided token is in the blacklist and has not yet expired.
-func (b *DBTokenBlacklist) Contains(token string, tokenType string) bool {
-	ctx := context.Background()
+func (b *DBTokenBlacklist) Contains(ctx context.Context, token string, tokenType string) bool {
 	tokenHash := HashToken(token)
 
 	exists, err := b.repo.Contains(ctx, tokenHash, models.TokenType(tokenType))
 	if err != nil {
-		logger.Errorf("failed to check token blacklist: %v", err)
+		logger.ErrorfCtx(ctx, "failed to check token blacklist: %v", err)
 
 		return false
 	}
@@ -88,7 +86,7 @@ func (b *DBTokenBlacklist) gc() {
 		case <-ticker.C:
 			ctx := context.Background()
 			if err := b.repo.CleanupExpired(ctx); err != nil {
-				logger.Errorf("failed to cleanup expired tokens: %v", err)
+				logger.ErrorfCtx(ctx, "failed to cleanup expired tokens: %v", err)
 			}
 		}
 	}

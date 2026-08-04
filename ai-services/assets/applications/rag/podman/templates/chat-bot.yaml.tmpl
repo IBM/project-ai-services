@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
+spec:
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"

@@ -24,16 +24,16 @@ class DigitizeConfig(BaseSettings):
         description="Number of workers for document processing",
     )
 
-    heavy_pdf_convert_worker_size: int = Field(
+    heavy_doc_convert_worker_size: int = Field(
         default=2,
         ge=1,
-        description="Number of workers for heavy PDF conversion",
+        description="Number of workers for heavy document conversion",
     )
 
-    heavy_pdf_page_threshold: int = Field(
+    heavy_doc_page_threshold: int = Field(
         default=500,
         ge=1,
-        description="Page count threshold for heavy PDF classification",
+        description="Page count threshold for heavy document classification",
     )
 
     # API concurrency limits
@@ -63,10 +63,10 @@ class DigitizeConfig(BaseSettings):
     )
 
     # Document conversion parameters
-    pdf_chunk_size: int = Field(
+    doc_chunk_size: int = Field(
         default=100,
         ge=1,
-        description="Pages per chunk for large PDF processing",
+        description="Pages per chunk for large document processing",
     )
 
     # Batch processing

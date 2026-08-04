@@ -1,17 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "backend": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
+        "editSystemPrompt": {
+          "type": "boolean",
+          "title": "Edit system prompt for queries",
+          "description": "Enable editing of the system prompt used for conversational queries",
+          "default": false,
+          "x-ui-only": true,
+          "x-ui-controls": "systemPrompt"
+        },
         "systemPrompt": {
           "type": "string",
-          "title": "System Prompt",
-          "description": "Custom initial system prompt for conversational RAG. Leave empty to use default.",
-          "default": "",
+          "title": "Prompt text",
+          "description": "Custom initial system prompt for conversational RAG",
+          "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
           "minLength": 10,
-          "maxLength": 5000
+          "maxLength": 5000,
+          "x-ui-controlled-by": "editSystemPrompt"
         }
       }
     }

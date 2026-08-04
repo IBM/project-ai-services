@@ -7,7 +7,11 @@ on:
       - .github/workflows/go.yaml
     branches:
       - main
+      - 'release-*'
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -15,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -46,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Go
         uses: actions/setup-go@v6

@@ -30,8 +30,18 @@ const (
 	CatalogSecretSkipLabel = "ai-services.io/secret-skip-cleanup"
 	// CatalogVolumeLabel represents the catalog volume name associated with Catalog Pod.
 	CatalogVolumeLabel = "ai-services.io/volume"
+	// CatalogVolumeSkipLabel represents if catalog volume associated with pod should be skipped while deletion.
+	CatalogVolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
 	// PodmanAuthSecret represents podman auth secret name.
 	PodmanAuthSecret = "podman-auth-secret"
+	// CatalogSecretName represents the catalog secret name.
+	CatalogSecretName = "catalog-secret"
+	// CatalogDBSecretName represents the catalog database secret name used in OpenShift deployments.
+	CatalogDBSecretName = "catalog-db-secret"
+	// CatalogPodmanAuthSecretName represent the podman auth secret name.
+	CatalogPodmanAuthSecretName = "podman-auth-secret"
+	// CatalogDeploymentName represent the catalog deployment name.
+	CatalogDeploymentName = "catalog-backend"
 )
 
 // Pagination constants.

@@ -21,6 +21,19 @@ const (
 	FilePerm = 0644
 )
 
+// Ulimit configuration constants.
+const (
+	MinNofileLimit        = 134217728
+	NofileFieldCount      = 4
+	MemlockConfFile       = "/etc/security/limits.d/memlock.conf"
+	NofileConfFile        = "/etc/security/limits.conf"
+	MemlockConfContent    = "@sentient - memlock unlimited\n"
+	NofileConfTemplate    = "@sentient hard nofile %d\n"
+	SentientGroupName     = "sentient"
+	ExpectedMemlockConfig = "@sentient - memlock unlimited"
+	ExpectedNofileConfig  = "@sentient hard nofile 134217728"
+)
+
 const (
 	PercentageDivisor = 100.0
 )

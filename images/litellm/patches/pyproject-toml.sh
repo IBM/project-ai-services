@@ -48,7 +48,7 @@ echo "=================================================="
 # Define the array of packages to target
 PACKAGES=(
     "litellm-enterprise=="
-    "pyroscope-io=="
+    "pyroscope-io>="
 )
 
 # Loop through each package and apply the inline sed modification

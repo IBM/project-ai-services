@@ -1,26 +1,36 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
+	"github.com/spf13/pflag"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
+	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// Variables for flags placeholder.
 var (
+	// common flags.
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	// Reset password flag for catalog configure command.
+	resetPasswordFlag bool
+
+	// podman flags.
 	// Base directory flag for catalog configure command.
 	baseDir string
 	// SSL certificate flags for HTTPS configuration.
@@ -29,136 +39,170 @@ var (
 	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
+	// Reset podman auth secret for catalog configure command.
+	resetPodmanAuthFlag bool
+	// Reset certificate flag for catalog configure command.
+	resetCertificateFlag bool
+
+	// openShift flags.
+	timeout time.Duration
 )
 
-const defaultHTTPSPort = 443
+const (
+	defaultHTTPSPort = 443
+)
 
-// NewConfigureCmd creates a new configure command for the catalog service.
-func NewConfigureCmd() *cobra.Command {
-	var (
-		rawArgParams []string
-		argParams    map[string]string
-	)
+var configureCmd = &cobra.Command{
+	Use:   "configure",
+	Short: "Configure the catalog service",
+	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
 
-	cmd := &cobra.Command{
-		Use:   "configure",
-		Short: "Configure the catalog service with initial configuration",
-		Long: `Deploys the catalog service with the provided configuration.
+This command performs the following operations:
+  - Deploys the catalog services
+  - Creates an admin user (if not already present)
+  - Initializes directory structure for applications and models
 
-Examples:
-	 # Configure catalog service for podman
-	 ai-services catalog configure --runtime podman
+Additional configuration options include base directory customization, domain name setup,
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
+	Example: `  # Configure catalog service for podman
+  ai-services catalog configure --runtime podman
 
-	 # Configure with custom UI port
-	 ai-services catalog configure --runtime podman --params ui.port=8081`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
+  # Configure with custom HTTPS port
+  ai-services catalog configure --runtime podman --https-port 8443`,
+	Args: cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 
-			var err error
-			argParams, err = validateConfigureFlags(rawArgParams)
-
+		if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 			return err
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Prompt for admin password
-			return runConfigure(argParams)
-		},
-	}
+		}
 
-	configureConfigureFlags(cmd, &rawArgParams)
+		// Reject runtime-scoped flags early.
+		if err := buildFlagValidator().Validate(cmd); err != nil {
+			return err
+		}
 
-	return cmd
+		if resetPasswordFlag {
+			return validateResetFlag(cmd, "reset-password")
+		} else if resetPodmanAuthFlag {
+			return validateResetFlag(cmd, "reset-podman-auth")
+		} else if resetCertificateFlag {
+			return validateResetCertificateFlags(cmd, "reset-certificate")
+		}
+
+		return validateConfigureFlags()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if resetPasswordFlag {
+			return runResetPassword()
+		} else if resetPodmanAuthFlag {
+			return runResetPodmanAuth()
+		} else if resetCertificateFlag {
+			return runResetCertificate()
+		}
+
+		return runConfigure()
+	},
+}
+
+// NewConfigureCmd returns the configure command for the catalog service.
+func NewConfigureCmd() *cobra.Command {
+	return configureCmd
+}
+
+func init() {
+	initConfigureCommonFlags()
+	initConfigurePodmanFlags()
+	initConfigureOpenShiftFlags()
 }
 
 // runConfigure executes the catalog configuration process.
-func runConfigure(argParams map[string]string) error {
-	// Prompt for admin password
-	adminPassword, err := promptForPassword()
-	if err != nil {
-		return fmt.Errorf("failed to read admin password: %w", err)
-	}
-
-	var aiServicesDir string
-
-	// Use default base directory if not specified, otherwise validate
-	if baseDir == "" {
-		aiServicesDir = constants.DefaultBaseDir
-	} else {
-		aiServicesDir, err = utils.ValidateBaseDir(baseDir)
+func runConfigure() error {
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	ctx := context.Background()
+	// Deploy catalog service based on runtime
+	switch rt {
+	case types.RuntimeTypePodman:
+		// Resolve base directory: fall back to default when not provided.
+		aiServicesDir, err := resolveBaseDir(baseDir)
 		if err != nil {
-			return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+			return err
 		}
-	}
 
-	logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+		// Create the models directory under the base dir.
+		modelPath := filepath.Join(aiServicesDir, "models")
+		if err := utils.CreateDir(modelPath); err != nil {
+			return fmt.Errorf("failed to create model directory: %w", err)
+		}
 
-	// create model directory
-	modelPath := filepath.Join(aiServicesDir, "models")
-	err = utils.CreateDir(modelPath)
-	if err != nil {
-		return fmt.Errorf("failed to create model directory: %w", err)
-	}
+		opts := catalogUtils.PodmanConfigureOptions{
+			BaseDir:     aiServicesDir,
+			DomainName:  domainName,
+			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+			HttpsPort:   httpsPort,
+		}
 
-	// Sanitize SSL certificate paths to prevent path traversal attacks
-	// Only clean if paths are provided (filepath.Clean("") returns ".")
-	cleanCertPath := ""
-	cleanKeyPath := ""
-	if sslCertPath != "" {
-		cleanCertPath = filepath.Clean(sslCertPath)
-	}
-	if sslKeyPath != "" {
-		cleanKeyPath = filepath.Clean(sslKeyPath)
-	}
+		return catalogPodman.DeployCatalog(ctx, opts)
 
-	return configure.Run(configure.ConfigureOptions{
-		AdminPassword: adminPassword,
-		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
-		BaseDir:       aiServicesDir,
-		ArgParams:     argParams,
-		DomainName:    domainName,
-		SSLCertPath:   cleanCertPath,
-		SSLKeyPath:    cleanKeyPath,
-		HttpsPort:     httpsPort,
-	})
+	case types.RuntimeTypeOpenShift:
+		opts := catalogUtils.OpenShiftConfigureOptions{
+			Namespace: catalogConstants.CatalogAppName,
+			Timeout:   timeout,
+		}
+
+		return catalogOpenShift.DeployCatalog(ctx, opts)
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", rt)
+	}
 }
 
-// validateConfigureFlags validates the configure command flags and initializes runtime.
-func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
-	// Initialize runtime factory based on flag
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return nil, fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+// resolveBaseDir returns the validated base directory, falling back to the default.
+func resolveBaseDir(baseDir string) (string, error) {
+	if baseDir == "" {
+		return constants.DefaultBaseDir, nil
 	}
 
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-	// Check if podman runtime is being used on unsupported platform
-	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-		return nil, err
+	resolved, err := utils.ValidateBaseDir(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
 	}
 
+	return resolved, nil
+}
+
+func validateResetFlag(cmd *cobra.Command, flagName string) error {
+	// Check that no configuration parameters are provided with reset flag
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag {
+			// Skip reset flag and runtime parameter
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
+	}
+
+	return nil
+}
+
+// validateConfigureFlags validates the configure command flags.
+func validateConfigureFlags() error {
 	// Validate SSL flags
-	if err := validateSSLFlags(); err != nil {
-		return nil, err
-	}
+	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		if err := validateSSLFlags(); err != nil {
+			return err
+		}
 
-	// Validate HTTPS port range
-	if httpsPort < 1 || httpsPort > 65535 {
-		return nil, fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
-	}
-
-	// Parse params if provided
-	var argParams map[string]string
-	if len(rawArgParams) > 0 {
-		var err error
-		argParams, err = utils.ParseKeyValues(rawArgParams)
-		if err != nil {
-			return nil, fmt.Errorf("invalid params format: %w", err)
+		// Validate HTTPS port range
+		if httpsPort < 1 || httpsPort > 65535 {
+			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 		}
 	}
 
-	return argParams, nil
+	return nil
 }
 
 // validateSSLFlags validates SSL certificate and key flags.
@@ -214,102 +258,180 @@ func validateSSLCertificates() error {
 	return nil
 }
 
-// configureConfigureFlags configures the flags for the configure command.
-func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
-	// Add runtime flag as required
-	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired("runtime")
+func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
+	// Require SSL certificate flags with reset-certificate
+	if sslCertPath == "" || sslKeyPath == "" {
+		return fmt.Errorf("--ssl-cert and --ssl-key are required when using --reset-certificate")
+	}
 
-	// Add basedir flag
-	cmd.Flags().StringVar(
+	// Validate SSL certificate flags
+	if err := validateSSLFlags(); err != nil {
+		return err
+	}
+
+	// Check that no other configuration parameters are provided with reset-certificate flag
+	// Allow ssl-cert and ssl-key since they are required for this operation
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag ||
+			f.Name == "ssl-cert" || f.Name == "ssl-key" {
+			// Skip reset flag, runtime parameter, and required SSL flags
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
+	}
+
+	return nil
+}
+
+func runResetCertificate() error {
+	// Call ResetCatalogCertificate with certificate paths
+	return catalogPodman.ResetCatalogCertificate(catalogUtils.SanitizeFilePath(sslCertPath), catalogUtils.SanitizeFilePath(sslKeyPath))
+}
+
+func initConfigureCommonFlags() {
+	common.ConfigureRuntimeFlag(configureCmd, &runtimeType)
+
+	configureCmd.Flags().BoolVar(
+		&resetPasswordFlag,
+		"reset-password",
+		false,
+		"Reset the password for the admin user",
+	)
+}
+
+func initConfigurePodmanFlags() {
+	initConfigurePodmanDeployFlags()
+	initConfigurePodmanResetFlags()
+}
+
+func initConfigurePodmanDeployFlags() {
+	configureCmd.Flags().StringVar(
 		&baseDir,
 		"basedir",
 		"",
-		"Base directory for AI services data (applications, models, cache).\n"+
+		"Base directory for AI services data (models, caddy).\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /custom/path\n",
 	)
 
-	// Add HTTPS port flag
-	cmd.Flags().IntVar(
+	configureCmd.Flags().IntVar(
 		&httpsPort,
 		"https-port",
 		defaultHTTPSPort,
-		"Custom HTTPS port to expose the service endpoints externally (podman runtime only).\n"+
+		"Custom HTTPS port to expose the service endpoints externally.\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n",
 	)
 
-	cmd.Flags().StringSliceVar(
-		rawArgParams,
-		"params",
-		[]string{},
-		"Inline parameters to configure the catalog service.\n\n"+
-			"Format:\n"+
-			"- Comma-separated key=value pairs\n"+
-			"- Example: --params ui.port=8081,backend.port=8080\n\n"+
-			"Available parameters:\n"+
-			"- ui.port: Port for the catalog UI (default: random available port)\n"+
-			"- backend.port: Port for the catalog backend API (default: random available port)\n",
-	)
-
-	// SSL/TLS certificate configuration flags
-	cmd.Flags().StringVar(
+	configureCmd.Flags().StringVar(
 		&domainName,
 		"domain-name",
 		"",
-		"Custom domain name for self-signed certificates (podman runtime only).\n"+
+		"Custom domain name for self-signed certificates.\n"+
 			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
 			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and the --domain flag is ignored.\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --domain-name example.com generates certs for *.example.com\n",
 	)
 
-	cmd.Flags().StringVar(
+	configureCmd.Flags().StringVar(
 		&sslCertPath,
 		"ssl-cert",
 		"",
 		"Path to user-provided SSL certificate (optional).\n"+
 			"Must be used together with --ssl-key.\n"+
 			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-cert /path/to/cert.pem\n",
 	)
 
-	cmd.Flags().StringVar(
+	configureCmd.Flags().StringVar(
 		&sslKeyPath,
 		"ssl-key",
 		"",
 		"Path to user-provided SSL private key (optional).\n"+
 			"Must be used together with --ssl-cert.\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
 	)
 }
 
-// promptForPassword prompts the user to enter a password securely.
-func promptForPassword() (string, error) {
-	fmt.Print("Enter admin password: ")
-	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println() // Print newline after password input
-	if err != nil {
-		return "", err
-	}
+func initConfigurePodmanResetFlags() {
+	configureCmd.Flags().BoolVar(
+		&resetPodmanAuthFlag,
+		"reset-podman-auth",
+		false,
+		"Reset podman authentication using the system's current auth.json.",
+	)
 
-	password := string(passwordBytes)
-	if password == "" {
-		return "", fmt.Errorf("password cannot be empty")
-	}
+	configureCmd.Flags().BoolVar(
+		&resetCertificateFlag,
+		"reset-certificate",
+		false,
+		"Reset the Caddy SSL certificates by loading new custom certificates.\n"+
+			"Requires --ssl-cert and --ssl-key flags to specify the new certificate files.\n"+
+			"This will reload the certificates in Caddy without restarting the pod.\n"+
+			"Note: Supported for podman runtime only.\n"+
+			"Example:\n"+
+			"  ai-services catalog configure --runtime podman --reset-certificate --ssl-cert /path/to/cert.pem --ssl-key /path/to/key.pem\n",
+	)
+}
 
-	// Prompt for confirmation
-	fmt.Print("Confirm admin password: ")
-	confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println() // Print newline after password input
-	if err != nil {
-		return "", err
-	}
+// buildFlagValidator registers every flag with its runtime scope.
+func buildFlagValidator() *flagvalidator.FlagValidator {
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	builder := flagvalidator.NewFlagValidatorBuilder(rt)
 
-	confirm := string(confirmBytes)
-	if password != confirm {
-		return "", fmt.Errorf("passwords do not match")
-	}
+	// Common flags, valid for every runtime.
+	builder.AddCommonFlag("reset-password", nil)
 
-	return password, nil
+	// Podman-only flags.
+	builder.
+		AddPodmanFlag("basedir", nil).
+		AddPodmanFlag("https-port", nil).
+		AddPodmanFlag("domain-name", nil).
+		AddPodmanFlag("ssl-cert", nil).
+		AddPodmanFlag("ssl-key", nil).
+		AddPodmanFlag("reset-podman-auth", nil).
+		AddPodmanFlag("reset-certificate", nil)
+
+	// OpenShift-only flags.
+	builder.AddOpenShiftFlag("timeout", nil)
+
+	return builder.Build()
+}
+
+func runResetPassword() error {
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	switch rt {
+	case types.RuntimeTypePodman:
+		return catalogPodman.ResetCatalogPassword()
+
+	case types.RuntimeTypeOpenShift:
+		return catalogOpenShift.ResetCatalogPassword()
+
+	default:
+		return fmt.Errorf("unsupported runtime: %s", rt)
+	}
+}
+
+func runResetPodmanAuth() error {
+	return catalogPodman.ResetPodmanAuth()
+}
+
+func initConfigureOpenShiftFlags() {
+	configureCmd.Flags().DurationVar(
+		&timeout,
+		"timeout",
+		0,
+		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
+			"Note: Supported for openshift runtime only.\n"+
+			"Example: --timeout 30m\n",
+	)
 }
 
 // Made with Bob

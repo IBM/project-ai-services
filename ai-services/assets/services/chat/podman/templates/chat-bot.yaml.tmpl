@@ -8,6 +8,11 @@ metadata:
     ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
+  restartPolicy: always
+  volumes:
+    - name: opensearch-secret
+      secret:
+        secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"
@@ -31,8 +36,6 @@ spec:
           value: "{{ .Values.backend.chatbot.numChunksPostReranker }}"
         - name: CHATBOT_RERANK
           value: "{{ .Values.backend.chatbot.rerank }}"
-        - name: CHATBOT_SYSTEM_PROMPT
-          value: "{{ .Values.backend.systemPrompt }}"
       ports:
         - containerPort: 3000
           protocol: TCP
@@ -47,18 +50,17 @@ spec:
     - name: backend-server
       image: "{{ .Values.backend.image }}"
       command:
-        - "/var/venv/bin/python"
-        - "-m"
-        - "uvicorn"
-        - "app:app"
-        - "--host"
-        - "0.0.0.0"
-        - "--port"
-        - "5000"
-        - "--loop"
-        - "uvloop"
-        - "--http"
-        - "httptools"
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
+          export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          exec /var/venv/bin/python -m uvicorn app:app \
+            --host 0.0.0.0 \
+            --port 5000 \
+            --loop uvloop \
+            --http httptools
       env:
         - name: EMB_ENDPOINT
           value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
@@ -82,16 +84,6 @@ spec:
           value: "RAG_DB"
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
-        - name: OPENSEARCH_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-              key: username
-        - name: OPENSEARCH_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL
@@ -104,6 +96,12 @@ spec:
           value: "{{ .Values.backend.chatbot.rerank }}"
         - name: CHATBOT_SIMILARITY_SERVICE_URL
           value: "http://similarity-api-{{ .InstanceSlug }}:7000"
+        - name: CHATBOT_SYSTEM_PROMPT
+          {{- if .Values.backend.systemPrompt }}
+          value: "{{ .Values.backend.systemPrompt }}"
+          {{- else }}
+          value: ""
+          {{ end }}
       ports:
         - containerPort: 5000
           protocol: TCP
@@ -120,3 +118,7 @@ spec:
           memory: "1Gi"
         limits:
           memory: "1Gi"
+      volumeMounts:
+        - mountPath: /etc/secret/opensearch-secret
+          name: opensearch-secret
+          readOnly: true

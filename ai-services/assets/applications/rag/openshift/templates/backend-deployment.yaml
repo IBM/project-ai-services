@@ -53,7 +53,7 @@ spec:
             - name: LLM_MAX_BATCH_SIZE
               value: {{ .Values.instruct.model.maxBatchSize | quote }}
             - name: RERANKER_ENDPOINT
-              value: http://reranker-predictor:8000
+              value: http://reranker-predictor:8080
             - name: RERANKER_MODEL
               value: {{ .Values.reranker.model.name | quote }}
             - name: OPENSEARCH_HOST

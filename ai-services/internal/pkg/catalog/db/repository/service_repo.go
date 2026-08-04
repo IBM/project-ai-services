@@ -84,13 +84,9 @@ func (r *serviceRepo) Insert(ctx context.Context, service *models.Service) error
 func (r *serviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM services WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	_, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -201,7 +197,7 @@ func (r *serviceRepo) Update(ctx context.Context, service *models.Service) error
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return pgx.ErrNoRows
+			return nil
 		}
 
 		return fmt.Errorf("failed to update service: %w", err)
@@ -218,13 +214,9 @@ func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status mod
 		WHERE id = $3
 	`
 
-	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	_, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
 	if err != nil {
 		return fmt.Errorf("failed to update service status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -248,13 +240,9 @@ func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoin
 		}
 	}
 
-	result, err := r.pool.Exec(ctx, query, endpointsJSON, id)
+	_, err = r.pool.Exec(ctx, query, endpointsJSON, id)
 	if err != nil {
 		return fmt.Errorf("failed to update service endpoints: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil

@@ -15,7 +15,15 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List container images for a given application template",
 	Long:  ``,
-	Args:  cobra.MaximumNArgs(0),
+	Example: `  # List images for Digital Assistant
+  ai-services application image list --template rag --runtime podman
+
+  # List images for a specific service
+  ai-services application image list --template chat --runtime podman
+
+  # List images using legacy implementation
+  ai-services application image list --template rag --legacy --runtime podman`,
+	Args: cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
@@ -25,7 +33,7 @@ var listCmd = &cobra.Command{
 }
 
 func list(templateName string) error {
-	if experimentalImages && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	if !legacyImage && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
 		return listCatalogImages(templateName)
 	}
 

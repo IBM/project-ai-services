@@ -8,36 +8,38 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 --report-unused-disable-directives",
+    "lint:fix": "eslint . --fix",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@carbon/ibm-products": "^2.85.0",
     "@carbon/icons-react": "^11.75.0",
     "@carbon/react": "^1.101.0",
-    "axios": "^1.16.0",
+    "axios": "^1.18.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.16.0"
+    "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.16",
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^20.19.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@typescript-eslint/eslint-plugin": "^8.17.0",
-    "@typescript-eslint/parser": "^8.17.0",
-    "@vitejs/plugin-react": "^4.2.1",
-    "eslint": "^8.56.0",
-    "eslint-plugin-react": "^7.33.2",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
     "sass": "^1.70.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.1"
+    "typescript-eslint": "^8.48.0",
+    "vite": "^8.1.4"
   },
   "overrides": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "flatted": "3.4.2"
+    "react-table": {
+      "react": "^19.2.0"
+    }
   }
 }

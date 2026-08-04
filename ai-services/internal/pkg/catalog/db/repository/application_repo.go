@@ -52,6 +52,7 @@ type scannedServiceFields struct {
 	appID     uuid.UUID
 	catalogID string
 	status    string
+	message   sql.NullString
 	endpoint  []byte
 	version   string
 	created   sql.NullTime
@@ -125,7 +126,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		)
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM paged_applications a
 		INNER JOIN services s ON a.id = s.app_id
 		ORDER BY a.created_at DESC, s.created_at ASC
@@ -149,7 +150,7 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 		err := rows.Scan(
 			&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 			&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-			&svc.id, &svc.appID, &svc.catalogID, &svc.status,
+			&svc.id, &svc.appID, &svc.catalogID, &svc.status, &svc.message,
 			&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 		)
 		if err != nil {
@@ -236,6 +237,10 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 		UpdatedAt: s.updated.Time,
 	}
 
+	if s.message.Valid {
+		service.Message = s.message.String
+	}
+
 	if len(s.endpoint) > 0 {
 		var endpoints []map[string]any
 		if err := json.Unmarshal(s.endpoint, &endpoints); err != nil {
@@ -257,7 +262,7 @@ func scanApplicationWithService(rows pgx.Rows, app *models.Application) (*models
 	err := rows.Scan(
 		&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 		&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-		&svc.id, &svc.appID, &svc.catalogID, &svc.status,
+		&svc.id, &svc.appID, &svc.catalogID, &svc.status, &svc.message,
 		&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 	)
 	if err != nil {
@@ -293,7 +298,7 @@ func collectApplication(rows pgx.Rows) (*models.Application, error) {
 	}
 
 	if app == nil {
-		return nil, pgx.ErrNoRows
+		return nil, nil
 	}
 
 	return app, nil
@@ -304,7 +309,7 @@ func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Ap
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		INNER JOIN services s ON a.id = s.app_id
 		WHERE a.id = $1
@@ -325,10 +330,10 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		LEFT JOIN services s ON a.id = s.app_id
-		WHERE a.name = $1
+		WHERE LOWER(a.name) = LOWER($1)
 		ORDER BY s.created_at
 	`
 
@@ -382,13 +387,9 @@ func (r *applicationRepo) UpdateDeploymentName(ctx context.Context, id uuid.UUID
 		WHERE id = $2
 	`
 
-	result, err := r.pool.Exec(ctx, query, name, id)
+	_, err := r.pool.Exec(ctx, query, name, id)
 	if err != nil {
 		return fmt.Errorf("failed to update application name: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -402,13 +403,9 @@ func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status
 		WHERE id = $3
 	`
 
-	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	_, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
 	if err != nil {
 		return fmt.Errorf("failed to update application status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -419,13 +416,9 @@ func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status
 func (r *applicationRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM applications WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	_, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete application: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil

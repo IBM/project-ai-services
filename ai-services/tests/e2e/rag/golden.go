@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	minCSVRows        = 2  // header + at least one data row
-	minCSVColumns     = 3  // ID, Question, GoldenAnswer
-	csvLineNumberOffset   = 2  // account for 1-based indexing + header row
+	minCSVRows          = 2 // header + at least one data row
+	minCSVColumns       = 3 // ID, Question, GoldenAnswer
+	csvLineNumberOffset = 2 // account for 1-based indexing + header row
 )
 
 // GoldenCase represents one golden dataset row.

@@ -70,14 +70,14 @@ func (s *service) Logout(ctx context.Context, accessToken, refreshToken string) 
 	if refreshToken != "" {
 		_, refreshExp, err := s.tokens.ValidateRefreshToken(refreshToken)
 		if err == nil {
-			s.blacklist.Add(refreshToken, catalogconstants.TokenTypeRefresh, refreshExp)
+			s.blacklist.Add(ctx, refreshToken, catalogconstants.TokenTypeRefresh, refreshExp)
 		}
 	}
 
 	// validate and blacklist access token
 	_, accessExp, err := s.tokens.ValidateAccessToken(accessToken)
 	if err == nil {
-		s.blacklist.Add(accessToken, catalogconstants.TokenTypeAccess, accessExp)
+		s.blacklist.Add(ctx, accessToken, catalogconstants.TokenTypeAccess, accessExp)
 	}
 
 	return nil
@@ -92,7 +92,7 @@ func (s *service) RefreshTokens(ctx context.Context, refreshToken string) (strin
 	}
 
 	// Blacklist the old refresh token to prevent reuse
-	s.blacklist.Add(refreshToken, catalogconstants.TokenTypeRefresh, exp)
+	s.blacklist.Add(ctx, refreshToken, catalogconstants.TokenTypeRefresh, exp)
 
 	access, _, err := s.tokens.GenerateAccessToken(uid)
 	if err != nil {

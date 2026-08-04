@@ -9,8 +9,8 @@ type SystemInfo struct {
 
 // CPUInfo represents CPU utilization information.
 type CPUInfo struct {
-	TotalCores     int     `json:"total_cores"`
-	AvailableCores float64 `json:"available_cores"`
+	Total     int     `json:"total_cpu"`
+	Available float64 `json:"available_cpu"`
 }
 
 // MemoryInfo represents memory usage information.

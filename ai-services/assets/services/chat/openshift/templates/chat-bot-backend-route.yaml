@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "backend"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/endpoint-type: api
+spec:
+  port:
+    targetPort: 5000
+  to:
+    kind: Service
+    name: "chat-bot-backend"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge

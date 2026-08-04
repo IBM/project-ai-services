@@ -264,12 +264,16 @@ def signAndVerifyBinaries() {
                 --outputDirectory "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR" \
                 --overwrite
             
+            # Rename signature file to <binary>.sig
+            mv "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.cosign.sig" \
+               "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.sig"
+            
             # Verify the signature
             echo "Verifying signature for $BINARY_NAME..."
             cosign verify-blob \
                 --key "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/cosign.pub" \
                 --insecure-ignore-tlog \
-                --signature "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.cosign.sig" \
+                --signature "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.sig" \
                 "$BINARY_PATH"
             
             echo "✓ $BINARY_NAME signed and verified successfully"
