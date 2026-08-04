@@ -1,7 +1,7 @@
 import type {
   DeployFormData,
   ComponentConfig,
-} from "@/components/ServicesDeployFlow/types";
+} from "@/components/DeployFlow/Services/types";
 import type {
   ServiceDeployOptions,
   ProviderSchema,
@@ -197,5 +197,3 @@ export async function transformToDeploymentPayload(
     services,
   };
 }
-
-// Made with Bob

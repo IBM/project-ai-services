@@ -1,6 +1,6 @@
 import React, { useReducer, useEffect } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { useDeployOptions } from "@/hooks/useDeployOptions";
+import { useDeployOptions } from "@/components/DeployFlow/DigitalAssistant/hooks/useDeployOptions";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -46,7 +46,7 @@ import { CELL_RENDERERS, StatusCell } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
-import { DeployFlow } from "@/components/DeployFlow";
+import { DeployFlow } from "@/components/DeployFlow/DigitalAssistant";
 import {
   fetchApplications,
   deleteApplication,
