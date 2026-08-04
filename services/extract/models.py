@@ -43,8 +43,12 @@ class SchemaRegisterRequest(BaseModel):
     description: Optional[str] = Field(
         None, description="Free-text description of what the schema extracts"
     )
-    json_schema: Dict[str, Any] = Field(
-        ..., description="JSON Schema draft 2020-12.  Root must be type:object."
+    json_schema: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "JSON Schema draft 2020-12.  Root must be type:object.  "
+            "If omitted, the schema is inferred automatically from the provided examples."
+        ),
     )
     examples: Optional[List[ExampleItem]] = Field(
         None,

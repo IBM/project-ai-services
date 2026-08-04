@@ -39,6 +39,7 @@ class DatabaseManager:
         description: Optional[str] = None,
         examples: Optional[list] = None,
         custom_prompt: Optional[str] = None,
+        is_schema_inferred: bool = False,
     ) -> Optional[ExtractionSchema]:
         """Insert a new schema row.  Returns the row or None on failure."""
         try:
@@ -53,6 +54,7 @@ class DatabaseManager:
                     schema_tokens=schema_tokens,
                     examples_tokens=examples_tokens,
                     custom_prompt_tokens=custom_prompt_tokens,
+                    is_schema_inferred=is_schema_inferred,
                     created_at=datetime.now(timezone.utc),
                 )
                 session.add(row)
