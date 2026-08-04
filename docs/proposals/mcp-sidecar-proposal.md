@@ -118,8 +118,7 @@ are required to get MCP running.
 
 ### What "plug and play" means here
 
-The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM-Cloud/ibmcloud-api-mcp),
-private, read access granted by the maintainer) is a complete, tested Go MCP server that parses any
+The `ibmcloud-api-mcp` repository ([IBM-Cloud/ibmcloud-api-mcp](https://github.com/IBM/project-ai-services/pull/1209)) is a complete, tested Go MCP server that parses any
 OpenAPI spec and generates tools dynamically. Every file referenced under Implementation Details
 below lives in that external repository today, not in `ai-services`. Phase 1 vendors it into a new
 `mcp/` directory in this repo as its own Go module, a one-time copy with the git history dropped,
