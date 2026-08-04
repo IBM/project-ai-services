@@ -88,8 +88,7 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
 
     if body.json_schema is None:
         # --- Infer schema from examples when no explicit schema is provided ---
-        inferred = infer_schema_from_examples(examples_raw or [])
-        normalized = normalize_schema(inferred)
+        normalized = infer_schema_from_examples(examples_raw or [])
         is_inferred = True
     else:
         # --- Normalize per-property "required": true convention FIRST ---
