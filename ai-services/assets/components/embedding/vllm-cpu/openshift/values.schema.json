@@ -2,9 +2,6 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "storageUri": {
-      "type": "string"
-    },
     "model": {
       "type": "string",
       "title": "Embedding model",
@@ -17,9 +14,6 @@
         }
       ],
       "default": "ibm-granite/granite-embedding-278m-multilingual"
-    },
-    "resources": {
-      "type": "object"
     }
   }
 }

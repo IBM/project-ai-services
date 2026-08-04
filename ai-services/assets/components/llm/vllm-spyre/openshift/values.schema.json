@@ -2,9 +2,6 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "storageUri": {
-      "type": "string"
-    },
     "model": {
       "type": "string",
       "title": "Large language model (LLM)",
@@ -23,9 +20,6 @@
       "title": "API key (optional)",
       "format": "password",
       "description": "Optional API key for securing the vLLM service. If provided, **store it securely**—you will need to enter this key when accessing the Question and Answer service. Leave empty to disable authentication."
-    },
-    "resources": {
-      "type": "object"
     }
   }
 }
