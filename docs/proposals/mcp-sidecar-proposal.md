@@ -139,7 +139,7 @@ flowchart LR
     REMOVE["Six IBM-specific<br/>pieces removed"]
     BUILD["Dockerfile adapted into<br/>Containerfile (Phase 2)"]
     ICR["Published to ICR"]
-    RUN["Runs as the sidecar<br/>(Phase 3)"]
+    RUN["Runs as the sidecar<br/>(Phase 2)"]
 
     UP -- "copied once,<br/>git history dropped<br/>(vendored, not forked)" --> VENDOR
     VENDOR --> REMOVE
@@ -240,8 +240,8 @@ introduced here, the sidecar just follows the existing convention.
 The sidecar runs in **HTTP transport mode only** (`--http` flag). Stdio transport — the default in
 the upstream binary — requires the MCP client to fork the process directly, which is not viable for
 a containerised sidecar. HTTP transport is the only mode that makes sense here: the sidecar binds
-to a port, the CLI resolves that port when generating `~/mcp.json`, and the agent connects over the
-network. The stdio code path is removed entirely rather than left as an unused option.
+to a port and the agent connects over the network. The stdio code path is removed entirely rather
+than left as an unused option.
 
 ### MCP Sidecar Exposure via Caddy
 
@@ -293,17 +293,17 @@ changed between restarts, so it's visible instead of a silent surprise.
 
 ### Keeping the Generated Config in Sync
 
-Generating `~/mcp.json` (via `application info <name> --format mcp-json`, see CLI Integration
-below) is a manual, on-demand step today. This bites in both directions:
+Generating `~/mcp.json` is deferred to a future release (see Future Work). This means that when a
+sidecar is added or removed, the agent host's config is not updated automatically. This bites in
+both directions:
 
 - **Adding a service:** since the sidecar is a container in the pod manifest, it starts when the
   pod starts — no extra step. But the agent host's `~/mcp.json` still only lists whatever was there
-  before. The new capability is invisible to the agent until someone re-runs `info` and hands the
-  updated file over.
+  before. The new capability is invisible to the agent until the config is manually updated.
 - **Removing a service:** the mirror problem. See Sidecar Lifecycle on Delete below.
 
-**Recommendation:** have `application info --format mcp-json` auto-run as part of the start/stop
-flow in a future release, rather than leaving regeneration as a separate manual step.
+**Recommendation:** auto-generate `~/mcp.json` as part of the start/stop flow in a future release,
+rather than leaving regeneration as a separate manual step.
 
 ### Lifecycle at a Glance
 
@@ -333,7 +333,7 @@ separate resource to begin with, so there's nothing extra to tag or track.
 `application delete <name>` already performs a cascade delete: it lists every pod carrying that
 application's `AppName` namespace label and force-deletes them all. Since the sidecar is a
 container inside that same pod, it's already carrying that label automatically, there's no
-separate resource that could be missed, no tagging step to verify in Phase 3. Deleting the
+separate resource that could be missed, no tagging step to verify in Phase 2. Deleting the
 service pod deletes the sidecar with it, by construction.
 
 **The tradeoff this accepts, worth being explicit about:** toggling the sidecar off without
@@ -368,30 +368,9 @@ this.
 
 ## CLI Integration
 
-No existing CLI commands are modified in v1. The sidecar is deployed automatically through manifest
-changes alone (see Manifest Changes below). The `application info` command gains a new format flag
-for generating the agent-facing config file.
-
-### `application info` — extended to cover MCP
-
-`application info <name>` already resolves the running pods for a named application and prints
-per-service connection details from a templated `info.md` (see
-`internal/pkg/application/podman/info.go`). Rather than building a second command that duplicates
-that same resolution logic, MCP endpoint info becomes part of that existing output, plus a format
-flag for the machine-readable case:
-
-```bash
-# Human-readable info, now includes MCP endpoints when a sidecar is running
-ai-services application info my-rag-app --runtime podman
-
-# Machine-readable: emit the MCP client config directly
-ai-services application info my-rag-app --format mcp-json --output ~/mcp.json
-```
-
-`--format mcp-json` reads which sidecars are currently running for the named application, resolves
-each endpoint, and writes a single JSON file the customer can hand directly to their agent host.
-This removes the need for any manual configuration, and reuses `info`'s existing pod-resolution
-code path instead of a parallel one.
+No existing CLI commands are modified in v1. The sidecar is deployed entirely through manifest
+changes (see Manifest Changes below). Generating the agent-facing `~/mcp.json` config is deferred
+to a future release (see Future Work).
 
 ### OpenShift: a different attach point
 
@@ -412,7 +391,7 @@ for the future granular control work (see Future Work).
 
 This is a proposed direction, not verified against the real chart: whether a conditional container
 in the pod spec cleanly appears and disappears across upgrades without disturbing the rest of the
-release needs a Phase 3 spike before it's trusted.
+release needs a Phase 2 spike before it's trusted.
 
 ### How this fits the bootstrap flow
 
@@ -431,16 +410,16 @@ flowchart TD
 
     subgraph Flow["With this proposal"]
         direction TB
-        D1["ai-services application start<br/>my-rag-app"] --> D2["ai-services application info<br/>my-rag-app --format mcp-json<br/>--output ~/mcp.json"] --> D3(["Service + sidecar running,<br/>agent host configured"])
+        D1["ai-services application start<br/>my-rag-app"] --> D2(["Service + sidecar running"])
     end
 
     Start --> B1
     B2 --> D1
 ```
 
-`application start` now always brings the sidecar up. One existing command gains a new format
-option (`application info --format mcp-json`) for generating the agent config. No new top-level
-command, no new flag on `start`.
+`application start` brings the sidecar up automatically. No new top-level command and no new flag
+on `start`. Agent config generation (`~/mcp.json`) is deferred to a future release (see Future
+Work).
 
 **Example Output:**
 
@@ -459,14 +438,10 @@ MCP sidecars:
   similarity   attached  → http://my-rag-app-similarity:7001
 
 Application 'my-rag-app' is running.
-Run 'ai-services application info my-rag-app --format mcp-json --output ~/mcp.json' to generate an agent config.
-
-$ ai-services application info my-rag-app --format mcp-json --output ~/mcp.json
-Resolved 4 running sidecar(s) for application 'my-rag-app'.
-Wrote MCP client config to ~/mcp.json
 ```
 
-That last command writes exactly what the agent host reads:
+The agent host config (`~/mcp.json`) that the future `application info` command will generate looks
+like this:
 
 ```json
 {
@@ -598,10 +573,10 @@ Work.
 
 ### Delivery Phases
 
-The implementation splits into three independent stages. A separate execution plan will cover
-task-level detail; the phases here describe scope boundaries. **The hard engineering work is in
-Phase 1, not saved for last.** Phase 2 is packaging what already works; Phase 3 is wiring a
-proven thing into the existing CLI and deployment templates.
+The implementation splits into two stages. A separate execution plan will cover task-level detail;
+the phases here describe scope boundaries. **The hard engineering work is in Phase 1, not saved
+for last.** Phase 2 is packaging what already works and wiring it into the deployment templates in
+one continuous piece of work.
 
 **Phase 1 — Local validation.** Vendor `ibmcloud-api-mcp` into `mcp/` as a new Go module (a
 one-time copy, git history dropped, not a GitHub fork) and apply the six targeted removals. Run
@@ -613,17 +588,15 @@ and it protects the description quality this whole proposal depends on before an
 exposed to a real ISV. This phase should also produce a decision on the Async Operations question
 above, validated directly against `summarize`.
 
-**Phase 2 — Container and local deployment.** The upstream repo already has a working Dockerfile,
-adapt it rather than writing one from scratch: rename to `Containerfile` (this project's
-convention), retarget the build to UBI9 and `ppc64le`, drop the `IAM_ENDPOINT` default. Adapt the
-existing `Makefile`, add `.golangci.yml`, and verify `go test ./...` passes. Build and run the
-container locally with Podman alongside existing service containers. Publish to ICR only after the
-container is verified locally, not before.
-
-**Phase 3 — Manifest integration and CLI.** Add the sidecar container to each service's pod
-template in `ai-services/assets/`. Add `--format mcp-json`/`--output` flags on `application info`
-to the `ai-services` CLI. Wire the Caddy route registration for sidecar ports. All four services,
-including digitize, ship together once the Async Operations decision is resolved in Phase 1.
+**Phase 2 — Container, deployment, and manifest integration.** The upstream repo already has a
+working Dockerfile, adapt it rather than writing one from scratch: rename to `Containerfile` (this
+project's convention), retarget the build to UBI9 and `ppc64le`, drop the `IAM_ENDPOINT` default.
+Adapt the existing `Makefile`, add `.golangci.yml`, and verify `go test ./...` passes. Build and
+verify the container locally with Podman alongside existing service containers first, then add the
+sidecar container entry to each service's pod template in `ai-services/assets/` and wire the Caddy
+route registration for sidecar ports. Publish to ICR only after the container is verified locally,
+not before. All four services, including digitize, ship together once the Async Operations decision
+is resolved in Phase 1.
 
 ## Verification Plan
 
@@ -635,18 +608,18 @@ including digitize, ship together once the Async Operations decision is resolved
 5. **Container:** `podman build` succeeds; container starts and `/health` returns `{"status":"ok"}`.
 6. **Manifest — sidecar runs:** after applying updated pod templates, the sidecar container starts
    alongside the service and `/health` returns `{"status":"ok"}` on its port.
-7. **CLI — config output:** `application info my-rag-app --format mcp-json` emits valid MCP client JSON.
+7. **Agent connectivity:** MCP client pointed at the sidecar's Caddy URL can call `tools/list` and receive tool definitions.
 8. **Regression:** all existing service tests pass; existing pod templates are unaffected until
    the sidecar container entry is added.
 
 ## Future Work
 
+- **Agent config generation:** `application info --format mcp-json --output ~/mcp.json` to emit
+  the MCP client config file directly from the CLI, reusing `info`'s existing pod-resolution logic.
 - **Granular MCP control:** an `--mcp` flag on `application start` and dedicated
   `application mcp start/stop` subcommands for customers who want to enable or disable MCP
   per-service independently of the application lifecycle. This includes per-service result
-  reporting, `--pod` targeting for individual sidecars, and partial failure handling. Not required
-  for v1 since the automatic approach covers the common case, but a natural next step for teams
-  that need finer control.
+  reporting, `--pod` targeting for individual sidecars, and partial failure handling.
 - **Thin proxy gateway:** for ISVs requiring a single MCP endpoint, a lightweight aggregator
   merges `tools/list` from all per-service sidecars and routes calls. Not required for v1 since
   most MCP hosts support multiple servers natively.
@@ -657,7 +630,7 @@ including digitize, ship together once the Async Operations decision is resolved
 - **Schema change detection:** diff the regenerated tool schema against the previous run at
   startup and log/alert when it changes, so the drift described under Tool Schema Stability above
   is visible rather than silent.
-- **OpenShift support:** Phase 3 covers Podman; OpenShift deployment template wiring follows the
+- **OpenShift support:** Phase 2 covers Podman; OpenShift deployment template wiring follows the
   same pattern used by all other application deployments in `ai-services/assets/`.
 
 ## Open Questions
