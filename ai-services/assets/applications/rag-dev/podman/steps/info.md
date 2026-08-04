@@ -57,3 +57,11 @@ Day N:
 - Similarity API is unavailable to use. Please make sure '{{ .AppName }}--similarity-api' pod is running.
 {{- end }}
 {{- end }}
+
+{{- if eq .EXTRACT_API_STATUS "running" }}
+
+- Extract API is available to use at http://{{ .HOST_IP }}:{{ .EXTRACT_API_PORT }}. Use this endpoint for entity extraction.
+{{- else }}
+
+- Extract API is unavailable to use. Please make sure '{{ .AppName }}--extract-api' pod is running.
+{{- end }}

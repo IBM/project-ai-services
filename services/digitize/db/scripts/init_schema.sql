@@ -37,15 +37,66 @@ CREATE TABLE IF NOT EXISTS documents (
 -- ON DELETE CASCADE ensures stale registry entries are automatically removed
 -- when the referenced document is deleted, preventing orphaned hash entries
 -- from blocking future re-ingestion of the same file.
-CREATE TABLE IF NOT EXISTS file_checksum_registry (
-    sha256        TEXT        PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS document_checksum (
+    checksum      TEXT        PRIMARY KEY,
     doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
+);
+
+-- Connector tables
+CREATE TABLE IF NOT EXISTS connectors (
+    id                      TEXT        PRIMARY KEY,
+    name                    TEXT        NOT NULL UNIQUE,
+    type                    TEXT        NOT NULL,
+    connection_details      JSONB       NOT NULL DEFAULT '{}',
+    allowed_extensions      JSONB       NOT NULL DEFAULT '[]',
+    sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
+    attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_sync_at            TIMESTAMPTZ,
+    sync_status             TEXT        NOT NULL DEFAULT 'up to date',
+    last_sync_error         TEXT,
+    total_files             INTEGER     NOT NULL DEFAULT 0,
+    CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name
+    ON connectors (name);
+
+-- One row per (checksum, connector_id) pair — connector dedup and reference counting.
+-- No FK constraints, no ON DELETE CASCADE — deletion is managed by application code.
+CREATE TABLE IF NOT EXISTS connector_document_checksum (
+    checksum     TEXT NOT NULL,
+    connector_id TEXT NOT NULL,
+    doc_id       TEXT NOT NULL,
+    PRIMARY KEY (checksum, connector_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
+    ON connector_document_checksum (connector_id);
+
+CREATE TABLE IF NOT EXISTS connector_sync_logs (
+    id               BIGSERIAL   PRIMARY KEY,
+    connector_id     TEXT        NOT NULL,
+    seq              INTEGER     NOT NULL,
+    started_at       TIMESTAMPTZ NOT NULL,
+    finished_at      TIMESTAMPTZ,
+    total_files      INTEGER     NOT NULL DEFAULT 0,
+    new_files        INTEGER     NOT NULL DEFAULT 0,
+    removed_files    INTEGER     NOT NULL DEFAULT 0,
+    failed_files     INTEGER     NOT NULL DEFAULT 0,
+    status           TEXT        NOT NULL DEFAULT 'started',
+    error            TEXT        NOT NULL DEFAULT '',
+    CONSTRAINT fk_csh_connector
+        FOREIGN KEY (connector_id)
+        REFERENCES connectors(id) ON DELETE CASCADE,
+    CONSTRAINT uq_csh_connector_seq
+        UNIQUE (connector_id, seq)
 );
 
 -- Create indexes with IF NOT EXISTS
 CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);
 CREATE INDEX IF NOT EXISTS idx_documents_job_id ON documents(job_id);
 CREATE INDEX IF NOT EXISTS idx_documents_submitted_at_status ON documents(submitted_at DESC, status);
+CREATE INDEX IF NOT EXISTS idx_csl_connector_started ON connector_sync_logs (connector_id, started_at DESC);
 
 -- Create trigger function (OR REPLACE makes it idempotent)
 CREATE OR REPLACE FUNCTION update_updated_at_column()

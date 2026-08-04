@@ -1022,7 +1022,7 @@ class DatabaseStatusManager:
                 logger.debug(f"Updated document {doc_id} in database")
                 # Register the checksum once the document is marked COMPLETED so
                 # that future uploads of the same content are caught via the
-                # file_checksum_registry table.
+                # document_checksum table.
                 if (
                     update_params.get("status") == DocStatus.COMPLETED
                     and "file_hash" in metadata_fields

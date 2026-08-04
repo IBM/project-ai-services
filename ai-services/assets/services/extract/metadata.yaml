@@ -1,7 +1,7 @@
 # Service identification
-id: summarize
-name: "Summarize"
-description: "Condenses long-form content into concise, accurate summaries while preserving key information; enables efficient document analysis and information extraction at scale."
+id: extract
+name: "Extract Information"
+description: "The service takes relevant data from unstructured text and populates a user-supplied JSON schema, enabling robust information retrieval from documents such as emails, invoices, and contracts"
 type: service
 
 # Certification and support
@@ -31,19 +31,19 @@ about:
     sections:
       - title: "Inputs"
         values:
-          - "Text to be summarized"
-          - "level (string, optional): Abstraction level: 'brief', 'standard' (default), or 'detailed'"
-          - "length (integer, optional): (Legacy) Desired summary length in words"
-          - "stream (boolean, optional): Stream the summary as it is generated, default False"
+          - "JSON schema"
+          - "examples"
+          - "custom prompt"
+          - "text/file to be extracted"
       - title: "Outputs"
         values:
-          - "Summary of the input text"
+          - "JSON entity extracted from input text with token stats"
 
   - title: "Dependencies and integration"
     sections:
       - title: "External dependencies"
         values:
-          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for LLM-based summarization capabilities)"
+          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for LLM-based extraction capabilities)"
 
   - title: "Content and format support"
     sections:
@@ -69,4 +69,4 @@ about:
       - title: "Source code"
         ctaLabel: "View source code"
         url: "https://github.com/IBM/project-ai-services"
-# Made with Bob
+
