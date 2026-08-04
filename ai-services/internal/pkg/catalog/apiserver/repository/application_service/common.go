@@ -672,4 +672,94 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
 }
 
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	if app.CreatedBy != user {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
+		return nil, err
+	}
+
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, keepData, runtimeType)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+func (s *ApplicationServiceBase) executeDeletionAsync(
+	parentCtx context.Context,
+	appID uuid.UUID,
+	services []models.Service,
+	keepData bool,
+	runtimeType runtimeTypes.RuntimeType,
+) {
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorfCtx(ctx, "Panic recovered in deletion goroutine for application %s: %v", appID, r)
+
+			errMsg := fmt.Sprintf("Deletion panic: %v", r)
+			if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
+			}
+		}
+	}()
+
+	err := s.DeletionExecutor.Execute(ctx, appID, services, keepData, runtimeType)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
+
+		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
+		}
+
+		return
+	}
+
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deletion completed successfully for application id '%s'", appID.String()))
+}
+
 // Made with Bob
