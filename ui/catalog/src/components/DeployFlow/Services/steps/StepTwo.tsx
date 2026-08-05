@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   parseSchema,
   validateField,
@@ -12,17 +12,100 @@ import {
   Accordion,
   AccordionItem,
 } from "@carbon/react";
-import { fetchResources } from "@/api/applications.api";
-import type { ResourcesResponse } from "@/types/api.types";
+import type { ServiceDeployOptions } from "@/types/api.types";
+import { useResources } from "../../Shared/hooks/useResources";
 import { useProviderSchema } from "../hooks/useProviderSchema";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit } from "@carbon/icons-react";
 import styles from "../ServicesDeployFlow.module.scss";
-import type { StepProps, ServiceConfig } from "../types";
-import { ResourceRequirements } from "../components/ResourceRequirements";
+import type { StepProps, ServiceConfig, DeployFormData } from "../types";
+import {
+  ResourceRequirementsPanel,
+  type CalculatedResources,
+} from "../../Shared/components/ResourceRequirementsPanel";
 import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import { ServiceCredentialDisplay } from "../components/ServiceCredentialDisplay";
+import { getDisplayName } from "../../Shared/utils/optionLabel";
+
+const calculateRequiredResources = (
+  formData: DeployFormData,
+  deployOptions: ServiceDeployOptions,
+): CalculatedResources => {
+  // Key: providerId-componentType — ensures vllm-cpu counts separately per component role
+  const uniqueProviders: Record<
+    string,
+    {
+      cpu: number;
+      memory: number;
+      storage: number;
+      accelerators: Record<string, number>;
+    }
+  > = {};
+
+  Object.entries(formData.services).forEach(([_serviceKey, serviceConfig]) => {
+    if (!serviceConfig.enabled) return;
+
+    if (deployOptions.resources) {
+      const serviceResourceKey = `service-${_serviceKey}`;
+      if (!uniqueProviders[serviceResourceKey]) {
+        uniqueProviders[serviceResourceKey] = {
+          cpu: deployOptions.resources.cpu || 0,
+          memory: deployOptions.resources.memory || 0,
+          storage: deployOptions.resources.storage || 0,
+          accelerators: { ...(deployOptions.resources.accelerators || {}) },
+        };
+      }
+    }
+
+    Object.entries(serviceConfig.components).forEach(
+      ([componentType, componentConfig]) => {
+        const selectedProviderId = componentConfig.providerId;
+        if (!selectedProviderId) return;
+
+        const component = deployOptions.components.find(
+          (c) => c.type === componentType,
+        );
+        if (!component) return;
+
+        const provider = component.providers.find(
+          (p) => p.id === selectedProviderId,
+        );
+        const uniqueKey = `${selectedProviderId}-${componentType}`;
+
+        if (provider?.resources && !uniqueProviders[uniqueKey]) {
+          uniqueProviders[uniqueKey] = {
+            cpu: provider.resources.cpu || 0,
+            memory: provider.resources.memory || 0,
+            storage: provider.resources.storage || 0,
+            accelerators: { ...(provider.resources.accelerators || {}) },
+          };
+        }
+      },
+    );
+  });
+
+  let totalCPU = 0;
+  let totalMemory = 0;
+  let totalStorage = 0;
+  const totalAccelerators: Record<string, number> = {};
+
+  Object.values(uniqueProviders).forEach((r) => {
+    totalCPU += r.cpu;
+    totalMemory += r.memory;
+    totalStorage += r.storage;
+    Object.entries(r.accelerators).forEach(([key, count]) => {
+      totalAccelerators[key] = (totalAccelerators[key] || 0) + count;
+    });
+  });
+
+  return {
+    cpu: totalCPU,
+    memory: Math.round(totalMemory / 1024 ** 3),
+    accelerators: totalAccelerators,
+    storage: Math.round(totalStorage / 1024 ** 3),
+  };
+};
 
 export const StepTwo: React.FC<StepProps> = ({
   title,
@@ -36,23 +119,7 @@ export const StepTwo: React.FC<StepProps> = ({
   serviceDescription,
   isLoadingLlmModels = false,
 }) => {
-  const [resources, setResources] = useState<ResourcesResponse | null>(null);
-  const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
-  const [resourcesError, setResourcesError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchResources()
-      .then((data) => {
-        setResources(data);
-        setResourcesLoading(false);
-      })
-      .catch((err) => {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to load resources";
-        setResourcesError(errorMessage);
-        setResourcesLoading(false);
-      });
-  }, []);
+  const { resources, resourcesLoading, resourcesError } = useResources();
 
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
@@ -78,6 +145,11 @@ export const StepTwo: React.FC<StepProps> = ({
     selectedServiceId || null,
     currentLlmProviderId ? "llm" : null,
     currentLlmProviderId || null,
+  );
+
+  const calculatedResources = useMemo(
+    () => calculateRequiredResources(formData, deployOptions),
+    [formData, deployOptions],
   );
 
   // Extract service version options from API response
@@ -228,16 +300,6 @@ export const StepTwo: React.FC<StepProps> = ({
   };
 
   const fieldErrors = showValidationError ? validateAllFields().errors : {};
-
-  // Helper function to get display name from ID
-  const getDisplayName = (
-    value: string | undefined,
-    options: Array<{ id: string; text: string }>,
-  ): string => {
-    if (!value) return "";
-    const option = options.find((opt) => opt.id === value);
-    return option?.text || value;
-  };
 
   // Helper function to get model description from provider schema
   const getModelDescription = (modelId: string | undefined) => {
@@ -777,9 +839,8 @@ export const StepTwo: React.FC<StepProps> = ({
       </div>
 
       {/* Resource Requirements */}
-      <ResourceRequirements
-        formData={formData}
-        deployOptions={deployOptions}
+      <ResourceRequirementsPanel
+        calculatedResources={calculatedResources}
         resourceData={resources}
         resourcesLoading={resourcesLoading}
         resourcesError={resourcesError}

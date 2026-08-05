@@ -11,7 +11,7 @@ import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { ServiceConfig } from "../types";
 import type { ServiceConfigField } from "../types/StepTwo.types";
-import { getDisplayName } from "../utils/StepTwo.utils";
+import { getDisplayName } from "../../Shared/utils/optionLabel";
 import type { useBatchProviderParams } from "../hooks/useProviderParams";
 import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import type { DeployOptionsComponent as Component } from "@/types/api.types";

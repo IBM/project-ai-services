@@ -1,3 +1,4 @@
+import { useMemo, useEffect } from "react";
 import {
   Tile,
   Toggletip,
@@ -8,23 +9,117 @@ import {
   Tooltip,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
-import styles from "../DigitalAssistantDeployFlow.module.scss";
-import { getResourceStatus } from "../utils/StepTwo.utils";
-import type { ResourceItem } from "../../Shared/types";
+import { bytesToGB } from "../../DigitalAssistant/utils/StepTwo.utils";
+import { getResourceStatus } from "../utils/resourceStatus";
+import type { ResourcesResponse } from "@/types/api.types";
+import styles from "../deployFlow.shared.module.scss";
+import type { ResourceItem } from "../types";
 
-interface ResourceRequirementsProps {
-  resourceRequirements: ResourceItem[];
-  resourcesLoading: boolean;
-  resourcesError: string | null;
-  resourceData: boolean;
+export interface CalculatedResources {
+  cpu: number;
+  memory: number;
+  accelerators: Record<string, number>;
+  storage: number;
 }
 
-export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
-  resourceRequirements,
+export interface ResourceRequirementsPanelProps {
+  calculatedResources: CalculatedResources;
+  resourceData: ResourcesResponse | null;
+  resourcesLoading: boolean;
+  resourcesError: string | null;
+  onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
+}
+
+export const ResourceRequirementsPanel: React.FC<
+  ResourceRequirementsPanelProps
+> = ({
+  calculatedResources,
+  resourceData,
   resourcesLoading,
   resourcesError,
-  resourceData,
+  onResourceStatusChange,
 }) => {
+  const resourceRequirements = useMemo((): ResourceItem[] => {
+    if (!resourceData) return [];
+
+    const resources: ResourceItem[] = [];
+
+    resources.push({
+      label: "Processors",
+      required: calculatedResources.cpu.toString(),
+      available: Math.floor(resourceData.cpu.available_cpu).toString(),
+      unit: "vCPUs",
+      type: "cpu",
+    });
+
+    resources.push({
+      label: "Memory",
+      required: calculatedResources.memory.toString(),
+      available: bytesToGB(resourceData.memory.available_bytes).toString(),
+      unit: "GB",
+      type: "memory",
+    });
+
+    const acceleratorKeys = Object.keys(resourceData.accelerators);
+    const totalRequired = Object.values(
+      calculatedResources.accelerators,
+    ).reduce((sum, val) => sum + val, 0);
+
+    if (acceleratorKeys.length > 0) {
+      acceleratorKeys.forEach((acceleratorKey) => {
+        const acceleratorData = resourceData.accelerators[acceleratorKey];
+        resources.push({
+          label: "Accelerators",
+          required: (
+            calculatedResources.accelerators[acceleratorKey] || 0
+          ).toString(),
+          available: acceleratorData.available.toString(),
+          unit: "Cards",
+          type: "accelerator",
+          acceleratorType: acceleratorKey,
+        });
+      });
+    } else {
+      // No accelerators in system — always show with 0 available
+      resources.push({
+        label: "Accelerators",
+        required: totalRequired.toString(),
+        available: "0",
+        unit: "Cards",
+        type: "accelerator",
+      });
+    }
+
+    if (calculatedResources.storage > 0) {
+      resources.push({
+        label: "Disk storage",
+        required: calculatedResources.storage.toString(),
+        available: "N/A",
+        unit: "GB",
+        type: "storage",
+      });
+    }
+
+    return resources;
+  }, [resourceData, calculatedResources]);
+
+  useEffect(() => {
+    if (!resourcesLoading && !resourcesError && resourceData) {
+      const hasInsufficientResources = resourceRequirements.some(
+        (r) => getResourceStatus(r.required, r.available) === "insufficient",
+      );
+      onResourceStatusChange?.(hasInsufficientResources);
+    } else {
+      onResourceStatusChange?.(true);
+    }
+  }, [
+    resourceRequirements,
+    resourcesLoading,
+    resourcesError,
+    resourceData,
+    onResourceStatusChange,
+  ]);
+
   return (
     <div className={styles.formSection}>
       <h3 className={styles.sectionTitle}>
@@ -44,14 +139,14 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
         </div>
       </h3>
 
-      {/* Loading State */}
+      {/* Loading */}
       {resourcesLoading && (
         <div className={styles.resourceLoading}>
           <InlineLoading description="Loading resource information..." />
         </div>
       )}
 
-      {/* Error State */}
+      {/* Error */}
       {resourcesError && !resourcesLoading && (
         <InlineNotification
           kind="error"
@@ -62,7 +157,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
         />
       )}
 
-      {/* Success State - Show Resources */}
+      {/* Success — resource tiles */}
       {!resourcesLoading && !resourcesError && resourceData && (
         <div className={styles.resourceGrid}>
           {resourceRequirements.map((resource) => {
@@ -113,7 +208,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
         </div>
       )}
 
-      {/* Empty State - No data but no error */}
+      {/* Empty — no data and no error */}
       {!resourcesLoading && !resourcesError && !resourceData && (
         <InlineNotification
           kind="info"
