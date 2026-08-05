@@ -34,9 +34,14 @@ Before any `digitize` connector endpoint is called:
   → fire first tick immediately (misfire_grace_time = 0)
 
 ── Manual sync trigger (POST /v1/connectors/{id}/sync) ──────────────
-  → guard: if sync_status == 'syncing', return 202 (no-op)
-  → atomically set sync_status = 'syncing'
-  → schedule a one-shot async task: _run_tick(connector_id)
+  → 404 if connector does not exist
+  → atomic DB check-and-set:
+      UPDATE connectors SET sync_status = 'syncing'
+      WHERE id = :connector_id AND sync_status != 'syncing'
+      RETURNING id
+      if no row returned → already syncing; return 202 immediately (no-op)
+  → dispatch _run_tick(connector_id) as a background async task
+  → return 202 Accepted
 
 ── Config update (PUT /v1/connectors/{id}) ──────────────────────────
   → merge + re-encrypt changed fields
@@ -281,17 +286,6 @@ Response codes:
 
 > **Future:** when job cancellation is supported, the `409` guard will be replaced by waiting for the running tick to finish (or cancelling it) so that DELETE can succeed at any stage of the lifecycle.
 
-### 3.7 `POST /v1/connectors/{connector_id}/sync`
-
-Manually triggers an immediate sync tick for the connector. Safe to call at any time — if a tick is already running the request is silently accepted and no duplicate tick is started.
-
-**Idempotency guard:** the endpoint uses a DB-level atomic check-and-set (`UPDATE … WHERE sync_status != 'syncing' RETURNING id`) before dispatching the task. Only the caller that wins the update proceeds; subsequent calls return `202` without scheduling anything.
-
-| Status | Meaning |
-| --- | --- |
-| `202 Accepted` | Tick started (or already running — no duplicate spawned) |
-| `404 Not Found` | Connector does not exist |
-
 ### 3.4 `GET /v1/connectors`
 
 Lists active connectors with non-secret configuration and current sync state.
@@ -422,7 +416,80 @@ At most one in-progress `syncing` row exists per connector.
 }
 ```
 
-### 3.7 Digitize Document & Job API — Connector Visibility Rules
+### 3.7 `POST /v1/connectors/{connector_id}/sync`
+
+Manually triggers an immediate sync tick for the connector. Safe to call at any time — concurrent or duplicate calls are collapsed by an atomic DB guard and never spawn two ticks simultaneously.
+
+#### Trigger steps
+
+1. **Existence check:** `GET active_connector(connector_id)` — return `404` if not found.
+2. **Atomic lock acquisition:** execute the following in a single DB round-trip:
+   ```sql
+   UPDATE connectors
+   SET    sync_status = 'syncing'
+   WHERE  id          = :connector_id
+     AND  sync_status != 'syncing'
+   RETURNING id
+   ```
+   - If **no row is returned** the connector is already mid-tick. Return `202 Accepted` immediately — no task is dispatched, no state is modified.
+   - If **a row is returned** this call won the lock. Proceed to step 3.
+3. **Open sync-log row:** call `open_new_sync_log(connector_id)` — inserts a `connector_sync_logs` row with `status='started'` and captures the new `seq` value. (The `sync_status='syncing'` write in step 2 and the log INSERT happen in separate transactions; step 2 must succeed before step 3 is attempted.)
+4. **Dispatch background task:** schedule `_run_tick(connector_id)` as an `asyncio` background task. The HTTP response is returned before the tick completes.
+5. **Return `202 Accepted`.**
+
+> `_run_tick` is responsible for closing the sync-log row and updating `sync_status` on both success and failure (see §8.1 Phase 5 and §10.2). The endpoint itself does not wait for the tick to finish.
+
+#### Sequence diagram
+
+```text
+POST /v1/connectors/{connector_id}/sync
+  │
+  ├─ 1. get_active_connector(connector_id)
+  │        └─ None → 404 Not Found
+  │
+  ├─ 2. UPDATE connectors
+  │      SET    sync_status = 'syncing'
+  │      WHERE  id = :connector_id AND sync_status != 'syncing'
+  │      RETURNING id
+  │        │
+  │        ├─ no row returned (already syncing)
+  │        │     └─ return 202 Accepted  [no-op]
+  │        │
+  │        └─ row returned (lock acquired)
+  │              │
+  ├─ 3.          open_new_sync_log(connector_id)
+  │              │  INSERT connector_sync_logs (status='started')
+  │              │  → sync_seq
+  │              │
+  ├─ 4.          asyncio.create_task(_run_tick(connector_id))
+  │              │
+  └─ 5.          return 202 Accepted
+                 ↓
+           [background]
+           _run_tick(connector_id)
+             → scanner.connect() + scan()
+             → _classify(...)
+             → _process_new_files(...)
+             → _delete_orphans(...)
+             → close_sync_log(sync_seq, status='completed'|'failed')
+             → UPDATE connectors SET sync_status = :final_status
+```
+
+#### Interaction with the APScheduler periodic job
+
+`POST /sync` and the APScheduler `IntervalTrigger` job share the same `_run_tick` coroutine and the same atomic lock. If the scheduler fires at the same moment as a `POST /sync` call, exactly one of them wins the `UPDATE … WHERE sync_status != 'syncing'` check. The loser returns (or is no-op'd by APScheduler's `max_instances=1`) without duplicating any state.
+
+#### Response codes
+
+| Status | Meaning |
+| --- | --- |
+| `202 Accepted` | Tick dispatched in the background |
+| `202 Accepted` | Tick already running — no duplicate spawned (idempotent) |
+| `404 Not Found` | Connector does not exist |
+
+---
+
+### 3.8 Digitize Document & Job API — Connector Visibility Rules
 
 #### Document APIs (`/v1/documents`)
 
@@ -617,7 +684,8 @@ Jobs created by a connector sync use the format `{connector_id} - {sync_number} 
 | `list_all_checksums()` | all distinct checksums in `connector_document_checksum` across all connectors |
 | `add_connector_checksum_entry(connector_id, checksum, doc_id)` | insert a new `(checksum, connector_id, doc_id)` row; no-op if the row already exists |
 | `remove_connector_checksum_entry(connector_id, checksum)` | delete the `(checksum, connector_id)` row; return remaining owner count and `doc_id` |
-| `open_new_sync_log(connector_id)` | create tick row; auto-generates `seq` as `COALESCE(MAX(seq), 0) + 1` scoped to the connector; sets `connectors.sync_status = 'syncing'` in the same transaction; returns the new `seq` value |
+| `try_acquire_sync_lock(connector_id)` | atomic `UPDATE connectors SET sync_status='syncing' WHERE id=:id AND sync_status!='syncing' RETURNING id`; returns the `id` if the lock was acquired, `None` if the connector is already syncing — used by `POST /sync` before calling `open_new_sync_log` |
+| `open_new_sync_log(connector_id)` | create tick row; auto-generates `seq` as `COALESCE(MAX(seq), 0) + 1` scoped to the connector; **does not** set `sync_status` — caller must have already acquired the lock via `try_acquire_sync_lock` or `open_new_sync_log` is called only from within `_run_tick` after the APScheduler job fires; returns the new `seq` value |
 | `close_sync_log()` | finalize tick row; sets `connectors.last_sync_at = NOW()` and `connectors.sync_status = :final_status` in the same transaction |
 | `update_sync_log()` | live progress updates |
 | `list_sync_logs()` | paginated logs query |
@@ -692,7 +760,7 @@ DB operations (Attach)
            :interval, NOW(), 'up to date')
    ON CONFLICT (id) DO NOTHING          ← 409 if already exists
 
-Result: one row in connectors; worker thread starts.
+Result: one row in connectors; APScheduler `IntervalTrigger` job registered; first tick fires immediately.
 connector_document_checksum is empty for this connector — populated on first tick.
 ```
 
@@ -703,6 +771,10 @@ connector_document_checksum is empty for this connector — populated on first t
 ```text
 DB operations (Sync Tick)
 ────────────────────────────────────────────────────────────────────
+
+Phase 0 — acquire sync lock  [APScheduler-driven path only]
+  APScheduler enforces max_instances=1 — no explicit DB lock needed before Phase 1.
+  For POST /sync path: lock is acquired by try_acquire_sync_lock() before _run_tick is dispatched.
 
 Phase 1 — open tick record  [open_new_sync_log]
   INSERT INTO connector_sync_logs
@@ -715,8 +787,8 @@ Phase 1 — open tick record  [open_new_sync_log]
   WHERE connector_id = :connector_id
   RETURNING seq          ← caller stores this as sync_seq
 
-  UPDATE connectors SET sync_status = 'syncing' WHERE id = :connector_id
-  ↑ both writes happen in a single transaction inside open_new_sync_log()
+  ↑ sync_status is already 'syncing' at this point (set either by APScheduler job
+    entry or by try_acquire_sync_lock() in the POST /sync path)
 
 Phase 2 — load known state
   ┌─ ACQUIRE ingest_lock (process-wide) ──────────────────────────┐
@@ -782,7 +854,7 @@ Phase 5 — close tick record  [close_sync_log]
 
 **Ordering guarantee:** Phase 4b (orphan removal) runs only after Phase 4a (all ingest jobs) completes.
 
-**Concurrency lock:** A process-wide `ingest_lock` (e.g. `threading.Lock`) **must be held continuously from the `SELECT checksum` DB read in Phase 2 through the end of Phase 4a** (i.e. until all `INSERT INTO connector_document_checksum` rows for newly created sessions are committed). Without this lock, two connector workers racing on the same brand-new file would both observe it absent from `all_checksums`, both call `create_job`, and produce duplicate documents. The lock is released before Phase 4b begins so orphan removal does not block other ticks unnecessarily.
+**Concurrency lock:** A process-wide `asyncio.Lock` (`_ingest_lock`) **must be held continuously from the `SELECT checksum` DB read in Phase 2 through the end of Phase 4a** (i.e. until all `INSERT INTO connector_document_checksum` rows for newly created sessions are committed). Without this lock, two concurrent ticks racing on the same brand-new file would both observe it absent from `all_checksums`, both call `create_job`, and produce duplicate documents. The lock is released before Phase 4b begins so orphan removal does not block other ticks unnecessarily.
 
 ---
 
@@ -792,10 +864,11 @@ Phase 5 — close tick record  [close_sync_log]
 DB operations (Detach)
 ────────────────────────────────────────────────────────────────────
 
-Pre-condition check: if worker tick is currently running → return 409 Conflict
+Pre-condition check: if sync_status == 'syncing' → return 409 Conflict
 
-Step 1 — stop worker thread (not a DB operation)
-  stop_event.set() → thread.join(timeout=30s)
+Step 1 — remove APScheduler job (not a DB operation)
+  scheduler.remove_job(connector_id)
+  ← prevents any new tick from starting during teardown
 
 Step 2 — snapshot owned checksums
   SELECT checksum, doc_id FROM connector_document_checksum WHERE connector_id = :connector_id
@@ -815,10 +888,54 @@ Step 4 — delete connector row
   -- CASCADE deletes connector_sync_logs rows automatically.
 
 Step 5 — cleanup staging dirs (not a DB operation)
-  rm -rf {staging_dir}/{connector_id}/
+  glob staging/connectors/<connector_id>-* → rm -rf each match
 ```
 
 **Invariant:** after Step 4, no row in `connector_document_checksum` has `connector_id = :connector_id`.
+
+---
+
+#### 5.3.4 Manual Sync — `POST /v1/connectors/{connector_id}/sync`
+
+```text
+DB operations (Manual Sync)
+────────────────────────────────────────────────────────────────────
+
+Step 1 — existence check
+  SELECT * FROM connectors WHERE id = :connector_id
+  → None → 404 Not Found (no DB write)
+
+Step 2 — atomic lock acquisition  [try_acquire_sync_lock]
+  UPDATE connectors
+  SET    sync_status = 'syncing'
+  WHERE  id          = :connector_id
+    AND  sync_status != 'syncing'
+  RETURNING id
+
+  → None returned  (connector already syncing)
+       → return immediately; no further DB writes
+  → id returned    (lock acquired)
+       → proceed to Step 3
+
+Step 3 — open sync-log row  [open_new_sync_log]
+  INSERT INTO connector_sync_logs
+      (connector_id, seq, started_at, status)
+  SELECT :connector_id,
+         COALESCE(MAX(seq), 0) + 1,
+         NOW(),
+         'started'
+  FROM connector_sync_logs
+  WHERE connector_id = :connector_id
+  RETURNING seq          ← stored as sync_seq
+
+Step 4 — dispatch background task (not a DB operation)
+  asyncio.create_task(_run_tick(connector_id))
+  → _run_tick proceeds through Phases 2–5 (see §5.3.2)
+  → on completion: close_sync_log(sync_seq, status='completed'|'failed')
+                   UPDATE connectors SET last_sync_at=NOW(), sync_status=:final_status
+```
+
+**Race safety:** Step 2 is a single `UPDATE … RETURNING` — Postgres serialises concurrent writers at the row level. Two simultaneous `POST /sync` calls cannot both acquire the lock.
 
 ---
 
