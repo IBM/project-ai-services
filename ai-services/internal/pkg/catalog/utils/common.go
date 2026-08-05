@@ -2,13 +2,19 @@ package utils
 
 import (
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	helmchart "helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/loader/archive"
+	"helm.sh/helm/v4/pkg/chart/v2/loader"
 )
 
 var (
@@ -94,6 +100,32 @@ func SanitizeFilePath(path string) string {
 	}
 
 	return cleanPath
+}
+
+// LoadChartFromCatalogFS walks assets.CatalogFS at catalogPath and returns a Helm chart.
+func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
+	var files []*archive.BufferedFile
+
+	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+
+		data, err := assets.CatalogFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+
+		rel := strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(catalogPath)+"/")
+		files = append(files, &archive.BufferedFile{Name: rel, Data: data})
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk chart directory %s: %w", catalogPath, err)
+	}
+
+	return loader.LoadFiles(files)
 }
 
 // Made with Bob

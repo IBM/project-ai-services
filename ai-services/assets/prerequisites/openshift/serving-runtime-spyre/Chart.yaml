@@ -1,0 +1,7 @@
+apiVersion: v2
+name: serving-runtime-spyre
+description: ServingRuntime for vLLM on Spyre accelerator cards — installed as a prerequisite before any application deployment.
+type: application
+
+version: 0.0.1
+appVersion: "0.0.1"

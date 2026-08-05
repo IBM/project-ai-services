@@ -12,7 +12,6 @@ similarity:
 embedding:
   model:
     name: ""
-    maxModelLen: 512
 
 reranker:
   model:
