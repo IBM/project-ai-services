@@ -90,7 +90,7 @@ export type SharedTableAction =
   | {
       type: "SHARED_RESET_COLUMN_VISIBILITY";
       /** Pass the table's DEFAULT_VISIBLE_COLUMNS constant. */
-      defaultColumns: Record<string, boolean>;
+      payload: Record<string, boolean>;
     }
   | { type: "SHARED_SET_FETCH_ERROR"; payload: string | null }
   | { type: "SHARED_SET_DELETING"; payload: boolean }

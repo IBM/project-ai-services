@@ -2,11 +2,11 @@ import type { DataTableHeader } from "@carbon/react";
 import type {
   BaseTableState,
   SharedTableAction,
-} from "@/components/table/types";
+} from "@/components/Table/types";
 import {
   handleSharedTableAction,
   isSharedTableAction,
-} from "@/components/table/utils/reducerUtils";
+} from "@/components/Table/utils/reducerUtils";
 
 // API response types
 export interface ApplicationService {

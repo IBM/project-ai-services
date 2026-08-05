@@ -50,7 +50,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
-import type { SharedTableAction } from "@/components/table/types";
+import type { SharedTableAction } from "@/components/Table/types";
 import { calculateUptime } from "@/api/applications.api";
 
 // Generic cell renderer wrapper

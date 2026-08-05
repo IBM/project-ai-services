@@ -2,7 +2,7 @@ import type {
   BaseTableRow,
   BaseTableState,
   SharedTableAction,
-} from "@/components/table/types";
+} from "@/components/Table/types";
 
 export function isSharedTableAction(a: {
   type: string;
@@ -60,7 +60,7 @@ export function handleSharedTableAction<
         ...toggleColumnVisibility(state.visibleColumns, action.payload),
       };
     case "SHARED_RESET_COLUMN_VISIBILITY":
-      return { ...state, ...resetColumnVisibility(action.defaultColumns) };
+      return { ...state, ...resetColumnVisibility(action.payload) };
     case "SHARED_SET_FETCH_ERROR":
       return { ...state, fetchError: action.payload };
     case "SHARED_SET_DELETING":

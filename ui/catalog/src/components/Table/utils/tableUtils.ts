@@ -1,4 +1,4 @@
-import type { TableHeaders } from "@/components/table/types";
+import type { TableHeaders } from "@/components/Table/types";
 
 // Search filtering
 
