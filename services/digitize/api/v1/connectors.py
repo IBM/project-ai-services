@@ -376,10 +376,6 @@ async def get_connector(connector_id: str):
                 f"Connector {connector_id!r} not found",
             )
 
-        # Fetch latest sync stats from the most recent log row (if any)
-        logs, _ = db_ops.list_sync_logs(connector_id, limit=1, offset=0)
-        latest_log = logs[0] if logs else None
-
         return ConnectorDetailResponse(
             connector_id=connector.id,
             connector_name=connector.name,
@@ -392,9 +388,6 @@ async def get_connector(connector_id: str):
             last_sync_error=connector.last_sync_error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
-            new_files=latest_log.new_files if latest_log else 0,
-            removed_files=latest_log.removed_files if latest_log else 0,
-            failed_files=latest_log.failed_files if latest_log else 0,
         )
     except HTTPException:
         raise

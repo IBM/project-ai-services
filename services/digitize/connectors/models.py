@@ -101,9 +101,6 @@ class ConnectorDetailResponse(BaseModel):
     last_sync_error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int
-    new_files: int
-    removed_files: int
-    failed_files: int
 
 
 class SyncLogItem(BaseModel):
