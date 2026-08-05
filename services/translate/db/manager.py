@@ -88,7 +88,7 @@ class TranslateDatabaseManager:
                     # Eagerly load all attributes before the session closes
                     _ = (
                         job.job_id, job.job_name, job.source_language, job.target_language,
-                        job.input_type, job.document_name, job.document_word_count,
+                        job.input_type, job.document_name,
                         job.status, job.submitted_at, job.completed_at, job.error,
                         job.job_metadata, job.updated_at,
                     )
@@ -151,7 +151,6 @@ class TranslateDatabaseManager:
         completed_at: Optional[datetime] = None,
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        document_word_count: Optional[int] = None,
         source_language: Optional[str] = None,
     ) -> bool:
         """
@@ -173,8 +172,6 @@ class TranslateDatabaseManager:
                     updates["error"] = error
                 if metadata is not None:
                     updates["job_metadata"] = metadata
-                if document_word_count is not None:
-                    updates["document_word_count"] = document_word_count
                 if source_language is not None:
                     updates["source_language"] = source_language
 

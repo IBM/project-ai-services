@@ -42,7 +42,7 @@ class SyncTranslateRequest(BaseModel):
 class SyncTranslateResponse(BaseModel):
     """Response body for POST /v1/translate (200)."""
 
-    data: Dict[str, Any]   # translation, source_language, target_language, word counts
+    data: Dict[str, Any]   # translation, source_language, target_language
     meta: Dict[str, Any]   # model, processing_time_ms, input_type
     usage: Dict[str, int]  # input_tokens, output_tokens, total_tokens
 
@@ -75,7 +75,6 @@ class JobDetailResponse(BaseModel):
     target_language: str
     input_type: str
     document_name: Optional[str] = None
-    document_word_count: Optional[int] = None
     submitted_at: str
     completed_at: Optional[str] = None
     error: Optional[str] = None
@@ -95,7 +94,7 @@ class JobDetailResponse(BaseModel):
 class JobResultResponse(BaseModel):
     """Response for GET /v1/translate/jobs/{job_id}/result."""
 
-    data: Dict[str, Any]   # translation, source_language, target_language, word counts
+    data: Dict[str, Any]   # translation, source_language, target_language
     meta: Dict[str, Any]   # model, processing_time_ms, input_type
     usage: Dict[str, Any]  # input_tokens, output_tokens, total_tokens
 

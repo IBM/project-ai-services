@@ -8,7 +8,6 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Index,
-    Integer,
     String,
     Text,
 )
@@ -42,7 +41,6 @@ class TranslateJob(Base):
     # Input document info
     input_type: Mapped[str] = mapped_column(String(20), nullable=False)
     document_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    document_word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Job lifecycle
     status: Mapped[str] = mapped_column(String(50), nullable=False)

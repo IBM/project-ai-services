@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS translate_jobs (
     target_language     VARCHAR(100) NOT NULL,
     input_type          VARCHAR(20)  NOT NULL,
     document_name       VARCHAR(500),
-    document_word_count INTEGER,
     status              VARCHAR(50)  NOT NULL,
     submitted_at        TIMESTAMP WITH TIME ZONE NOT NULL,
     completed_at        TIMESTAMP WITH TIME ZONE,
