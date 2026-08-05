@@ -53,7 +53,7 @@ Before any `digitize` connector endpoint is called:
         elif checksum IN all_checksums:
           → already ingested by a different connector — no download, no ingest;
             existing_doc_id = lookup_connector_content_by_checksum(checksum)
-            add_connector_to_membership(connector_id, checksum, existing_doc_id)
+            add_connector_checksum_entry(connector_id, checksum, existing_doc_id)
         else:
           → brand new to all connectors — place on ingest_list
 
@@ -64,12 +64,12 @@ Before any `digitize` connector endpoint is called:
                             checksum=checksum ← pre-computed by scanner; skips re-hash in pipeline
                         )
         on job success:
-          add_connector_to_membership(connector_id, checksum, doc_id)
+          add_connector_checksum_entry(connector_id, checksum, doc_id)
 
   Step 4 — orphan detection + removal
     → orphan_checksums = known_checksums − {checksum for (_, checksum) in scanned_files}
     → for each orphan_checksum (after all Step 3 writes finish):
-        remove_connector_from_membership(connector_id, orphan_checksum)
+        remove_connector_checksum_entry(connector_id, orphan_checksum)
         if remaining_owner_count == 0:
           DELETE /v1/documents/{doc_id}
 
@@ -80,7 +80,7 @@ Before any `digitize` connector endpoint is called:
 ── Detach (DELETE /v1/connectors/{id}) ──────────────────────────────
   → guard: reject with 409 if a tick is currently running
   → list all checksums owned by this connector
-  → for each checksum: remove_connector_from_membership → delete doc if last owner
+  → for each checksum: remove_connector_checksum_entry → delete doc if last owner
   → DELETE connectors row
   → cleanup staging dirs
   → stop worker thread
@@ -255,13 +255,13 @@ DELETE /v1/connectors/{connector_id}
   → stop worker
   → list checksums owned by this connector (connector_document_checksum WHERE connector_id = :connector_id)
   → for each checksum:
-       remove_connector_from_membership(connector_id, checksum)
+       remove_connector_checksum_entry(connector_id, checksum)
          → DELETE row WHERE checksum = :checksum AND connector_id = :connector_id
          → returns (remaining_owner_count, doc_id)
        if remaining_owner_count == 0:
          DELETE /v1/documents/{doc_id}
   → delete connector row
-  → cleanup staging dirs
+  → cleanup staging dirs: glob staging/connectors/<connector_id>-* and remove each match
 ```
 
 Document deletion is best-effort: `200`, `204`, `404` from `DELETE /v1/documents/{doc_id}` are treated as success; `5xx` or network failures are logged and cleanup continues.
@@ -344,7 +344,7 @@ Only non-secret `connection_details` are returned.
 }
 ```
 
-### 3.6 `GET /v1/connectors/{connector_id}/sync-history`
+### 3.6 `GET /v1/connectors/{connector_id}/syncs`
 
 Returns paginated tick history.
 
@@ -536,11 +536,10 @@ CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
 
 ### 4.4 `connector_sync_logs`
 
-Persistent per-tick history backing the sync-history API.
+Persistent per-tick history backing the syncs API.
 
 ```sql
 CREATE TABLE IF NOT EXISTS connector_sync_logs (
-    id               BIGSERIAL   PRIMARY KEY,
     connector_id     TEXT        NOT NULL,
     seq              INTEGER     NOT NULL,
     started_at       TIMESTAMPTZ NOT NULL,
@@ -551,11 +550,10 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     failed_files     INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
+    PRIMARY KEY (connector_id, seq),
     CONSTRAINT fk_csh_connector
         FOREIGN KEY (connector_id)
-        REFERENCES connectors(id) ON DELETE CASCADE,
-    CONSTRAINT uq_csh_connector_seq
-        UNIQUE (connector_id, seq)
+        REFERENCES connectors(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_csl_connector_started
@@ -568,7 +566,7 @@ CREATE INDEX IF NOT EXISTS idx_csl_connector_started
 
 - `Connector` — maps to `connectors`; fields: `id` (PK), `name` (UNIQUE), `type`, `connection_details` (JSONB), `allowed_extensions` (JSONB), `sync_interval_seconds`, `attached_at`, `last_sync_at`, `sync_status`, `last_sync_error`, `total_files`; has a one-to-many relationship `sync_logs → ConnectorSyncLog`
 - `ConnectorDocumentChecksum` — maps to `connector_document_checksum`; fields: `checksum` (NOT NULL), `connector_id` (NOT NULL), `doc_id` (NOT NULL); composite PK `(checksum, connector_id)`
-- `ConnectorSyncLog` — maps to `connector_sync_logs`; fields: `id` (PK, autoincrement), `connector_id` (FK → `connectors`, CASCADE DELETE), `seq`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`; unique constraint `uq_csh_connector_seq (connector_id, seq)`
+- `ConnectorSyncLog` — maps to `connector_sync_logs`; fields: `connector_id` (FK → `connectors`, CASCADE DELETE), `seq` (auto-generated per connector — see §5.1); composite PK `(connector_id, seq)`, `started_at`, `finished_at`, `total_files`, `new_files`, `removed_files`, `failed_files`, `status`, `error`
 
 ---
 
@@ -593,22 +591,20 @@ Jobs created by a connector sync use the format `{connector_id} - {sync_number} 
 
 | Function | Purpose |
 | --- | --- |
-| `insert_active_connector()` | create connector |
-| `upsert_active_connector()` | insert/update connector |
+| `insert_connector()` | create connector on first-time `POST /v1/connectors`; `ON CONFLICT (id) DO NOTHING` — returns `409` if already exists |
+| `upsert_connector()` | partial update on `PUT /v1/connectors/{id}`; accepts only the fields present in the request and merges `connection_details` at the key level, leaving omitted keys untouched |
 | `get_active_connector()` | fetch one connector |
 | `list_connectors()` | fetch all connectors |
 | `delete_active_connector()` | delete connector |
-| `update_connector_sync_status()` | write top-level sync state |
-| `merge_connection_details()` | key-level JSON merge for PUT |
 | `lookup_connector_content_by_checksum(checksum)` | connector dedup lookup — queries `connector_document_checksum`, returns `doc_id` or `None` |
 | `list_connector_checksums(connector_id)` | all checksums currently owned by this connector |
 | `list_all_checksums()` | all distinct checksums in `connector_document_checksum` across all connectors |
-| `add_connector_to_membership(connector_id, checksum, doc_id)` | insert a new `(checksum, connector_id, doc_id)` row; no-op if the row already exists |
-| `remove_connector_from_membership(connector_id, checksum)` | delete the `(checksum, connector_id)` row; return remaining owner count and `doc_id` |
-| `insert_sync_history()` | create tick row |
-| `update_sync_history()` | finalize tick row |
-| `update_sync_history_files_syncing()` | live progress updates |
-| `list_sync_history()` | paginated history query |
+| `add_connector_checksum_entry(connector_id, checksum, doc_id)` | insert a new `(checksum, connector_id, doc_id)` row; no-op if the row already exists |
+| `remove_connector_checksum_entry(connector_id, checksum)` | delete the `(checksum, connector_id)` row; return remaining owner count and `doc_id` |
+| `open_new_sync_log(connector_id)` | create tick row; auto-generates `seq` as `COALESCE(MAX(seq), 0) + 1` scoped to the connector; sets `connectors.sync_status = 'syncing'` in the same transaction; returns the new `seq` value |
+| `close_sync_log()` | finalize tick row; sets `connectors.last_sync_at = NOW()` and `connectors.sync_status = :final_status` in the same transaction |
+| `update_sync_log()` | live progress updates |
+| `list_sync_logs()` | paginated logs query |
 | `set_document_metadata(doc_id, metadata)` | write `source_checksum` + S3 key into `documents.metadata` |
 
 ### 5.2 DB-layer stub
@@ -629,7 +625,7 @@ def lookup_connector_content_by_checksum(checksum: str) -> str | None:
 
 
 @staticmethod
-def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -> None:
+def add_connector_checksum_entry(connector_id: str, checksum: str, doc_id: str) -> None:
     """Insert a new (checksum, connector_id, doc_id) row; no-op if already exists."""
     with get_db_session() as session:
         stmt = (
@@ -641,7 +637,7 @@ def add_connector_to_membership(connector_id: str, checksum: str, doc_id: str) -
 
 
 @staticmethod
-def remove_connector_from_membership(connector_id: str, checksum: str) -> tuple[int, str | None]:
+def remove_connector_checksum_entry(connector_id: str, checksum: str) -> tuple[int, str | None]:
     """Delete the (checksum, connector_id) row; return (remaining_owner_count, doc_id)."""
     with get_db_session() as session:
         deleted = session.execute(
@@ -692,12 +688,19 @@ connector_document_checksum is empty for this connector — populated on first t
 DB operations (Sync Tick)
 ────────────────────────────────────────────────────────────────────
 
-Phase 1 — open tick record
+Phase 1 — open tick record  [open_new_sync_log]
   INSERT INTO connector_sync_logs
       (connector_id, seq, started_at, status)
-  VALUES (:connector_id, :next_seq, NOW(), 'started')
+  SELECT :connector_id,
+         COALESCE(MAX(seq), 0) + 1,
+         NOW(),
+         'started'
+  FROM connector_sync_logs
+  WHERE connector_id = :connector_id
+  RETURNING seq          ← caller stores this as sync_seq
 
   UPDATE connectors SET sync_status = 'syncing' WHERE id = :connector_id
+  ↑ both writes happen in a single transaction inside open_new_sync_log()
 
 Phase 2 — load known state
   ┌─ ACQUIRE ingest_lock (process-wide) ──────────────────────────┐
@@ -750,7 +753,7 @@ Phase 4b — orphan detection + removal
     if remaining == 0:
       DELETE /v1/documents/{orphan_doc_id}   ← 200/204/404 = success; 5xx logged and skipped
 
-Phase 5 — close tick record
+Phase 5 — close tick record  [close_sync_log]
   UPDATE connector_sync_logs
   SET finished_at = NOW(), total_files = :n, new_files = :n,
       removed_files = :n, failed_files = :n, status = :final_status
@@ -758,6 +761,7 @@ Phase 5 — close tick record
 
   UPDATE connectors SET last_sync_at = NOW(), sync_status = :final_status
   WHERE id = :connector_id
+  ↑ both writes happen in a single transaction inside close_sync_log()
 ```
 
 **Ordering guarantee:** Phase 4b (orphan removal) runs only after Phase 4a (all ingest jobs) completes.
@@ -989,19 +993,24 @@ _run_tick()
 │            → skip_list   checksum IN known_checksums (no action)
 │            → ingest_list checksum NOT IN all_checksums (brand new)
 │            → cross-connector dup: lookup_connector_content_by_checksum(checksum)
-│                                   add_connector_to_membership(connector_id, checksum, existing_doc_id)
+│                                   add_connector_checksum_entry(connector_id, checksum, existing_doc_id)
 │                                   (DB write happens inline, no separate list)
 │
 ├─ [Phase 4a] _process_new_files(ingest_list)
-│             download → create_job(connector_id, checksum) → doc_id (session creation)
-│             add_connector_to_membership(connector_id, checksum, doc_id)
-│             UPDATE documents.metadata
+│             for each (batch_number, remote_path, checksum):
+│               batch_dir_name = f"{connector_id}-{job_id}-{batch_number}"
+│               download file → staging/connectors/<batch_dir_name>/<filename>
+│               create_job(connector_id, checksum) → ingest → doc_id (session creation)
+│               add_connector_checksum_entry(connector_id, checksum, doc_id)
+│               UPDATE documents.metadata
+│               cleanup_staging_directory(batch_dir_name,
+│                 staging_dir/"connectors", ignore_errors=True)  ← per-file, after ingest
 │            ── RELEASE ingest_lock (after all Phase 4a membership rows committed) ─
 │
 ├─ [Phase 4b] _delete_orphans(orphan_checksums)
 │   ← RUNS AFTER all Phase 4a writes finish ←
 │             orphan_checksums = known_checksums − scanned_checksums
-│             remove_connector_from_membership → if remaining==0: DELETE /v1/documents/{doc_id}
+│             remove_connector_checksum_entry → if remaining==0: DELETE /v1/documents/{doc_id}
 │
 └─ [Phase 5] UPDATE connector_sync_logs (finished_at, counters, status)
              UPDATE connectors (last_sync_at, sync_status)
@@ -1011,20 +1020,23 @@ _run_tick()
 
 - Overlapping ticks are skipped by a tick guard.
 - `new_files` is updated live during staging and download.
-- Staging uses per-tick temporary directories.
+- Each file in a tick gets its own uniquely-named staging directory: `staging/connectors/<connector_id>-<job_id>-<batch_number>/`. The `job_id` is the UUID returned by `create_job()`, and `batch_number` is the zero-based index of the file within the tick's `ingest_list`. This naming makes every staging directory traceable to a specific connector, job, and position in the batch.
+- The staging directory is created immediately before `scanner.download()` and removed in the `finally` block after ingest, regardless of success or failure — before the next file is downloaded. No two batch directories exist simultaneously.
 - Download and ingest are blocking operations.
 - Fatal errors mark the tick as failed.
-- Per-file failures are counted and summarized instead of failing the whole connector.
+- Per-file failures are counted and summarized instead of failing the whole connector. Staging cleanup still runs for each file even when ingest fails.
 - Cross-connector duplicates are registered inline during Phase 3 classification — no deferred list.
 - **Phase 4b (orphan removal) always runs after Phase 4a (all new-file ingest jobs) completes.**
-- **A process-wide `ingest_lock` must be held from the Phase 2 DB read (`list_all_checksums`) through the end of Phase 4a (last `add_connector_to_membership` call, i.e. session creation complete).** This prevents two concurrent workers from both classifying the same brand-new checksum as absent and independently spawning duplicate ingest jobs.
+- **A process-wide `ingest_lock` must be held from the Phase 2 DB read (`list_all_checksums`) through the end of Phase 4a (last `add_connector_checksum_entry` call, i.e. session creation complete).** This prevents two concurrent workers from both classifying the same brand-new checksum as absent and independently spawning duplicate ingest jobs.
+- Staging cleanup uses `cleanup_staging_directory(batch_dir_name, staging_dir / "connectors", ignore_errors=True)` from `common.misc_utils` — the same helper used by the job API, with `ignore_errors=True` for best-effort semantics.
+- On `DELETE /v1/connectors/{connector_id}`, any residual staging directories (e.g. left by a crash mid-tick) are swept by globbing `staging/connectors/<connector_id>-*` and removing each match.
 
 ### 8.3 Worker stub
 
 ```python
 def _run_tick(self) -> None:
     self.config = get_active_connector(self.connector_id)
-    sync_id = insert_sync_history(self.connector_id)
+    sync_seq = open_new_sync_log(self.connector_id)  # seq auto-generated by DB
     scanner = build_scanner(self.config)
     try:
         scanner.connect()
@@ -1040,14 +1052,42 @@ def _run_tick(self) -> None:
             ingest_list, orphan_checksums = self._classify(
                 scanned_files, known_checksums, all_checksums
             )
-            self._process_new_files(sync_id, scanner, ingest_list)
+            self._process_new_files(sync_seq, scanner, ingest_list)
         # Lock released — orphan removal does not need it
         self._delete_orphans(orphan_checksums)
-        self._complete_tick(sync_id)
+        self._complete_tick(sync_seq)
     except Exception as exc:
-        self._fail_tick(sync_id, exc)
+        self._fail_tick(sync_seq, exc)
     finally:
         scanner.close()
+
+def _process_new_files(
+    self,
+    sync_seq: int,
+    scanner: BaseScanner,
+    ingest_list: list[tuple[str, str]],
+) -> None:
+    staging_base = settings.digitize.staging_dir / "connectors"
+    for batch_number, (remote_path, checksum) in enumerate(ingest_list):
+        job_id = generate_job_id()  # UUID generated before download so the dir name is known upfront
+        batch_dir_name = f"{self.connector_id}-{job_id}-{batch_number}"
+        batch_dir = staging_base / batch_dir_name
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            scanner.download(remote_path, batch_dir)
+            doc_id = create_job(self.connector_id, checksum, staging_dir=batch_dir)
+            add_connector_checksum_entry(self.connector_id, checksum, doc_id)
+        except Exception as exc:
+            logger.warning(f"Failed to ingest {remote_path!r}: {exc}")
+            self._increment_failed(sync_seq)
+        finally:
+            # Remove this batch's staging directory immediately — before the
+            # next file is downloaded — regardless of success or failure.
+            cleanup_staging_directory(
+                batch_dir_name,
+                staging_base,
+                ignore_errors=True,
+            )
 ```
 
 ### 8.4 Classify
@@ -1059,7 +1099,7 @@ def _run_tick(self) -> None:
 | `ingest_list` | `list[tuple[str, str]]` | Brand new to all connectors — download, ingest, register |
 | `orphan_checksums` | `set[str]` | Previously owned by this connector, no longer on remote source |
 
-Cross-connector duplicates (`checksum IN all_checksums but NOT known_checksums`) are handled inline: `_classify` immediately calls `lookup_connector_content_by_checksum` and `add_connector_to_membership` before moving on. Intra-tick dedup still applies — only the first occurrence of a checksum triggers the DB write.
+Cross-connector duplicates (`checksum IN all_checksums but NOT known_checksums`) are handled inline: `_classify` immediately calls `lookup_connector_content_by_checksum` and `add_connector_checksum_entry` before moving on. Intra-tick dedup still applies — only the first occurrence of a checksum triggers the DB write.
 
 ```python
 def _classify(
@@ -1080,7 +1120,7 @@ def _classify(
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
                 existing_doc_id = lookup_connector_content_by_checksum(checksum)
-                add_connector_to_membership(self.connector_id, checksum, existing_doc_id)
+                add_connector_checksum_entry(self.connector_id, checksum, existing_doc_id)
         else:
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
@@ -1139,7 +1179,7 @@ try:
 except Exception as exc:
     log.error(f"Worker {connector_id} crashed: {exc}", exc_info=True)
     if _tick_running and _current_sync_id:
-        update_sync_history(…, sync_status=f"crashed: {exc}")
+        close_sync_log(…, sync_status=f"crashed: {exc}")
     update_connector_sync_status(…, f"crashed: {exc}")
 ```
 
@@ -1191,7 +1231,7 @@ monitor_thread.join(timeout=10)
 1. Closes active connections.
 2. Deletes pending (in-flight) checksum rows.
 3. Removes membership rows and OpenSearch docs for files ingested this tick.
-4. Closes the sync-history row as `"interrupted: connector deleted"`.
+4. Closes the sync-logs row as `"interrupted: connector deleted"`.
 
 Check points:
 
@@ -1261,13 +1301,14 @@ Each PR is independently testable.
 
 **What's to build:**
 All connector DB functions from §5.1:
-`insert_active_connector`, `upsert_active_connector`, `get_active_connector`, `list_connectors`, `delete_active_connector`, `update_connector_sync_status`, `merge_connection_details`, `lookup_connector_content_by_checksum`, `list_connector_checksums`, `list_all_checksums`, `add_connector_to_membership`, `remove_connector_from_membership`, `insert_sync_history`, `update_sync_history`, `update_sync_history_files_syncing`, `list_sync_history`, `set_document_metadata`
+`insert_connector`, `upsert_connector`, `get_active_connector`, `list_connectors`, `delete_active_connector`, `update_connector_sync_status`, `lookup_connector_content_by_checksum`, `list_connector_checksums`, `list_all_checksums`, `add_connector_checksum_entry`, `remove_connector_checksum_entry`, `open_new_sync_log`, `close_sync_log`, `update_sync_log`, `list_sync_logs`, `set_document_metadata`
 
 **How to test:**
 - Unit tests per function against a test DB
-- Assert `add_connector_to_membership` inserts a new row on first call and appends the connector_id on subsequent calls with the same checksum
-- Assert `remove_connector_from_membership` returns `remaining=0` when the last connector is removed, and `remaining>0` when others still own the checksum
-- Assert `merge_connection_details` correctly merges keys without clobbering untouched fields
+- Assert `insert_connector` inserts a new row and returns `409` on a duplicate `id`
+- Assert `upsert_connector` updates only the supplied fields and merges `connection_details` keys without clobbering untouched fields
+- Assert `add_connector_checksum_entry` inserts a new row on first call and appends the connector_id on subsequent calls with the same checksum
+- Assert `remove_connector_checksum_entry` returns `remaining=0` when the last connector is removed, and `remaining>0` when others still own the checksum
 - Assert `lookup_connector_content_by_checksum` queries `connector_document_checksum` and never touches `document_checksum`
 
 ---
@@ -1277,11 +1318,11 @@ All connector DB functions from §5.1:
 **Files touched:** connector router/handler file(s)
 
 **What's to build:**
-- `POST /v1/connectors` — validate body, encrypt secrets, call `insert_active_connector`, return `202`
-- `PUT /v1/connectors/{id}` — partial update, re-encrypt if credentials included, `merge_connection_details`, return `200`
+- `POST /v1/connectors` — validate body, encrypt secrets, call `insert_connector`, return `202`
+- `PUT /v1/connectors/{id}` — partial update, re-encrypt if credentials included, call `upsert_connector`, return `200`
 - `DELETE /v1/connectors/{id}` — stub only (stops at "would stop worker" + calls DB delete), no worker logic yet
 - `GET /v1/connectors` and `GET /v1/connectors/{id}` — read from DB, strip secret fields
-- `GET /v1/connectors/{id}/sync-history` — paginated query with `limit`/`offset`
+- `GET /v1/connectors/{id}/syncs` — paginated query with `limit`/`offset`
 - **Update `GET /v1/documents` and `GET /v1/documents/{doc_id}`** to exclude connector-sourced docs via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = ...)` filter
 - **Update `DELETE /v1/documents/{doc_id}`** to return `404` for connector-sourced docs
 
@@ -1319,7 +1360,7 @@ All connector DB functions from §5.1:
 **Files touched:** `connectors/s3_scanner.py`
 
 **What's to build:**
-- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()`, staged download; `scan()` returns **all** allowed objects without dedup filtering; checksum (S3 ETag) registered via `add_connector_to_membership()` on job completion; `set_document_metadata()` stores checksum and key. `upsert_file_checksum()` must NOT be called.
+- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()`, staged download; `scan()` returns **all** allowed objects without dedup filtering; checksum (S3 ETag) registered via `add_connector_checksum_entry()` on job completion; `set_document_metadata()` stores checksum and key. `upsert_file_checksum()` must NOT be called.
 
 **How to test:**
 - Unit test with `moto` (mock AWS) — assert listing, extension filtering, and download
@@ -1335,7 +1376,8 @@ All connector DB functions from §5.1:
 **What's to build:**
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, classify, ingest new files, register cross-connector dups, orphan deletion, tick finalize
 - `_classify()`: see §8.4 — `skip_list` is implicit (not returned)
-- Pass `connector_id` and `checksum` (pre-computed by scanner) to each create-job call; `add_connector_to_membership` called on job completion — `upsert_file_checksum` must NOT be called for connector jobs
+- Pass `connector_id` and `checksum` (pre-computed by scanner) to each create-job call; `add_connector_checksum_entry` called on job completion — `upsert_file_checksum` must NOT be called for connector jobs
+- `_process_new_files()`: for each file, generate a `job_id` upfront, create `staging/connectors/<connector_id>-<job_id>-<batch_number>/`, download into it, ingest, then `cleanup_staging_directory(batch_dir_name, ..., ignore_errors=True)` in a `finally` block — staging is cleared after each individual file, not at the end of the batch
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
@@ -1350,6 +1392,9 @@ All connector DB functions from §5.1:
 - `_classify` — assert intra-tick dedup (two paths with same checksum → first path wins)
 - `_classify` — assert absent checksums appear in `orphan_checksums`
 - Assert `_delete_orphans()` is called only after `_process_new_files()` returns
+- `_process_new_files` — assert staging dir is named `<connector_id>-<job_id>-<batch_number>` and is created before `scanner.download()`
+- `_process_new_files` — assert `cleanup_staging_directory` is called with `batch_dir_name` in the `finally` block, including when ingest raises
+- `_process_new_files` — assert staging directory is absent between two consecutive file downloads (i.e. cleanup happens before the next `scanner.download` call)
 
 ---
 

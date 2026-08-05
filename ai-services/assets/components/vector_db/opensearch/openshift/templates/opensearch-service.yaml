@@ -6,7 +6,7 @@ metadata:
   name: "opensearch-headless"
   labels:
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/name: vectordb
 spec:
@@ -31,7 +31,7 @@ metadata:
   name: "opensearch"
   labels:
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/name: vectordb
 spec:

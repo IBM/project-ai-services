@@ -9,6 +9,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -19,15 +22,6 @@ type HTTPClientConfig struct {
 	InsecureSkipVerify bool
 	// PoolConnections enables connection pooling for better performance.
 	PoolConnections bool
-}
-
-// DefaultHTTPConfig returns sensible defaults for HTTP communication.
-func DefaultHTTPConfig() HTTPClientConfig {
-	return HTTPClientConfig{
-		Timeout:            10 * time.Second, //nolint:mnd
-		InsecureSkipVerify: true, // Self-signed certs common in test environments
-		PoolConnections:    true,
-	}
 }
 
 // GetHTTPClient returns an HTTP client configured with the given config.
@@ -158,12 +152,42 @@ func ParseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error)
 	return &errorResp, nil
 }
 
-// ExpectErrorResponse checks if the response status differs from the expected success status,
-// and returns a parsed error response. If the status was successful, returns an error indicating unexpected success.
-func ExpectErrorResponse(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
-	if statusCode != successStatus {
-		return ParseErrorResponse(body, statusCode)
+// GetTestPDFPath returns the absolute path to the shared test PDF fixture (test_doc.pdf)
+// located at ingestion/docs/test_doc.pdf relative to the e2e tests root.
+// Returns an empty string if the caller location cannot be resolved.
+func GetTestPDFPath() string {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
 	}
 
-	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
+	// common/ is one level below the e2e root; ingestion/docs is a sibling of common/.
+	return filepath.Join(filepath.Dir(filepath.Dir(filename)), "ingestion", "docs", "test_doc.pdf")
+}
+
+// IsResourceLockedError reports whether err is an HTTP 409 resource-lock error.
+// Any 409 is treated as a lock because both the digitize and summarize APIs only return 409 for that reason.
+func IsResourceLockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "409") {
+		return false
+	}
+
+	// A plain 409 with no body detail is still a resource-locked response.
+	return true
+}
+
+// IsRateLimitError reports whether err is an HTTP 429 rate-limit error.
+func IsRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return strings.Contains(err.Error(), "429") &&
+		(strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") ||
+			strings.Contains(err.Error(), "Too many"))
 }
