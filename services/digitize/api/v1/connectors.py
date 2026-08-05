@@ -277,12 +277,15 @@ async def delete_connector(connector_id: str):
 
 def _best_effort_delete_document(doc_id: str) -> None:
     """
-    Delete a document via the db_manager.  200 / 204 / 404 are all treated
-    as success — 5xx and unexpected exceptions are logged and swallowed.
+    Delete a document via the full teardown path (VDB → files → DB record).
+
+    Calls delete_document_data() so that indexed chunks and output files are
+    cleaned up — not just the DB row.
+    All failures are logged and swallowed (best-effort semantics).
     """
     try:
-        from digitize.db.manager import db_manager
-        db_manager.delete_document(doc_id)
+        from digitize.api.v1.documents import delete_document_data
+        delete_document_data(doc_id)
         logger.debug(f"Deleted document {doc_id!r} (connector cleanup)")
     except Exception as exc:
         logger.error(

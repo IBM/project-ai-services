@@ -26,6 +26,43 @@ router = APIRouter()
 logger = get_logger("documents_router")
 
 
+def delete_document_data(doc_id: str) -> None:
+    """
+    Steps 4-6 of the delete_document flow: VDB cleanup, file cleanup, DB record removal.
+    Extracted so connector cleanup can call the same teardown path.
+    Raises on failure; callers decide how to handle errors.
+    """
+    # 4. VDB cleanup.
+    import common.db_utils as db
+
+    vector_store = db.get_vector_store()
+    deleted_chunks = vector_store.delete_document_by_id(doc_id)
+    logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+
+    # 5. File cleanup.
+    doc_metadata = None
+    try:
+        doc_metadata = dg_util.get_document(doc_id, include_details=False)
+    except FileNotFoundError:
+        logger.error(f"Metadata for {doc_id} not found. Proceeding with VDB cleanup.")
+    if doc_metadata:
+        storage_manager.delete_document_content(
+            doc_id, output_format=doc_metadata.output_format
+        )
+        logger.info(f"Files for {doc_id} deleted successfully.")
+
+    # 6. Database record removal.
+    from digitize.db.manager import db_manager
+
+    success = db_manager.delete_document(doc_id)
+    if success:
+        logger.info(f"Database record for {doc_id} deleted successfully.")
+    else:
+        logger.warning(
+            f"Database record for {doc_id} not found (may have been deleted already)."
+        )
+
+
 @router.get(
     "",
     response_model=models.DocumentsListResponse,
@@ -207,51 +244,12 @@ async def delete_document(doc_id: str):
                     f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted",
                 )
 
-        # 4. VDB cleanup.
+        # 4-6. VDB cleanup, file cleanup, DB record removal.
         try:
-            import common.db_utils as db
-
-            vector_store = db.get_vector_store()
-            deleted_chunks = vector_store.delete_document_by_id(doc_id)
-            logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+            delete_document_data(doc_id)
         except Exception as exc:
-            logger.error(f"VDB cleanup failed for {doc_id}: {exc}")
-            APIError.raise_error(
-                ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Document metadata deleted but VDB cleanup failed: {exc}",
-            )
-
-        # 5. File cleanup.
-        if doc_metadata:
-            try:
-                storage_manager.delete_document_content(
-                    doc_id, output_format=doc_metadata.output_format
-                )
-                logger.info(f"Files for {doc_id} deleted successfully.")
-            except Exception as exc:
-                logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
-                APIError.raise_error(
-                    ErrorCode.INTERNAL_SERVER_ERROR,
-                    f"Search data removed but files remain: {exc}",
-                )
-
-        # 6. Database record removal.
-        try:
-            from digitize.db.manager import db_manager
-
-            success = db_manager.delete_document(doc_id)
-            if success:
-                logger.info(f"Database record for {doc_id} deleted successfully.")
-            else:
-                logger.warning(
-                    f"Database record for {doc_id} not found (may have been deleted already)."
-                )
-        except Exception as exc:
-            logger.error(f"Failed to delete database record for {doc_id}: {exc}")
-            APIError.raise_error(
-                ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Search data and files removed but database cleanup failed: {exc}",
-            )
+            logger.error(f"Document teardown failed for {doc_id}: {exc}")
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
 
         return None
 
