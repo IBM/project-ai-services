@@ -775,7 +775,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status=SyncStatus.IDLE,
+                        sync_status=SyncStatus.UP_TO_DATE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])

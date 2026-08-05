@@ -21,7 +21,7 @@ class SyncStatus:
     """String constants for connector sync_status and sync-log status columns.
 
     Connector.sync_status lifecycle:
-        IDLE  ──► SYNCING  ──► IDLE        (tick completed cleanly)
+        UP_TO_DATE  ──► SYNCING  ──► UP_TO_DATE  (tick completed cleanly)
                           └──► OUT_OF_SYNC (tick finished with errors)
 
     ConnectorSyncLog.status lifecycle:
@@ -30,7 +30,7 @@ class SyncStatus:
     """
 
     # Connector.sync_status values
-    IDLE = "up to date"
+    UP_TO_DATE = "up to date"
     SYNCING = "syncing"
     OUT_OF_SYNC = "out of sync"
 

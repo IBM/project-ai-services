@@ -202,7 +202,7 @@ class Connector(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncStatus.IDLE)
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncStatus.UP_TO_DATE)
     last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

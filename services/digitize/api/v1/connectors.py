@@ -93,7 +93,7 @@ async def create_connector(body: ConnectorCreateRequest):
         )
         # Worker start is a no-op stub in PR3 — the worker manager (PR7) will hook
         # in here once implemented.
-        return Response(status_code=200)
+        return Response(status_code=201)
 
     except IntegrityError:
         # id or name already exists
@@ -266,7 +266,7 @@ async def delete_connector(connector_id: str):
         _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} detached and deleted")
-        return None
+        return Response(status_code=204)
 
     except HTTPException:
         raise
