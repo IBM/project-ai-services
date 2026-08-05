@@ -1,5 +1,5 @@
 """
-Database repository layer for Job and Document operations.
+Database repository layer for Job, Document, and Connector operations.
 
 Provides CRUD operations with proper error handling and transaction management.
 """
@@ -7,12 +7,12 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, cast
 from sqlalchemy import select, update, delete, func, or_, and_
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
-from digitize.db.models import Job, Document, DocumentChecksum
+from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 
@@ -357,7 +357,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = (
-                    insert(DocumentChecksum)
+                    pg_insert(DocumentChecksum)
                     .values(sha256=sha256, doc_id=doc_id)
                     .on_conflict_do_update(
                         index_elements=["sha256"],
@@ -731,6 +731,517 @@ class DatabaseManager:
                 "error": str(e)
             }
 
+
+
+    # ========================================================================
+    # Connector CRUD
+    # ========================================================================
+
+    @staticmethod
+    def insert_connector(
+        connector_id: str,
+        name: str,
+        connector_type: str,
+        connection_details: dict,
+        allowed_extensions: list,
+        sync_interval_seconds: int,
+    ) -> None:
+        """
+        Insert a new connector row.
+
+        Uses ON CONFLICT (id) DO NOTHING and re-raises IntegrityError when the
+        id already exists so the caller can map that to a 409 response.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(Connector)
+                    .values(
+                        id=connector_id,
+                        name=name,
+                        type=connector_type,
+                        connection_details=connection_details,
+                        allowed_extensions=allowed_extensions,
+                        sync_interval_seconds=sync_interval_seconds,
+                        attached_at=datetime.now(timezone.utc),
+                        sync_status="up to date",
+                        total_files=0,
+                    )
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                result = session.execute(stmt)
+                if result.rowcount == 0:
+                    raise IntegrityError(
+                        statement=None,
+                        params=None,
+                        orig=Exception(f"Connector id={connector_id!r} already exists"),
+                    )
+                logger.info(f"Inserted connector {connector_id!r} ({name!r})")
+        except IntegrityError:
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"DB error inserting connector {connector_id}: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def update_connector(
+        connector_id: str,
+        name: Optional[str] = None,
+        connection_details: Optional[dict] = None,
+        allowed_extensions: Optional[list] = None,
+    ) -> None:
+        """
+        Partial update of an existing connector.
+
+        Only non-None kwargs are written; connection_details is merged at the
+        key level using the PostgreSQL ``||`` JSONB concatenation operator.
+
+        Raises FileNotFoundError if no connector with the given id exists.
+        """
+        try:
+            with get_db_session() as session:
+                values: Dict[str, Any] = {}
+                if name is not None:
+                    values["name"] = name
+                if allowed_extensions is not None:
+                    values["allowed_extensions"] = allowed_extensions
+                if connection_details is not None:
+                    stmt = (
+                        update(Connector)
+                        .where(Connector.id == connector_id)
+                        .values(
+                            connection_details=Connector.connection_details.op("||")(
+                                func.cast(connection_details, Connector.connection_details.type)
+                            ),
+                            **values,
+                        )
+                    )
+                else:
+                    stmt = (
+                        update(Connector)
+                        .where(Connector.id == connector_id)
+                        .values(**values)
+                    )
+                result = session.execute(stmt)
+                if result.rowcount == 0:
+                    raise FileNotFoundError(f"Connector id={connector_id!r} not found")
+                logger.info(f"Updated connector {connector_id!r}")
+        except FileNotFoundError:
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"DB error updating connector {connector_id}: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def get_connector_by_id(connector_id: str) -> Optional[Connector]:
+        """
+        Fetch a single connector by id, attributes eagerly loaded and expunged.
+
+        Returns None if not found.
+        """
+        try:
+            with get_db_session() as session:
+                connector = session.get(Connector, connector_id)
+                if connector is None:
+                    logger.debug(f"Connector {connector_id!r} not found")
+                    return None
+                _ = (
+                    connector.id, connector.name, connector.type,
+                    connector.connection_details, connector.allowed_extensions,
+                    connector.sync_interval_seconds, connector.attached_at,
+                    connector.last_sync_at, connector.sync_status,
+                    connector.last_sync_error, connector.total_files,
+                )
+                session.expunge(connector)
+                return connector
+        except SQLAlchemyError as e:
+            logger.error(f"DB error fetching connector {connector_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def get_all_connectors() -> List[Connector]:
+        """
+        Return all connectors ordered by attached_at descending.
+
+        Each object is eagerly loaded and expunged from the session.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Connector).order_by(Connector.attached_at.desc())
+                connectors = list(session.scalars(stmt).all())
+                for c in connectors:
+                    _ = (
+                        c.id, c.name, c.type, c.connection_details,
+                        c.allowed_extensions, c.sync_interval_seconds,
+                        c.attached_at, c.last_sync_at, c.sync_status,
+                        c.last_sync_error, c.total_files,
+                    )
+                    session.expunge(c)
+                logger.debug(f"Listed {len(connectors)} connector(s)")
+                return connectors
+        except SQLAlchemyError as e:
+            logger.error(f"DB error listing connectors: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def delete_connector(connector_id: str) -> bool:
+        """
+        Delete a connector row by id (cascades to connector_sync_logs).
+
+        Returns True if a row was deleted, False if not found.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(Connector).where(Connector.id == connector_id)
+                result = session.execute(stmt)
+                deleted = result.rowcount > 0
+                if deleted:
+                    logger.info(f"Deleted connector {connector_id!r}")
+                else:
+                    logger.debug(f"Connector {connector_id!r} not found for deletion")
+                return deleted
+        except SQLAlchemyError as e:
+            logger.error(f"DB error deleting connector {connector_id}: {e}", exc_info=True)
+            return False
+
+    # ========================================================================
+    # Connector checksum helpers
+    # ========================================================================
+
+    @staticmethod
+    def find_connector_doc_by_checksum(checksum: str) -> Optional[str]:
+        """
+        Return the doc_id if any connector has registered this checksum, else None.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConnectorDocumentChecksum.doc_id)
+                    .where(ConnectorDocumentChecksum.checksum == checksum)
+                    .limit(1)
+                )
+                row = session.execute(stmt).one_or_none()
+                return row[0] if row else None
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in find_connector_doc_by_checksum: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def get_connector_checksums(connector_id: str) -> List[str]:
+        """Return all checksums owned by the given connector."""
+        try:
+            with get_db_session() as session:
+                stmt = select(ConnectorDocumentChecksum.checksum).where(
+                    ConnectorDocumentChecksum.connector_id == connector_id
+                )
+                rows = session.execute(stmt).all()
+                return [r[0] for r in rows]
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_connector_checksums({connector_id}): {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def get_all_connector_checksums() -> List[str]:
+        """Return all distinct checksums across all connectors."""
+        try:
+            with get_db_session() as session:
+                stmt = select(ConnectorDocumentChecksum.checksum).distinct()
+                rows = session.execute(stmt).all()
+                return [r[0] for r in rows]
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_all_connector_checksums: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def insert_connector_checksum(connector_id: str, checksum: str, doc_id: str) -> None:
+        """
+        Insert a (checksum, connector_id, doc_id) row.
+
+        No-op if the row already exists (ON CONFLICT DO NOTHING).
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(ConnectorDocumentChecksum)
+                    .values(checksum=checksum, connector_id=connector_id, doc_id=doc_id)
+                    .on_conflict_do_nothing(index_elements=["checksum", "connector_id"])
+                )
+                session.execute(stmt)
+                logger.debug(
+                    f"insert_connector_checksum: connector={connector_id!r} "
+                    f"checksum={checksum[:20]}... doc_id={doc_id!r}"
+                )
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in insert_connector_checksum({connector_id}, {checksum[:20]}...): {e}",
+                exc_info=True,
+            )
+            raise
+
+    @staticmethod
+    def delete_connector_checksum(
+        connector_id: str, checksum: str
+    ) -> tuple[int, Optional[str]]:
+        """
+        Delete the (checksum, connector_id) row.
+
+        Returns (remaining_owner_count, doc_id).
+        If the row did not exist, returns (0, None).
+        """
+        try:
+            with get_db_session() as session:
+                del_stmt = (
+                    delete(ConnectorDocumentChecksum)
+                    .where(
+                        ConnectorDocumentChecksum.checksum == checksum,
+                        ConnectorDocumentChecksum.connector_id == connector_id,
+                    )
+                    .returning(ConnectorDocumentChecksum.doc_id)
+                )
+                deleted_row = session.execute(del_stmt).one_or_none()
+                if deleted_row is None:
+                    return 0, None
+                doc_id: str = deleted_row[0]
+
+                count_stmt = select(func.count()).where(
+                    ConnectorDocumentChecksum.checksum == checksum
+                )
+                remaining: int = session.execute(count_stmt).scalar() or 0
+                logger.debug(
+                    f"delete_connector_checksum: connector={connector_id!r} "
+                    f"checksum={checksum[:20]}... remaining={remaining}"
+                )
+                return remaining, doc_id
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in delete_connector_checksum({connector_id}, {checksum[:20]}...): {e}",
+                exc_info=True,
+            )
+            raise
+
+    # ========================================================================
+    # Sync log helpers
+    # ========================================================================
+
+    @staticmethod
+    def open_sync_log(
+        connector_id: str,
+        started_at: Optional[datetime] = None,
+    ) -> int:
+        """
+        Create a new sync-log row and set connector sync_status to 'syncing'.
+
+        seq is auto-generated as COALESCE(MAX(seq), 0) + 1 scoped to this connector.
+        Returns the generated seq value.
+        """
+        try:
+            with get_db_session() as session:
+                seq_subquery = (
+                    select(func.coalesce(func.max(ConnectorSyncLog.seq), 0) + 1)
+                    .where(ConnectorSyncLog.connector_id == connector_id)
+                    .scalar_subquery()
+                )
+                stmt = (
+                    pg_insert(ConnectorSyncLog)
+                    .values(
+                        connector_id=connector_id,
+                        seq=seq_subquery,
+                        started_at=started_at or datetime.now(timezone.utc),
+                        status="started",
+                        error="",
+                    )
+                    .returning(ConnectorSyncLog.seq)
+                )
+                seq: int = session.execute(stmt).scalar_one()
+                session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(sync_status="syncing")
+                )
+                logger.debug(f"open_sync_log: connector={connector_id!r} seq={seq}")
+                return seq
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in open_sync_log({connector_id}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def close_sync_log(
+        connector_id: str,
+        seq: int,
+        status: str,
+        finished_at: Optional[datetime] = None,
+        total_files: Optional[int] = None,
+        new_files: Optional[int] = None,
+        removed_files: Optional[int] = None,
+        failed_files: Optional[int] = None,
+        error: Optional[str] = None,
+    ) -> bool:
+        """
+        Finalize a sync-log row and update connector last_sync_at / sync_status.
+
+        Returns True on success, False if the sync-log row was not found.
+        """
+        try:
+            with get_db_session() as session:
+                now = finished_at or datetime.now(timezone.utc)
+                log_values: Dict[str, Any] = {
+                    "status": status,
+                    "finished_at": now,
+                }
+                if total_files is not None:
+                    log_values["total_files"] = total_files
+                if new_files is not None:
+                    log_values["new_files"] = new_files
+                if removed_files is not None:
+                    log_values["removed_files"] = removed_files
+                if failed_files is not None:
+                    log_values["failed_files"] = failed_files
+                if error is not None:
+                    log_values["error"] = error
+                log_stmt = (
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
+                    .values(**log_values)
+                )
+                result = session.execute(log_stmt)
+                if result.rowcount == 0:
+                    logger.warning(
+                        f"Sync log connector={connector_id!r} seq={seq} not found for update"
+                    )
+                    return False
+                session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(last_sync_at=now, sync_status=status)
+                )
+                return True
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in close_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
+    def update_sync_log_progress(
+        log_id: int,
+        total_files: Optional[int] = None,
+        new_files: Optional[int] = None,
+        removed_files: Optional[int] = None,
+        failed_files: Optional[int] = None,
+    ) -> bool:
+        """
+        Write live progress counters into an in-progress sync-log row.
+
+        Only non-None counters are updated. Returns True on success, False if
+        the row was not found.
+        """
+        try:
+            with get_db_session() as session:
+                values: Dict[str, Any] = {}
+                if total_files is not None:
+                    values["total_files"] = total_files
+                if new_files is not None:
+                    values["new_files"] = new_files
+                if removed_files is not None:
+                    values["removed_files"] = removed_files
+                if failed_files is not None:
+                    values["failed_files"] = failed_files
+                if not values:
+                    return True
+                stmt = (
+                    update(ConnectorSyncLog)
+                    .where(ConnectorSyncLog.id == log_id)
+                    .values(**values)
+                )
+                result = session.execute(stmt)
+                updated = result.rowcount > 0
+                if not updated:
+                    logger.warning(f"Sync log id={log_id} not found for progress update")
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in update_sync_log_progress(id={log_id}): {e}", exc_info=True
+            )
+            return False
+
+    @staticmethod
+    def get_sync_logs(
+        connector_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[List[ConnectorSyncLog], int]:
+        """
+        Return paginated sync-log rows for a connector, newest first.
+
+        Returns (items, total_count).
+        """
+        try:
+            with get_db_session() as session:
+                base = select(ConnectorSyncLog).where(
+                    ConnectorSyncLog.connector_id == connector_id
+                )
+                total: int = session.execute(
+                    select(func.count()).select_from(base.subquery())
+                ).scalar() or 0
+
+                stmt = (
+                    base.order_by(ConnectorSyncLog.started_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                rows = list(session.scalars(stmt).all())
+                for row in rows:
+                    _ = (
+                        row.id, row.connector_id, row.seq,
+                        row.started_at, row.finished_at,
+                        row.total_files, row.new_files, row.removed_files,
+                        row.failed_files, row.status, row.error,
+                    )
+                    session.expunge(row)
+                logger.debug(
+                    f"get_sync_logs: connector={connector_id!r} "
+                    f"returned {len(rows)} of {total}"
+                )
+                return rows, total
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_sync_logs({connector_id}): {e}", exc_info=True)
+            return [], 0
+
+    # ========================================================================
+    # Document metadata helper
+    # ========================================================================
+
+    @staticmethod
+    def merge_document_metadata(doc_id: str, metadata: dict) -> bool:
+        """
+        Merge *metadata* into documents.doc_metadata using the PostgreSQL
+        ``||`` JSONB concatenation operator (atomic key-level merge).
+
+        Returns True on success, False if the document row was not found.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    update(Document)
+                    .where(Document.doc_id == doc_id)
+                    .values(
+                        doc_metadata=Document.doc_metadata.op("||")(
+                            func.cast(metadata, Document.doc_metadata.type)
+                        )
+                    )
+                )
+                result = session.execute(stmt)
+                updated = result.rowcount > 0
+                if not updated:
+                    logger.warning(f"merge_document_metadata: doc_id={doc_id!r} not found")
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in merge_document_metadata({doc_id}): {e}", exc_info=True)
+            return False
 
 
 # Singleton instance for easy access

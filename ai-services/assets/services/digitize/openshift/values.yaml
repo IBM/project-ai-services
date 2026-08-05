@@ -29,11 +29,8 @@ postgres:
 embedding:
   model:
     name: ""
-    maxModelLen: 512
 
 llm:
   model:
     name: ""
-    maxModelLen: 4096
-    maxBatchSize: 32
   apiKey: ""

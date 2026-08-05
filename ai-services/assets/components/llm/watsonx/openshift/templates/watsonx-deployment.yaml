@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "instruct"
+  name: "llm"
   labels:
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
   selector:
     matchLabels:
       ai-services.io/component: {{ .Release.Name }}
-      ai-services.io/name: instruct
+      ai-services.io/name: llm
   template:
     metadata:
       labels:
         ai-services.io/component: {{ .Release.Name }}
-        ai-services.io/template: {{ .Chart.Name }}
-        ai-services.io/name: instruct
+        ai-services.io/template: {{ .Values.templateID }}
+        ai-services.io/name: llm
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
       containers:
         - name: litellm
-          image: "{{ .Values.instruct.image }}"
+          image: "{{ .Values.image }}"
           command:
             - litellm
             - --config
@@ -36,13 +36,13 @@ spec:
                 name: "watsonx-credentials"
           env:
             - name: WATSONX_PROJECT_ID
-              value: "{{ .Values.instruct.watsonxProjectId }}"
+              value: "{{ .Values.watsonxProjectId }}"
             - name: WATSONX_URL
-              value: "{{ .Values.instruct.watsonxUrl }}"
-            - name: INSTRUCT_MODEL
-              value: "watsonx/{{ .Values.instruct.model }}"
-            - name: INSTRUCT_MODEL_NAME
-              value: "{{ .Values.instruct.model }}"
+              value: "{{ .Values.watsonxUrl }}"
+            - name: LLM_MODEL
+              value: "watsonx/{{ .Values.model }}"
+            - name: LLM_MODEL_NAME
+              value: "{{ .Values.model }}"
           livenessProbe:
             httpGet:
               path: /health/liveness
@@ -61,11 +61,11 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: {{ .Values.instruct.resources.requests.cpu | quote }}
-              memory: {{ .Values.instruct.resources.requests.memory | quote }}
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
             limits:
-              cpu: {{ .Values.instruct.resources.limits.cpu | quote }}
-              memory: {{ .Values.instruct.resources.limits.memory | quote }}
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
           ports:
             - containerPort: 8000
               protocol: TCP

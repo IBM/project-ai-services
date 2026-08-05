@@ -97,27 +97,27 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 1.a: Pull container images for all components and services
 	if err := d.pullImagesForDeployment(ctx, plan); err != nil {
-		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Image pull failed", err)
+		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Image pull failed", err)
 
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
 	// Step 1.b: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(ctx, plan); err != nil {
-		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Model download failed", err)
+		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Model download failed", err)
 
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
 	// Update application status to Deploying before starting deployment
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, deployingStatusMessage(plan)); err != nil {
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, catalogutils.DeployingStatusMessage(plan.IsArchitecture)); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
 	}
 
 	// Step 2: Deploy components if any
 	if len(plan.Components) > 0 {
 		if err := d.deployComponents(ctx, plan); err != nil {
-			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Component deployment failed", err)
+			catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Component deployment failed", err)
 
 			return fmt.Errorf("failed to deploy components: %w", err)
 		}
@@ -126,7 +126,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	// Step 4: Deploy services if any
 	if len(plan.Services) > 0 {
 		if err := d.deployServices(ctx, plan); err != nil {
-			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Service deployment failed", err)
+			catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Service deployment failed", err)
 
 			return fmt.Errorf("failed to deploy services: %w", err)
 		}
@@ -134,7 +134,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 5: Register routes with Caddy proxy
 	if err := d.registerApplicationRoutes(ctx, plan); err != nil {
-		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Failed to register application routes", err)
+		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Failed to register application routes", err)
 
 		return fmt.Errorf("failed to register application routes: %w", err)
 	}
@@ -147,23 +147,6 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	logger.InfofCtx(ctx, "Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
-}
-
-// deployingStatusMessage returns the human-readable deploying status message based on deployment type.
-func deployingStatusMessage(plan *DeploymentPlan) string {
-	if plan.IsArchitecture {
-		return "Deploying digital assistant"
-	}
-
-	return "Deploying service"
-}
-
-// handleDeploymentStepError updates application status to Error and logs the failure.
-func (d *PodmanDeployer) handleDeploymentStepError(ctx context.Context, appID uuid.UUID, context string, err error) {
-	errMsg := fmt.Sprintf("%s: %v", context, err)
-	if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
-		logger.ErrorfCtx(ctx, "Failed to update application status: %v\n", updateErr)
-	}
 }
 
 // downloadModelsForDeployment downloads all models specified in component and service parameters.
@@ -353,46 +336,28 @@ func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, compo
 		return nil
 	}
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex // Mutex to protect concurrent writes to service Values maps
-	errChan := make(chan error, len(components))
-
+	// Build hash → dbID index so RunConcurrently can track status per component.
+	// A shared mutex is passed into each deployComponent call to protect concurrent
+	// writes to service Values maps (endpoint merging).
+	var mu sync.Mutex
+	items := make(map[string]uuid.UUID, len(components))
 	for hash, comp := range components {
-		wg.Add(1)
-		go func(h string, c *ComponentPlan) {
-			defer wg.Done()
-			if err := d.deployComponent(ctx, h, c, plan, &mu); err != nil {
-				errMsg := fmt.Sprintf("Component deployment failed: %v", err)
-				if updateErr := catalogutils.UpdateComponentStatus(ctx, d.componentRepo, c.DatabaseID, models.ComponentStatusError, errMsg); updateErr != nil {
-					logger.ErrorfCtx(ctx, "Failed to update component %s status: %v\n", h, updateErr)
-				}
-				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
-
-				return
-			}
-			// Update component status to Running after successful deployment
-			if err := catalogutils.UpdateComponentStatus(ctx, d.componentRepo, c.DatabaseID, models.ComponentStatusRunning, "Component deployed successfully"); err != nil {
-				logger.ErrorfCtx(ctx, "Failed to update component %s status to Running: %v\n", h, err)
-			}
-		}(hash, comp)
+		items[hash] = comp.DatabaseID
 	}
 
-	// Wait for all goroutines to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	errs := make([]error, 0, len(plan.Components))
-	for err := range errChan {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		// Return the first error (could be enhanced to return all errors)
-		return errs[0]
-	}
-
-	return nil
+	return catalogutils.RunConcurrently(
+		ctx,
+		items,
+		func(ctx context.Context, hash string) error {
+			return d.deployComponent(ctx, hash, components[hash], plan, &mu)
+		},
+		func(ctx context.Context, dbID uuid.UUID, msg string) error {
+			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusError, msg)
+		},
+		func(ctx context.Context, dbID uuid.UUID, msg string) error {
+			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusRunning, msg)
+		},
+	)
 }
 
 // deployComponent deploys a single component and updates its endpoint in the database.
@@ -586,49 +551,25 @@ func (d *PodmanDeployer) deployComponentPods(
 func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Deploying %d services concurrently...\n", len(plan.Services))
 
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(plan.Services))
-
-	for serviceID, svc := range plan.Services {
-		wg.Add(1)
-		go func(sID string, service *ServicePlan) {
-			defer wg.Done()
-
-			if err := d.deployService(ctx, plan, sID, service); err != nil {
-				// Update service status to Error
-				errMsg := fmt.Sprintf("Service deployment failed: %v", err)
-				if updateErr := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, service.DatabaseID, models.ServiceStatusError, errMsg); updateErr != nil {
-					logger.ErrorfCtx(ctx, "Failed to update service %s status: %v\n", sID, updateErr)
-				}
-				errCh <- fmt.Errorf("failed to deploy service %s: %w", sID, err)
-
-				return
-			}
-
-			// Update service status to Running after successful deployment
-			if err := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, service.DatabaseID, models.ServiceStatusRunning, "Service deployed successfully"); err != nil {
-				logger.ErrorfCtx(ctx, "Failed to update service %s status to Running: %v\n", sID, err)
-				// Don't fail the deployment if status update fails
-			}
-		}(serviceID, svc)
+	// Build id → dbID index so RunConcurrently can track status per service.
+	items := make(map[string]uuid.UUID, len(plan.Services))
+	for id, svc := range plan.Services {
+		items[id] = svc.DatabaseID
 	}
 
-	wg.Wait()
-	close(errCh)
-
-	// Collect all errors
-	errs := make([]error, 0, len(plan.Services))
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("service deployment errors: %v", errs)
-	}
-
-	logger.InfofCtx(ctx, "All services deployed successfully\n")
-
-	return nil
+	return catalogutils.RunConcurrently(
+		ctx,
+		items,
+		func(ctx context.Context, id string) error {
+			return d.deployService(ctx, plan, id, plan.Services[id])
+		},
+		func(ctx context.Context, dbID uuid.UUID, msg string) error {
+			return catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, dbID, models.ServiceStatusError, msg)
+		},
+		func(ctx context.Context, dbID uuid.UUID, msg string) error {
+			return catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, dbID, models.ServiceStatusRunning, msg)
+		},
+	)
 }
 
 // deployService deploys a single service and updates its endpoint in the database.

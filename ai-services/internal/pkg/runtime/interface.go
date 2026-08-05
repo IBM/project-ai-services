@@ -40,7 +40,7 @@ type Runtime interface {
 	ContainerLogs(containerNameOrID string) error
 
 	// Network operations
-	ListRoutes() ([]types.Route, error)
+	ListRoutes(labelSelector string) ([]types.Route, error)
 
 	// PVC operations
 	DeletePVCs(appLabel string) error

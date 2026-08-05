@@ -8,7 +8,7 @@ metadata:
   labels:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
@@ -21,15 +21,15 @@ spec:
       modelFormat:
         name: vLLM
       args:
-        - --served-model-name={{ .Values.instruct.model.name }}
-        - --max-model-len={{ .Values.instruct.model.maxModelLen }}
-        - --max-num-seqs={{ .Values.instruct.model.maxBatchSize }}
+        - --served-model-name={{ .Values.model }}
+        - --max-model-len=32768
+        - --max-num-seqs=32
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
           value: "auto"
         - name: VLLM_CPU_KVCACHE_SPACE
           value: "32"
-      {{- if .Values.instruct.apiKey }}
+      {{- if .Values.apiKey }}
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -38,10 +38,10 @@ spec:
       {{- end }}
       resources:
         requests:
-          cpu: {{ .Values.instruct.resources.requests.cpu | quote }}
-          memory: {{ .Values.instruct.resources.requests.memory | quote }}
+          cpu: {{ .Values.resources.requests.cpu | quote }}
+          memory: {{ .Values.resources.requests.memory | quote }}
         limits:
-          cpu: {{ .Values.instruct.resources.limits.cpu | quote }}
-          memory: {{ .Values.instruct.resources.limits.memory | quote }}
+          cpu: {{ .Values.resources.limits.cpu | quote }}
+          memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
-      storageUri: {{ .Values.instruct.storageUri }}
+      storageUri: {{ .Values.storageUri }}

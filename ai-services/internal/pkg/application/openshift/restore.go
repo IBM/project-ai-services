@@ -72,7 +72,7 @@ func (o *OpenshiftApplication) getDigitizeAPIURL(ctx context.Context, appName st
 	logger.Infof("Fetching digitize route from OpenShift...\n")
 
 	// List all routes in the namespace using the runtime interface
-	routes, err := o.runtime.ListRoutes()
+	routes, err := o.runtime.ListRoutes("")
 	if err != nil {
 		return "", fmt.Errorf("failed to list routes: %w", err)
 	}
