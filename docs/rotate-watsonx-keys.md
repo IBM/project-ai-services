@@ -1,72 +1,74 @@
 # Rotating Watsonx API Keys
 
-How to rotate an IBM Watsonx API key for an AI Services application running on the Podman runtime (PowerVS).
+How to replace an expired or compromised Watsonx API key for a RAG application
+running on the Podman (PowerVS) runtime without losing application data.
 
 ## Prerequisites
 
-- The Catalog UI is deployed and accessible. See [Configuring with PowerVS and IBM watsonx](https://www.ibm.com/docs/en/aiservices/2026.06.0?topic=podman-configuring-powervs-watsonx).
+- `ai-services` CLI installed and on `PATH`.
+- The AI Services catalog is running (`ai-services catalog configure` completed).
+- The RAG application is deployed and the LLM pod is in a running state.
 - You have the new Watsonx API key ready.
 
-## Approach 1 — Script (no data loss)
+## Steps
 
-Rotates the key by replacing only the LiteLLM pod. All ingested data is preserved.
+**1. Export the new API key**
 
-```bash
-export WATSONX_APIKEY_NEW="<your-new-api-key>"
+```sh
+export WATSONX_APIKEY_NEW="<new-api-key>"
+```
+
+The script reads the key from the environment so it is never written to shell history.
+
+**2. Run the rotation script**
+
+From the repository root:
+
+```sh
 ./hack/rotate-watsonx-key/rotate-watsonx-key.sh <app-name>
 ```
 
-The script must be run from within the repository. After it completes, access the Q&A interface and send a test query to confirm the application is working correctly with the new key.
+Replace `<app-name>` with the name of the application
+(visible in `ai-services application ps --runtime podman`).
 
-> **Note:** This approach is not available in the Catalog UI.
+**3. Verify**
 
-## Approach 2 — Delete and recreate (data loss without backup)
-
-Deletes and recreates the entire application. Use this if the script approach is not available.
-
-### Before you begin
-
-Each new application gets a new internal ID so all data volumes become unreachable after deletion. Back up your data first if you have ingested documents to preserve.
-
-| Deployment | Backup needed | Targets |
-|---|---|---|
-| `rag` (Digital Assistant) | ✅ Yes | `opensearch`, `digitize` |
-| `digitize` standalone | ✅ Yes | `opensearch`, `digitize` |
-| `summarize` standalone | ⚠️ No backup target available — data will be lost | — |
-| `chat` standalone | No persistent data | — |
-
-### Steps
-
-**1. Back up your data** (CLI only — skip if no data to preserve)
-
-```bash
-ai-services application backup <app-name> --target opensearch --runtime podman
-ai-services application backup <app-name> --target digitize --runtime podman
+```sh
+ai-services application ps <app-name> --runtime podman
 ```
 
-**2. Set the new credentials**
+Then test an end-to-end query through the Catalog UI to confirm Watsonx is
+responding with the new key.
 
-Export your new Watsonx API key, project ID, and URL before proceeding. If using the Catalog UI, have these values ready to enter in the deploy form.
+## Troubleshooting
 
-**3. Delete the application**
+**LLM pod not found** — confirm the application is deployed and the LLM pod is running:
 
-**CLI:** Delete the application using the CLI.
-
-**Catalog UI:** Open the application, click the overflow menu, and select **Delete**.
-
-**4. Recreate the application with the new key**
-
-**CLI:** Create the application using the new exported credentials.
-
-**Catalog UI:** Deploy the application again from the Catalog and enter the new Watsonx API key in the deploy form.
-
-**5. Restore your data** (CLI only — skip if no backup was taken)
-
-```bash
-ai-services application restore <app-name> --target opensearch --filename <opensearch-backup>.tar.gz --runtime podman --yes
-ai-services application restore <app-name> --target digitize --filename <digitize-backup>.tar.gz --runtime podman --yes
+```sh
+ai-services application ps <app-name> --runtime podman
 ```
 
-**6. Verify**
+**Pod is not a Watsonx pod** — the application may be using a different LLM
+provider (vLLM). This script only works with Watsonx. Check the pod labels to confirm:
 
-Access the Q&A interface and send a test query to confirm the application is working correctly with the new key.
+```sh
+podman pod inspect llm-<slug> --format '{{.Labels}}'
+```
+
+**Mounted key mismatch after rotation** — the container may still be starting.
+Wait a few more seconds then check:
+
+```sh
+podman exec llm-<slug>-litellm cat /etc/secret/watsonx-secret/apiKey | cut -c1-8
+podman logs llm-<slug>-litellm
+```
+
+**Script failed mid-rotation** — if failure occurred after the pod was removed,
+the rendered manifest is preserved at the path printed in the error output.
+Replay it to restore the LLM pod:
+
+```sh
+podman kube play /tmp/llm-rotate-XXXXXX.yaml
+```
+
+If the manifest was not preserved, re-run the script with the new key.
