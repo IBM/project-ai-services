@@ -15,6 +15,7 @@ from common.misc_utils import get_logger
 from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
+from digitize.connectors.models import SyncStatus
 
 logger = get_logger("db_repository")
 
@@ -774,7 +775,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status="up to date",
+                        sync_status=SyncStatus.IDLE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
@@ -1057,7 +1058,7 @@ class DatabaseManager:
                         connector_id=connector_id,
                         seq=seq_subquery,
                         started_at=started_at or datetime.now(timezone.utc),
-                        status="started",
+                        status=SyncStatus.STARTED,
                         error="",
                     )
                     .returning(ConnectorSyncLog.seq)
@@ -1066,7 +1067,7 @@ class DatabaseManager:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_status="syncing")
+                    .values(sync_status=SyncStatus.SYNCING)
                 )
                 logger.debug(f"open_sync_log: connector={connector_id!r} seq={seq}")
                 return seq

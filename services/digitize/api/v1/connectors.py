@@ -26,6 +26,7 @@ from digitize.connectors.models import (
     ConnectorUpdateRequest,
     SyncLogItem,
     SyncLogResponse,
+    SyncStatus,
 )
 from digitize.connectors.encryption import (
     encrypt_secrets,
@@ -227,7 +228,7 @@ async def delete_connector(connector_id: str):
             )
 
         # Guard: reject if a tick is currently running
-        if connector.sync_status == "syncing":
+        if connector.sync_status == SyncStatus.SYNCING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "A sync tick is currently running for this connector. "

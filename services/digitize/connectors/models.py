@@ -14,6 +14,33 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
+# Connector / sync-log status constants
+# ---------------------------------------------------------------------------
+
+class SyncStatus:
+    """String constants for connector sync_status and sync-log status columns.
+
+    Connector.sync_status lifecycle:
+        IDLE  ──► SYNCING  ──► IDLE        (tick completed cleanly)
+                          └──► OUT_OF_SYNC (tick finished with errors)
+
+    ConnectorSyncLog.status lifecycle:
+        STARTED ──► COMPLETED  (all files processed successfully)
+                └──► FAILED    (fatal tick error or partial failure)
+    """
+
+    # Connector.sync_status values
+    IDLE = "up to date"
+    SYNCING = "syncing"
+    OUT_OF_SYNC = "out of sync"
+
+    # ConnectorSyncLog.status values
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
