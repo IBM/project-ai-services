@@ -211,22 +211,23 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 
 | Method   | Path                                                        | Description                                                                                |
 | -------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `GET`    | `/connectors/datasources`                                   | List all datasources (paginated, filterable by status)                                     |
-| `GET`    | `/connectors/datasources/:id`                               | Get a single datasource by ID                                                              |
-| `POST`   | `/connectors/datasources`                                   | Create a new datasource (validates connectivity first)                                     |
-| `PUT`    | `/connectors/datasources/:id`                               | Update datasource credentials                                                              |
-| `DELETE` | `/connectors/datasources/:id`                               | Delete a datasource (only if not connected to any application)                             |
-| `GET`    | `/connectors/datasources/:id/services`                      | List all services connected to a datasource with sync status                               |
-| `GET`    | `/components?type=datasource`                               | List all supported datasource provider types (reuses existing API)                         |
-| `GET`    | `/components/:component_type/providers/:provider_id/params` | Get the input schema for a provider (reuses existing API; use `component_type=datasource`) |
+| `GET`    | `/datasources`                                   | List all datasources (paginated, filterable by status)                                     |
+| `GET`    | `/datasources/:id`                               | Get a single datasource by ID                                                              |
+| `POST`   | `/datasources`                                   | Create a new datasource (validates connectivity first)                                     |
+| `PUT`    | `/datasources/:id`                               | Update datasource credentials                                                              |
+| `DELETE` | `/datasources/:id`                               | Delete a datasource (only if not connected to any application)                             |
+| `GET`    | `/datasources/:id/services`                      | List all services connected to a datasource with sync status                               |
+| `GET`    | `/connectors/:connector_type/providers/:provider_id/params` | Get the input schema for a provider (reuses existing API; use `connector_type=datasource`) |
+| `GET`    | `/connectors[?connector_type=datasource]`        | List all supported datasource provider types (reuses existing API)  `connector_type=datasource`.        |
 
 ### 5.2 Application-Datasource Connection APIs
 
 | Method   | Path                                                      | Description                                                         |
 | -------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
-| `PUT`    | `/applications/:id/connectors/datasources/:datasource_id` | Connect a datasource to an application                              |
-| `DELETE` | `/applications/:id/connectors/datasources/:datasource_id` | Disconnect a datasource from an application                         |
-| `GET`    | `/applications/:id/connectors/datasources/:datasource_id` | Get datasource status/details for a specific application connection |
+| `PUT`    | `/applications/:id/datasources/:datasource_id` | Connect a datasource to an application                              |
+| `DELETE` | `/applications/:id/datasources/:datasource_id` | Disconnect a datasource from an application                         |
+| `GET`    | `/applications/:id/datasources/:datasource_id` | Get datasource status/details for a specific application connection |
+| `GET`    | `/applications/:id/datasources/` | Get all the datasources for a specific application connection |
 
 ---
 
