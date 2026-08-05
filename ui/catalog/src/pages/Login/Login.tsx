@@ -8,7 +8,7 @@ import {
   ToastNotification,
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
@@ -30,25 +30,25 @@ const LoginPage = () => {
   const [credentialError, setCredentialError] = useState<boolean>(false);
   const [networkError, setNetworkError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  // Mount-only by design: /login is always entered fresh (redirect or direct
-  // navigation), so we only need to read inactivity state once at mount.
-  // sessionStorage is consumed and cleared here to keep subsequent renders pure.
+  // Mount-only by design: /login is always entered fresh (redirect or direct navigation), so we only need to read inactivity state once at mount.
   const [showInactivityNotification, setShowInactivityNotification] =
     useState<boolean>(() => {
       const locationState = location.state as LoginLocationState | null;
-      const isInactivityLogout =
+      return (
         locationState?.logoutReason === LogoutReason.INACTIVITY ||
         sessionStorage.getItem(SESSION_STORAGE_KEYS.LOGOUT_REASON) ===
-          LogoutReason.INACTIVITY;
-
-      if (isInactivityLogout) {
-        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
-        sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
-        navigate(location.pathname, { replace: true, state: null });
-      }
-
-      return isInactivityLogout;
+          LogoutReason.INACTIVITY
+      );
     });
+
+  // navigate() is ignored during render in react-router 8.x, so clear sessionStorage and reset history state after mount.
+  useEffect(() => {
+    if (!showInactivityNotification) return;
+    sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
+    sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
+    if (location.state)
+      navigate(location.pathname, { replace: true, state: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogin = async (): Promise<void> => {
     setCredentialError(false);
@@ -64,15 +64,12 @@ const LoginPage = () => {
       navigate(ROUTES.DIGITAL_ASSISTANTS);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
-        // Treat 400 and 401 as credential/validation errors
         if (error.response.status === 400 || error.response.status === 401) {
           setCredentialError(true);
         } else {
-          // 5xx server errors or other unexpected errors
           setNetworkError(true);
         }
       } else {
-        // Network error (no response from server)
         setNetworkError(true);
       }
     } finally {
