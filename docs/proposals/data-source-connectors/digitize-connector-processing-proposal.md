@@ -261,7 +261,7 @@ DELETE /v1/connectors/{connector_id}
        if remaining_owner_count == 0:
          DELETE /v1/documents/{doc_id}
   → delete connector row
-  → cleanup staging dirs
+  → cleanup staging dirs: glob staging/connectors/<connector_id>-* and remove each match
 ```
 
 Document deletion is best-effort: `200`, `204`, `404` from `DELETE /v1/documents/{doc_id}` are treated as success; `5xx` or network failures are logged and cleanup continues.
@@ -997,9 +997,14 @@ _run_tick()
 │                                   (DB write happens inline, no separate list)
 │
 ├─ [Phase 4a] _process_new_files(ingest_list)
-│             download → create_job(connector_id, checksum) → doc_id (session creation)
-│             add_connector_checksum_entry(connector_id, checksum, doc_id)
-│             UPDATE documents.metadata
+│             for each (batch_number, remote_path, checksum):
+│               batch_dir_name = f"{connector_id}-{job_id}-{batch_number}"
+│               download file → staging/connectors/<batch_dir_name>/<filename>
+│               create_job(connector_id, checksum) → ingest → doc_id (session creation)
+│               add_connector_checksum_entry(connector_id, checksum, doc_id)
+│               UPDATE documents.metadata
+│               cleanup_staging_directory(batch_dir_name,
+│                 staging_dir/"connectors", ignore_errors=True)  ← per-file, after ingest
 │            ── RELEASE ingest_lock (after all Phase 4a membership rows committed) ─
 │
 ├─ [Phase 4b] _delete_orphans(orphan_checksums)
@@ -1015,13 +1020,16 @@ _run_tick()
 
 - Overlapping ticks are skipped by a tick guard.
 - `new_files` is updated live during staging and download.
-- Staging uses per-tick temporary directories.
+- Each file in a tick gets its own uniquely-named staging directory: `staging/connectors/<connector_id>-<job_id>-<batch_number>/`. The `job_id` is the UUID returned by `create_job()`, and `batch_number` is the zero-based index of the file within the tick's `ingest_list`. This naming makes every staging directory traceable to a specific connector, job, and position in the batch.
+- The staging directory is created immediately before `scanner.download()` and removed in the `finally` block after ingest, regardless of success or failure — before the next file is downloaded. No two batch directories exist simultaneously.
 - Download and ingest are blocking operations.
 - Fatal errors mark the tick as failed.
-- Per-file failures are counted and summarized instead of failing the whole connector.
+- Per-file failures are counted and summarized instead of failing the whole connector. Staging cleanup still runs for each file even when ingest fails.
 - Cross-connector duplicates are registered inline during Phase 3 classification — no deferred list.
 - **Phase 4b (orphan removal) always runs after Phase 4a (all new-file ingest jobs) completes.**
 - **A process-wide `ingest_lock` must be held from the Phase 2 DB read (`list_all_checksums`) through the end of Phase 4a (last `add_connector_checksum_entry` call, i.e. session creation complete).** This prevents two concurrent workers from both classifying the same brand-new checksum as absent and independently spawning duplicate ingest jobs.
+- Staging cleanup uses `cleanup_staging_directory(batch_dir_name, staging_dir / "connectors", ignore_errors=True)` from `common.misc_utils` — the same helper used by the job API, with `ignore_errors=True` for best-effort semantics.
+- On `DELETE /v1/connectors/{connector_id}`, any residual staging directories (e.g. left by a crash mid-tick) are swept by globbing `staging/connectors/<connector_id>-*` and removing each match.
 
 ### 8.3 Worker stub
 
@@ -1052,6 +1060,34 @@ def _run_tick(self) -> None:
         self._fail_tick(sync_seq, exc)
     finally:
         scanner.close()
+
+def _process_new_files(
+    self,
+    sync_seq: int,
+    scanner: BaseScanner,
+    ingest_list: list[tuple[str, str]],
+) -> None:
+    staging_base = settings.digitize.staging_dir / "connectors"
+    for batch_number, (remote_path, checksum) in enumerate(ingest_list):
+        job_id = generate_job_id()  # UUID generated before download so the dir name is known upfront
+        batch_dir_name = f"{self.connector_id}-{job_id}-{batch_number}"
+        batch_dir = staging_base / batch_dir_name
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            scanner.download(remote_path, batch_dir)
+            doc_id = create_job(self.connector_id, checksum, staging_dir=batch_dir)
+            add_connector_checksum_entry(self.connector_id, checksum, doc_id)
+        except Exception as exc:
+            logger.warning(f"Failed to ingest {remote_path!r}: {exc}")
+            self._increment_failed(sync_seq)
+        finally:
+            # Remove this batch's staging directory immediately — before the
+            # next file is downloaded — regardless of success or failure.
+            cleanup_staging_directory(
+                batch_dir_name,
+                staging_base,
+                ignore_errors=True,
+            )
 ```
 
 ### 8.4 Classify
@@ -1341,6 +1377,7 @@ All connector DB functions from §5.1:
 - `ConnectorSyncWorker` with full `_run_tick()`: config refresh, scan, classify, ingest new files, register cross-connector dups, orphan deletion, tick finalize
 - `_classify()`: see §8.4 — `skip_list` is implicit (not returned)
 - Pass `connector_id` and `checksum` (pre-computed by scanner) to each create-job call; `add_connector_checksum_entry` called on job completion — `upsert_file_checksum` must NOT be called for connector jobs
+- `_process_new_files()`: for each file, generate a `job_id` upfront, create `staging/connectors/<connector_id>-<job_id>-<batch_number>/`, download into it, ingest, then `cleanup_staging_directory(batch_dir_name, ..., ignore_errors=True)` in a `finally` block — staging is cleared after each individual file, not at the end of the batch
 - Tick guard to prevent overlapping ticks
 - Crash guard (outer `try/except` in `run()`) — writes `crashed:` status to DB
 - `_cancel_if_requested()` check points at each phase boundary
@@ -1355,6 +1392,9 @@ All connector DB functions from §5.1:
 - `_classify` — assert intra-tick dedup (two paths with same checksum → first path wins)
 - `_classify` — assert absent checksums appear in `orphan_checksums`
 - Assert `_delete_orphans()` is called only after `_process_new_files()` returns
+- `_process_new_files` — assert staging dir is named `<connector_id>-<job_id>-<batch_number>` and is created before `scanner.download()`
+- `_process_new_files` — assert `cleanup_staging_directory` is called with `batch_dir_name` in the `finally` block, including when ingest raises
+- `_process_new_files` — assert staging directory is absent between two consecutive file downloads (i.e. cleanup happens before the next `scanner.download` call)
 
 ---
 
