@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -16,8 +17,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -670,6 +675,156 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+}
+
+// ApplicationsPs returns runtime pod/container status for an application by querying the configured runtime.
+func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID, namespace string) (*types.ApplicationPSResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	rt, err := vars.RuntimeFactory.Create(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init runtime client: %w", err)
+	}
+
+	servicePods, err := s.collectServicePods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect service pods: %w", err)
+	}
+
+	componentPods, err := s.collectComponentPods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect component pods: %w", err)
+	}
+
+	return &types.ApplicationPSResponse{
+		ID:         app.ID.String(),
+		Name:       app.Name,
+		Services:   servicePods,
+		Components: componentPods,
+	}, nil
+}
+
+func (s *ApplicationServiceBase) collectServicePods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	servicePods := make([]types.Pod, 0, len(services))
+
+	for _, service := range services {
+		pod, err := loadApplicationPods(rt, service.ID.String())
+		if err != nil {
+			logger.ErrorfCtx(ctx, "Failed to load service pod: %v", err)
+
+			continue
+		}
+		servicePods = append(servicePods, pod...)
+	}
+
+	logger.InfofCtx(ctx, "Successfully collected %d service pods", len(servicePods))
+
+	return servicePods, nil
+}
+
+func (s *ApplicationServiceBase) collectComponentPods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	componentMap := make(map[string][]types.Pod)
+
+	for _, service := range services {
+		serviceDependencies, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
+		if err != nil {
+			logger.ErrorfCtx(ctx, "Failed to get dependencies for service %s: %v", service.ID, err)
+
+			continue
+		}
+
+		for _, dependency := range serviceDependencies {
+			if dependency.DependencyType != models.DependencyTypeComponent {
+				continue
+			}
+
+			componentID := dependency.DependencyID.String()
+
+			if _, exists := componentMap[componentID]; exists {
+				continue
+			}
+
+			componentPod, err := loadApplicationPods(rt, componentID)
+			if err != nil {
+				logger.ErrorfCtx(ctx, "Failed to load component pod: %v", err)
+
+				continue
+			}
+
+			componentMap[componentID] = componentPod
+		}
+	}
+
+	componentPods := make([]types.Pod, 0, len(componentMap))
+	for _, podDetails := range componentMap {
+		componentPods = append(componentPods, podDetails...)
+	}
+
+	logger.InfofCtx(ctx, "Successfully collected %d unique component pods", len(componentPods))
+
+	return componentPods, nil
+}
+
+func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) {
+	filteredPod, err := common.FetchFilteredPods(rt, appID)
+	if err != nil {
+		return nil, err
+	}
+	if len(filteredPod) == 0 {
+		return nil, fmt.Errorf("no pod found with given id")
+	}
+
+	appPodList := make([]types.Pod, 0, len(filteredPod))
+
+	for _, pod := range filteredPod {
+		processedPod, err := common.ProcessPod(rt, pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process pod: %w", err)
+		}
+		// ProcessPod returns (nil, nil) when InspectPod fails, so we should skip that pod
+		if processedPod == nil {
+			continue
+		}
+
+		containers := make([]types.PodContainer, 0, len(pod.Containers))
+		for _, container := range processedPod.Containers {
+			containers = append(containers, types.PodContainer{
+				Name:    container.Name,
+				Status:  types.Status(strings.ToLower(processedPod.Status)),
+				Healthy: strings.ToLower(container.Health) == string(consts.Ready),
+			})
+		}
+
+		appPod := types.Pod{
+			PodID:      processedPod.ID,
+			PodName:    processedPod.Name,
+			Status:     types.Status(strings.ToLower(processedPod.Status)),
+			Healthy:    processedPod.Health == string(consts.Ready),
+			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+			Containers: containers,
+		}
+
+		appPodList = append(appPodList, appPod)
+	}
+
+	return appPodList, nil
 }
 
 // Made with Bob
