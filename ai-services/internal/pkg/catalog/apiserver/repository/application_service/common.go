@@ -3,6 +3,7 @@ package applicationservice
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -16,8 +17,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -670,6 +675,224 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+}
+
+// GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
+// namespace is the runtime namespace to query: empty string for Podman, AppNamespace(app.ID) for OpenShift.
+func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID, namespace string) (*types.ApplicationResourcesResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	runtimeClient, err := vars.RuntimeFactory.Create(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runtime client: %w", err)
+	}
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect application resources: %w", err)
+	}
+
+	return buildResourcesResponse(resourceTotals), nil
+}
+
+// resourceTotals holds aggregated resource information.
+type resourceTotals struct {
+	allocatedCPU    int
+	allocatedMemory int
+	usedCPU         float64
+	usedMemory      uint64
+	spyreCards      map[string]bool
+}
+
+func (s *ApplicationServiceBase) collectResources(
+	ctx context.Context,
+	app *models.Application,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+) (*resourceTotals, error) {
+	totals := &resourceTotals{spyreCards: make(map[string]bool)}
+	countedComponents := make(map[uuid.UUID]bool)
+
+	for _, service := range app.Services {
+		if err := s.processServiceResources(ctx, service, runtimeClient, catalogProvider, totals, countedComponents); err != nil {
+			return nil, fmt.Errorf("failed to process service %s resources: %w", service.ID, err)
+		}
+	}
+
+	return totals, nil
+}
+
+func (s *ApplicationServiceBase) processServiceResources(
+	ctx context.Context,
+	service models.Service,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	if err := s.addServiceResources(service, catalogProvider, runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service allocated resources: %w", err)
+	}
+
+	if err := s.addComponentResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
+		return fmt.Errorf("failed to get component allocated resources: %w", err)
+	}
+
+	return nil
+}
+
+func addAllocatedResources(runtimeMetadata *clitemplates.AppMetadata, totals *resourceTotals) {
+	if runtimeMetadata.Resources != nil {
+		totals.allocatedCPU += runtimeMetadata.Resources.CPU
+		totals.allocatedMemory += runtimeMetadata.Resources.Memory
+	}
+}
+
+func (s *ApplicationServiceBase) addServiceResources(
+	service models.Service,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service used resources: %w", err)
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) addComponentResources(
+	ctx context.Context,
+	serviceID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	dependencies, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get dependencies for service %s: %w", serviceID, err)
+	}
+
+	for _, dep := range dependencies {
+		if dep.DependencyType != models.DependencyTypeComponent || countedComponents[dep.DependencyID] {
+			continue
+		}
+
+		if err := s.processComponentResources(ctx, dep.DependencyID, catalogProvider, runtimeClient, totals); err != nil {
+			return err
+		}
+
+		countedComponents[dep.DependencyID] = true
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) processComponentResources(
+	ctx context.Context,
+	componentID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	component, err := s.ComponentRepo.GetByID(ctx, componentID)
+	if err != nil {
+		return fmt.Errorf("failed to get component %s: %w", componentID, err)
+	}
+
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+	}
+
+	return nil
+}
+
+func addUsedResourcesByTemplateID(templateID string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+	filters := map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
+	}
+
+	pods, err := runtimeClient.ListPods(filters)
+	if err != nil {
+		return fmt.Errorf("failed to list pods for template %s: %w", templateID, err)
+	}
+
+	for _, pod := range pods {
+		if err := collectPodResources(pod.Name, runtimeClient, totals); err != nil {
+			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func collectPodResources(podName string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+	resources, err := runtimeClient.GetPodResources(podName)
+	if err != nil {
+		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
+	}
+
+	for _, card := range resources.SpyreCards {
+		totals.spyreCards[card] = true
+	}
+
+	totals.usedCPU += resources.CPU
+	totals.usedMemory += resources.MemUsage
+
+	return nil
+}
+
+func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesResponse {
+	totalSpyreCards := make([]string, 0, len(totals.spyreCards))
+	for card := range totals.spyreCards {
+		totalSpyreCards = append(totalSpyreCards, card)
+	}
+
+	accelerators := make(map[string][]string)
+	if len(totalSpyreCards) > 0 {
+		accelerators["ibm.com/spyre_pf"] = totalSpyreCards
+	}
+
+	return &types.ApplicationResourcesResponse{
+		CPU: types.ApplicationCPUInfo{
+			Total: float64(totals.allocatedCPU),
+			Used:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
+		},
+		Memory: types.ApplicationMemInfo{
+			TotalBytes: int64(totals.allocatedMemory),
+			UsedBytes:  int64(totals.usedMemory),
+		},
+		Accelerators: accelerators,
+	}
 }
 
 // Made with Bob

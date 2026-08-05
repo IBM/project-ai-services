@@ -2,6 +2,7 @@ package openshift
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -30,6 +32,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -642,14 +645,134 @@ func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
 	return int64(used), nil
 }
 
-// GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
-// For OpenShift, this is not yet implemented and returns empty values.
+// GetPodResources retrieves resource usage and Spyre card assignments for a pod.
+//
+// CPU and memory are fetched from the in-cluster Thanos Querier using PromQL:
+//   - CPU  : rate(container_cpu_usage_seconds_total{pod="<name>",container!=""}[5m])
+//   - Memory: container_memory_working_set_bytes{pod="<name>",container!=""}
+//
+// Spyre card PCI addresses are read from the AIU_PCIE_IDS environment variable
+// set on each container in the pod spec (same convention as the Podman runtime).
 func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
+	podName, err := getPodNameWithPrefix(kc, nameOrID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find pod: %w", err)
+	}
+
+	// Fetch the full pod spec to read container env vars for Spyre cards.
+	pod, err := kc.KubeClient.CoreV1().Pods(kc.Namespace).Get(kc.Ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s: %w", podName, err)
+	}
+
+	// Collect Spyre card PCI addresses from the pod's live container environment
+	// (injected at runtime by the Spyre device plugin — not in the static pod spec).
+	spyreCards := []string{}
+	collectSpyreCardsFromPod(kc, pod, &spyreCards)
+
+	// Query per-pod CPU usage (sum of all containers, excluding the pause/infra container).
+	cpuQuery := fmt.Sprintf(
+		`sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=%q,container!=""}[5m]))`,
+		kc.Namespace, podName,
+	)
+
+	cpuCores, err := queryThanos(kc.Ctx, cpuQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query CPU usage for pod %s: %w", podName, err)
+	}
+
+	// Query per-pod memory working-set usage in bytes.
+	memQuery := fmt.Sprintf(
+		`sum(container_memory_working_set_bytes{namespace=%q,pod=%q,container!=""})`,
+		kc.Namespace, podName,
+	)
+
+	memBytes, err := queryThanos(kc.Ctx, memQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query memory usage for pod %s: %w", podName, err)
+	}
+
 	return &types.PodResources{
-		CPU:        0,
-		MemUsage:   0,
-		SpyreCards: []string{},
+		CPU:        cpuCores,
+		MemUsage:   uint64(memBytes),
+		SpyreCards: spyreCards,
 	}, nil
+}
+
+// collectSpyreCardsFromPod reads the PCIDEVICE_IBM_COM_AIU_PF environment variable
+// from the live environment of each non-init container in the pod by exec-ing
+// into it via the Kubernetes API server's pod/exec subresource.
+//
+// This variable is injected at runtime by the Kubernetes Spyre device plugin and
+// is NOT present in pod.Spec.Containers[].Env (the static pod spec). It is only
+// visible via `oc exec <pod> -- env`, equivalent to what this function does.
+//
+// The value is comma-separated, e.g.:
+//
+//	PCIDEVICE_IBM_COM_AIU_PF=0182:60:00.0,0183:70:00.0,0481:50:00.0,0181:50:00.0
+func collectSpyreCardsFromPod(kc *OpenshiftClient, pod *corev1.Pod, spyreCards *[]string) {
+	envKey := string(constants.PCIDeviceEnvKey) + "="
+
+	for i := range pod.Spec.Containers {
+		containerName := pod.Spec.Containers[i].Name
+
+		output, err := execEnvInContainer(kc, pod.Namespace, pod.Name, containerName)
+		if err != nil {
+			// Container may not be running yet or exec is not permitted; skip silently.
+			continue
+		}
+
+		for _, line := range strings.Split(output, "\n") {
+			if strings.HasPrefix(line, envKey) {
+				value := strings.TrimPrefix(line, envKey)
+				for _, addr := range strings.Split(value, ",") {
+					if addr = strings.TrimSpace(addr); addr != "" {
+						*spyreCards = append(*spyreCards, addr)
+					}
+				}
+
+				break
+			}
+		}
+	}
+}
+
+// execEnvInContainer runs `env` inside the named container via the Kubernetes
+// API server pod/exec subresource. This works from inside the cluster without
+// requiring the `oc` binary to be present in the catalog-backend pod.
+func execEnvInContainer(kc *OpenshiftClient, namespace, podName, containerName string) (string, error) {
+	req := kc.KubeClient.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   []string{"env"},
+			Stdout:    true,
+			Stderr:    false,
+		}, clientgoscheme.ParameterCodec)
+
+	config, err := getKubeConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to get kube config for exec: %w", err)
+	}
+
+	executor, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create SPDY executor for %s/%s: %w", podName, containerName, err)
+	}
+
+	var stdout bytes.Buffer
+
+	err = executor.StreamWithContext(kc.Ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+	})
+	if err != nil {
+		return "", fmt.Errorf("exec stream failed for %s/%s: %w", podName, containerName, err)
+	}
+
+	return stdout.String(), nil
 }
 
 // isDeploymentReady reports whether a rollout of the named deployment has fully completed.

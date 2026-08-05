@@ -91,7 +91,10 @@ func parseThanosResponse(body []byte) (float64, error) {
 	}
 
 	if len(result.Data.Result) == 0 {
-		return 0, fmt.Errorf("thanos returned empty result set for query")
+		// An empty result set is valid — e.g. sum() on a metric that has no
+		// matching series returns no data points rather than a zero value.
+		// Callers should treat this as 0, not as an error.
+		return 0, nil
 	}
 
 	var total float64
