@@ -32,8 +32,7 @@ import digitize.api.v1.documents as documents_router_module
 # Constants
 # ---------------------------------------------------------------------------
 
-_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-_NOW_STR = "2025-01-15T12:00:00Z"
+_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 CONNECTOR_ID = "c7f3a2d1-0000-0000-0000-000000000001"
 CONNECTOR_NAME = "prod-sftp-reports"
