@@ -189,10 +189,10 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
 # ===========================================================================
 
 class TestPostConnector:
-    def test_returns_200_on_success(self, connector_test_client, monkeypatch):
+    def test_returns_201_on_success(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.status_code == 200
+        assert response.status_code == 201
         assert response.text == ""
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
@@ -214,10 +214,10 @@ class TestPostConnector:
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 409
 
-    def test_s3_connector_returns_200(self, connector_test_client, monkeypatch):
+    def test_s3_connector_returns_201(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=S3_PAYLOAD)
-        assert response.status_code == 200
+        assert response.status_code == 201
 
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
