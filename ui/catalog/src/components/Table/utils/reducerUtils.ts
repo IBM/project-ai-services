@@ -4,10 +4,36 @@ import type {
   SharedTableAction,
 } from "@/components/Table/types";
 
+const SHARED_ACTION_TYPES = new Set<SharedTableAction["type"]>([
+  "SHARED_SET_SEARCH",
+  "SHARED_SET_PAGE",
+  "SHARED_SET_PAGE_SIZE",
+  "SHARED_OPEN_DELETE_DIALOG",
+  "SHARED_CLOSE_DELETE_DIALOG",
+  "SHARED_SET_CONFIRMED",
+  "SHARED_SET_SELECTED_ROW_ID",
+  "SHARED_SET_LOADING",
+  "SHARED_SHOW_ERROR",
+  "SHARED_HIDE_ERROR",
+  "SHARED_OPEN_EXPORT_DIALOG",
+  "SHARED_CLOSE_EXPORT_DIALOG",
+  "SHARED_SET_CSV_FILENAME",
+  "SHARED_SET_EXPORT_ERROR",
+  "SHARED_CLEAR_EXPORT_ERROR",
+  "SHARED_SET_EXPORTING",
+  "SHARED_SHOW_EXPORT_TOAST",
+  "SHARED_HIDE_EXPORT_TOAST",
+  "SHARED_TOGGLE_COLUMN_VISIBILITY",
+  "SHARED_RESET_COLUMN_VISIBILITY",
+  "SHARED_SET_FETCH_ERROR",
+  "SHARED_SET_DELETING",
+  "SHARED_UPDATE_ROW_STATUS",
+]);
+
 export function isSharedTableAction(a: {
   type: string;
 }): a is SharedTableAction {
-  return a.type.startsWith("SHARED_");
+  return SHARED_ACTION_TYPES.has(a.type as SharedTableAction["type"]);
 }
 
 export function handleSharedTableAction<
