@@ -245,16 +245,16 @@ than left as an unused option.
 
 ### MCP Sidecar Exposure via Caddy
 
-External agents reach the sidecar through Caddy. When `application start` deploys sidecars
-automatically, the CLI must also automatically register each sidecar route with Caddy's Admin API
-using the same pattern already used for service routes.
+External agents reach the sidecar through Caddy. When `application create` deploys the pod, the
+CLI must also automatically register each sidecar route with Caddy's Admin API using the same
+pattern already used for service routes.
 
 Each sidecar gets one route: `<service>-mcp.<app-domain>` routes to the sidecar's port inside the
 pod (4001 for digitize, 5001 for chatbot, 6001 for summarize, 7001 for similarity). Caddy
 terminates TLS; the sidecar receives plaintext HTTP.
 
-On `application stop` and `application delete`, sidecar routes are removed from Caddy
-automatically, keeping it in sync with the running infrastructure.
+On `application delete`, sidecar routes are removed from Caddy automatically, keeping it in sync
+with the running infrastructure.
 
 ### Tool Name Prefixing
 
@@ -314,7 +314,7 @@ the sidecar exists, not the service's own running/stopped/deleted state:
 ```mermaid
 stateDiagram-v2
     [*] --> NoSidecar
-    NoSidecar --> SidecarRunning: pod starts<br/>(application start / create)
+    NoSidecar --> SidecarRunning: pod starts<br/>(application create)
     SidecarRunning --> NoSidecar: pod stops<br/>(application stop / whole app stops)
     SidecarRunning --> [*]: application delete
     NoSidecar --> [*]: application delete
@@ -374,15 +374,13 @@ to a future release (see Future Work).
 
 ### OpenShift: a different attach point
 
-Podman is the primary target for v1 (see Delivery Phases), but the automatic attach point above
-doesn't carry over to OpenShift as-is, worth stating directly rather than implying one mechanism
-covers both runtimes.
+Podman is the primary target for v1 (see Delivery Phases), but the deployment mechanism differs
+between runtimes, worth stating directly rather than implying one mechanism covers both.
 
-On OpenShift, `application start`/`application stop` are no-ops today, they log and return without
-doing anything. `application create` is what actually deploys and waits for a running app, via
-`helm install`/`upgrade`. So on this runtime, the sidecar is added to the service's own pod spec
-as a second container automatically, enabled by default via `{{- if .Values.mcp.enabled }}` set to
-true before the install/upgrade call.
+On both runtimes, `application create` is what actually deploys and waits for a running app — not
+`application start`. On Podman, `application create` applies the pod template files in
+`ai-services/assets/` directly. On OpenShift, it calls `helm install`/`upgrade`, so the sidecar
+is enabled via `{{- if .Values.mcp.enabled }}` set to true before that call.
 
 Kubernetes can't add or remove a container from a running pod in place, so toggling later would
 trigger a rolling restart of that pod. Podman doesn't have this limitation — containers can be
@@ -410,22 +408,22 @@ flowchart TD
 
     subgraph Flow["With this proposal"]
         direction TB
-        D1["ai-services application start<br/>my-rag-app"] --> D2(["Service + sidecar running"])
+        D1["ai-services application create<br/>my-rag-app"] --> D2(["Service + sidecar running"])
     end
 
     Start --> B1
     B2 --> D1
 ```
 
-`application start` brings the sidecar up automatically. No new top-level command and no new flag
-on `start`. Agent config generation (`~/mcp.json`) is deferred to a future release (see Future
-Work).
+`application create` brings the sidecar up automatically alongside the service. No new top-level
+command and no new flag on `create`. Agent config generation (`~/mcp.json`) is deferred to a
+future release (see Future Work).
 
 **Example Output:**
 
 ```
-$ ai-services application start my-rag-app --runtime podman
-Starting application 'my-rag-app'...
+$ ai-services application create my-rag-app --runtime podman
+Creating application 'my-rag-app'...
   chatbot      started
   digitize     started
   summarize    started
@@ -659,6 +657,6 @@ is resolved in Phase 1.
   managing deployments) and isn't reusable here.
 
 
-- **4. Startup ordering:** if `application start` brings the service and its sidecar up at the
+- **4. Startup ordering:** if `application create` brings the service and its sidecar up at the
   same time, should the sidecar retry with backoff when the service isn't ready yet to serve its
   OpenAPI spec, rather than failing outright on first boot?
