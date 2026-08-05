@@ -57,6 +57,7 @@ type Route struct {
 	Name       string
 	HostPort   string
 	TargetPort string
+	Labels     map[string]string
 }
 
 // PodResources represents resource allocation and usage for a pod including accelerators.

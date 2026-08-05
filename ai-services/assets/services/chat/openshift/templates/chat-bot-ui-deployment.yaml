@@ -4,7 +4,7 @@ metadata:
   name: "chat-bot"
   labels:
     ai-services.io/service: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
@@ -16,7 +16,7 @@ spec:
     metadata:
       labels:
         ai-services.io/service: {{ .Release.Name }}
-        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: chat-bot-ui
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
