@@ -14,7 +14,7 @@ Endpoints:
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
@@ -92,7 +92,7 @@ async def create_connector(body: ConnectorCreateRequest):
         )
         # Worker start is a no-op stub in PR3 — the worker manager (PR7) will hook
         # in here once implemented.
-        return {"connector_id": body.connector_id, "status": "accepted"}
+        return Response(status_code=200)
 
     except IntegrityError:
         # id or name already exists
@@ -136,7 +136,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     try:
         # Nothing to update — treat as success
         if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
-            return {"connector_id": connector_id, "status": "updated"}
+            return Response(status_code=200)
 
         key_path = _get_key_path()
 
@@ -165,7 +165,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         )
 
         logger.info(f"Connector {connector_id!r} updated")
-        return {"connector_id": connector_id, "status": "updated"}
+        return Response(status_code=200)
 
     except FileNotFoundError:
         APIError.raise_error(
