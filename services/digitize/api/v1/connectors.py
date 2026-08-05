@@ -17,7 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 
-from common.misc_utils import cleanup_staging_directory, get_logger
+from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from digitize.connectors.models import (
     ConnectorCreateRequest,
@@ -48,13 +48,6 @@ _KEY_PATH = None  # resolved lazily via _get_key_path()
 def _get_key_path() -> str:
     """Return the encryption key path from settings."""
     return settings.digitize.connector.encryption_key_path
-
-
-def _serialize_dt(dt) -> Optional[str]:
-    """Convert a datetime to ISO-8601 string with Z suffix, or None."""
-    if dt is None:
-        return None
-    return dt.isoformat().replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +333,8 @@ async def list_connectors():
                 connector_id=c.id,
                 connector_name=c.name,
                 type=c.type,
-                attached_at=_serialize_dt(c.attached_at),
-                last_sync_at=_serialize_dt(c.last_sync_at),
+                attached_at=get_utc_timestamp(c.attached_at),
+                last_sync_at=get_utc_timestamp(c.last_sync_at),
                 sync_status=c.sync_status,
                 last_sync_error=c.last_sync_error,
                 total_files=c.total_files,
@@ -392,8 +385,8 @@ async def get_connector(connector_id: str):
             type=connector.type,
             allowed_extensions=list(connector.allowed_extensions or []),
             sync_interval_seconds=connector.sync_interval_seconds,
-            attached_at=_serialize_dt(connector.attached_at),
-            last_sync_at=_serialize_dt(connector.last_sync_at),
+            attached_at=get_utc_timestamp(connector.attached_at),
+            last_sync_at=get_utc_timestamp(connector.last_sync_at),
             sync_status=connector.sync_status,
             last_sync_error=connector.last_sync_error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
@@ -442,8 +435,8 @@ async def get_sync_history(
         items = [
             SyncLogItem(
                 id=log.id,
-                started_at=_serialize_dt(log.started_at) or "",
-                finished_at=_serialize_dt(log.finished_at),
+                started_at=get_utc_timestamp(log.started_at) or "",
+                finished_at=get_utc_timestamp(log.finished_at),
                 total_files=log.total_files,
                 new_files=log.new_files,
                 removed_files=log.removed_files,
