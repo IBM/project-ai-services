@@ -70,7 +70,7 @@ func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID
 	errorMessages = append(errorMessages, componentErr...)
 
 	// Uninstall Serving runtimes
-	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx, s.ns, appID)
+	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx, s.ns)
 	errorMessages = append(errorMessages, servingRuntimeErr...)
 
 	if len(errorMessages) > 0 {
@@ -164,7 +164,7 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, app
 	return errorMessages
 }
 
-func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns string, appID uuid.UUID) []string {
+func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns string) []string {
 	var errorMessages []string
 
 	runtimes, err := s.rt.ListServingRuntimes(map[string][]string{
