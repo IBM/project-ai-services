@@ -7,4 +7,5 @@ const (
 	PodPortsAnnotationKey    = "ai-services.io/ports"
 	PodRoutesAnnotationKey   = "ai-services.io/routes"
 	ApplicationTemplateKey   = "ai-services.io/template"
+	PrerequisiteLabelKey     = "ai-services.io/prerequisite"
 )

@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -341,6 +342,34 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	}
 
 	return fmt.Errorf("cannot find pod for the given container")
+}
+
+// ListCRD populates list resources based on input
+// resources in the client namespace that carry every label key in filters["label"].
+func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
+	labelKeys := []string{}
+	if labelFilters, exists := filters["label"]; exists {
+		labelKeys = append(labelKeys, labelFilters...)
+	}
+
+	opts := []client.ListOption{
+		client.InNamespace(kc.Namespace),
+		client.HasLabels(labelKeys),
+	}
+
+	if err := kc.Client.List(kc.Ctx, list, opts...); err != nil {
+		return nil, fmt.Errorf("failed to list CRD resources : %w", err)
+	}
+
+	result := make([]types.CRDResource, 0, len(list.Items))
+	for _, item := range list.Items {
+		result = append(result, types.CRDResource{
+			Name:   item.GetName(),
+			Labels: item.GetLabels(),
+		})
+	}
+
+	return result, nil
 }
 
 // ListRoutes lists all routes in the namespace.
