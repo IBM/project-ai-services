@@ -43,15 +43,16 @@ func (e *DeletionExecutor) Execute(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
 	runtimeType types.RuntimeType,
 ) error {
 	// Execute deployment based on runtime type using the provided plan
 	switch runtimeType {
 	case types.RuntimeTypePodman:
-		return e.executePodmanDeletion(ctx, appID, services, keepData)
+		return e.executePodmanDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 	case types.RuntimeTypeOpenShift:
-		return e.executeOpenShiftDeletion(ctx, appID, services, keepData)
+		return e.executeOpenShiftDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
@@ -62,6 +63,7 @@ func (e *DeletionExecutor) executePodmanDeletion(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
 ) error {
 	// Initialize Podman runtime client
@@ -79,7 +81,7 @@ func (e *DeletionExecutor) executePodmanDeletion(
 		e.serviceDependencyRepo,
 	)
 
-	deleteService.PerformDeletion(ctx, appID, services, keepData)
+	deleteService.PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }
@@ -89,6 +91,7 @@ func (e *DeletionExecutor) executeOpenShiftDeletion(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
 ) error {
 	ns := catalogutils.AppNamespace(appID)
@@ -106,7 +109,7 @@ func (e *DeletionExecutor) executeOpenShiftDeletion(
 		e.serviceDependencyRepo,
 	)
 
-	deletionService.PerformDeletion(ctx, appID, services, keepData)
+	deletionService.PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }

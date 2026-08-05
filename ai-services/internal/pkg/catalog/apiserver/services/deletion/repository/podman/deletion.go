@@ -24,7 +24,6 @@ type PodmanDeletion struct {
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
-	delUtils              *common.Deletion
 }
 
 // NewPodmanDeletion creates a new deletion service instance.
@@ -35,32 +34,23 @@ func NewPodmanDeletion(
 	componentRepo dbrepo.ComponentRepository,
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
 ) *PodmanDeletion {
-	deletionCommon := common.NewDeletion(appRepo, serviceRepo, componentRepo, serviceDependencyRepo)
-
 	return &PodmanDeletion{
 		rt:                    rt,
 		appRepo:               appRepo,
 		serviceRepo:           serviceRepo,
 		componentRepo:         componentRepo,
 		serviceDependencyRepo: serviceDependencyRepo,
-		delUtils:              deletionCommon,
 	}
 }
 
 // PerformDeletion carries out the async cascade deletion for an application.
 // When keepData is true, preserves underlying data (pods, volumes, orphaned components).
 // When keepData is false, deletes all data including application data directory.
-func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, keepData bool) {
-	// Identify orphaned components before deletion
-	orphanedComponents, err := s.delUtils.IdentifyOrphanedComponents(ctx, appID, services)
-	if err != nil {
-		return // Error already logged and status updated
-	}
-
+func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
 	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
-		s.delUtils.HandleStepError(ctx, appID, "failed to get Caddy proxy manager for app", err)
+		common.HandleStepError(ctx, s.appRepo, appID, "failed to get Caddy proxy manager for app", err)
 
 		return
 	}
@@ -69,19 +59,19 @@ func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, s
 	errorMessages := s.deleteServices(ctx, services, keepData, proxyManager)
 
 	// Delete orphaned components and track errors
-	componentErrors := s.deleteOrphanedComponents(ctx, orphanedComponents, keepData)
+	componentErrors := s.deleteOrphanedComponents(ctx, orphanedComponentIDs, keepData)
 	errorMessages = append(errorMessages, componentErrors...)
 
 	// Check if any errors occurred during deletion
 	if len(errorMessages) > 0 {
-		s.delUtils.HandleDeletionFailure(ctx, appID, errorMessages)
+		common.HandleDeletionFailure(ctx, s.appRepo, appID, errorMessages)
 
 		return
 	}
 
 	// Delete application from DB only if no errors occurred
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		s.delUtils.HandleStepError(ctx, appID, "application DB deletion failed", err)
+		common.HandleStepError(ctx, s.appRepo, appID, "application DB deletion failed", err)
 
 		return
 	}

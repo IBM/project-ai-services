@@ -25,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -345,16 +344,9 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	return fmt.Errorf("cannot find pod for the given container")
 }
 
-// ListServingRuntimes lists KServe ServingRuntime resources (serving.kserve.io/v1alpha1)
-// that have all the specified label filter set, regardless of their values.
-func (kc *OpenshiftClient) ListServingRuntimes(filters map[string][]string) ([]types.ServingRuntime, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "serving.kserve.io",
-		Version: "v1alpha1",
-		Kind:    "ServingRuntimeList",
-	})
-
+// ListCRD populates list resources based on input
+// resources in the client namespace that carry every label key in filters["label"].
+func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
 	labelKeys := []string{}
 	if labelFilters, exists := filters["label"]; exists {
 		labelKeys = append(labelKeys, labelFilters...)
@@ -366,12 +358,12 @@ func (kc *OpenshiftClient) ListServingRuntimes(filters map[string][]string) ([]t
 	}
 
 	if err := kc.Client.List(kc.Ctx, list, opts...); err != nil {
-		return nil, fmt.Errorf("failed to list servingruntimes: %w", err)
+		return nil, fmt.Errorf("failed to list CRD resources : %w", err)
 	}
 
-	result := make([]types.ServingRuntime, 0, len(list.Items))
+	result := make([]types.CRDResource, 0, len(list.Items))
 	for _, item := range list.Items {
-		result = append(result, types.ServingRuntime{
+		result = append(result, types.CRDResource{
 			Name:   item.GetName(),
 			Labels: item.GetLabels(),
 		})
