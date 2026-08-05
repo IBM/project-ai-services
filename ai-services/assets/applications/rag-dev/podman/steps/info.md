@@ -56,6 +56,7 @@ Day N:
 
 - Similarity API is unavailable to use. Please make sure '{{ .AppName }}--similarity-api' pod is running.
 {{- end }}
+{{- end }}
 
 {{- if eq .EXTRACT_API_STATUS "running" }}
 
