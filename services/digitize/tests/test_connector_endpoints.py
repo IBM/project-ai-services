@@ -189,11 +189,11 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
 # ===========================================================================
 
 class TestPostConnector:
-    def test_returns_202_on_success(self, connector_test_client, monkeypatch):
+    def test_returns_200_on_success(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.status_code == 202
-        assert response.json()["connector_id"] == CONNECTOR_ID
+        assert response.status_code == 200
+        assert response.text == ""
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
         captured = {}
@@ -214,18 +214,15 @@ class TestPostConnector:
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 409
 
-    def test_s3_connector_returns_202(self, connector_test_client, monkeypatch):
+    def test_s3_connector_returns_200(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=S3_PAYLOAD)
-        assert response.status_code == 202
+        assert response.status_code == 200
 
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        body = response.json()
-        # The 202 response body only has connector_id and status
-        assert "private_key" not in str(body)
-        assert "secret_access_key" not in str(body)
+        assert response.text == ""
 
 
 # ===========================================================================
@@ -418,16 +415,16 @@ class TestGetConnector:
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
         )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_sync_logs",
-            Mock(return_value=([_make_sync_log()], 1)),
-        )
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 200
         data = response.json()
         assert data["connector_id"] == CONNECTOR_ID
         assert data["total_files"] == 42
-        assert data["new_files"] == 2
+        assert data["connection_details"] == {
+            "host": "sftp.example.com",
+            "username": "sync_user",
+            "remote_path": "/exports",
+        }
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
