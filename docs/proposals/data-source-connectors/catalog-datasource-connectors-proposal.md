@@ -111,7 +111,7 @@ The digitize proposal uses the following canonical type identifiers. The catalog
 | Type       | Digitize `type` value | Key Credentials                                                     |
 | ---------- | --------------------- | ------------------------------------------------------------------- |
 | Amazon S3  | `s3`                  | `endpoint_url`, `bucket_name`, `access_key_id`, `secret_access_key` |
-| Remote SSH | `ssh`                 | `host`, `username`, `private_key` (Ed25519), `remote_path`          |
+| Remote SSH | `ssh`                 | `host`, `username`, `private_key`, `remote_path`                    |
 
 Additional provider types can be added by implementing the provider interface described in Section 8.
 
@@ -483,7 +483,7 @@ Returns all registered providers for the given connector type, discovered from t
   {
     "id": "ssh",
     "name": "Remote SSH",
-    "description": "Remote server accessible via SSH private key (Ed25519)",
+    "description": "Remote server accessible via SSH private key",
     "schema": "/api/v1/connectors/datasource/providers/ssh/schema"
   }
 ]
@@ -986,7 +986,7 @@ Field names below match the `connection_details` keys used in the digitize push 
 | -------------------- | -------- | --------- | --------- | ---------------------------------------------------------- |
 | `host`               | Yes      | No        | No        |                                                            |
 | `username`           | Yes      | No        | **Yes**   |                                                            |
-| `private_key`        | Yes      | **Yes**   | **Yes**   | Ed25519 private key                                        |
+| `private_key`        | Yes      | **Yes**   | **Yes**   | Private key                                                |
 | `remote_path`        | Yes      | No        | No        | Absolute path on the remote server to sync from            |
 | `allowed_extensions` | No       | No        | No        | e.g. `[".pdf", ".docx"]`; if omitted, all files are synced |
 
@@ -1037,7 +1037,7 @@ sensitive_fields:
 type: connector
 id: ssh
 name: "Remote SSH"
-description: "Remote server accessible via SSH private key (Ed25519)"
+description: "Remote server accessible via SSH private key"
 
 connector_type: datasource
 
@@ -1105,7 +1105,7 @@ sensitive_fields:
     "private_key": {
       "type": "string",
       "title": "Private Key",
-      "description": "Ed25519 private key in OpenSSH format",
+      "description": "Private key in OpenSSH format",
       "x-sensitive": true
     },
     "remote_path": {
@@ -1147,7 +1147,7 @@ The `schema.json` for each provider is served verbatim by `GET /api/v1/connector
 
 A unique **Key Encryption Key (KEK)** is generated at application deploy time and deployed as a Kubernetes/Podman Secret. It is mounted into each Digitize service pod in that application. There is no DEK layer — the KEK is the only key.
 
-The catalog backend passes plaintext credentials to the Digitize service over the authenticated connector API; encryption at rest is the responsibility of the receiving service.
+The catalog backend passes plaintext credentials to the Digitize service over the connector API; encryption at rest is the responsibility of the receiving service.
 
 ### 9.2 Deployment Changes
 
@@ -1163,7 +1163,7 @@ The **catalog-side sync service** is a connector-agnostic heartbeat that validat
 
 ### 10.1 Sync Job Design
 
-A single periodic background job (`ConnectorSyncJob`) runs in the catalog backend process on a configurable schedule (default: every 15 minutes). It queries the `connectors` table for all records. For each record:
+A single periodic background job (`ConnectorSyncJob`) runs in the catalog backend process on a configurable schedule (default: every 5 minutes). It queries the `connectors` table for all records. For each record:
 
 1. Looks up the registered provider for the connector's `type` and `provider` fields.
 2. Calls `provider.TestConnection(ctx, metadata)`.
