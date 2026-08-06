@@ -1,9 +1,5 @@
 # Catalog Datasource Connectors Feature Proposal
 
-**Version:** 1.0
-**Date:** June 2026
-**Status:** Draft
-
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)
@@ -558,7 +554,7 @@ Creates a link in `service_dependencies` and calls `POST /v1/connectors` on each
 
 - The application must exist and be in `Running` status.
 - The datasource must exist and be in `Connected` status.
-- The application must have been deployed as an architecture (`deployment_type = "architectures"`), and at least one of its services must declare `accepts_connectors: [datasource]` for that architecture in `architecture_config`. Applications deployed as standalone services never satisfy this condition.
+- The target service in the application must declare `accepts_connectors: [datasource]` in its catalog metadata.
 - The link must not already exist.
 
 **Response `200 OK`:**
@@ -577,11 +573,11 @@ Creates a link in `service_dependencies` and calls `POST /v1/connectors` on each
 { "error": "datasource is already connected to this application" }
 ```
 
-**Response `422 Unprocessable Entity` (standalone deployment):**
+**Response `422 Unprocessable Entity` (service does not accept datasource connectors):**
 
 ```json
 {
-  "error": "no services in this application accept datasource connectors"
+  "error": "service does not accept datasource connectors"
 }
 ```
 
@@ -774,9 +770,9 @@ When `PUT /api/v1/applications/:id/connectors/datasources/:datasource_id` is cal
 
 1. Validate application is `Running`.
 2. Validate datasource is `Connected` (lookup in `connectors` table).
-3. Verify the application was deployed as an architecture (`deployment_type = "architectures"`). Look up all services in the application whose catalog metadata declares `accepts_connectors: [datasource]` and which do not already have this datasource in `service_dependencies`. If `deployment_type = "services"` (standalone), reject immediately with `422 Unprocessable Entity`.
-4. Insert a `service_dependencies` row for each eligible service: `(service_id, dependency_id=datasource_id, dependency_type='datasource')`. The inserted `dependency_id` is the Digitize `connector_id` for that service-datasource pair.
-5. For each eligible service, call `POST /v1/connectors` on its downstream pod, passing `dependency_id` (the datasource UUID) as `connector_id`.
+3. Resolve the target service in the application and verify its catalog metadata declares `accepts_connectors: [datasource]`. Also verify this datasource is not already linked to that `(service_id, datasource_id)` pair in `service_dependencies`.
+4. Insert a `service_dependencies` row for the target service: `(service_id, dependency_id=datasource_id, dependency_type='datasource')`. The inserted `dependency_id` is the Digitize `connector_id` for that service-datasource pair.
+5. Call `POST /v1/connectors` on the target service's downstream pod, passing `dependency_id` (the datasource UUID) as `connector_id`.
 
 **`POST /v1/connectors` payload — S3 example:**
 
@@ -1317,37 +1313,13 @@ The corresponding Go type addition to [`types.Service`](../../ai-services/intern
 AcceptsConnectors []string `yaml:"accepts_connectors,omitempty" json:"accepts_connectors,omitempty"`
 ```
 
-#### Architecture Catalog YAML Change
-
-The architecture metadata mirrors which connector types it supports. This is used by the connect API to verify the application was deployed as part of an architecture that permits connectors, without needing to inspect individual service metadata at validation time:
-
-```yaml
-# assets/architectures/rag/metadata.yaml
-id: rag
-name: "Digital Assistant"
-# ...existing fields...
-
-# Connector types supported by this architecture.
-# Services listed under this architecture that declare the same connector type
-# in their own accepts_connectors field will be eligible for connection.
-accepts_connectors:
-  - datasource
-```
-
-Architectures that do not support any connectors omit the field (treated as an empty list). The corresponding Go type addition to [`types.Architecture`](../../ai-services/internal/pkg/catalog/types/types.go):
-
-```go
-// In Architecture struct, add:
-AcceptsConnectors []string `yaml:"accepts_connectors,omitempty" json:"accepts_connectors,omitempty"`
-```
-
 #### Deploy-Options API Response Change
 
 **Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
 
 Because connectors are not components, the `components` array inside each service entry **is not modified**. Instead, each service entry gains a new `accepts_connectors` array that mirrors the value from the service's catalog YAML. The UI uses this to decide whether to render a connector picker for that service — and which connector types to offer.
 
-The standalone deploy-options path (`GET /api/v1/services/{id}/deploy-options`) calls [`GetServiceDeployOptions`](../../ai-services/internal/pkg/catalog/deploy_options.go:147) and returns **no** `accepts_connectors` field — connector attachment is not available for standalone service deployments.
+The standalone deploy-options path (`GET /api/v1/services/{id}/deploy-options`) should also return `accepts_connectors`, so connector attachment is available for standalone service deployments when the selected service supports it.
 
 **How the build works in [`buildSingleService`](../../ai-services/internal/pkg/catalog/deploy_options.go:74):**
 
@@ -1446,15 +1418,13 @@ The `accepts_connectors: ["datasource"]` on the `digitize` service signals the U
 | `components`         | array    | Array of deployable component objects with providers. Unchanged — no connector entries are added here.                |
 | `resources`          | object   | Optional resource requirements for this service                                                                       |
 
-> **Backward compatibility:** `accepts_connectors` is a purely additive new field. Existing clients that do not read it are unaffected. The `components` arrays are completely unchanged. The standalone `GET /api/v1/services/{id}/deploy-options` path returns neither `accepts_connectors` nor any other connector field.
+> **Backward compatibility:** `accepts_connectors` is a purely additive new field. Existing clients that do not read it are unaffected. The `components` arrays are completely unchanged.
 
 #### Post-Deploy Connect Flow
 
 1. The deployment proceeds normally. Connector attachment is **not** attempted until the application reaches `Running` status.
-2. Once the application transitions to `Running`, the deployment completion callback iterates over each service's `connectors` list as supplied in the original create request. For each `ConnectorRef`, it calls `PUT /api/v1/applications/:id/connectors/datasources/:datasource_id` (scoped to the specific service). The `service_dependencies` insertion happens inside that handler.
+2. Once the application transitions to `Running`, the deployment completion callback iterates over each service's `connectors` list as supplied in the original create request. For each `ConnectorRef`, it calls `PUT /api/v1/applications/:id/services/:service_id/connectors/datasources/:datasource_id`. The `service_dependencies` insertion happens inside that handler.
 3. If any downstream service call fails after one retry, the application remains `Running` (deployment was successful). The `service_dependencies` row is still inserted so the link is tracked, but the UI surfaces the failure against the specific service so the user can retrigger via a datasource update.
-
-> **Note:** Step 2 only runs for applications where `deployment_type = "architectures"`. The callback for standalone deployments has no `connectors` list to process and skips this step entirely.
 
 ### 11.2 Datasource Connection Post-Creation
 
@@ -1471,10 +1441,10 @@ The handler validates:
 - The datasource exists in the `connectors` table with `status = "Connected"`.
 - The `(service_id, datasource_id)` pair does not already exist in `service_dependencies`.
 
-> **Restriction:** The connect endpoint enforces the architecture deployment guard server-side. When called for a service whose catalog YAML does not list `"datasource"` in `accepts_connectors`, or for an application with `deployment_type = "services"` (standalone), the handler returns `422 Unprocessable Entity`:
+> **Restriction:** The connect endpoint enforces the service-level guard server-side. When called for a service whose catalog YAML does not list `"datasource"` in `accepts_connectors`, the handler returns `422 Unprocessable Entity`:
 >
 > ```json
-> { "error": "no services in this application accept datasource connectors" }
+> { "error": "service does not accept datasource connectors" }
 > ```
 >
 > This guard is independent of the UI — it prevents direct API calls from bypassing the restriction.
@@ -1489,21 +1459,20 @@ The feature follows the existing error response convention established in the ap
 { "error": "<human-readable description>" }
 ```
 
-| Scenario                                                                                           | HTTP Status                                                                                                      |
-| -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Datasource not found                                                                               | `404 Not Found`                                                                                                  |
-| Application not found                                                                              | `404 Not Found`                                                                                                  |
-| Invalid request body or missing required fields                                                    | `400 Bad Request`                                                                                                |
-| Connectivity test failed on create/update (triggered internally by create and update handlers)     | `422 Unprocessable Entity`                                                                                       |
-| Datasource already connected to application                                                        | `409 Conflict`                                                                                                   |
-| Delete attempted while datasource has active connections                                           | `409 Conflict`                                                                                                   |
-| Application not in `Running` status during connect                                                 | `422 Unprocessable Entity`                                                                                       |
-| Connect attempted on a standalone deployment (`deployment_type = "services"`)                      | `422 Unprocessable Entity`                                                                                       |
-| Connect attempted and architecture does not include any service with matching `accepts_connectors` | `422 Unprocessable Entity`                                                                                       |
-| Digitize `POST /v1/connectors` returns `409 Conflict`                                              | `409 Conflict` — connector already exists; catalog should use `PUT`                                              |
-| Digitize `PUT /v1/connectors` failed after 1 retry                                                 | `200 OK` — datasource update succeeds; `propagation_errors` array in response lists affected applications        |
-| Digitize `DELETE /v1/connectors` failed (non-404)                                                  | `200 OK` — succeeded services are disconnected; `propagation_errors` array lists failed services; user can retry |
-| Digitize service API call failed (non-404, non-PUT)                                                | `502 Bad Gateway` (with `error` field describing the downstream failure)                                         |
+| Scenario                                                                                              | HTTP Status                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Datasource not found                                                                                  | `404 Not Found`                                                                                                  |
+| Application not found                                                                                 | `404 Not Found`                                                                                                  |
+| Invalid request body or missing required fields                                                       | `400 Bad Request`                                                                                                |
+| Connectivity test failed on create/update (triggered internally by create and update handlers)        | `422 Unprocessable Entity`                                                                                       |
+| Datasource already connected to application                                                           | `409 Conflict`                                                                                                   |
+| Delete attempted while datasource has active connections                                              | `409 Conflict`                                                                                                   |
+| Application not in `Running` status during connect                                                    | `422 Unprocessable Entity`                                                                                       |
+| Connect attempted for a service whose catalog metadata does not include matching `accepts_connectors` | `422 Unprocessable Entity`                                                                                       |
+| Digitize `POST /v1/connectors` returns `409 Conflict`                                                 | `409 Conflict` — connector already exists; catalog should use `PUT`                                              |
+| Digitize `PUT /v1/connectors` failed after 1 retry                                                    | `200 OK` — datasource update succeeds; `propagation_errors` array in response lists affected applications        |
+| Digitize `DELETE /v1/connectors` failed (non-404)                                                     | `200 OK` — succeeded services are disconnected; `propagation_errors` array lists failed services; user can retry |
+| Digitize service API call failed (non-404, non-PUT)                                                   | `502 Bad Gateway` (with `error` field describing the downstream failure)                                         |
 
 ---
 
