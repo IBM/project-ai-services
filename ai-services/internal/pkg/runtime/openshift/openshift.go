@@ -18,6 +18,7 @@ import (
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
@@ -653,12 +654,7 @@ func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
 //
 // Spyre card PCI addresses are read from the AIU_PCIE_IDS environment variable
 // set on each container in the pod spec (same convention as the Podman runtime).
-func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
-	podName, err := getPodNameWithPrefix(kc, nameOrID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find pod: %w", err)
-	}
-
+func (kc *OpenshiftClient) GetPodResources(podName string) (*types.PodResources, error) {
 	// Fetch the full pod spec to read container env vars for Spyre cards.
 	pod, err := kc.KubeClient.CoreV1().Pods(kc.Namespace).Get(kc.Ctx, podName, metav1.GetOptions{})
 	if err != nil {
@@ -711,44 +707,34 @@ func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources
 //
 //	PCIDEVICE_IBM_COM_AIU_PF=0182:60:00.0,0183:70:00.0,0481:50:00.0,0181:50:00.0
 func collectSpyreCardsFromPod(kc *OpenshiftClient, pod *corev1.Pod, spyreCards *[]string) {
-	envKey := string(constants.PCIDeviceEnvKey) + "="
-
 	for i := range pod.Spec.Containers {
 		containerName := pod.Spec.Containers[i].Name
 
-		output, err := execEnvInContainer(kc, pod.Namespace, pod.Name, containerName)
+		output, err := kc.ExecInContainerWithCmd(pod.Name, containerName, []string{"env"})
 		if err != nil {
-			// Container may not be running yet or exec is not permitted; skip silently.
+			logger.Warningf("collectSpyreCardsFromPod: exec failed for container %s in pod %s/%s: %v", containerName, pod.Namespace, pod.Name, err)
+
 			continue
 		}
 
-		for _, line := range strings.Split(output, "\n") {
-			if strings.HasPrefix(line, envKey) {
-				value := strings.TrimPrefix(line, envKey)
-				for _, addr := range strings.Split(value, ",") {
-					if addr = strings.TrimSpace(addr); addr != "" {
-						*spyreCards = append(*spyreCards, addr)
-					}
-				}
-
-				break
-			}
-		}
+		addrs := spyre.ParseEnvVarAddresses(strings.Split(output, "\n"), string(constants.PCIDeviceEnvKey), ",")
+		*spyreCards = append(*spyreCards, addrs...)
 	}
 }
 
-// execEnvInContainer runs `env` inside the named container via the Kubernetes
-// API server pod/exec subresource. This works from inside the cluster without
-// requiring the `oc` binary to be present in the catalog-backend pod.
-func execEnvInContainer(kc *OpenshiftClient, namespace, podName, containerName string) (string, error) {
+// ExecInContainerWithCmd runs the given command inside the named container via
+// the Kubernetes API server pod/exec subresource and returns the combined stdout.
+// This works from inside the cluster without requiring the `oc` binary to be
+// present in the catalog-backend pod.
+func (kc *OpenshiftClient) ExecInContainerWithCmd(podName, containerName string, command []string) (string, error) {
 	req := kc.KubeClient.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
-		Namespace(namespace).
+		Namespace(kc.Namespace).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: containerName,
-			Command:   []string{"env"},
+			Command:   command,
 			Stdout:    true,
 			Stderr:    false,
 		}, clientgoscheme.ParameterCodec)
@@ -765,10 +751,9 @@ func execEnvInContainer(kc *OpenshiftClient, namespace, podName, containerName s
 
 	var stdout bytes.Buffer
 
-	err = executor.StreamWithContext(kc.Ctx, remotecommand.StreamOptions{
+	if err = executor.StreamWithContext(kc.Ctx, remotecommand.StreamOptions{
 		Stdout: &stdout,
-	})
-	if err != nil {
+	}); err != nil {
 		return "", fmt.Errorf("exec stream failed for %s/%s: %w", podName, containerName, err)
 	}
 

@@ -595,24 +595,11 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 
 // collectSpyreCards extracts Spyre card PCI addresses from container environment variables.
 func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
-	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
-		for _, env := range containerInspect.Config.Env {
-			pciAddressPrefix := string(constants.PCIAddressKey) + "="
-			if strings.HasPrefix(env, pciAddressPrefix) {
-				// Extract the value after "AIU_PCIE_IDS="
-				pciAddresses := strings.TrimPrefix(env, pciAddressPrefix)
-				// Split by spaces and filter out empty strings
-				addresses := strings.Fields(pciAddresses)
-				for _, addr := range addresses {
-					if addr != "" {
-						*spyreCards = append(*spyreCards, addr)
-					}
-				}
-
-				return
-			}
-		}
+	if containerInspect.Config == nil || containerInspect.Config.Env == nil {
+		return
 	}
+	addrs := spyre.ParseEnvVarAddresses(containerInspect.Config.Env, string(constants.PCIAddressKey), " ")
+	*spyreCards = append(*spyreCards, addrs...)
 }
 
 // ExecInContainer executes a command in a container using podman exec command.
@@ -752,4 +739,12 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 
 	// Execute the provided function with the sidecar
 	return executor(pc.Context, containerID)
+}
+
+// ExecInContainerWithCmd satisfies the runtime.Runtime interface. podName has no
+// meaning in Podman's flat container model and is ignored; containerName is used
+// as the container ID directly. Delegates to ExecInContainerWithOutput.
+// TODO: implement fully when exec-in-container support is needed for Podman.
+func (pc *PodmanClient) ExecInContainerWithCmd(_, containerName string, command []string) (string, error) {
+	return pc.ExecInContainerWithOutput(containerName, command)
 }

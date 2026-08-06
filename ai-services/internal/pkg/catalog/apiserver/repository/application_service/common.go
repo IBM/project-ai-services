@@ -43,6 +43,15 @@ type DeleteApplicationResponse struct {
 	Message string `json:"message"`
 }
 
+// resourceTotals holds aggregated resource information.
+type resourceTotals struct {
+	allocatedCPU    int
+	allocatedMemory int
+	usedCPU         float64
+	usedMemory      uint64
+	spyreCards      map[string]bool
+}
+
 // ValidatePaginationParams validates and returns pagination parameters with defaults.
 func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 	// Apply defaults
@@ -707,15 +716,6 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 	}
 
 	return buildResourcesResponse(resourceTotals), nil
-}
-
-// resourceTotals holds aggregated resource information.
-type resourceTotals struct {
-	allocatedCPU    int
-	allocatedMemory int
-	usedCPU         float64
-	usedMemory      uint64
-	spyreCards      map[string]bool
 }
 
 func (s *ApplicationServiceBase) collectResources(
