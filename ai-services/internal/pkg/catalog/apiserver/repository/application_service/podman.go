@@ -42,35 +42,11 @@ func (s *PodmanApplicationService) DeleteApplication(ctx context.Context, id uui
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // using the Podman runtime executor.
 func (s *PodmanApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
-	// Phase 1: check for duplicate name
-	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
+	plan, err := s.prepareCreateApplication(ctx, req, runtimeTypes.RuntimeTypePodman)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check for existing application: %w", err)
-	}
-	if existingApp != nil {
-		return nil, &ValidationError{
-			Code:    http.StatusConflict,
-			Message: fmt.Sprintf(ErrMsgApplicationNameExists, req.Name),
-		}
-	}
-
-	// Phase 2: validate payload
-	if err := s.Validator.ValidateDeploymentRequest(ctx, req); err != nil {
 		return nil, err
 	}
 
-	// Phase 3: create deployment plan
-	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
-	}
-
-	// Phase 4: persist DB records
-	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
-		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
-	}
-
-	// Phase 5: async deployment
 	go s.executeDeploymentAsync(ctx, plan, req)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil

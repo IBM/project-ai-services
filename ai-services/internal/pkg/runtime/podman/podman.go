@@ -117,23 +117,23 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 }
 
 // podmanCtx derives a child of pc.Context (which carries the podman connection) that
-// is cancelled when the caller's ctx is cancelled.  This is necessary because the
-// podman bindings SDK requires its own connection-carrying context, but we still want
-// cancellation signals from the caller to propagate (e.g. mid-deployment deletion).
+// is cancelled when the caller's ctx is cancelled.
+//
+// The Podman bindings SDK stores its connection handle under an unexported key in
+// pc.Context, so we cannot simply pass callerCtx to kube.PlayWithBody — it would
+// have no connection value. Instead we derive from pc.Context (preserving the
+// connection) and mirror cancellation from the caller via a short-lived goroutine.
+// The goroutine exits as soon as either context is done, so there is no leak.
 func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, context.CancelFunc) {
 	// Child of pc.Context so the podman connection value is present.
 	ctx, cancel := context.WithCancel(pc.Context)
 
-	// Mirror cancellation from the caller into the derived context.
-	// The ctx.Done() case handles normal exit: once CreatePod returns,
-	// its defer cancel() fires and closes ctx, allowing this goroutine
-	// to exit cleanly without leaking.
 	go func() {
 		select {
 		case <-callerCtx.Done():
 			cancel()
 		case <-ctx.Done():
-			// CreatePod returned normally (defer cancel() fired) — nothing to do.
+			// CreatePod returned (defer cancel() fired) — nothing to do.
 		}
 	}()
 

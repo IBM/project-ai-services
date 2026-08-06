@@ -614,9 +614,10 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	}, nil
 }
 
-// CreateApplication validates, plans, persists, and asynchronously deploys a new application
-// for the given runtime type.
-func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
+// prepareCreateApplication runs phases 1–4 of application creation (duplicate check,
+// validation, deployment planning, and DB persistence) and returns the resulting plan.
+// It is shared by both the base CreateApplication and PodmanApplicationService.CreateApplication.
+func (s *ApplicationServiceBase) prepareCreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*deployment.DeploymentPlan, error) {
 	// Phase 1: check for duplicate name
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {
@@ -645,7 +646,17 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
 	}
 
-	// Phase 5: async deployment
+	return plan, nil
+}
+
+// CreateApplication validates, plans, persists, and asynchronously deploys a new application
+// for the given runtime type.
+func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
+	plan, err := s.prepareCreateApplication(ctx, req, runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
 	go s.executeDeploymentAsync(ctx, plan, req, runtimeType)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
