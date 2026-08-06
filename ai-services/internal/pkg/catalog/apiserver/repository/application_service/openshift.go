@@ -13,13 +13,13 @@ import (
 // OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
 // It embeds ApplicationServiceBase for all shared DB operations.
 //
-// TODO(OCP): wire in a DeploymentRegistry (same pattern as PodmanApplicationService) when CreateApplication is implemented.
+// TODO(OCP): set base.DeploymentRegistry = NewDeploymentRegistry() in the OpenShift constructor when CreateApplication is implemented.
 type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
 
 func (s *OpenShiftApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
-	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData, runtimeTypes.RuntimeTypeOpenShift)
+	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData)
 }
 
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
@@ -39,4 +39,3 @@ func (s *OpenShiftApplicationService) GetApplicationResources(ctx context.Contex
 func (s *OpenShiftApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
 	return s.ApplicationServiceBase.ApplicationsPs(ctx, appID, catalogutils.AppNamespace(appID))
 }
-
