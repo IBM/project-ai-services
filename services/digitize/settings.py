@@ -11,11 +11,30 @@ from common.settings import Settings as CommonSettings
 class DigitizeConfig(BaseSettings):
     """Digitize service configuration."""
 
+    class ConnectorConfig(BaseSettings):
+        """Connector-specific configuration."""
+
+        sync_interval_seconds: int = Field(
+            default=300,
+            ge=1,
+            description="Sync interval in seconds applied to all connectors at attach time",
+        )
+
+        encryption_key_path: str = Field(
+            default="/run/secrets/connector_encryption_key",
+            description="Path to the AES-256-GCM key file (32 raw bytes) used to encrypt connector secrets at rest",
+        )
+
+        model_config = SettingsConfigDict(env_prefix="CONNECTOR_")
+
     # Directory paths
     cache_dir: Path = Field(
         default=Path("/var/cache"),
         description="Base cache directory for all operations",
     )
+
+    # Connector settings
+    connector: ConnectorConfig = Field(default_factory=ConnectorConfig)
 
     # Worker pool sizes
     doc_worker_size: int = Field(

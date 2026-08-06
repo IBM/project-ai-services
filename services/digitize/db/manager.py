@@ -15,6 +15,7 @@ from common.misc_utils import get_logger
 from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
+from digitize.connectors.models import SyncStatus
 
 logger = get_logger("db_repository")
 
@@ -432,7 +433,8 @@ class DatabaseManager:
         status: Optional[str] = None,
         name: Optional[str] = None,
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
+        exclude_connector_sourced: bool = False,
     ) -> tuple[List[Document], int]:
         """
         Retrieve all documents with optional filtering and pagination.
@@ -442,6 +444,8 @@ class DatabaseManager:
             name: Filter by document name (partial match)
             limit: Maximum number of documents to return
             offset: Number of documents to skip
+            exclude_connector_sourced: When True, omit docs that appear in
+                connector_document_checksum (connector-sourced documents).
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -460,7 +464,14 @@ class DatabaseManager:
                     filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
-                
+                if exclude_connector_sourced:
+                    # Exclude connector-sourced documents via NOT EXISTS subquery.
+                    filters.append(
+                        ~select(ConnectorDocumentChecksum.doc_id)
+                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
+                        .exists()
+                    )
+
                 if filters:
                     stmt = stmt.where(and_(*filters))
                 
@@ -764,7 +775,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status="up to date",
+                        sync_status=SyncStatus.UP_TO_DATE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
@@ -1047,7 +1058,7 @@ class DatabaseManager:
                         connector_id=connector_id,
                         seq=seq_subquery,
                         started_at=started_at or datetime.now(timezone.utc),
-                        status="started",
+                        status=SyncStatus.STARTED,
                         error="",
                     )
                     .returning(ConnectorSyncLog.seq)
@@ -1056,7 +1067,7 @@ class DatabaseManager:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_status="syncing")
+                    .values(sync_status=SyncStatus.SYNCING)
                 )
                 logger.debug(f"open_sync_log: connector={connector_id!r} seq={seq}")
                 return seq

@@ -9,7 +9,7 @@ ui:
       cpu: "500m"
 
 backend:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.213
+  image: icr.io/ai-services-cicd/ai-services:v0.0.214
   runtime: "openshift"
   adminPasswordHash: ""
   resources:

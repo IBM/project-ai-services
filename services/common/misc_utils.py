@@ -4,6 +4,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import requests
 from contextvars import ContextVar
@@ -375,22 +376,40 @@ def validate_document_file(filename: str, content) -> None:
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
 
-def get_utc_timestamp() -> str:
+_UNSET = object()
+
+def get_utc_timestamp(dt=_UNSET) -> Optional[str]:
     """
-    Generate UTC timestamp in ISO format with 'Z' suffix.
+    Serialize a datetime to ISO 8601 string with 'Z' suffix, or generate the
+    current UTC timestamp if no argument is provided.
+
+    Args:
+        dt: An existing datetime object to serialize.  Pass no argument (or
+            omit) to generate the current UTC time.  Pass None to get None
+            back (e.g. for optional nullable fields).
 
     Returns:
-        ISO 8601 formatted timestamp string with 'Z' suffix
+        ISO 8601 formatted timestamp string with 'Z' suffix, or None if dt
+        is explicitly passed as None.
     """
     from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if dt is _UNSET:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if dt is None:
+        return None
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 logger = get_logger("cleanup")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
-def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
+def cleanup_staging_directory(
+    job_id: str,
+    staging_base_dir: Path,
+    *,
+    ignore_errors: bool = False,
+) -> bool:
     """
     Clean up the staging directory for a specific job.
 
@@ -400,6 +419,10 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
     Args:
         job_id: Unique identifier of the job
         staging_base_dir: Base directory where staging directories are created
+        ignore_errors: When True, per-file errors inside the tree are silently
+            swallowed (passed directly to ``shutil.rmtree``). Useful for
+            best-effort cleanup where leaving partial remnants is acceptable
+            (e.g. connector staging directories on DELETE).
 
     Returns:
         True if cleanup was successful or directory didn't exist, False if cleanup failed
@@ -412,7 +435,7 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
         return True
 
     try:
-        shutil.rmtree(staging_dir)
+        shutil.rmtree(staging_dir, ignore_errors=ignore_errors)
         logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
         return True
     except Exception as e:

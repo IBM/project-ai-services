@@ -3,6 +3,11 @@ Document-related API endpoints.
 
 Handles document listing, retrieval, content access, and deletion.
 Extracted from the monolithic app.py following the digitize-api-sample pattern.
+
+Connector visibility rules:
+  - GET  /v1/documents        — user-submitted only (connector-sourced excluded)
+  - GET  /v1/documents/{id}   — 404 for connector-sourced docs
+  - DELETE /v1/documents/{id} — 404 for connector-sourced docs
 """
 
 import json
@@ -19,6 +24,43 @@ from digitize.utils.storage import storage_manager
 
 router = APIRouter()
 logger = get_logger("documents_router")
+
+
+def delete_document_data(doc_id: str) -> None:
+    """
+    Steps 4-6 of the delete_document flow: VDB cleanup, file cleanup, DB record removal.
+    Extracted so connector cleanup can call the same teardown path.
+    Raises on failure; callers decide how to handle errors.
+    """
+    # 4. VDB cleanup.
+    import common.db_utils as db
+
+    vector_store = db.get_vector_store()
+    deleted_chunks = vector_store.delete_document_by_id(doc_id)
+    logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+
+    # 5. File cleanup.
+    doc_metadata = None
+    try:
+        doc_metadata = dg_util.get_document(doc_id, include_details=False)
+    except FileNotFoundError:
+        logger.error(f"Metadata for {doc_id} not found. Proceeding with VDB cleanup.")
+    if doc_metadata:
+        storage_manager.delete_document_content(
+            doc_id, output_format=doc_metadata.output_format
+        )
+        logger.info(f"Files for {doc_id} deleted successfully.")
+
+    # 6. Database record removal.
+    from digitize.db.manager import db_manager
+
+    success = db_manager.delete_document(doc_id)
+    if success:
+        logger.info(f"Database record for {doc_id} deleted successfully.")
+    else:
+        logger.warning(
+            f"Database record for {doc_id} not found (may have been deleted already)."
+        )
 
 
 @router.get(
@@ -65,6 +107,7 @@ async def list_documents(
             name=name,
             limit=limit,
             offset=offset,
+            exclude_connector_sourced=True,
         )
 
         logger.debug(
@@ -103,7 +146,13 @@ async def get_document_metadata(
     details: bool = Query(False, description="Include detailed metadata (pages, tables, timing)"),
 ):
     try:
-        from digitize.utils.db import get_document
+        from digitize.utils.db import get_document, is_connector_sourced_document
+
+        if is_connector_sourced_document(doc_id):
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Document with ID '{doc_id}' not found",
+            )
 
         return get_document(doc_id, include_details=details)
     except FileNotFoundError as exc:
@@ -163,21 +212,31 @@ async def get_document_content(doc_id: str):
 async def delete_document(doc_id: str):
     """
     Delete a single document — follows the 'Always-Clean-VDB' strategy:
-    1. Fetch metadata
-    2. Active-job guard
-    3. VDB cleanup (high priority)
-    4. File & metadata cleanup
-    5. Database record removal
+    1. Connector guard  — 404 for connector-sourced docs
+    2. Fetch metadata
+    3. Active-job guard
+    4. VDB cleanup (high priority)
+    5. File & metadata cleanup
+    6. Database record removal
     """
     try:
-        # 1. Fetch metadata (best-effort).
+        # 1. Connector guard — connector-sourced docs cannot be deleted via this API.
+        from digitize.utils.db import is_connector_sourced_document
+
+        if is_connector_sourced_document(doc_id):
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Document with ID '{doc_id}' not found",
+            )
+
+        # 2. Fetch metadata (best-effort).
         doc_metadata = None
         try:
             doc_metadata = dg_util.get_document(doc_id, include_details=False)
         except FileNotFoundError:
             logger.error(f"Metadata for {doc_id} not found. Proceeding with VDB cleanup.")
 
-        # 2. Active-job guard.
+        # 3. Active-job guard.
         if doc_metadata:
             if dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id):
                 APIError.raise_error(
@@ -185,51 +244,12 @@ async def delete_document(doc_id: str):
                     f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted",
                 )
 
-        # 3. VDB cleanup.
+        # 4-6. VDB cleanup, file cleanup, DB record removal.
         try:
-            import common.db_utils as db
-
-            vector_store = db.get_vector_store()
-            deleted_chunks = vector_store.delete_document_by_id(doc_id)
-            logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+            delete_document_data(doc_id)
         except Exception as exc:
-            logger.error(f"VDB cleanup failed for {doc_id}: {exc}")
-            APIError.raise_error(
-                ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Document metadata deleted but VDB cleanup failed: {exc}",
-            )
-
-        # 4. File cleanup.
-        if doc_metadata:
-            try:
-                storage_manager.delete_document_content(
-                    doc_id, output_format=doc_metadata.output_format
-                )
-                logger.info(f"Files for {doc_id} deleted successfully.")
-            except Exception as exc:
-                logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
-                APIError.raise_error(
-                    ErrorCode.INTERNAL_SERVER_ERROR,
-                    f"Search data removed but files remain: {exc}",
-                )
-
-        # 5. Database record removal.
-        try:
-            from digitize.db.manager import db_manager
-
-            success = db_manager.delete_document(doc_id)
-            if success:
-                logger.info(f"Database record for {doc_id} deleted successfully.")
-            else:
-                logger.warning(
-                    f"Database record for {doc_id} not found (may have been deleted already)."
-                )
-        except Exception as exc:
-            logger.error(f"Failed to delete database record for {doc_id}: {exc}")
-            APIError.raise_error(
-                ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Search data and files removed but database cleanup failed: {exc}",
-            )
+            logger.error(f"Document teardown failed for {doc_id}: {exc}")
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
 
         return None
 
