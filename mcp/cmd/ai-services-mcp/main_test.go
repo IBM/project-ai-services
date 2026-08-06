@@ -34,8 +34,7 @@ func TestValidateEndpoint(t *testing.T) {
 		{
 			name:     "non-IBM Cloud domain",
 			endpoint: "https://api.example.com",
-			wantErr:  true,
-			errMsg:   "Must match pattern *.cloud.ibm.com",
+			wantErr:  false,
 		},
 		{
 			name:     "invalid URL format",
@@ -46,8 +45,7 @@ func TestValidateEndpoint(t *testing.T) {
 		{
 			name:     "too short domain",
 			endpoint: "https://short.com",
-			wantErr:  true,
-			errMsg:   "Must match pattern *.cloud.ibm.com",
+			wantErr:  false,
 		},
 		{
 			name:     "valid subdomain",

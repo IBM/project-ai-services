@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
@@ -31,18 +30,18 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ibmcloud-api-mcp",
-	Short: "IBM Cloud API MCP Server",
-	Long: `An MCP (Model Context Protocol) server that dynamically generates tools from IBM Cloud OpenAPI specifications.
+	Use:   "ai-services-mcp",
+	Short: "AI Services MCP Server",
+	Long: `An MCP (Model Context Protocol) server that dynamically generates tools from AI Services OpenAPI specifications.
 
-This server loads OpenAPI specifications for IBM Cloud services and creates MCP tools that can be used by Claude and other MCP clients to interact with IBM Cloud APIs.`,
+This server loads OpenAPI specifications for AI Services and creates MCP tools that can be used by Claude and other MCP clients to interact with AI Services APIs.`,
 	RunE: runServer,
 }
 
 func init() {
 	rootCmd.Flags().StringVarP(&description, "description", "d", "", "The local OpenAPI description file path or remote URL to use (required)")
 	rootCmd.Flags().StringVarP(&endpoint, "endpoint", "e", "", "The service endpoint URL to use")
-	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "IBM Cloud API key, environment variable ($VAR), or 1Password reference (op://...)")
+	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "AI Services API key, environment variable ($VAR), or 1Password reference (op://...)")
 	rootCmd.Flags().BoolVarP(&authCLI, "auth-cli", "c", false, "Use the ibmcloud CLI to authenticate")
 	rootCmd.Flags().StringVarP(&authToken, "auth-token", "a", "", "IAM token to use for authentication")
 	rootCmd.Flags().BoolVarP(&authPassthrough, "auth-passthrough", "P", false, "Use passthrough authentication mode")
@@ -168,24 +167,9 @@ func validateEndpoint(endpoint string) error {
 		return nil
 	}
 
-	// Validate HTTPS and *.cloud.ibm.com pattern for production
+	// Validate HTTPS
 	if !strings.HasPrefix(endpoint, "https://") {
 		return errors.NewUsageError("Invalid endpoint: %s. Must use HTTPS protocol", endpoint)
-	}
-
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return errors.NewUsageError("Invalid endpoint format: %s", endpoint)
-	}
-
-	parts := strings.Split(u.Hostname(), ".")
-	if len(parts) < 3 {
-		return errors.NewUsageError("Invalid endpoint: %s. Must match pattern *.cloud.ibm.com", endpoint)
-	}
-
-	suffix := strings.Join(parts[len(parts)-3:], ".")
-	if !strings.HasSuffix(suffix, "cloud.ibm.com") {
-		return errors.NewUsageError("Invalid endpoint: %s. Must match pattern *.cloud.ibm.com", endpoint)
 	}
 
 	return nil
@@ -304,13 +288,13 @@ func handleError(err error) {
 }
 
 func getUsage() string {
-	return `Usage: ibmcloud-api-mcp -d <API description> -e <service endpoint>
+	return `Usage: ai-services-mcp -d <API description> -e <service endpoint>
 
 Flags:
   -d, --description    <path> The local OpenAPI description to use.
                         <URL> The remote OpenAPI description to use.
   -e, --endpoint        <URL> The service endpoint to use.
-  -k, --auth-api-key    <key> The IBM Cloud API key with which to obtain
+  -k, --auth-api-key    <key> The AI Services API key with which to obtain
                               tokens to authenticate requests. Cannot be used
                               with --auth-cli or --auth-token.
                        $<VAR> As above, but read in the API key from an
@@ -318,7 +302,7 @@ Flags:
                               when a literal $-prefixed variable name is
                               passed in outside of a shell context. Cannot be
                               used with --auth-cli or --auth-token.
-                        <URL> The 1Password reference containing an IBM Cloud
+                        <URL> The 1Password reference containing an AI Services
                               API key with which to obtain tokens to
                               authenticate requests. Cannot be used with
                               --auth-cli or --auth-token.

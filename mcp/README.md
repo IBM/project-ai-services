@@ -73,7 +73,7 @@ The IBM Cloud API MCP Server is a Go implementation of the Model Context Protoco
 ```
 go-api-mcp/
 ├── cmd/
-│   └── ibmcloud-api-mcp/
+│   └── ai-services-mcp/
 │       └── main.go              # Application entry point & CLI
 │
 ├── internal/
@@ -115,7 +115,7 @@ go-api-mcp/
 
 ## Core Components
 
-### 1. Main Entry Point (`cmd/ibmcloud-api-mcp/main.go`)
+### 1. Main Entry Point (`cmd/ai-services-mcp/main.go`)
 
 The main package provides:
 - **CLI Interface**: Uses Cobra for command-line argument parsing
@@ -277,7 +277,7 @@ make run
 
 ```bash
 # HTTP mode
-./bin/ibmcloud-api-mcp \
+./bin/ai-services-mcp \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-cli \
@@ -288,7 +288,7 @@ make run
 
 ```bash
 # STDIO mode
-./bin/ibmcloud-api-mcp \
+./bin/ai-services-mcp \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-cli \
@@ -303,10 +303,10 @@ The project includes a multi-stage Dockerfile optimized for size and security.
 
 ```bash
 # Build the image
-docker build -t ibmcloud-api-mcp:latest .
+docker build -t ai-services-mcp:latest .
 
 # Build with a specific tag
-docker build -t ibmcloud-api-mcp:v1.0.0 .
+docker build -t ai-services-mcp:v1.0.0 .
 ```
 
 #### Running the Container
@@ -317,7 +317,7 @@ docker build -t ibmcloud-api-mcp:v1.0.0 .
 # Using passthrough authentication
 docker run -p 3000:3000 \
   -e IBMCLOUD_API_KEY=your-api-key-here \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-passthrough \
@@ -334,7 +334,7 @@ export IBMCLOUD_API_KEY=your-api-key-here
 # Run container
 docker run -p 3000:3000 \
   -e IBMCLOUD_API_KEY \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-api-key $IBMCLOUD_API_KEY \
@@ -348,7 +348,7 @@ docker run -p 3000:3000 \
 # Mount IBM Cloud CLI config directory
 docker run -p 3000:3000 \
   -v ~/.bluemix:/home/mcpuser/.bluemix:ro \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-cli \
@@ -360,7 +360,7 @@ docker run -p 3000:3000 \
 
 ```bash
 docker run -p 3000:3000 \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-token your-iam-token-here \
@@ -375,7 +375,7 @@ docker run -p 3000:3000 \
 docker run -p 3000:3000 \
   -v /path/to/specs:/app/specs:ro \
   -e IBMCLOUD_API_KEY=your-api-key-here \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description /app/specs/openapi.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-api-key $IBMCLOUD_API_KEY \
@@ -390,7 +390,7 @@ docker run -p 3000:3000 \
 docker run -p 8080:8080 \
   -e PORT=8080 \
   -e IBMCLOUD_API_KEY=your-api-key-here \
-  ibmcloud-api-mcp:latest \
+  ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-api-key $IBMCLOUD_API_KEY \
@@ -461,7 +461,7 @@ Business logic and tool system:
 #### Application Tests
 Server and application entry points:
 - **`internal/server`** - HTTP and STDIO server implementations
-- **`cmd/ibmcloud-api-mcp`** - Main application, CLI validation, flag parsing
+- **`cmd/ai-services-mcp`** - Main application, CLI validation, flag parsing
 
 ### Running Tests
 

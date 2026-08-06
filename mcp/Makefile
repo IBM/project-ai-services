@@ -2,15 +2,15 @@
 
 # Build the application
 build:
-	go build -o bin/ibmcloud-api-mcp cmd/ibmcloud-api-mcp/main.go
+	go build -o bin/ai-services-mcp cmd/ai-services-mcp/main.go
 
 # Build with optimizations
 build-optimized:
-	go build -ldflags="-s -w" -o bin/ibmcloud-api-mcp cmd/ibmcloud-api-mcp/main.go
+	go build -ldflags="-s -w" -o bin/ai-services-mcp cmd/ai-services-mcp/main.go
 
 # Clean built artifacts
 clean:
-	rm -f bin/ibmcloud-api-mcp bin/ibmcloud-api-mcp-*
+	rm -f bin/ai-services-mcp bin/ai-services-mcp-*
 
 # Clean test coverage files
 clean-coverage:
@@ -37,7 +37,7 @@ test-coverage-html: test-coverage
 
 # Run the application with example flags
 run:
-	./bin/ibmcloud-api-mcp --help
+	./bin/ai-services-mcp --help
 
 # Install dependencies
 install:
@@ -46,10 +46,10 @@ install:
 
 # Cross-compile for multiple platforms
 cross-compile: clean
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/ibmcloud-api-mcp-darwin-arm64 cmd/ibmcloud-api-mcp/main.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/ibmcloud-api-mcp-darwin-amd64 cmd/ibmcloud-api-mcp/main.go
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/ibmcloud-api-mcp-linux-amd64 cmd/ibmcloud-api-mcp/main.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/ibmcloud-api-mcp.exe cmd/ibmcloud-api-mcp/main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/ai-services-mcp-darwin-arm64 cmd/ai-services-mcp/main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/ai-services-mcp-darwin-amd64 cmd/ai-services-mcp/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/ai-services-mcp-linux-amd64 cmd/ai-services-mcp/main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/ai-services-mcp.exe cmd/ai-services-mcp/main.go
 
 # Show help
 help:
