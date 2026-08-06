@@ -94,6 +94,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	serviceRepo := repository.NewServiceRepository(pool)
 	componentRepo := repository.NewComponentRepository(pool)
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+	workerRepo := repository.NewWorkerRepository(pool)
 
 	// Initialize sync service for background DB-Pod synchronization
 	// TODO: implement sync service on remote machines
@@ -116,7 +117,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	}
 
 	// Initialize application service with all required repositories
-	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
+	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, workerRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)

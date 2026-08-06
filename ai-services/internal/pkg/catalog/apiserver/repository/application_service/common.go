@@ -85,6 +85,7 @@ type ApplicationServiceBase struct {
 	ServiceRepo           dbrepo.ServiceRepository
 	ComponentRepo         dbrepo.ComponentRepository
 	ServiceDependencyRepo dbrepo.ServiceDependencyRepository
+	WorkerRepo            dbrepo.WorkerRepository
 	Provider              *catalog.CatalogProvider
 	DeploymentPlanner     *deployment.DeploymentPlanner
 	DeploymentExecutor    *deployment.DeploymentExecutor
@@ -94,7 +95,7 @@ type ApplicationServiceBase struct {
 
 // ListApplications retrieves a paginated list of applications with filters.
 // buildApplication creates an Application from a models.Application.
-func (s *ApplicationServiceBase) buildApplication(app models.Application) (types.Application, error) {
+func (s *ApplicationServiceBase) buildApplication(ctx context.Context, app models.Application) (types.Application, error) {
 	// Get type (display name) from catalog metadata
 	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
 	if err != nil {
@@ -110,6 +111,7 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 		Status:         string(app.Status),
 		Message:        app.Message,
 		Version:        app.Version,
+		Worker:         s.resolveWorker(ctx, app.WorkerID),
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
@@ -120,6 +122,32 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 	}
 
 	return appData, nil
+}
+
+// resolveWorker fetches worker details by ID and returns a WorkerInfo pointer,
+// or nil if no worker is assigned or the lookup fails.
+func (s *ApplicationServiceBase) resolveWorker(ctx context.Context, workerID *uuid.UUID) *types.WorkerInfo {
+	if workerID == nil || s.WorkerRepo == nil {
+		return nil
+	}
+
+	workers, err := s.WorkerRepo.GetAll(ctx)
+	if err != nil {
+		return nil
+	}
+
+	for _, w := range workers {
+		if w.ID == *workerID {
+			return &types.WorkerInfo{
+				ID:          w.ID.String(),
+				Name:        w.Name,
+				RuntimeType: string(w.RuntimeType),
+				Status:      string(w.Status),
+			}
+		}
+	}
+
+	return nil
 }
 
 // buildServiceStatuses creates ApplicationService array from models.Service slice.
@@ -210,7 +238,7 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	appData, err := s.buildApplication(*updatedApp)
+	appData, err := s.buildApplication(ctx, *updatedApp)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +280,7 @@ func (s *ApplicationServiceBase) buildGetApplicationResponse(ctx context.Context
 		Status:         string(app.Status),
 		Message:        app.Message,
 		Version:        app.Version,
+		Worker:         s.resolveWorker(ctx, app.WorkerID),
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
@@ -588,7 +617,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 
 	apps := make([]types.Application, 0, len(applications))
 	for _, app := range applications {
-		appData, err := s.buildApplication(app)
+		appData, err := s.buildApplication(ctx, app)
 		if err != nil {
 			return nil, err
 		}
