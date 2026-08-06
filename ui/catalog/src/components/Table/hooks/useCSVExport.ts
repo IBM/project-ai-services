@@ -1,48 +1,39 @@
 import { useCallback } from "react";
 import { downloadCSVWithChildren } from "@/utils/csv";
-import { getToggleableHeaders } from "@/components/table/utils/tableUtils";
-import type { TableHeaders } from "@/components/table/types";
-export interface CSVExportActionTypes {
-  SET_EXPORT_ERROR: string;
-  SET_EXPORTING: string;
-  CLOSE_EXPORT_DIALOG: string;
-  SHOW_EXPORT_TOAST: string;
-}
-
-// Bivariant method signature — accepts any useReducer dispatcher without
-// requiring callers to cast, while still avoiding `any`.
-interface DispatchLike {
-  dispatch(action: { type: string; payload?: unknown }): void;
-}
+import {
+  filterRowsBySearch,
+  getToggleableHeaders,
+} from "@/components/Table/utils/tableUtils";
+import type { SharedTableAction, TableHeaders } from "@/components/Table/types";
 
 interface UseCSVExportOptions<TRow extends Record<string, unknown>> {
   csvFileName: string;
   totalItems: number;
   search: string;
+  searchFields: (keyof TRow)[];
   visibleColumns: Record<string, boolean>;
   headers: TableHeaders;
 
   fetchAllRows: () => Promise<TRow[]>;
-  dispatch: DispatchLike["dispatch"];
-  actionTypes: CSVExportActionTypes;
+  dispatch: (action: SharedTableAction) => void;
 }
 
 export function useCSVExport<TRow extends Record<string, unknown>>({
   csvFileName,
   totalItems,
   search,
+  searchFields,
   visibleColumns,
   headers,
   fetchAllRows,
   dispatch,
-  actionTypes,
 }: UseCSVExportOptions<TRow>) {
   const downloadCSV = useCallback(async () => {
     const name = csvFileName.trim();
 
     if (!name) {
       dispatch({
-        type: actionTypes.SET_EXPORT_ERROR,
+        type: "SHARED_SET_EXPORT_ERROR",
         payload: "Provide a valid file name",
       });
       return;
@@ -50,27 +41,19 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
 
     if (totalItems === 0) {
       dispatch({
-        type: actionTypes.SET_EXPORT_ERROR,
+        type: "SHARED_SET_EXPORT_ERROR",
         payload: "No data available to export",
       });
       return;
     }
 
-    dispatch({ type: actionTypes.SET_EXPORTING, payload: true });
+    dispatch({ type: "SHARED_SET_EXPORTING", payload: true });
 
     try {
       const allRows = await fetchAllRows();
 
       // Apply search filter to exported data (matches the in-table filter)
-      const filteredRows = search
-        ? allRows.filter((row) =>
-            Object.values(row)
-              .join(" ")
-              .toLowerCase()
-              .includes(search.toLowerCase()),
-          )
-        : allRows;
-
+      const filteredRows = filterRowsBySearch(allRows, search, searchFields);
       // Only export visible, non-actions columns
       const visibleHeaders = getToggleableHeaders(headers).filter(
         (h) => visibleColumns[h.key] === true,
@@ -82,9 +65,9 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
         name,
       );
 
-      dispatch({ type: actionTypes.CLOSE_EXPORT_DIALOG });
+      dispatch({ type: "SHARED_CLOSE_EXPORT_DIALOG" });
       dispatch({
-        type: actionTypes.SHOW_EXPORT_TOAST,
+        type: "SHARED_SHOW_EXPORT_TOAST",
         payload: {
           message: result.message,
           kind: result.success ? "success" : "error",
@@ -92,24 +75,24 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
       });
     } catch {
       dispatch({
-        type: actionTypes.SHOW_EXPORT_TOAST,
+        type: "SHARED_SHOW_EXPORT_TOAST",
         payload: {
           message: "Failed to fetch data for export",
           kind: "error",
         },
       });
     } finally {
-      dispatch({ type: actionTypes.SET_EXPORTING, payload: false });
+      dispatch({ type: "SHARED_SET_EXPORTING", payload: false });
     }
   }, [
     csvFileName,
     totalItems,
     search,
+    searchFields,
     visibleColumns,
     headers,
     fetchAllRows,
     dispatch,
-    actionTypes,
   ]);
 
   return { downloadCSV };
