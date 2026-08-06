@@ -116,7 +116,7 @@ class ExtractJob(Base):
             name="chk_extract_job_status",
         ),
         CheckConstraint(
-            "source_type IN ('txt', 'pdf')",
+            "source_type IN ('txt', 'md')",
             name="chk_extract_source_type",
         ),
         Index("idx_extract_jobs_submitted_at_status", "submitted_at", "status"),

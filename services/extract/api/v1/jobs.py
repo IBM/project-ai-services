@@ -229,7 +229,7 @@ async def create_extract_job(
     """Validate, stage, record, and enqueue an async extraction job."""
     _check_job_admission()
     filename, source_type = _validate_and_resolve_file(file)
-    _validate_file_content(file)
+    await _validate_file_content(file)
     _resolve_schema(schema_id)
 
     job_id = str(uuid.uuid4())
