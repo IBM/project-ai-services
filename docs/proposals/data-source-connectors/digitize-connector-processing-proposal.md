@@ -1107,11 +1107,13 @@ client = boto3.Session(
 
 ### 8.1 Tick flow
 
+![Sync Worker Tick Flow](sync-worker-tick-flow.svg)
+
 ```text
 _run_tick(connector_id)
 │
 ├─ [Phase 1] INSERT connector_sync_logs (status='started')
-│            UPDATE connectors (sync_status='syncing')
+│            sync_status already 'syncing' (set before dispatch)
 │
 ├─ [Phase 2] ── ACQUIRE ingest_lock (asyncio.Lock, process-wide) ──────────────
 │            known_checksums ← SELECT checksum FROM connector_document_checksum
@@ -1339,6 +1341,8 @@ async def lifespan(app: FastAPI):
     yield
     await _scheduler.shutdown()
 ```
+
+![Scheduler Job Lifecycle](scheduler-lifecycle.svg)
 
 ---
 
