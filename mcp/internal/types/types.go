@@ -6,12 +6,6 @@ import "github.com/google/jsonschema-go/jsonschema"
 // All MCP-related types should use the official SDK directly:
 // import "github.com/modelcontextprotocol/go-sdk/mcp"
 
-// RegionServer represents a server in a specific region
-type RegionServer struct {
-	Region string `json:"region"`
-	URL    string `json:"url"`
-}
-
 // HTTPMethod represents valid HTTP methods
 type HTTPMethod string
 

@@ -106,21 +106,6 @@ func TestHTTPMethodConstants(t *testing.T) {
 	}
 }
 
-func TestRegionServer(t *testing.T) {
-	rs := RegionServer{
-		Region: "us-south",
-		URL:    "https://api.us-south.example.com",
-	}
-
-	if rs.Region != "us-south" {
-		t.Errorf("RegionServer.Region = %q, want %q", rs.Region, "us-south")
-	}
-
-	if rs.URL != "https://api.us-south.example.com" {
-		t.Errorf("RegionServer.URL = %q, want %q", rs.URL, "https://api.us-south.example.com")
-	}
-}
-
 func TestConfigOutput(t *testing.T) {
 	config := ConfigOutput{
 		MCPServers: map[string]MCPClientServerConfig{
