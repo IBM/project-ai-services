@@ -5,3 +5,5 @@ version: "1.0.0"
 resources:
   cpu: 8
   memory: 4294967296 # 4Gi in bytes
+  accelerators:
+    ibm.com/spyre_pf: 1
