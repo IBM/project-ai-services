@@ -85,8 +85,8 @@ class TestCreateExtractJob:
     def _txt_file(self, content=b"Sample text for extraction.", name="doc.txt"):
         return (name, io.BytesIO(content), "text/plain")
 
-    def _pdf_file(self, name="doc.pdf"):
-        return (name, io.BytesIO(b"%PDF-1.4 fake content"), "application/pdf")
+    def _md_file(self, name="doc.md"):
+        return (name, io.BytesIO(b"# Invoice\n\n**Vendor:** Northwind Traders\n**Total:** USD 8,420.0"), "md")
 
     def test_success_txt_returns_202(self, extract_test_client):
         """Happy path: .txt file with a valid schema_id returns 202 with job_id."""
@@ -108,12 +108,12 @@ class TestCreateExtractJob:
         assert response.status_code == 202
         assert response.json()["job_id"] == test_uuid
 
-    def test_success_pdf_returns_202(self, extract_test_client):
+    def test_success_md_returns_202(self, extract_test_client):
         """A PDF file is also accepted and returns 202."""
         test_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
         with patch("extract.api.v1.jobs.job_limiter.locked", return_value=False), \
-             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".pdf")), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".md")), \
              patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=Mock()), \
              patch("extract.api.v1.jobs.stage_uploaded_file"), \
              patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job(job_id=test_uuid)), \
@@ -122,7 +122,7 @@ class TestCreateExtractJob:
             response = extract_test_client.post(
                 "/v1/extract/jobs",
                 data={"schema_id": "schema-001"},
-                files={"file": self._pdf_file()},
+                files={"file": self._md_file()},
             )
 
         assert response.status_code == 202
