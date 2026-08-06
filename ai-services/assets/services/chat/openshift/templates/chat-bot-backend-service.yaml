@@ -4,7 +4,7 @@ metadata:
   name: "chat-bot-backend"
   labels:
     ai-services.io/service: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   selector:

@@ -344,8 +344,11 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 }
 
 // ListRoutes lists all routes in the namespace.
-func (kc *OpenshiftClient) ListRoutes() ([]types.Route, error) {
-	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{})
+// ListRoutes lists routes in the namespace. Pass an empty string to list all routes.
+func (kc *OpenshiftClient) ListRoutes(labelSelector string) ([]types.Route, error) {
+	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routes: %w", err)
 	}

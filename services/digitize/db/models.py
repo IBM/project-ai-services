@@ -5,15 +5,18 @@ These models map to the PostgreSQL schema defined in init_schema.sql.
 """
 
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import (
+    Integer,
     String,
     Text,
     DateTime,
     ForeignKey,
     CheckConstraint,
     Index,
+    UniqueConstraint,
+    desc,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -152,20 +155,20 @@ class Document(Base):
         return f"<Document(doc_id='{self.doc_id}', name='{self.name}', status='{self.status}')>"
 
 
-class FileChecksumRegistry(Base):
+class DocumentChecksum(Base):
     """
-    Registry table that maps a SHA-256 digest to the authoritative completed
+    Registry table that maps a checksum to the authoritative completed
     Document row for that content.
 
-    Maps to the 'file_checksum_registry' table in PostgreSQL.
+    Maps to the 'document_checksum' table in PostgreSQL.
 
     The FK to documents(doc_id) ON DELETE CASCADE means registry entries are
     automatically removed when the referenced document is deleted, preventing
     orphaned hashes from blocking future re-ingestion of the same file.
     """
-    __tablename__ = "file_checksum_registry"
+    __tablename__ = "document_checksum"
 
-    sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    checksum: Mapped[str] = mapped_column(Text, primary_key=True)
     doc_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("documents.doc_id", ondelete="CASCADE"),
@@ -174,6 +177,109 @@ class FileChecksumRegistry(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<FileChecksumRegistry(sha256='{self.sha256[:20]}...', doc_id='{self.doc_id}')>"
+        return f"<DocumentChecksum(checksum='{self.checksum[:20]}...', doc_id='{self.doc_id}')>"
+
+
+class Connector(Base):
+    """
+    Stores connector config, encrypted credential blobs, and top-level sync state.
+
+    Maps to the 'connectors' table in PostgreSQL.
+    """
+    __tablename__ = "connectors"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    connection_details: Mapped[dict] = mapped_column(JSONB, nullable=False, default={})
+    allowed_extensions: Mapped[list] = mapped_column(JSONB, nullable=False, default=[])
+    sync_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    attached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default="up to date")
+    last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Relationships
+    sync_logs: Mapped[List["ConnectorSyncLog"]] = relationship(
+        "ConnectorSyncLog",
+        back_populates="connector",
+        lazy="select",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        CheckConstraint("type IN ('ssh', 's3')", name="chk_connector_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.sync_status}')>"
+
+
+class ConnectorDocumentChecksum(Base):
+    """
+    Connector-sourced document dedup and reference-counting table.
+
+    Maps to the 'connector_document_checksum' table in PostgreSQL.
+
+    One row per (checksum, connector_id) pair. A checksum may appear in multiple
+    rows (shared across connectors). doc_id is stored on every row so that
+    deletion can proceed without a join. No FK constraints and no ON DELETE CASCADE
+    — deletion is an intentional, reference-counted operation managed in application code.
+    """
+    __tablename__ = "connector_document_checksum"
+
+    checksum: Mapped[str] = mapped_column(Text, nullable=False, primary_key=True)
+    connector_id: Mapped[str] = mapped_column(Text, nullable=False, primary_key=True)
+    doc_id: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_cdc_connector_id", "connector_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConnectorDocumentChecksum(checksum='{self.checksum[:20]}...', connector_id='{self.connector_id}')>"
+
+
+class ConnectorSyncLog(Base):
+    """
+    Persistent per-tick history backing the sync-logs API.
+
+    Maps to the 'connector_sync_logs' table in PostgreSQL.
+    """
+    __tablename__ = "connector_sync_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connector_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    removed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="started")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # Relationships
+    connector: Mapped["Connector"] = relationship(
+        "Connector", back_populates="sync_logs"
+    )
+
+    __table_args__ = (
+        Index("idx_csl_connector_started", "connector_id", desc("started_at")),
+        UniqueConstraint("connector_id", "seq", name="uq_csh_connector_seq"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConnectorSyncLog(id={self.id}, connector_id='{self.connector_id}', seq={self.seq})>"
 
 # Made with Bob

@@ -1,0 +1,15 @@
+FROM icr.io/ai-services-cicd/service-base:v0.0.34
+
+WORKDIR /opt/services/translate
+
+ENV PYTHONPATH=/opt/services
+
+COPY common /opt/services/common
+COPY translate/ .
+
+# Uncomment when translate-specific requirements.txt is added:
+# RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+
+CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
+     "--host", "0.0.0.0", "--port", "9000", \
+     "--loop", "uvloop", "--http", "httptools"]

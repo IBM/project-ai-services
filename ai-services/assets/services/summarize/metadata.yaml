@@ -7,10 +7,6 @@ type: service
 # Certification and support
 certified_by: "IBM"
 
-# Service belongs to these architectures
-architectures:
-  - rag
-
 # Dependencies on other components
 dependencies:
   - id: llm
@@ -70,11 +66,7 @@ about:
 
   - title: "Assets"
     sections:
-      - title: "Architectures"
-        values:
-          - "Digital assistant"
       - title: "Source code"
         ctaLabel: "View source code"
         url: "https://github.com/IBM/project-ai-services"
-
 # Made with Bob

@@ -10,10 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -30,53 +28,6 @@ import (
 // deployment, pod-status, and resource-inspection logic.
 type PodmanApplicationService struct {
 	ApplicationServiceBase
-}
-
-// ListApplications retrieves a paginated list of applications with filters.
-func (s *PodmanApplicationService) ListApplications(ctx context.Context, req ListApplicationsRequest) (*types.ApplicationListResponse, error) {
-	filters := &dbrepo.ApplicationFilters{
-		DeploymentType: req.DeploymentType,
-		CatalogID:      req.CatalogID,
-		Limit:          req.PageSize,
-		Offset:         (req.Page - 1) * req.PageSize,
-	}
-
-	totalCount, err := s.AppRepo.GetCount(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application count: %w", err)
-	}
-
-	applications, err := s.AppRepo.GetAll(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve applications: %w", err)
-	}
-
-	apps := make([]types.Application, 0, len(applications))
-	for _, app := range applications {
-		appData, err := s.buildApplication(app)
-		if err != nil {
-			return nil, err
-		}
-
-		apps = append(apps, appData)
-	}
-
-	totalPages := (totalCount + req.PageSize - 1) / req.PageSize
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	return &types.ApplicationListResponse{
-		Data: apps,
-		Pagination: types.PaginationMetadata{
-			Page:       req.Page,
-			PageSize:   req.PageSize,
-			TotalItems: totalCount,
-			TotalPages: totalPages,
-			HasNext:    req.Page < totalPages,
-			HasPrev:    req.Page > 1,
-		},
-	}, nil
 }
 
 // DeleteApplication initiates async deletion of an application and returns immediately.
@@ -132,75 +83,7 @@ func (s *PodmanApplicationService) DeleteApplication(ctx context.Context, id uui
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // using the Podman runtime executor.
 func (s *PodmanApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
-	// Phase 1: check for duplicate name
-	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check for existing application: %w", err)
-	}
-	if existingApp != nil {
-		return nil, &ValidationError{
-			Code:    http.StatusConflict,
-			Message: fmt.Sprintf(ErrMsgApplicationNameExists, req.Name),
-		}
-	}
-
-	// Phase 2: validate payload
-	if err := s.Validator.ValidateDeploymentRequest(ctx, req); err != nil {
-		return nil, err
-	}
-
-	// Phase 3: create deployment plan
-	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
-	}
-
-	// Phase 4: persist DB records
-	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
-		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
-	}
-
-	// Phase 5: async deployment
-	go s.executeDeploymentAsync(ctx, plan, req)
-
-	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
-}
-
-// executeDeploymentAsync runs the Podman deployment in a background goroutine.
-func (s *PodmanApplicationService) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
-	var requestID string
-	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
-		requestID = id
-	}
-
-	ctx := context.Background()
-	if requestID != "" {
-		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			logger.ErrorfCtx(ctx, "Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
-
-			errMsg := fmt.Sprintf("Deployment panic: %v", r)
-			if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
-				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
-			}
-		}
-	}()
-
-	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeTypes.RuntimeTypePodman)
-	if err != nil {
-		logger.ErrorfCtx(ctx, "Deployment failed for application %s: %v", plan.ApplicationName, err)
-
-		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
-			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
-		}
-
-		return
-	}
-
-	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+	return s.ApplicationServiceBase.CreateApplication(ctx, req, runtimeTypes.RuntimeTypePodman)
 }
 
 // GetApplicationResources retrieves CPU, memory, and Spyre-card usage by querying Podman pods.
