@@ -17,7 +17,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	modelpkg "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -57,6 +56,19 @@ type SyncService struct {
 	resourceCache   map[string]*ResourceCounts // Tracks expected resource counts per catalogID
 	cacheMutex      sync.RWMutex               // Protects resourceCache
 	catalogProvider *catalogpkg.CatalogProvider
+	runtimeSync     RuntimeSync // Runtime-specific sync backend
+}
+
+// newRuntimeSync constructs the appropriate RuntimeSync for the configured runtime type.
+func newRuntimeSync(rt runtimeTypes.RuntimeType) (RuntimeSync, error) {
+	switch rt {
+	case runtimeTypes.RuntimeTypePodman:
+		return newPodmanSync(), nil
+	case runtimeTypes.RuntimeTypeOpenShift:
+		return newOpenShiftSync(), nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime type for sync: %s", rt)
+	}
 }
 
 // NewSyncService creates a new sync service instance.
@@ -76,6 +88,11 @@ func NewSyncService(
 		return nil, fmt.Errorf("failed to create catalog provider for sync service: %w", err)
 	}
 
+	runtimeSync, err := newRuntimeSync(vars.RuntimeFactory.GetRuntimeType())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runtime sync: %w", err)
+	}
+
 	return &SyncService{
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
@@ -85,6 +102,7 @@ func NewSyncService(
 		stopChan:        make(chan struct{}),
 		resourceCache:   make(map[string]*ResourceCounts),
 		catalogProvider: catalogProvider,
+		runtimeSync:     runtimeSync,
 	}, nil
 }
 
@@ -144,12 +162,6 @@ func (s *SyncService) performSync(ctx context.Context) {
 		s.isSyncing = false
 		s.syncMutex.Unlock()
 	}()
-
-	if vars.RuntimeFactory.GetRuntimeType() != runtimeTypes.RuntimeTypePodman {
-		logger.DebuglnCtx(ctx, "Skipping DB-Pod sync cycle: not running in Podman mode")
-
-		return
-	}
 
 	logger.DebuglnCtx(ctx, "Starting DB-Pod sync cycle")
 
@@ -223,8 +235,6 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	return nil
 }
 
-// syncAllComponents syncs all components for an application
-// Returns: error messages for application-level reporting.
 // syncAllComponents syncs all components for an application.
 // Returns error messages and a pending flag — pending is true if any component was
 // skipped because it has not yet reached a stable (Running/Error) state.
@@ -320,7 +330,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 // Returns: error message (if any) and error.
 func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, service models.Service) (string, error) {
 	// Fetch all pods using service ID as template label
-	pods, err := s.fetchPodsByTemplateID(rt, service.ID.String())
+	pods, err := s.runtimeSync.FetchPodStatuses(rt, service.ID.String())
 	if err != nil {
 		return s.handleServicePodFetchError(ctx, service, err)
 	}
@@ -358,9 +368,11 @@ func (s *SyncService) handleServicePodFetchError(ctx context.Context, service mo
 }
 
 // determineServiceStatusFromPods determines service status based on pods and resource validation.
-func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, catalogID, instanceID string, pods []*podStatus, rt runtime.Runtime) (models.ServiceStatus, string) {
-	// Validate resource counts against templates
-	resourceValidationMsg := s.validateResourceCounts(ctx, catalogID, instanceID, resourceItemTypeService, len(pods), rt)
+func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, catalogID, instanceID string, pods []*PodStatus, rt runtime.Runtime) (models.ServiceStatus, string) {
+	var resourceValidationMsg string
+	if s.runtimeSync.ShouldValidateResources() {
+		resourceValidationMsg = s.validateResourceCounts(ctx, catalogID, instanceID, resourceItemTypeService, len(pods), rt)
+	}
 
 	// Check all pods - if any pod is unhealthy, service is in error
 	newStatus := models.ServiceStatusRunning
@@ -402,7 +414,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	componentID := component.ID
 
 	// Fetch all pods using component ID as template label
-	pods, err := s.fetchPodsByTemplateID(rt, componentID.String())
+	pods, err := s.runtimeSync.FetchPodStatuses(rt, componentID.String())
 	if err != nil {
 		return s.handleComponentPodFetchError(ctx, component, componentID, err)
 	}
@@ -410,8 +422,10 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	// Build component catalogID in format "type/provider"
 	componentCatalogID := fmt.Sprintf("%s/%s", component.Type, component.Provider)
 
-	// Validate resource counts against templates
-	resourceValidationMsg := s.validateResourceCounts(ctx, componentCatalogID, componentID.String(), resourceItemTypeComponent, len(pods), rt)
+	var resourceValidationMsg string
+	if s.runtimeSync.ShouldValidateResources() {
+		resourceValidationMsg = s.validateResourceCounts(ctx, componentCatalogID, componentID.String(), resourceItemTypeComponent, len(pods), rt)
+	}
 
 	// Check all pods health
 	newStatus, message := s.checkPodsHealth(pods)
@@ -455,7 +469,7 @@ func (s *SyncService) handleComponentPodFetchError(ctx context.Context, componen
 }
 
 // checkPodsHealth checks the health of all pods and returns the overall status.
-func (s *SyncService) checkPodsHealth(pods []*podStatus) (models.ComponentStatus, string) {
+func (s *SyncService) checkPodsHealth(pods []*PodStatus) (models.ComponentStatus, string) {
 	newStatus := models.ComponentStatusRunning
 	var errorMessages []string
 
@@ -482,60 +496,18 @@ func (s *SyncService) updateComponentStatusIfChanged(ctx context.Context, compon
 	return nil
 }
 
-// fetchPodsByTemplateID fetches all pods using the template ID label.
-// Returns a slice of pod statuses.
-func (s *SyncService) fetchPodsByTemplateID(rt runtime.Runtime, templateID string) ([]*podStatus, error) {
-	// Use the same logic as in ApplicationsPs - fetch pods with template label
-	filteredPods, err := common.FetchFilteredPods(rt, templateID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pods: %w", err)
-	}
-
-	if len(filteredPods) == 0 {
-		return nil, fmt.Errorf("no pod found with template ID: %s", templateID)
-	}
-
-	// Process all pods
-	var podStatuses []*podStatus
-	for _, pod := range filteredPods {
-		processedPod, err := common.ProcessPod(rt, pod)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process pod: %w", err)
-		}
-
-		if processedPod == nil {
-			return nil, fmt.Errorf("pod processing returned nil")
-		}
-
-		podStatuses = append(podStatuses, &podStatus{
-			state:   processedPod.State,
-			health:  processedPod.Health,
-			podName: processedPod.Name,
-		})
-	}
-
-	return podStatuses, nil
-}
-
-// podStatus holds the relevant pod status information.
-type podStatus struct {
-	state   string
-	health  string
-	podName string
-}
-
 // determinePodStatus determines status based on pod state and health
 // Returns: isHealthy (bool), errorMessage (string).
-func (s *SyncService) determinePodStatus(pod *podStatus) (bool, string) {
-	if pod.state == "Running" && pod.health == string(constants.Ready) {
+func (s *SyncService) determinePodStatus(pod *PodStatus) (bool, string) {
+	if pod.State == "Running" && pod.Health == string(constants.Ready) {
 		return true, ""
 	}
 
-	if pod.state == "Running" && pod.health == string(constants.NotReady) {
-		return false, fmt.Sprintf("Pod %s is running but unhealthy", pod.podName)
+	if pod.State == "Running" && pod.Health == string(constants.NotReady) {
+		return false, fmt.Sprintf("Pod %s is running but unhealthy", pod.PodName)
 	}
 
-	return false, fmt.Sprintf("Pod %s is in state: %s", pod.podName, pod.state)
+	return false, fmt.Sprintf("Pod %s is in state: %s", pod.PodName, pod.State)
 }
 
 // updateApplicationStatus updates application status based on collected errors during sync
@@ -746,10 +718,9 @@ func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, ins
 			fmt.Sprintf("Pod count mismatch: expected %d, found %d", expectedCounts.Pods, actualPodCount))
 	}
 
-	// Validate secrets and volumes exist by checking pod labels
-	// If pods are running with these labels, the secrets/volumes must exist
+	// Validate secrets and volumes exist
 	if len(expectedCounts.SecretNames) > 0 || len(expectedCounts.VolumeNames) > 0 {
-		resourceValidationMsg := s.validateResourcesFromPodLabels(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, rt)
+		resourceValidationMsg := validateResources(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, rt)
 		if resourceValidationMsg != "" {
 			errorMessages = append(errorMessages, resourceValidationMsg)
 		}
@@ -757,63 +728,6 @@ func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, ins
 
 	if len(errorMessages) > 0 {
 		return strings.Join(errorMessages, "; ")
-	}
-
-	return ""
-}
-
-// validateResourcesFromPodLabels validates that secrets and volumes referenced in templates exist
-// by checking the runtime for their existence.
-func (s *SyncService) validateResourcesFromPodLabels(ctx context.Context, expectedSecretNames, expectedVolumeNames []string, rt runtime.Runtime) string {
-	if len(expectedSecretNames) == 0 && len(expectedVolumeNames) == 0 {
-		return ""
-	}
-
-	var errorMessages []string
-
-	// Validate secrets
-	if secretMsg := s.validateSecrets(ctx, expectedSecretNames, rt); secretMsg != "" {
-		errorMessages = append(errorMessages, secretMsg)
-	}
-
-	// Validate volumes
-	if volumeMsg := s.validateVolumes(ctx, expectedVolumeNames, rt); volumeMsg != "" {
-		errorMessages = append(errorMessages, volumeMsg)
-	}
-
-	if len(errorMessages) > 0 {
-		return strings.Join(errorMessages, "; ")
-	}
-
-	return ""
-}
-
-// validateSecrets validates that expected secrets exist in runtime.
-func (s *SyncService) validateSecrets(ctx context.Context, expectedSecretNames []string, rt runtime.Runtime) string {
-	return s.validateResourceExistence(ctx, expectedSecretNames, "secret", rt.SecretExists)
-}
-
-// validateVolumes validates that expected volumes exist in runtime.
-func (s *SyncService) validateVolumes(ctx context.Context, expectedVolumeNames []string, rt runtime.Runtime) string {
-	return s.validateResourceExistence(ctx, expectedVolumeNames, "volume", rt.VolumeExists)
-}
-
-// validateResourceExistence is a generic helper to validate resource existence.
-func (s *SyncService) validateResourceExistence(ctx context.Context, resourceNames []string, resourceType string, existsFunc func(string) (bool, error)) string {
-	var missingResources []string
-	for _, resourceName := range resourceNames {
-		exists, err := existsFunc(resourceName)
-		if err != nil {
-			logger.ErrorfCtx(ctx, "Failed to check %s existence for %s: %v", resourceType, resourceName, err)
-
-			continue
-		}
-		if !exists {
-			missingResources = append(missingResources, resourceName)
-		}
-	}
-	if len(missingResources) > 0 {
-		return fmt.Sprintf("Missing %ss: %s", resourceType, strings.Join(missingResources, ", "))
 	}
 
 	return ""
