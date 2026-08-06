@@ -20,7 +20,7 @@ def digitize(
     job_id: str,
     doc_id_dict: dict,
     output_format: OutputFormat,
-    file_checksum_dict: dict | None = None,  # filename -> "sha256:..." pre-computed at upload
+    file_checksum_dict: dict | None = None,  # filename -> md5 hex pre-computed at upload
 ):
     """
     Digitize a single document file (PDF or DOCX) in the staging directory.
@@ -31,7 +31,7 @@ def digitize(
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "txt"
-        file_checksum_dict: Pre-computed SHA-256 checksums keyed by filename.
+        file_checksum_dict: Pre-computed MD5 hex digests keyed by filename.
                             When provided the hash is reused rather than
                             re-reading the file from disk to recompute it.
 

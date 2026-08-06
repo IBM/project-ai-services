@@ -344,31 +344,31 @@ class DatabaseManager:
 
 
     @staticmethod
-    def upsert_file_checksum(sha256: str, doc_id: str) -> None:
+    def upsert_file_checksum(checksum: str, doc_id: str) -> None:
         """
-        Insert or ignore a (sha256, doc_id) pair into document_checksum.
+        Insert or ignore a (checksum, doc_id) pair into document_checksum.
 
         Called once a document reaches COMPLETED status so that subsequent
         uploads of the same content can be detected via find_completed_document_by_hash.
 
         Args:
-            sha256: Prefixed SHA-256 digest, e.g. 'sha256:e3b0c44...'
+            checksum: MD5 hex digest string.
             doc_id: The completed document's primary key.
         """
         try:
             with get_db_session() as session:
                 stmt = (
                     pg_insert(DocumentChecksum)
-                    .values(checksum=sha256, doc_id=doc_id)
+                    .values(checksum=checksum, doc_id=doc_id)
                     .on_conflict_do_update(
                         index_elements=["checksum"],
                         set_={"doc_id": doc_id},
                     )
                 )
                 session.execute(stmt)
-                logger.debug(f"Upserted checksum registry: sha256={sha256[:20]}... doc_id={doc_id}")
+                logger.debug(f"Upserted checksum registry: checksum={checksum[:20]}... doc_id={doc_id}")
         except SQLAlchemyError as e:
-            logger.error(f"DB error upserting checksum for {sha256[:20]}...: {e}", exc_info=True)
+            logger.error(f"DB error upserting checksum for {checksum[:20]}...: {e}", exc_info=True)
 
     @staticmethod
     def find_completed_document_by_hash(
@@ -384,7 +384,7 @@ class DatabaseManager:
         failed attempt does not prevent re-processing of the same file.
 
         Args:
-            file_hash: Prefixed SHA-256 digest, e.g. 'sha256:e3b0c44...'
+            file_hash: MD5 hex digest string.
             operation: Document type to match — 'ingestion' or 'digitization'.
 
         Returns:

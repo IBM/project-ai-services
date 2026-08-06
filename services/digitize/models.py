@@ -37,7 +37,7 @@ class AlreadyExistsFile(BaseModel):
     filename: str = Field(..., description="Original filename of the skipped file")
     existing_doc_id: str = Field(..., description="doc_id of the already-ingested document")
     existing_doc_name: str = Field(..., description="Name of the already-ingested document")
-    file_hash: str = Field(..., description="SHA-256 hash that matched, e.g. 'sha256:e3b0...'")
+    file_hash: str = Field(..., description="MD5 hash that matched.")
 
 
 class PaginationInfo(BaseModel):
