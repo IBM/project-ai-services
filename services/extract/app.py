@@ -11,11 +11,11 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from common.misc_utils import configure_uvicorn_logging, create_llm_session, get_llm_endpoint, get_logger, set_log_level, set_request_id
 from common.diagnostic_logger import setup_comprehensive_crash_handler
-from extract.db.connection import check_db_connection, close_db_connections
-
-
-from extract.utils.schema import SchemaValidationError
+from extract.db.connection import check_db_connection, close_db_connections, engine
+from extract.db.models import Base
+from extract.utils.schema import SchemaValidationError, calculate_prompt_overhead_tokens
 from extract.utils.exceptions import ExtractException
+from extract.utils.job import recover_zombie_jobs
 from extract.settings import settings
 
 set_log_level(settings.common.app.log_level)
@@ -45,42 +45,40 @@ def initialize_models() -> None:
     llm_model_dict = get_llm_endpoint()
 
 
+def _initialize_database() -> None:
+    """Connect to the database and create all schema tables.
+
+    Raises RuntimeError on any failure so the application refuses to start
+    with a clear message rather than failing later at request time.
+    """
+    try:
+        connected = check_db_connection()
+    except Exception as exc:
+        raise RuntimeError(f"Database connection check failed: {exc}") from exc
+
+    if not connected:
+        raise RuntimeError("Database connection required but not available.")
+
+    logger.info("✅ Database connection established")
+
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database schema initialized")
+    except Exception as exc:
+        logger.error(f"❌ Failed to initialize database schema: {exc}")
+        raise RuntimeError(f"Database schema initialization failed: {exc}") from exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    filtered_paths = ["/health"]
-    configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
+    configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     initialize_models()
-
-    # Compute prompt scaffold token overhead now that the LLM session is ready.
-    from extract.utils.schema import calculate_prompt_overhead_tokens
-    llm_endpoint = llm_model_dict.get("llm_endpoint", "")
-    calculate_prompt_overhead_tokens(llm_endpoint)
-
-    # Database check (required for operation — fail fast if DB is unavailable).
-    try:
-        if check_db_connection():
-            logger.info("✅ Database connection established")
-            try:
-                from extract.db.models import Base
-                from extract.db.connection import engine
-                Base.metadata.create_all(bind=engine)
-                logger.info("✅ Database schema initialized")
-            except Exception as schema_error:
-                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
-                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
-        else:
-            raise RuntimeError("Database connection required but not available.")
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(f"Database connection required but failed: {exc}")
-
+    calculate_prompt_overhead_tokens(llm_model_dict.get("llm_endpoint", ""))
+    _initialize_database()
     ensure_directories()
 
-    # Zombie-job recovery scan on startup.
     logger.info("Running zombie job recovery scan...")
-    from extract.utils.job import recover_zombie_jobs
     recovered = recover_zombie_jobs()
     if recovered > 0:
         logger.warning(f"Recovered {recovered} zombie job(s) from previous session")
