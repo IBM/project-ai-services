@@ -18,6 +18,7 @@ import (
 	modelpkg "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -143,6 +144,12 @@ func (s *SyncService) performSync(ctx context.Context) {
 		s.isSyncing = false
 		s.syncMutex.Unlock()
 	}()
+
+	if vars.RuntimeFactory.GetRuntimeType() != runtimeTypes.RuntimeTypePodman {
+		logger.DebuglnCtx(ctx, "Skipping DB-Pod sync cycle: not running in Podman mode")
+
+		return
+	}
 
 	logger.DebuglnCtx(ctx, "Starting DB-Pod sync cycle")
 

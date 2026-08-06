@@ -106,6 +106,7 @@ func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
 			Name:       route.Name,
 			HostPort:   route.Spec.Host,
 			TargetPort: route.Spec.Port.TargetPort.String(),
+			Labels:     route.Labels,
 		})
 	}
 

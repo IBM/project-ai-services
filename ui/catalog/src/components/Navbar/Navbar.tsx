@@ -5,7 +5,7 @@ import {
   SideNavMenuItem,
   SideNavDivider,
 } from "@carbon/react";
-import { NavLink } from "react-router-dom";
+import { NavLink } from "react-router";
 import { useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { ROUTES } from "@/constants";

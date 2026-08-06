@@ -3,21 +3,19 @@ package digitization
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
 // ErrJobNotFound is returned by GetJobStatus on HTTP 404; WaitForJobCompletion treats it as terminal to avoid infinite polling after cleanup.
@@ -32,98 +30,27 @@ var postCallTimeout = 60 * time.Second //nolint:mnd
 // docCallTimeout is 60 s to accommodate large JSON/markdown content responses over nip.io TLS.
 var docCallTimeout = 60 * time.Second //nolint:mnd
 
-// Transport tuning constants for sharedDigitizeTransport.
-const (
-	transportMaxIdleConnsPerHost   = 4                //nolint:mnd
-	transportIdleConnTimeout       = 90 * time.Second //nolint:mnd
-	transportResponseHeaderTimeout = 35 * time.Second //nolint:mnd
-	transportDialTimeout           = 15 * time.Second //nolint:mnd
-	transportDialKeepAlive         = 30 * time.Second //nolint:mnd
-)
-
-// sharedDigitizeTransport pools TLS connections; ResponseHeaderTimeout and DialContext deadlines prevent hangs on dead keep-alive sockets that http.Client.Timeout alone cannot catch.
-var sharedDigitizeTransport = &http.Transport{
-	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-	MaxIdleConnsPerHost: transportMaxIdleConnsPerHost,
-	IdleConnTimeout:     transportIdleConnTimeout,
-	// ResponseHeaderTimeout guards against dead keep-alive sockets that never send response headers.
-	ResponseHeaderTimeout: transportResponseHeaderTimeout,
-	DialContext: (&net.Dialer{
-		Timeout:   transportDialTimeout,
-		KeepAlive: transportDialKeepAlive,
-	}).DialContext,
-}
-
-// getHTTPClient returns an HTTP client with the given timeout using the shared pooled transport.
-func getHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: sharedDigitizeTransport,
+// httpCfg returns a common.HTTPClientConfig for the given timeout using a pooled, TLS-insecure client.
+// This mirrors the behaviour of the former sharedDigitizeTransport.
+func httpCfg(timeout time.Duration) common.HTTPClientConfig {
+	return common.HTTPClientConfig{
+		Timeout:            timeout,
+		InsecureSkipVerify: true,
+		PoolConnections:    true,
 	}
 }
 
-// drainAndClose drains and closes the body so the underlying TCP connection is returned to the pool.
-func drainAndClose(body io.ReadCloser) {
-	_, _ = io.Copy(io.Discard, body)
-	_ = body.Close()
-}
-
+// doGet sends a GET request and returns (body, statusCode, error).
 func doGet(ctx context.Context, url string, timeout time.Duration) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := getHTTPClient(timeout).Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer drainAndClose(resp.Body)
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	return body, resp.StatusCode, nil
+	return common.DoGET(ctx, url, httpCfg(timeout))
 }
 
-// doDelete sends a DELETE request to url, reads the body, and returns (body, statusCode, error).
+// doDelete sends a DELETE request and returns (body, statusCode, error).
 func doDelete(ctx context.Context, url string, timeout time.Duration) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := getHTTPClient(timeout).Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer drainAndClose(resp.Body)
-
-	body, _ := io.ReadAll(resp.Body)
-
-	return body, resp.StatusCode, nil
+	return common.DoDELETE(ctx, url, httpCfg(timeout))
 }
 
-// unmarshalOK asserts expectedStatus and unmarshals body into v; shared by all GET/DELETE success paths.
-func unmarshalOK(body []byte, statusCode, expectedStatus int, v any) error {
-	if statusCode != expectedStatus {
-		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
-	}
-
-	if v == nil {
-		return nil
-	}
-
-	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return nil
-}
-
-// expectError returns the parsed error body when status != successStatus, or an error if the call unexpectedly succeeded.
+// expectError returns the digitize-typed error body when status != successStatus.
 func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
 	if statusCode != successStatus {
 		return parseErrorResponse(body, statusCode)
@@ -132,17 +59,9 @@ func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, er
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
-// GetTestPDFPath returns the path to a test PDF file.
+// GetTestPDFPath returns the path to the shared test PDF fixture.
 func GetTestPDFPath() string {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
-
-	testDir := filepath.Dir(filename)
-	testPDFPath := filepath.Join(filepath.Dir(testDir), "ingestion", "docs", "test_doc.pdf")
-
-	return testPDFPath
+	return common.GetTestPDFPath()
 }
 
 // JobCreatedResponse represents the response when a job is created.
@@ -235,39 +154,14 @@ type ErrorResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// IsResourceLockedError reports whether err is an HTTP 409 resource-lock error; bare 409s are also treated as locked since the digitize API only returns 409 for that reason.
+// IsResourceLockedError reports whether err is an HTTP 409 resource-lock error.
 func IsResourceLockedError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	msg := err.Error()
-	if !strings.Contains(msg, "409") {
-		return false
-	}
-
-	lockSignals := []string{
-		"RESOURCE_LOCKED", "locked", "active", "in use", "in_progress",
-	}
-	for _, s := range lockSignals {
-		if strings.Contains(msg, s) {
-			return true
-		}
-	}
-
-	// Plain 409 with no other context is still a resource-locked response.
-	return true
+	return common.IsResourceLockedError(err)
 }
 
-// IsRateLimitError checks if an error is a rate limit error (429).
+// IsRateLimitError reports whether err is an HTTP 429 rate-limit error.
 func IsRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	return strings.Contains(err.Error(), "429") &&
-		(strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") ||
-			strings.Contains(err.Error(), "Too many"))
+	return common.IsRateLimitError(err)
 }
 
 // GetDigitizeBaseURL returns the base URL for the digitize service.
@@ -281,7 +175,7 @@ const healthCheckRetryInterval = 10 * time.Second //nolint:mnd
 // HealthCheck polls baseURL/health until HTTP 200 is returned or ctx is cancelled.
 func HealthCheck(ctx context.Context, baseURL string) error {
 	healthURL := fmt.Sprintf("%s/health", baseURL)
-	client := getHTTPClient(getCallTimeout)
+	client := common.GetHTTPClient(httpCfg(getCallTimeout))
 	attempt := 0
 
 	for {
@@ -306,7 +200,7 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			drainAndClose(resp.Body)
+			common.DrainAndClose(resp.Body)
 			logger.Warningf("[DIGITIZE] Health check attempt %d: status %d — retrying in %s",
 				attempt, resp.StatusCode, healthCheckRetryInterval)
 			select {
@@ -317,7 +211,7 @@ func HealthCheck(ctx context.Context, baseURL string) error {
 			}
 		}
 
-		drainAndClose(resp.Body)
+		common.DrainAndClose(resp.Body)
 		logger.Infof("[DIGITIZE] Health check passed (attempt %d)", attempt)
 
 		return nil
@@ -368,27 +262,9 @@ func createMultipartBody(filePaths ...string) (*bytes.Buffer, *multipart.Writer,
 	return body, writer, nil
 }
 
-// sendJobRequest sends the HTTP request and returns the response body.
+// sendJobRequest sends the HTTP POST request and returns the response body.
 func sendJobRequest(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", contentType)
-
-	client := getHTTPClient(postCallTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer drainAndClose(resp.Body)
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	return respBody, resp.StatusCode, nil
+	return common.DoPOST(ctx, url, body, contentType, httpCfg(postCallTimeout))
 }
 
 // CreateJob creates a new digitization or ingestion job.
@@ -432,7 +308,7 @@ func GetJobStatus(ctx context.Context, baseURL, jobID string) (*JobStatusRespons
 	}
 
 	var jobStatus JobStatusResponse
-	if err := unmarshalOK(body, statusCode, http.StatusOK, &jobStatus); err != nil {
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &jobStatus); err != nil {
 		return nil, err
 	}
 
@@ -516,7 +392,7 @@ func ListJobs(ctx context.Context, baseURL string, latest bool, limit, offset in
 	}
 
 	var jobsList JobsListResponse
-	if err := unmarshalOK(body, statusCode, http.StatusOK, &jobsList); err != nil {
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &jobsList); err != nil {
 		return nil, err
 	}
 
@@ -555,7 +431,7 @@ func ListDocuments(ctx context.Context, baseURL string, limit, offset int, statu
 	}
 
 	var docsList DocumentsListResponse
-	if err := unmarshalOK(body, statusCode, http.StatusOK, &docsList); err != nil {
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &docsList); err != nil {
 		return nil, err
 	}
 
@@ -570,7 +446,7 @@ func GetDocument(ctx context.Context, baseURL, docID string) (*DocumentDetailRes
 	}
 
 	var doc DocumentDetailResponse
-	if err := unmarshalOK(body, statusCode, http.StatusOK, &doc); err != nil {
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &doc); err != nil {
 		return nil, err
 	}
 
@@ -585,7 +461,7 @@ func GetDocumentContent(ctx context.Context, baseURL, docID string) (*DocumentCo
 	}
 
 	var content DocumentContentResponse
-	if err := unmarshalOK(body, statusCode, http.StatusOK, &content); err != nil {
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &content); err != nil {
 		return nil, err
 	}
 

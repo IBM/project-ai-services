@@ -941,9 +941,9 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
 
 @pytest.mark.unit
 class TestDatabaseManagerDeleteDocumentClearsChecksum:
-    """delete_document must remove the checksum registry entry before deleting the doc."""
+    """delete_document must remove the checksum registry entry and shadow docs before deleting the doc."""
 
-    def test_execute_called_twice(self):
+    def test_execute_called_three_times(self):
         session = MagicMock()
         session.execute.return_value = Mock(rowcount=1)
 
@@ -951,13 +951,15 @@ class TestDatabaseManagerDeleteDocumentClearsChecksum:
             from digitize.db.manager import DatabaseManager
             DatabaseManager.delete_document("doc-1")
 
-        # First execute: registry delete. Second execute: document delete.
-        assert session.execute.call_count == 2
+        # 1st execute: registry delete.
+        # 2nd execute: shadow already_exists docs delete.
+        # 3rd execute: document delete.
+        assert session.execute.call_count == 3
 
     def test_returns_true_when_deleted(self):
         session = MagicMock()
-        # registry delete (rowcount irrelevant), doc delete rowcount=1
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=1)]
+        # registry delete, shadow docs delete (rowcount irrelevant), doc delete rowcount=1
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=1)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
@@ -967,13 +969,34 @@ class TestDatabaseManagerDeleteDocumentClearsChecksum:
 
     def test_returns_false_when_not_found(self):
         session = MagicMock()
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0)]
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
             result = DatabaseManager.delete_document("doc-missing")
 
         assert result is False
+
+    def test_shadow_docs_deleted_before_original(self):
+        """already_exists placeholder rows referencing this doc_id are removed."""
+        session = MagicMock()
+        session.execute.return_value = Mock(rowcount=1)
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            import sqlalchemy
+            DatabaseManager.delete_document("doc-orig")
+
+        # Verify the second call (index 1) targets Documents via a metadata JSONB lookup.
+        # The key 'existing_doc_id' is passed as a bind parameter, so check the params dict.
+        second_call_stmt = session.execute.call_args_list[1][0][0]
+        dialect = sqlalchemy.dialects.postgresql.dialect()
+        compiled = second_call_stmt.compile(dialect=dialect)
+        sql = str(compiled).lower()
+        assert "delete" in sql
+        assert "documents" in sql
+        # The JSONB key is passed as a bind param — confirm it appears in the compiled params.
+        assert "existing_doc_id" in compiled.params.values()
 
 
 @pytest.mark.unit

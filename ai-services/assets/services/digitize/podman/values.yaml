@@ -1,10 +1,10 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.35
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.39
   log_level: "INFO"
   database: "digitize_metadata"
 
 digitizeUi:
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.29
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.30
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-4
