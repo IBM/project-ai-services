@@ -65,3 +65,13 @@ Day N:
 
 - Extract API is unavailable to use. Please make sure '{{ .AppName }}--extract-api' pod is running.
 {{- end }}
+
+{{- if ne .TRANSLATE_API_PORT "" }}
+{{- if eq .TRANSLATE_API_STATUS "running" }}
+
+- Translate API is available to use at http://{{ .HOST_IP }}:{{ .TRANSLATE_API_PORT }}. Use this endpoint for document translation via programmatic access.
+{{- else }}
+
+- Translate API is unavailable to use. Please make sure '{{ .AppName }}--translate-api' pod is running.
+{{- end }}
+{{- end }}
