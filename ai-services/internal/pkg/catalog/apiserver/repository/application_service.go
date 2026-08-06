@@ -34,7 +34,6 @@ func NewApplicationService(
 	serviceRepo dbrepo.ServiceRepository,
 	componentRepo dbrepo.ComponentRepository,
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
-	workerRepo dbrepo.WorkerRepository,
 	provider *catalog.CatalogProvider,
 	runtimeType runtimeTypes.RuntimeType,
 ) ApplicationServiceInterface {
@@ -43,7 +42,6 @@ func NewApplicationService(
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
-		WorkerRepo:            workerRepo,
 		Provider:              provider,
 		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
