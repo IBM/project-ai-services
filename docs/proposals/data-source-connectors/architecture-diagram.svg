@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 520" width="620" height="520" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="a-arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
+  </defs>
+
+  <!-- Catalog box -->
+  <rect x="240" y="10" width="140" height="36" rx="4" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="310" y="33" text-anchor="middle" font-weight="600" fill="#1f2328">Catalog</text>
+
+  <!-- Arrow down from Catalog to digitize box -->
+  <line x1="310" y1="46" x2="310" y2="80" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+  <text x="316" y="67" font-size="11" fill="#57606a">POST / PUT / DELETE / GET</text>
+
+  <!-- digitize outer box -->
+  <rect x="20" y="80" width="580" height="420" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="40" y="100" font-weight="700" font-size="13" fill="#1f2328">digitize</text>
+
+  <!-- Connector API sub-box -->
+  <rect x="40" y="112" width="540" height="96" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="56" y="130" font-weight="600" fill="#1e40af">Connector API</text>
+  <text x="72" y="152" fill="#1f2328">▸  validates payload shape</text>
+  <text x="72" y="170" fill="#1f2328">▸  encrypts secret fields before DB write</text>
+  <text x="72" y="188" fill="#1f2328">▸  delegates worker lifecycle to ConnectorWorkerManager</text>
+
+  <!-- Arrow from Connector API down to ConnectorWorkerManager -->
+  <line x1="310" y1="208" x2="310" y2="228" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+
+  <!-- ConnectorWorkerManager sub-box -->
+  <rect x="40" y="228" width="540" height="130" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="56" y="246" font-weight="600" fill="#166534">ConnectorWorkerManager</text>
+  <text x="72" y="266" fill="#1f2328">▸  one background thread per active connector</text>
+
+  <!-- ConnectorSyncWorker inner box -->
+  <rect x="88" y="278" width="476" height="72" rx="4" fill="#bbf7d0" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="104" y="295" font-weight="600" fill="#166534">ConnectorSyncWorker</text>
+  <text x="118" y="313" fill="#1f2328">▸  builds scanner by type  ·  scans remote source  ·  computes checksum per file</text>
+  <text x="118" y="329" fill="#1f2328">▸  deduplicates against connector_document_checksum  ·  stages + ingests new files</text>
+  <text x="118" y="345" fill="#1f2328">▸  deletes orphaned documents when last ref is gone</text>
+
+  <!-- Arrow from ConnectorWorkerManager down to Persistence -->
+  <line x1="310" y1="358" x2="310" y2="382" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+
+  <!-- Persistence sub-box -->
+  <rect x="40" y="382" width="540" height="100" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
+  <text x="56" y="400" font-weight="600" fill="#854d0e">Persistence</text>
+  <rect x="72" y="412" width="226" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="185" y="430" text-anchor="middle" fill="#854d0e">connectors</text>
+  <rect x="312" y="412" width="240" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="432" y="430" text-anchor="middle" fill="#854d0e">document_checksum</text>
+  <rect x="72" y="446" width="226" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="185" y="464" text-anchor="middle" fill="#854d0e">connector_document_checksum</text>
+  <rect x="312" y="446" width="240" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="432" y="464" text-anchor="middle" fill="#854d0e">connector_sync_history</text>
+</svg>

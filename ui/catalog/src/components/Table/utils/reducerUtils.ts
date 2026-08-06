@@ -1,0 +1,306 @@
+import type {
+  BaseTableRow,
+  BaseTableState,
+  SharedTableAction,
+} from "@/components/Table/types";
+
+const SHARED_ACTION_TYPES = new Set<SharedTableAction["type"]>([
+  "SHARED_SET_SEARCH",
+  "SHARED_SET_PAGE",
+  "SHARED_SET_PAGE_SIZE",
+  "SHARED_OPEN_DELETE_DIALOG",
+  "SHARED_CLOSE_DELETE_DIALOG",
+  "SHARED_SET_CONFIRMED",
+  "SHARED_SET_SELECTED_ROW_ID",
+  "SHARED_SET_LOADING",
+  "SHARED_SHOW_ERROR",
+  "SHARED_HIDE_ERROR",
+  "SHARED_OPEN_EXPORT_DIALOG",
+  "SHARED_CLOSE_EXPORT_DIALOG",
+  "SHARED_SET_CSV_FILENAME",
+  "SHARED_SET_EXPORT_ERROR",
+  "SHARED_CLEAR_EXPORT_ERROR",
+  "SHARED_SET_EXPORTING",
+  "SHARED_SHOW_EXPORT_TOAST",
+  "SHARED_HIDE_EXPORT_TOAST",
+  "SHARED_TOGGLE_COLUMN_VISIBILITY",
+  "SHARED_RESET_COLUMN_VISIBILITY",
+  "SHARED_SET_FETCH_ERROR",
+  "SHARED_SET_DELETING",
+  "SHARED_UPDATE_ROW_STATUS",
+]);
+
+export function isSharedTableAction(a: {
+  type: string;
+}): a is SharedTableAction {
+  return SHARED_ACTION_TYPES.has(a.type as SharedTableAction["type"]);
+}
+
+export function handleSharedTableAction<
+  TRow extends BaseTableRow,
+  S extends BaseTableState<TRow>,
+>(state: S, action: SharedTableAction): S | undefined {
+  switch (action.type) {
+    case "SHARED_SET_SEARCH":
+      return { ...state, ...setSearch(action.payload) };
+    case "SHARED_SET_PAGE":
+      return { ...state, ...setPage(action.payload) };
+    case "SHARED_SET_PAGE_SIZE":
+      return { ...state, ...setPageSize(action.payload) };
+    case "SHARED_OPEN_DELETE_DIALOG":
+      return { ...state, ...openDeleteDialog(action.payload) };
+    case "SHARED_CLOSE_DELETE_DIALOG":
+      return {
+        ...state,
+        ...closeDeleteDialog(state.hasError, state.selectedRowId),
+      };
+    case "SHARED_SET_CONFIRMED":
+      return { ...state, ...setConfirmed(action.payload) };
+    case "SHARED_SET_SELECTED_ROW_ID":
+      return { ...state, ...setSelectedRowId(action.payload) };
+    case "SHARED_SET_LOADING":
+      return { ...state, ...setLoading(action.payload) };
+    case "SHARED_SHOW_ERROR":
+      return { ...state, ...showError(action.payload) };
+    case "SHARED_HIDE_ERROR":
+      return { ...state, ...hideError() };
+    case "SHARED_OPEN_EXPORT_DIALOG":
+      return { ...state, ...openExportDialog() };
+    case "SHARED_CLOSE_EXPORT_DIALOG":
+      return { ...state, ...closeExportDialog() };
+    case "SHARED_SET_CSV_FILENAME":
+      return { ...state, ...setCsvFilename(action.payload) };
+    case "SHARED_SET_EXPORT_ERROR":
+      return { ...state, ...setExportError(action.payload) };
+    case "SHARED_CLEAR_EXPORT_ERROR":
+      return { ...state, ...clearExportError() };
+    case "SHARED_SET_EXPORTING":
+      return { ...state, ...setExporting(action.payload) };
+    case "SHARED_SHOW_EXPORT_TOAST":
+      return { ...state, ...showExportToast(action.payload) };
+    case "SHARED_HIDE_EXPORT_TOAST":
+      return { ...state, ...hideExportToast() };
+    case "SHARED_TOGGLE_COLUMN_VISIBILITY":
+      return {
+        ...state,
+        ...toggleColumnVisibility(state.visibleColumns, action.payload),
+      };
+    case "SHARED_RESET_COLUMN_VISIBILITY":
+      return { ...state, ...resetColumnVisibility(action.payload) };
+    case "SHARED_SET_FETCH_ERROR":
+      return { ...state, fetchError: action.payload };
+    case "SHARED_SET_DELETING":
+      return { ...state, isDeleting: action.payload };
+    case "SHARED_UPDATE_ROW_STATUS":
+      return {
+        ...state,
+        ...updateRowStatus(state.rowsData, action.payload, action.sortFn),
+      };
+    default:
+      return undefined;
+  }
+}
+
+// Search
+
+export function setSearch(value: string): Pick<BaseTableState, "search"> {
+  return { search: value };
+}
+
+// Pagination
+
+export function setPage(page: number): Pick<BaseTableState, "page"> {
+  return { page };
+}
+
+export function setPageSize(
+  pageSize: number,
+): Pick<BaseTableState, "pageSize"> {
+  return { pageSize };
+}
+
+// Delete dialog
+
+export function openDeleteDialog(
+  rowId: string,
+): Pick<BaseTableState, "selectedRowId" | "isDeleteDialogOpen" | "toastOpen"> {
+  return {
+    selectedRowId: rowId,
+    isDeleteDialogOpen: true,
+    toastOpen: false,
+  };
+}
+
+export function closeDeleteDialog(
+  hasError: boolean,
+  selectedRowId: string | null,
+): Pick<
+  BaseTableState,
+  "isDeleteDialogOpen" | "isConfirmed" | "selectedRowId"
+> {
+  return {
+    isDeleteDialogOpen: false,
+    isConfirmed: false,
+    selectedRowId: hasError ? selectedRowId : null,
+  };
+}
+
+export function setConfirmed(
+  checked: boolean,
+): Pick<BaseTableState, "isConfirmed"> {
+  return { isConfirmed: checked };
+}
+
+export function setSelectedRowId(
+  id: string | null,
+): Pick<BaseTableState, "selectedRowId"> {
+  return { selectedRowId: id };
+}
+
+// Loading
+
+export function setLoading(value: boolean): Pick<BaseTableState, "isLoading"> {
+  return { isLoading: value };
+}
+
+export function setDeleting(
+  value: boolean,
+): Pick<BaseTableState, "isDeleting"> {
+  return { isDeleting: value };
+}
+
+// Delete error
+
+export function showError(payload: {
+  message: string;
+  rowName?: string;
+}): Pick<
+  BaseTableState,
+  | "deleteErrorMessage"
+  | "deleteErrorRowName"
+  | "toastOpen"
+  | "isDeleting"
+  | "hasError"
+> {
+  return {
+    deleteErrorMessage: payload.message,
+    deleteErrorRowName: payload.rowName ?? "",
+    toastOpen: true,
+    isDeleting: false,
+    hasError: true,
+  };
+}
+
+export function hideError(): Pick<
+  BaseTableState,
+  "toastOpen" | "selectedRowId" | "hasError" | "deleteErrorRowName"
+> {
+  return {
+    toastOpen: false,
+    selectedRowId: null,
+    hasError: false,
+    deleteErrorRowName: "",
+  };
+}
+
+// Export dialog
+
+export function openExportDialog(): Pick<
+  BaseTableState,
+  "isExportDialogOpen" | "csvFileName" | "exportErrorMessage"
+> {
+  return {
+    isExportDialogOpen: true,
+    csvFileName: "",
+    exportErrorMessage: "",
+  };
+}
+
+export function closeExportDialog(): Pick<
+  BaseTableState,
+  "isExportDialogOpen"
+> {
+  return { isExportDialogOpen: false };
+}
+
+export function setCsvFilename(
+  name: string,
+): Pick<BaseTableState, "csvFileName"> {
+  return { csvFileName: name };
+}
+
+export function setExportError(
+  message: string,
+): Pick<BaseTableState, "exportErrorMessage"> {
+  return { exportErrorMessage: message };
+}
+
+export function clearExportError(): Pick<BaseTableState, "exportErrorMessage"> {
+  return { exportErrorMessage: "" };
+}
+
+export function setExporting(
+  value: boolean,
+): Pick<BaseTableState, "isExporting"> {
+  return { isExporting: value };
+}
+
+// Export result toast
+
+export function showExportToast(payload: {
+  message: string;
+  kind: "success" | "error";
+}): Pick<
+  BaseTableState,
+  "exportToastOpen" | "exportToastMessage" | "exportToastKind"
+> {
+  return {
+    exportToastOpen: true,
+    exportToastMessage: payload.message,
+    exportToastKind: payload.kind,
+  };
+}
+
+export function hideExportToast(): Pick<BaseTableState, "exportToastOpen"> {
+  return { exportToastOpen: false };
+}
+
+// Column visibility
+
+export function toggleColumnVisibility(
+  visibleColumns: Record<string, boolean>,
+  columnKey: string,
+): Pick<BaseTableState, "visibleColumns"> {
+  return {
+    visibleColumns: {
+      ...visibleColumns,
+      [columnKey]: !visibleColumns[columnKey],
+    },
+  };
+}
+
+export function resetColumnVisibility(
+  defaultColumns: Record<string, boolean>,
+): Pick<BaseTableState, "visibleColumns"> {
+  return { visibleColumns: { ...defaultColumns } };
+}
+
+// Row status update (used by SHARED_UPDATE_ROW_STATUS)
+
+export function updateRowStatus<TRow extends BaseTableRow>(
+  rows: TRow[],
+  payload: { id: string; status: string; message?: string },
+  sortFn?: (a: BaseTableRow, b: BaseTableRow) => number,
+): Pick<BaseTableState<TRow>, "rowsData"> {
+  const patched = rows.map((r) =>
+    r.id === payload.id
+      ? {
+          ...r,
+          status: payload.status,
+          messages:
+            payload.message !== undefined ? payload.message : r.messages,
+        }
+      : r,
+  );
+  return { rowsData: sortFn ? patched.sort(sortFn) : patched };
+}

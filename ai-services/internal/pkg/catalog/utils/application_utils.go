@@ -12,7 +12,37 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
+
+// HandleDeploymentStepError updates the application status to Error and logs the failure.
+func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, stepContext string, err error) {
+	errMsg := fmt.Sprintf("%s: %v", stepContext, err)
+	if updateErr := UpdateApplicationStatus(ctx, appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
+		logger.ErrorfCtx(ctx, "Failed to update application status: %v\n", updateErr)
+	}
+}
+
+// AppNamespace derives the Kubernetes namespace from an application UUID.
+// Format: "ai-services-<first 8 chars of UUID>".
+func AppNamespace(appID uuid.UUID) string {
+	return "ai-services-" + appID.String()[:8]
+}
+
+// HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
+// e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
+func HelmReleaseName(appID uuid.UUID, id string) string {
+	return id + "-" + appID.String()[:8]
+}
+
+// DeployingStatusMessage returns the human-readable deploying status message.
+func DeployingStatusMessage(isArchitecture bool) string {
+	if isArchitecture {
+		return "Deploying digital assistant"
+	}
+
+	return "Deploying service"
+}
 
 // GetDeploymentType determines the deployment type based on whether it's an architecture.
 func GetDeploymentType(isArchitecture bool) models.DeploymentType {

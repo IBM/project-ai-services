@@ -43,6 +43,7 @@ const (
 	svcChatBotUI       = "chat-bot-ui"
 	svcDigitizeBackend = "digitize-backend"
 	svcSimilarityAPI   = "similarity-api"
+	svcSummarizeAPI    = "summarize-api"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -464,6 +465,19 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 	}
 
 	return ""
+}
+
+// ExtractCatalogSummarizeURL parses the 'application info' output for the
+// summarize service URL.
+//
+// Actual output line:
+//
+//	"- Summarize API is available to use at https://summarize-api-<slug>.<domain>."
+//
+// We match on URL-host substring "summarize-api" which is stable regardless
+// of human-readable title changes in info.md.
+func ExtractCatalogSummarizeURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSummarizeAPI)
 }
 
 // WaitForApplicationInfoURLs polls 'application info' until service URLs are present.

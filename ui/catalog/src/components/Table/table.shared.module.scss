@@ -1,0 +1,119 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+
+// Fixed-position toast notification
+.customToast {
+  position: fixed;
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-07;
+  z-index: 9000;
+}
+
+// Delete confirmation checkbox block
+
+.deleteConfirmation {
+  margin-top: spacing.$spacing-07;
+  @include type.type-style("heading-compact-01");
+}
+
+// Overflow menu panel (Edit columns, Filter)
+
+:global(.cds--overflow-menu-options) {
+  &:has(.overflowMenuContent) {
+    min-width: 234px;
+    width: 234px;
+  }
+}
+
+.overflowMenuContent {
+  padding: spacing.$spacing-05;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.overflowMenuHeading {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("heading-compact-01");
+}
+
+.overflowMenuActions {
+  margin-top: spacing.$spacing-03;
+  margin-left: calc(-1 * spacing.$spacing-05);
+  margin-right: calc(-1 * spacing.$spacing-05);
+  display: flex;
+  gap: 0;
+
+  :global(.cds--btn) {
+    flex: 1;
+    border-radius: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// Delete overflow menu item
+
+.deleteMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+// Message cell with icon
+
+.messageWithIcon {
+  display: flex;
+  align-items: flex-start;
+  gap: spacing.$spacing-03;
+}
+
+.messageText {
+  flex: 1;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.messageIconError {
+  flex-shrink: 0;
+  color: theme.$support-error;
+}
+
+.messageIconSuccess {
+  flex-shrink: 0;
+  color: theme.$support-success;
+}
+
+.messageIconInfo {
+  flex-shrink: 0;
+  color: theme.$support-info;
+}
+
+// Status tag icon colours
+
+.statusTagError {
+  :global(svg) {
+    fill: theme.$support-error;
+  }
+}
+
+.statusTagSuccess {
+  :global(svg) {
+    fill: theme.$support-success;
+  }
+}
+
+.statusTagInfo {
+  :global(svg) {
+    fill: theme.$support-info;
+  }
+}
+
+.statusTagSecondary {
+  :global(svg) {
+    fill: theme.$text-secondary;
+  }
+}
