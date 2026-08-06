@@ -80,6 +80,13 @@ class DocumentDetailResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    duplicate_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of shadow 'already_exists' document entries that point to this "
+            "document as their original. These duplicates will also be removed on delete."
+        ),
+    )
 
 
 class DocumentContentResponse(BaseModel):
