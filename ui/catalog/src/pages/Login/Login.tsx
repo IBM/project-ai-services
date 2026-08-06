@@ -9,7 +9,7 @@ import {
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
 import { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
 import { ROUTES } from "@/constants/endpoints.constants";
@@ -30,30 +30,25 @@ const LoginPage = () => {
   const [credentialError, setCredentialError] = useState<boolean>(false);
   const [networkError, setNetworkError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  // Mount-only by design: /login is always entered fresh (redirect or direct navigation), so we only need to read inactivity state once at mount.
   const [showInactivityNotification, setShowInactivityNotification] =
-    useState<boolean>(false);
+    useState<boolean>(() => {
+      const locationState = location.state as LoginLocationState | null;
+      return (
+        locationState?.logoutReason === LogoutReason.INACTIVITY ||
+        sessionStorage.getItem(SESSION_STORAGE_KEYS.LOGOUT_REASON) ===
+          LogoutReason.INACTIVITY
+      );
+    });
 
+  // navigate() is ignored during render in react-router 8.x, so clear sessionStorage and reset history state after mount.
   useEffect(() => {
-    const locationState = location.state as LoginLocationState | null;
-    const logoutReason = locationState?.logoutReason;
-    const storedReason = sessionStorage.getItem(
-      SESSION_STORAGE_KEYS.LOGOUT_REASON,
-    );
-
-    if (
-      logoutReason === LogoutReason.INACTIVITY ||
-      storedReason === LogoutReason.INACTIVITY
-    ) {
-      setShowInactivityNotification(true);
-
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
-      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
-
-      if (locationState) {
-        navigate(location.pathname, { replace: true, state: null });
-      }
-    }
-  }, [location, navigate]);
+    if (!showInactivityNotification) return;
+    sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
+    sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
+    if (location.state)
+      navigate(location.pathname, { replace: true, state: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogin = async (): Promise<void> => {
     setCredentialError(false);
@@ -69,15 +64,12 @@ const LoginPage = () => {
       navigate(ROUTES.DIGITAL_ASSISTANTS);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
-        // Treat 400 and 401 as credential/validation errors
         if (error.response.status === 400 || error.response.status === 401) {
           setCredentialError(true);
         } else {
-          // 5xx server errors or other unexpected errors
           setNetworkError(true);
         }
       } else {
-        // Network error (no response from server)
         setNetworkError(true);
       }
     } finally {

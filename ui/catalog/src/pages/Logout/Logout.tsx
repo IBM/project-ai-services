@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import styles from "./Logout.module.scss";
 import { Theme, ToastNotification } from "@carbon/react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router";
 import { logout } from "@/services/auth";
 
 const Logout = () => {

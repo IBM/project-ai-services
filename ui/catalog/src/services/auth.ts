@@ -5,6 +5,7 @@ import { useDeployStore } from "@/store/deploy.store";
 import { fetchArchitectures } from "@/api/applications.api";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
+import { dedupe } from "@/utils/requestManager";
 
 export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const response = await api.post(AUTH_ENDPOINTS.LOGIN, payload);
@@ -32,38 +33,34 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   return response.data;
 };
 
-export const logout = async () => {
-  const refreshToken = useAuthStore.getState().refreshToken;
+export const logout = (): Promise<void> =>
+  dedupe("logout", async () => {
+    const refreshToken = useAuthStore.getState().refreshToken;
+    try {
+      await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
+        headers: {
+          "X-Refresh-Token": refreshToken,
+        },
+      });
+    } finally {
+      useAuthStore.getState().clearTokens();
+      useAuthStore.getState().clearUserInfo();
+      useDeployStore.getState().clearAll();
+      useServiceDeployStore.getState().clearAllCache();
+    }
+  });
 
-  try {
-    await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
-      headers: {
-        "X-Refresh-Token": refreshToken,
-      },
-    });
-  } finally {
-    // Clear auth store state
-    useAuthStore.getState().clearTokens();
-    useAuthStore.getState().clearUserInfo();
-
-    // Clear all deploy store data
-    useDeployStore.getState().clearAll();
-
-    // Clear all service deploy store data
-    useServiceDeployStore.getState().clearAllCache();
-  }
-};
-
-export const getUserInfo = async (): Promise<UserInfo> => {
-  const response = await api.get(AUTH_ENDPOINTS.ME);
-  const userInfo: UserInfo = {
-    id: response.data.id,
-    username: response.data.username,
-    name: response.data.name,
-  };
-  useAuthStore.getState().setUserInfo(userInfo);
-  return userInfo;
-};
+export const getUserInfo = (): Promise<UserInfo> =>
+  dedupe("getUserInfo", async () => {
+    const response = await api.get(AUTH_ENDPOINTS.ME);
+    const userInfo: UserInfo = {
+      id: response.data.id,
+      username: response.data.username,
+      name: response.data.name,
+    };
+    useAuthStore.getState().setUserInfo(userInfo);
+    return userInfo;
+  });
 
 export const refreshAccessToken = async () => {
   const refreshToken = useAuthStore.getState().refreshToken;

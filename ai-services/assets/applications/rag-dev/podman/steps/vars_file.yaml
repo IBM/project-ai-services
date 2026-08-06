@@ -33,6 +33,11 @@ pods:
     format: "index .Ports \"9500/tcp\" 0"
     default: ""
     alias: EXTRACT_API_PORT
+    
+  - name: "{{ .AppName }}--translate-api"
+    format: "index .Ports \"9000/tcp\" 0"
+    default: ""
+    alias: TRANSLATE_API_PORT
 
 containers:
   - name: "{{ .AppName }}--chat-bot-ui"
@@ -62,6 +67,10 @@ containers:
   - name: "{{ .AppName }}--extract-api-extract-api"
     format: ".Status"
     alias: EXTRACT_API_STATUS
+    
+  - name: "{{ .AppName }}--translate-api-translate-api"
+    format: ".Status"
+    alias: TRANSLATE_API_STATUS
 
 hosts:
   - fetch: HOST_IP
