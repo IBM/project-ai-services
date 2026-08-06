@@ -8,7 +8,7 @@ metadata:
   labels:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/component: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
@@ -29,15 +29,15 @@ spec:
           value: "0"
       resources:
         requests:
-          cpu: {{ .Values.reranker.resources.requests.cpu | quote }}
-          memory: {{ .Values.reranker.resources.requests.memory | quote }}
-          ibm.com/spyre_pf: {{ index .Values.reranker.resources.requests "ibm.com/spyre_pf" | quote }}
+          cpu: {{ .Values.resources.requests.cpu | quote }}
+          memory: {{ .Values.resources.requests.memory | quote }}
+          ibm.com/spyre_pf: {{ index .Values.resources.requests "ibm.com/spyre_pf" | quote }}
         limits:
-          cpu: {{ .Values.reranker.resources.limits.cpu | quote }}
-          memory: {{ .Values.reranker.resources.limits.memory | quote }}
-          ibm.com/spyre_pf: {{ index .Values.reranker.resources.limits "ibm.com/spyre_pf" | quote }}
+          cpu: {{ .Values.resources.limits.cpu | quote }}
+          memory: {{ .Values.resources.limits.memory | quote }}
+          ibm.com/spyre_pf: {{ index .Values.resources.limits "ibm.com/spyre_pf" | quote }}
       runtime: spyre-temp
-      storageUri: {{ .Values.reranker.storageUri }}
+      storageUri: {{ .Values.storageUri }}
       args:
-        - --served-model-name={{ .Values.reranker.model.name }}
+        - --served-model-name={{ .Values.model }}
         - -tp 1
