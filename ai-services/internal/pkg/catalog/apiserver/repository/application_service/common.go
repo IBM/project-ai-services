@@ -74,6 +74,10 @@ type ApplicationServiceBase struct {
 	DeploymentExecutor    *deployment.DeploymentExecutor
 	DeletionService       *deletion.DeletionService
 	Validator             *validators.ApplicationValidator
+
+	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
+	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
+	DeploymentRegistry *DeploymentRegistry
 }
 
 // ListApplications retrieves a paginated list of applications with filters.
@@ -598,10 +602,66 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	}, nil
 }
 
-// prepareCreateApplication runs phases 1–4 of application creation (duplicate check,
-// validation, deployment planning, and DB persistence) and returns the resulting plan.
-// It is shared by both the base CreateApplication and PodmanApplicationService.CreateApplication.
-func (s *ApplicationServiceBase) prepareCreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*deployment.DeploymentPlan, error) {
+// DeleteApplication cancels any in-flight deployment, marks the application as deleting,
+// and kicks off async deletion. It is the shared implementation for all runtimes.
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	if app.CreatedBy != user {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
+	}
+
+	// Cancel any in-flight deployment before transitioning to Deleting.
+	// No-op when DeploymentRegistry is nil (e.g. OpenShift stub).
+	if s.DeploymentRegistry != nil {
+		s.DeploymentRegistry.Cancel(id)
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
+		return nil, err
+	}
+
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.DeletionService.PerformDeletion(deletionCtx, id, app.Services, keepData)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+// CreateApplication validates, plans, persists, and asynchronously deploys a new application
+// for the given runtime type.
+func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
 	// Phase 1: check for duplicate name
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {
@@ -630,17 +690,7 @@ func (s *ApplicationServiceBase) prepareCreateApplication(ctx context.Context, r
 		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
 	}
 
-	return plan, nil
-}
-
-// CreateApplication validates, plans, persists, and asynchronously deploys a new application
-// for the given runtime type.
-func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
-	plan, err := s.prepareCreateApplication(ctx, req, runtimeType)
-	if err != nil {
-		return nil, err
-	}
-
+	// Phase 5: async deployment
 	go s.executeDeploymentAsync(ctx, plan, req, runtimeType)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
@@ -648,14 +698,16 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 
 // executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
 func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
-	var requestID string
-	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
-		requestID = id
+	ctx := context.Background()
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok && id != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, id)
 	}
 
-	ctx := context.Background()
-	if requestID != "" {
-		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	// Register with the DeploymentRegistry so a concurrent delete can cancel this
+	// goroutine. Deregister on any exit path — success, error, or panic.
+	if s.DeploymentRegistry != nil {
+		ctx = s.DeploymentRegistry.Register(ctx, plan.ApplicationID)
+		defer s.DeploymentRegistry.Deregister(plan.ApplicationID)
 	}
 
 	defer func() {
@@ -671,6 +723,13 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 
 	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
 	if err != nil {
+		// Context cancelled — deletion is in charge of status, exit silently.
+		if ctx.Err() != nil {
+			logger.InfofCtx(ctx, "Deployment cancelled for application %s (deletion in progress)", plan.ApplicationName)
+
+			return
+		}
+
 		logger.ErrorfCtx(ctx, "Deployment failed for application %s: %v", plan.ApplicationName, err)
 
 		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
