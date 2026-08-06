@@ -146,7 +146,11 @@ async def get_document_metadata(
     details: bool = Query(False, description="Include detailed metadata (pages, tables, timing)"),
 ):
     try:
-        from digitize.utils.db import get_document, is_connector_sourced_document
+        from digitize.utils.db import (
+            get_document,
+            get_shadow_documents_for,
+            is_connector_sourced_document,
+        )
 
         if is_connector_sourced_document(doc_id):
             APIError.raise_error(
@@ -154,7 +158,9 @@ async def get_document_metadata(
                 f"Document with ID '{doc_id}' not found",
             )
 
-        return get_document(doc_id, include_details=details)
+        doc = get_document(doc_id, include_details=details)
+        doc.duplicate_names = get_shadow_documents_for(doc_id)
+        return doc
     except FileNotFoundError as exc:
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
     except HTTPException as exc:
