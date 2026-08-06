@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/project-ai-services/mcp/internal/authenticator"
 	"github.com/project-ai-services/mcp/internal/openapi"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Aggregator aggregates tools from OpenAPI operations
@@ -36,7 +36,7 @@ func NewAggregator(intf *openapi.Interface, endpoint string, auth authenticator.
 	// Create providers for each operation
 	for _, operation := range intf.Operations {
 		provider, err := NewProvider(operation, endpoint,
-			intf.RegionServers, auth, globalQuery, aggregator.globalHeaders)
+			auth, globalQuery, aggregator.globalHeaders)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider for operation %s: %w", operation.OperationID, err)
 		}

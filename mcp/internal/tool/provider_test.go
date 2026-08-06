@@ -41,7 +41,6 @@ func TestNewProvider(t *testing.T) {
 		name          string
 		operation     types.OperationInfo
 		endpoint      string
-		regions       []types.RegionServer
 		globalQuery   map[string]string
 		globalHeaders map[string]string
 		wantErr       bool
@@ -81,26 +80,11 @@ func TestNewProvider(t *testing.T) {
 			endpoint: "https://api.example.com",
 			wantErr:  false,
 		},
-		{
-			name: "operation with regions",
-			operation: types.OperationInfo{
-				OperationID: "listItems",
-				Method:      types.GET,
-				Path:        "/items",
-				Description: "List items",
-			},
-			endpoint: "",
-			regions: []types.RegionServer{
-				{Region: "us-south", URL: "https://us-south.api.example.com"},
-				{Region: "eu-gb", URL: "https://eu-gb.api.example.com"},
-			},
-			wantErr: false,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, tt.endpoint, tt.regions, auth, tt.globalQuery, tt.globalHeaders)
+			provider, err := NewProvider(tt.operation, tt.endpoint, auth, tt.globalQuery, tt.globalHeaders)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewProvider() error = %v, wantErr %v", err, tt.wantErr)
@@ -138,7 +122,7 @@ func TestProvider_GetTool(t *testing.T) {
 		Description: "Test operation",
 	}
 
-	provider, err := NewProvider(operation, "https://api.example.com", nil, auth, nil, nil)
+	provider, err := NewProvider(operation, "https://api.example.com", auth, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v", err)
 	}
@@ -219,7 +203,6 @@ func TestProvider_buildInputSchema(t *testing.T) {
 		name         string
 		operation    types.OperationInfo
 		endpoint     string
-		regions      []types.RegionServer
 		expectFields []string
 	}{
 		{
@@ -303,25 +286,11 @@ func TestProvider_buildInputSchema(t *testing.T) {
 			endpoint:     "https://api.example.com",
 			expectFields: []string{"data"},
 		},
-		{
-			name: "region selection",
-			operation: types.OperationInfo{
-				OperationID: "listItems",
-				Method:      types.GET,
-				Path:        "/items",
-			},
-			endpoint: "",
-			regions: []types.RegionServer{
-				{Region: "us-south", URL: "https://us-south.api.example.com"},
-				{Region: "eu-gb", URL: "https://eu-gb.api.example.com"},
-			},
-			expectFields: []string{"serverRegion"},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, tt.endpoint, tt.regions, auth, nil, nil)
+			provider, err := NewProvider(tt.operation, tt.endpoint, auth, nil, nil)
 			if err != nil {
 				t.Fatalf("NewProvider() error = %v", err)
 			}
@@ -387,50 +356,6 @@ func TestProvider_buildRequestURL(t *testing.T) {
 			params:   json.RawMessage(`{"query":{"limit":"10","offset":"0"}}`),
 			expected: "https://api.example.com/users?limit=10&offset=0",
 			wantErr:  false,
-		},
-		{
-			name: "region-based URL",
-			provider: &Provider{
-				operation: types.OperationInfo{
-					Path: "/items",
-				},
-				endpoint: "",
-				regionServers: []types.RegionServer{
-					{Region: "us-south", URL: "https://us-south.api.example.com"},
-					{Region: "eu-gb", URL: "https://eu-gb.api.example.com"},
-				},
-			},
-			params:   json.RawMessage(`{"serverRegion": "us-south"}`),
-			expected: "https://us-south.api.example.com/items",
-			wantErr:  false,
-		},
-		{
-			name: "missing region",
-			provider: &Provider{
-				operation: types.OperationInfo{
-					Path: "/items",
-				},
-				endpoint: "",
-				regionServers: []types.RegionServer{
-					{Region: "us-south", URL: "https://us-south.api.example.com"},
-				},
-			},
-			params:  json.RawMessage(`{}`),
-			wantErr: true,
-		},
-		{
-			name: "invalid region",
-			provider: &Provider{
-				operation: types.OperationInfo{
-					Path: "/items",
-				},
-				endpoint: "",
-				regionServers: []types.RegionServer{
-					{Region: "us-south", URL: "https://us-south.api.example.com"},
-				},
-			},
-			params:  json.RawMessage(`{"serverRegion":"invalid-region"}`),
-			wantErr: true,
 		},
 	}
 
@@ -690,7 +615,7 @@ func TestProvider_Execute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, server.URL, nil, auth, nil, nil)
+			provider, err := NewProvider(tt.operation, server.URL, auth, nil, nil)
 			if err != nil {
 				t.Fatalf("NewProvider() error = %v", err)
 			}

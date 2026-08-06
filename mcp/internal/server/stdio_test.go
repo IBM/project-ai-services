@@ -34,9 +34,6 @@ func createTestAggregatorStdio() *tool.Aggregator {
 		},
 	}
 
-	regionServers := []types.RegionServer{
-		{Region: "us-south", URL: "https://us-south.api.example.com"},
-	}
 
 	// Create proper mock document
 	info := &base.Info{
@@ -50,11 +47,10 @@ func createTestAggregatorStdio() *tool.Aggregator {
 	}
 
 	intf := &openapi.Interface{
-		Doc:           doc,
-		Name:          "test-api",
-		Operations:    operations,
-		Tags:          []string{"items"},
-		RegionServers: regionServers,
+		Doc:        doc,
+		Name:       "test-api",
+		Operations: operations,
+		Tags:       []string{"items"},
 	}
 
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}

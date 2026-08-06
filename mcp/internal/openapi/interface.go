@@ -5,40 +5,28 @@ import (
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/project-ai-services/mcp/internal/types"
 	base "github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/project-ai-services/mcp/internal/types"
 )
 
 // Interface represents a processed OpenAPI specification
 type Interface struct {
-	Doc           *v3.Document
-	Name          string
-	Operations    []types.OperationInfo
-	Tags          []string
-	RegionServers []types.RegionServer
+	Doc        *v3.Document
+	Name       string
+	Operations []types.OperationInfo
+	Tags       []string
 }
 
 // NewInterface creates a new Interface from an OpenAPI document
 func NewInterface(doc *v3.Document) *Interface {
 	intf := &Interface{
-		Doc:           doc,
-		Name:          canonicalizeName(doc.Info.Title),
-		Operations:    []types.OperationInfo{},
-		Tags:          []string{},
-		RegionServers: []types.RegionServer{},
+		Doc:        doc,
+		Name:       canonicalizeName(doc.Info.Title),
+		Operations: []types.OperationInfo{},
+		Tags:       []string{},
 	}
 
-	// Ensure the name includes "ibm" prefix
-	if !strings.Contains(intf.Name, "ibm") {
-		prefix := "ibm-"
-		if !strings.Contains(intf.Name, "cloud") {
-			prefix += "cloud-"
-		}
-		intf.Name = prefix + intf.Name
-	}
-
-	intf.extractRegionServers()
 	intf.collectOperations()
 	intf.collectTags()
 
@@ -54,24 +42,6 @@ func canonicalizeName(name string) string {
 	name = strings.TrimSpace(name)
 	name = regexp.MustCompile(`\s+`).ReplaceAllString(name, "-")
 	return name
-}
-
-// extractRegionServers extracts region information from servers
-func (intf *Interface) extractRegionServers() {
-	if len(intf.Doc.Servers) > 0 {
-		for _, server := range intf.Doc.Servers {
-			// Extract region from URL pattern like api.{region}.cloud.ibm.com
-			region := "default"
-			if match := regexp.MustCompile(`api\.([^.]+)\.`).FindStringSubmatch(server.URL); len(match) > 1 {
-				region = match[1]
-			}
-
-			intf.RegionServers = append(intf.RegionServers, types.RegionServer{
-				Region: region,
-				URL:    server.URL,
-			})
-		}
-	}
 }
 
 // collectOperations extracts all operations from the OpenAPI spec

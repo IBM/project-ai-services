@@ -12,16 +12,15 @@ import (
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/project-ai-services/mcp/internal/authenticator"
 	"github.com/project-ai-services/mcp/internal/types"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Provider provides a single tool based on an OpenAPI operation
 type Provider struct {
 	operation     types.OperationInfo
 	endpoint      string
-	regionServers []types.RegionServer
 	authenticator authenticator.Authenticator
 	globalQuery   map[string]string
 	globalHeaders map[string]string
@@ -31,13 +30,12 @@ type Provider struct {
 
 // NewProvider creates a new tool provider
 func NewProvider(operation types.OperationInfo, endpoint string,
-	regionServers []types.RegionServer, auth authenticator.Authenticator,
+	auth authenticator.Authenticator,
 	globalQuery, globalHeaders map[string]string) (*Provider, error) {
 
 	provider := &Provider{
 		operation:     operation,
 		endpoint:      endpoint,
-		regionServers: regionServers,
 		authenticator: auth,
 		globalQuery:   globalQuery,
 		globalHeaders: globalHeaders,
@@ -103,22 +101,12 @@ func (p *Provider) buildInputSchema() *jsonschema.Schema {
 		required:   []string{},
 	}
 
-	p.addServerRegionToSchema(sb)
 	p.addPathParametersToSchema(sb)
 	p.addQueryParametersToSchema(sb)
 	p.addHeaderParametersToSchema(sb)
 	p.addRequestBodyToSchema(sb)
 
 	return sb.toSchema()
-}
-
-// addServerRegionToSchema adds server region parameter if needed
-func (p *Provider) addServerRegionToSchema(sb *schemaBuilder) {
-	if p.endpoint == "" && len(p.regionServers) > 0 {
-		regions := extractRegions(p.regionServers)
-		regionSchema := buildServerRegionSchema(regions)
-		sb.addProperty("serverRegion", regionSchema, true)
-	}
 }
 
 // addPathParametersToSchema adds path parameters to the schema
@@ -160,30 +148,6 @@ func (p *Provider) addRequestBodyToSchema(sb *schemaBuilder) {
 	if p.operation.RequestBody != nil {
 		bodySchema := p.buildRequestBodySchema()
 		sb.addProperty(p.bodyName, bodySchema, p.operation.RequestBody.Required)
-	}
-}
-
-// extractRegions extracts region names from region servers
-func extractRegions(regionServers []types.RegionServer) []string {
-	regions := make([]string, len(regionServers))
-	for i, rs := range regionServers {
-		regions[i] = rs.Region
-	}
-	return regions
-}
-
-// buildServerRegionSchema creates a schema for server region selection
-func buildServerRegionSchema(regions []string) *jsonschema.Schema {
-	// jsonschema requires the Enum property to be of type []any
-	enumVals := make([]any, len(regions))
-	for i, r := range regions {
-		enumVals[i] = r
-	}
-
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: fmt.Sprintf("The region for the API endpoint. Available regions: %s", strings.Join(regions, ", ")),
-		Enum:        enumVals,
 	}
 }
 
@@ -384,33 +348,6 @@ func (p *Provider) buildRequestURL(params *mcp.CallToolParamsRaw) (string, error
 
 	// Determine base URL
 	baseURL := p.endpoint
-	if baseURL == "" {
-		region, exists := args["serverRegion"]
-		if !exists {
-			return "", fmt.Errorf("no region specified and no endpoint configured")
-		}
-
-		regionStr, ok := region.(string)
-		if !ok {
-			return "", fmt.Errorf("region must be a string")
-		}
-
-		// Find the region server
-		for _, rs := range p.regionServers {
-			if rs.Region == regionStr {
-				baseURL = rs.URL
-				break
-			}
-		}
-
-		if baseURL == "" {
-			regions := make([]string, len(p.regionServers))
-			for i, rs := range p.regionServers {
-				regions[i] = rs.Region
-			}
-			return "", fmt.Errorf("invalid region %s. Available regions: %s", regionStr, strings.Join(regions, ", "))
-		}
-	}
 
 	// Replace path parameters
 	path := p.operation.Path

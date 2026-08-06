@@ -62,11 +62,6 @@ func createMockInterface() *openapi.Interface {
 		},
 	}
 
-	regionServers := []types.RegionServer{
-		{Region: "us-south", URL: "https://us-south.api.example.com"},
-		{Region: "eu-gb", URL: "https://eu-gb.api.example.com"},
-	}
-
 	// Create a proper mock document using libopenapi structures
 	info := &base.Info{
 		Title:   "Test API",
@@ -80,11 +75,10 @@ func createMockInterface() *openapi.Interface {
 	}
 
 	return &openapi.Interface{
-		Doc:           doc,
-		Name:          "test-api",
-		Operations:    operations,
-		Tags:          []string{"users", "resources"},
-		RegionServers: regionServers,
+		Doc:        doc,
+		Name:       "test-api",
+		Operations: operations,
+		Tags:       []string{"users", "resources"},
 	}
 }
 

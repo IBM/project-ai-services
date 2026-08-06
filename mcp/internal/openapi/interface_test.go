@@ -74,11 +74,6 @@ func TestNewInterface(t *testing.T) {
 			t.Error("Interface.Doc is nil")
 		}
 
-		// Check name includes ibm prefix
-		if !strings.Contains(intf.Name, "ibm") {
-			t.Errorf("Interface name %q should contain 'ibm'", intf.Name)
-		}
-
 		// Should have at least one operation
 		if len(intf.Operations) == 0 {
 			t.Error("Interface should have at least one operation")
@@ -101,29 +96,6 @@ func TestNewInterface(t *testing.T) {
 
 	t.Run("complex spec", func(t *testing.T) {
 		intf := NewInterface(complexDoc)
-
-		// Check region servers were extracted
-		if len(intf.RegionServers) < 2 {
-			t.Errorf("Expected at least 2 region servers, got %d", len(intf.RegionServers))
-		}
-
-		// Check regions were extracted correctly
-		hasUSSouth := false
-		hasEUGB := false
-		for _, rs := range intf.RegionServers {
-			if rs.Region == "us-south" {
-				hasUSSouth = true
-			}
-			if rs.Region == "eu-gb" {
-				hasEUGB = true
-			}
-		}
-		if !hasUSSouth {
-			t.Error("Missing us-south region")
-		}
-		if !hasEUGB {
-			t.Error("Missing eu-gb region")
-		}
 
 		// Check tags were collected
 		if len(intf.Tags) == 0 {
@@ -187,33 +159,6 @@ func TestNewInterface(t *testing.T) {
 	})
 }
 
-func TestExtractRegionServers(t *testing.T) {
-	doc, err := LoadDescription("testdata/complex.yaml")
-	if err != nil {
-		t.Fatalf("Failed to load spec: %v", err)
-	}
-
-	intf := &Interface{
-		Doc:           doc,
-		RegionServers: []types.RegionServer{},
-	}
-
-	intf.extractRegionServers()
-
-	if len(intf.RegionServers) != 2 {
-		t.Errorf("Expected 2 region servers, got %d", len(intf.RegionServers))
-	}
-
-	// Check specific regions
-	for _, rs := range intf.RegionServers {
-		if rs.Region != "us-south" && rs.Region != "eu-gb" {
-			t.Errorf("Unexpected region: %q", rs.Region)
-		}
-		if !strings.Contains(rs.URL, "cloud.ibm.com") {
-			t.Errorf("URL should contain cloud.ibm.com: %q", rs.URL)
-		}
-	}
-}
 
 func TestCollectTags(t *testing.T) {
 	doc, err := LoadDescription("testdata/complex.yaml")
@@ -302,7 +247,7 @@ func TestInterfaceNameGeneration(t *testing.T) {
 	}{
 		{
 			title:    "Cloud Service API",
-			expected: "ibm-cloud-service-api",
+			expected: "cloud-service-api",
 		},
 		{
 			title:    "IBM Watson API",
@@ -310,7 +255,7 @@ func TestInterfaceNameGeneration(t *testing.T) {
 		},
 		{
 			title:    "Simple API",
-			expected: "ibm-cloud-simple-api",
+			expected: "simple-api",
 		},
 	}
 
