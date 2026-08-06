@@ -1,0 +1,59 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test files and coverage
+*_test.go
+coverage.out
+coverage.html
+testdata/
+
+# Build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go specific
+vendor/
+*.test
+*.prof
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Pre-commit and linting
+.pre-commit-config.yaml
+.secrets.baseline
+.whitesource
+sonar-project.properties
+whitesource.config
+
+# Makefile (not needed in container)
+Makefile
+
+# License files (already in source)
+LICENSE
+CODEOWNERS
+
+# Docker files (avoid recursion)
+Dockerfile
+.dockerignore
+docker-compose.yml

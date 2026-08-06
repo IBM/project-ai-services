@@ -1,0 +1,50 @@
+openapi: 3.0.0
+info:
+  title: API with References
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      summary: Get items
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Item'
+    post:
+      operationId: createItem
+      summary: Create item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+      responses:
+        '201':
+          description: Created
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+      required:
+        - name
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
