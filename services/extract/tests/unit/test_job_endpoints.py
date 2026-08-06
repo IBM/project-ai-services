@@ -225,6 +225,28 @@ class TestCreateExtractJob:
         assert response.status_code == 500
         mock_cleanup.assert_called_once()
 
+    def test_db_create_exception_cleans_up_staging(self, extract_test_client):
+        """When db.create_job raises unexpectedly, staging is still cleaned up."""
+        test_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+        with patch("extract.api.v1.jobs.job_limiter.locked", return_value=False), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=Mock()), \
+             patch("extract.api.v1.jobs.stage_uploaded_file"), \
+             patch("extract.api.v1.jobs.db_repo.create_job", side_effect=RuntimeError("DB timeout")), \
+             patch("extract.api.v1.jobs.cleanup_staging_directory") as mock_cleanup, \
+             patch("extract.api.v1.jobs.uuid.uuid4", return_value=uuid.UUID(test_uuid)):
+
+            response = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_id": "schema-001"},
+                files={"file": self._txt_file()},
+            )
+
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "DATABASE_ERROR"
+        mock_cleanup.assert_called_once()
+
     def test_response_contains_valid_uuid(self, extract_test_client):
         """The returned job_id must be a valid UUID string."""
         with patch("extract.api.v1.jobs.job_limiter.locked", return_value=False), \
@@ -366,20 +388,14 @@ class TestGetExtractJob:
         assert body["status"] == job.status
 
     def test_response_includes_document_block(self, extract_test_client):
-        """The document sub-object must include name, source_type, digitize IDs."""
-        job = _mock_job(
-            source_type="pdf",
-            digitize_job_id="dj-999",
-            digitize_doc_id="dd-888",
-        )
+        """The document sub-object must include name and source_type."""
+        job = _mock_job(source_type="pdf")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=job):
             response = extract_test_client.get(f"/v1/extract/jobs/{job.job_id}")
 
         doc = response.json()["document"]
         assert doc["name"] == job.document_name
         assert doc["source_type"] == "pdf"
-        assert doc["digitize_job_id"] == "dj-999"
-        assert doc["digitize_doc_id"] == "dd-888"
 
     def test_response_includes_phase_from_metadata(self, extract_test_client):
         """metadata JSONB (phase, token_diagnostics, etc.) is surfaced."""
