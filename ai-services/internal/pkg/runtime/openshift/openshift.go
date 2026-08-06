@@ -59,9 +59,6 @@ const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
 )
 
-// spyreResourceName is the Kubernetes extended resource name advertised by the Spyre operator.
-const spyreResourceName = "ibm.com/spyre_pf"
-
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
 	Client      client.Client
@@ -570,7 +567,7 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 		return nil, fmt.Errorf("failed to retrieve Spyre card info: %w", err)
 	}
 	if spyreInfo != nil {
-		sysInfo.Accelerators[spyreResourceName] = spyreInfo
+		sysInfo.Accelerators[constants.SpyreResourceName] = spyreInfo
 	}
 
 	return sysInfo, nil
@@ -625,7 +622,7 @@ func (kc *OpenshiftClient) sumSpyreCapacity() (int64, error) {
 	var total int64
 
 	for i := range nodeList.Items {
-		if qty, ok := nodeList.Items[i].Status.Capacity[corev1.ResourceName(spyreResourceName)]; ok {
+		if qty, ok := nodeList.Items[i].Status.Capacity[corev1.ResourceName(constants.SpyreResourceName)]; ok {
 			total += qty.Value()
 		}
 	}

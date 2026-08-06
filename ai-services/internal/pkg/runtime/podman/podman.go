@@ -501,7 +501,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 	availableCards, err := spyre.FindFreeCards(ctx)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Could not find available Spyre cards: %v", err)
-		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+		accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 			Total:     totalCount,
 			Available: 0,
 		}
@@ -511,7 +511,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 
 	availableCount := len(availableCards)
 
-	accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+	accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 		Total:     totalCount,
 		Available: availableCount,
 	}

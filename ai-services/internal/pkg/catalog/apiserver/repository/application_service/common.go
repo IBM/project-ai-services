@@ -838,7 +838,7 @@ func (s *ApplicationServiceBase) processComponentResources(
 
 func addUsedResourcesByTemplateID(templateID string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
 	filters := map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
+		"label": {fmt.Sprintf("%s=%s", consts.ApplicationTemplateKey, templateID)},
 	}
 
 	pods, err := runtimeClient.ListPods(filters)
@@ -879,7 +879,7 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 
 	accelerators := make(map[string][]string)
 	if len(totalSpyreCards) > 0 {
-		accelerators["ibm.com/spyre_pf"] = totalSpyreCards
+		accelerators[consts.SpyreResourceName] = totalSpyreCards
 	}
 
 	return &types.ApplicationResourcesResponse{

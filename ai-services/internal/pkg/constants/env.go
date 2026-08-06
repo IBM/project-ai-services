@@ -12,3 +12,8 @@ const (
 	//   PCIDEVICE_IBM_COM_AIU_PF=0182:60:00.0,0183:70:00.0
 	PCIDeviceEnvKey Env = "PCIDEVICE_IBM_COM_AIU_PF"
 )
+
+const (
+	// SpyreResourceName is the Kubernetes extended resource name advertised by the Spyre device plugin.
+	SpyreResourceName = "ibm.com/spyre_pf"
+)
