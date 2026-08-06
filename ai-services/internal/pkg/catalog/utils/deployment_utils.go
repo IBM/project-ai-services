@@ -44,7 +44,6 @@ func RunConcurrently(
 				// Context cancelled — deletion is in charge of status, exit silently.
 				if ctx.Err() != nil {
 					logger.InfofCtx(ctx, "Deployment of %s cancelled (deletion in progress)\n", itemID)
-					errCh <- fmt.Errorf("failed to deploy %s: %w", itemID, err)
 
 					return
 				}

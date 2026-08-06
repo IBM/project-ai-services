@@ -15,11 +15,7 @@ var errOpenShiftNotSupported = errors.New("OpenShift runtime is not yet supporte
 // OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
 // It embeds ApplicationServiceBase for all shared DB operations.
 //
-// NOTE: When CreateApplication is implemented here, wire in a DeploymentRegistry (same pattern
-// as PodmanApplicationService) so that mid-deployment deletion works on OCP too:
-//  1. Add deploymentRegistry *DeploymentRegistry field
-//  2. Call registry.Register in executeDeploymentAsync
-//  3. Call registry.Cancel in DeleteApplication before firing PerformDeletion
+// TODO(OCP): wire in a DeploymentRegistry (same pattern as PodmanApplicationService) when CreateApplication is implemented.
 type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
@@ -42,4 +38,3 @@ func (s *OpenShiftApplicationService) ApplicationsPs(_ context.Context, _ uuid.U
 	return nil, errOpenShiftNotSupported
 }
 
-// Made with Bob
