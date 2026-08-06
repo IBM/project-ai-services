@@ -8,8 +8,9 @@ import (
 type DependencyType string
 
 const (
-	DependencyTypeService   DependencyType = "service"
-	DependencyTypeComponent DependencyType = "component"
+	DependencyTypeService    DependencyType = "service"
+	DependencyTypeComponent  DependencyType = "component"
+	DependencyTypeDatasource DependencyType = "datasource"
 )
 
 // ServiceDependency represents a dependency relationship between a service and another entity.
