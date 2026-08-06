@@ -71,8 +71,6 @@ class SchemaValidationError(Exception):
 
 
 
-
-
 # ---------------------------------------------------------------------------
 # Normalization — per-property "required": true → required array
 # ---------------------------------------------------------------------------
