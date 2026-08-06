@@ -6,6 +6,8 @@ Exposes one router:
 - ``router`` → mounted at ``/v1/extract``
 """
 
+import os
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,12 +37,102 @@ from extract.utils.job import (
     stage_uploaded_file,
     validate_file_extension,
 )
-from extract.utils.schema import SchemaValidationError, fmt_dt
+from extract.utils.exceptions import ExtractException
+from extract.utils.schema import fmt_dt
 
 router = APIRouter()
 logger = get_logger("jobs_router")
 
 
+
+
+# ---------------------------------------------------------------------------
+# create_extract_job — private helpers
+# ---------------------------------------------------------------------------
+
+def _check_job_admission() -> None:
+    """Raise 429 if the concurrency slot is exhausted."""
+    if job_limiter.locked():
+        raise ExtractException(
+            429, "RATE_LIMIT_EXCEEDED",
+            "Job concurrency limit reached. Please try again later.",
+        )
+
+
+def _validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
+    """Normalise the filename and validate its extension.
+
+    Returns:
+        (normalised_filename, source_type)  e.g. ("report.txt", "txt")
+
+    Raises:
+        ExtractException(415) on an unsupported or missing extension.
+    """
+    filename = (file.filename or "").lower()
+    is_valid, ext = validate_file_extension(filename)
+    if not is_valid:
+        raw_ext = os.path.splitext(filename)[1] or "unknown"
+        raise ExtractException(
+            415, "UNSUPPORTED_FILE_TYPE",
+            f"Only .txt and .md files are accepted. Received: {raw_ext}",
+        )
+    return filename, ext.lstrip(".")
+
+
+def _resolve_schema(schema_id: str):
+    """Return the schema row for *schema_id*.
+
+    Raises:
+        ExtractException(404) if the schema does not exist.
+    """
+    row = db_repo.get_schema_by_id(schema_id)
+    if row is None:
+        raise ExtractException(
+            404, "SCHEMA_NOT_FOUND",
+            f"No schema with id {schema_id!r}.",
+        )
+    return row
+
+
+def _stage_and_persist(
+    job_id: str,
+    file: UploadFile,
+    schema_id: str,
+    filename: str,
+    source_type: str,
+    job_name: Optional[str],
+):
+    """Stage the uploaded file then write the DB record.
+
+    Cleans up the staging directory on *any* failure after staging so no
+    orphaned files are left on disk.
+
+    Raises:
+        ExtractException(500) on staging or database failure.
+    """
+    try:
+        stage_uploaded_file(job_id, file)
+    except IOError as exc:
+        logger.error(f"Failed to stage file for job {job_id}: {exc}")
+        raise ExtractException(500, "FILE_STAGING_ERROR", "Failed to save uploaded file.")
+
+    try:
+        row = db_repo.create_job(
+            job_id=job_id,
+            schema_id=schema_id,
+            document_name=filename,
+            source_type=source_type,
+            job_name=job_name,
+            submitted_at=datetime.now(timezone.utc),
+        )
+    except Exception as exc:
+        logger.error(f"Unexpected DB error creating job {job_id}: {exc}")
+        cleanup_staging_directory(job_id, settings.extract.staging_dir)
+        raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
+
+    if row is None:
+        cleanup_staging_directory(job_id, settings.extract.staging_dir)
+        raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
 
 
 # ---------------------------------------------------------------------------
@@ -50,13 +142,61 @@ logger = get_logger("jobs_router")
 @router.post("", tags=["extraction"], include_in_schema=True)
 async def extract_sync():
     """Synchronous extraction — implementation in follow-up iteration."""
-    raise SchemaValidationError("NOT_IMPLEMENTED", "POST /v1/extract not yet implemented.", status=501)
+    raise ExtractException(501, "NOT_IMPLEMENTED", "POST /v1/extract not yet implemented.")
+
+# Probe size for binary-detection heuristics. 8 KB is large enough to catch
+# null bytes, invalid UTF-8, or control-character runs in virtually any
+# misnamed binary file, while aligning with the OS page size and Python's
+# default IO buffer. The full UTF-8 decode in the worker catches anything
+# deeper; this probe just moves obvious rejections to submission time.
+MAX_PROBE_BYTES = 8192
+
+async def _validate_file_content(file):
+    """
+        Validate that an uploaded file is a genuine text file.
+        Reads only the first 8 KB, then resets the file pointer.
+        Raises 415 if the content doesn't match expectations.
+        """
+    # Extension check
+    filename = file.filename or ""
+    ext = filename[filename.rfind("."):].lower() if "." in filename else ""
+
+    # Read probe and reset
+    probe = await file.read(MAX_PROBE_BYTES)
+    await file.seek(0)
+
+    if not probe:
+        raise ExtractException(400, "BAD_REQUEST", "File is empty.")
+
+    try:
+        decoded = probe.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ExtractException(400, "BAD_REQUEST", "File content is not valid UTF-8 text.")
+
+    # Gate 2: no null bytes
+    if b"\x00" in probe:
+        raise ExtractException(415, "BAD_REQUEST", "File contains null bytes and appears to be binary.")
+
+    # Gate 3: low control character ratio
+    control_count = sum(
+        1 for ch in decoded
+        if unicodedata.category(ch).startswith("Cc")
+        and ch not in ("\n", "\r", "\t", "\f")
+    )
+    if len(decoded) > 0 and (control_count / len(decoded)) > 0.05:
+        raise ExtractException(415, "BAD_REQUEST", "File contains excessive control characters and appears to be binary.")
+
+    # Gate 4: reject text files that are actually PDFs
+    pdf_magic = b"%PDF"
+    if probe[:4].startswith(pdf_magic):
+        raise ExtractException(415, "BAD_REQUEST", f"File has {ext} extension but contains PDF content.")
+
+    return
 
 
 # ---------------------------------------------------------------------------
 # POST /v1/extract/jobs — Submit an async extraction job
 # ---------------------------------------------------------------------------
-
 @router.post(
     "/jobs",
     status_code=202,
@@ -87,68 +227,15 @@ async def create_extract_job(
     job_name: Optional[str] = Form(None),
 ) -> JobCreatedResponse:
     """Validate, stage, record, and enqueue an async extraction job."""
-    # --- Job admission check ---
-    if job_limiter.locked():
-        raise SchemaValidationError(
-            "RATE_LIMIT_EXCEEDED",
-            "Job concurrency limit reached. Please try again later.",
-            status=429,
-        )
+    _check_job_admission()
+    filename, source_type = _validate_and_resolve_file(file)
+    _validate_file_content(file)
+    _resolve_schema(schema_id)
 
-    # --- File extension validation ---
-    filename = file.filename or ""
-    is_valid, ext = validate_file_extension(filename)
-    if not is_valid:
-        raise SchemaValidationError(
-            "UNSUPPORTED_FILE_TYPE",
-            f"Only .txt and .md files are accepted. Received: {ext or 'unknown'}",
-            status=415,
-        )
-
-    # --- Schema existence check ---
-    schema_row = db_repo.get_schema_by_id(schema_id)
-    if schema_row is None:
-        raise SchemaValidationError(
-            "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.",
-            status=404,
-        )
-
-    # --- Generate job ID ---
     job_id = str(uuid.uuid4())
-    source_type = ext.lstrip(".")  # "txt" or "md"
+    _stage_and_persist(job_id, file, schema_id, filename, source_type, job_name)
 
-    # --- Stage the uploaded file ---
-    try:
-        stage_uploaded_file(job_id, file)
-    except IOError as exc:
-        logger.error(f"Failed to stage file for job {job_id}: {exc}")
-        raise SchemaValidationError(
-            "FILE_STAGING_ERROR",
-            "Failed to save uploaded file.",
-            status=500,
-        )
-
-    # --- Persist job record ---
-    row = db_repo.create_job(
-        job_id=job_id,
-        schema_id=schema_id,
-        document_name=filename,
-        source_type=source_type,
-        job_name=job_name,
-        submitted_at=datetime.now(timezone.utc),
-    )
-    if row is None:
-        cleanup_staging_directory(job_id, settings.extract.staging_dir)
-        raise SchemaValidationError(
-            "DATABASE_ERROR",
-            "Failed to create job record.",
-            status=500,
-        )
-
-    # --- Enqueue background worker ---
     background_tasks.add_task(_process_extract_job, job_id)
-
     logger.info(f"Accepted extraction job {job_id} (schema={schema_id}, file={filename!r})")
     return JobCreatedResponse(job_id=job_id)
 
@@ -199,10 +286,9 @@ async def list_extract_jobs(
 ) -> JobsListResponse:
     _VALID_STATUSES = {"accepted", "in_progress", "completed", "failed"}
     if status is not None and status not in _VALID_STATUSES:
-        raise SchemaValidationError(
-            "INVALID_PARAMETER",
+        raise ExtractException(
+            400, "INVALID_PARAMETER",
             f"Invalid status value. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
-            status=400,
         )
 
     rows, total = db_repo.list_jobs(
@@ -256,11 +342,7 @@ async def list_extract_jobs(
 async def get_extract_job(job_id: str) -> JobDetailResponse:
     row = db_repo.get_job_by_id(job_id)
     if row is None:
-        raise SchemaValidationError(
-            "RESOURCE_NOT_FOUND",
-            f"Job {job_id!r} not found.",
-            status=404,
-        )
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
     return JobDetailResponse(
         job_id=row.job_id,
@@ -269,9 +351,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
         status=row.status,
         document=DocumentInfo(
             name=row.document_name,
-            source_type=row.source_type,
-            digitize_job_id=row.digitize_job_id,
-            digitize_doc_id=row.digitize_doc_id,
+            source_type=row.source_type
         ),
         metadata=row.job_metadata,
         submitted_at=fmt_dt(row.submitted_at),
@@ -309,11 +389,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
 async def get_extract_job_result(job_id: str):
     row = db_repo.get_job_by_id(job_id)
     if row is None:
-        raise SchemaValidationError(
-            "RESOURCE_NOT_FOUND",
-            f"Job {job_id!r} not found.",
-            status=404,
-        )
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
     if row.status in ("accepted", "in_progress"):
         return JSONResponse(
@@ -345,11 +421,7 @@ async def get_extract_job_result(job_id: str):
     result_data = read_result_file(job_id)
     if result_data is None:
         logger.error(f"Result file missing for completed job {job_id}")
-        raise SchemaValidationError(
-            "INTERNAL_SERVER_ERROR",
-            "Result file not found for completed job.",
-            status=500,
-        )
+        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Result file not found for completed job.")
 
     return JobResultResponse(
         data=result_data.get("data", {}),
@@ -382,28 +454,19 @@ async def get_extract_job_result(job_id: str):
 async def delete_extract_job(job_id: str) -> Response:
     row = db_repo.get_job_by_id(job_id)
     if row is None:
-        raise SchemaValidationError(
-            "RESOURCE_NOT_FOUND",
-            f"Job {job_id!r} not found.",
-            status=404,
-        )
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
-    if row.status in ("accepted", "in_progress"):
-        raise SchemaValidationError(
-            "RESOURCE_LOCKED",
+    if row.status not in ("completed", "failed"):
+        raise ExtractException(
+            409, "RESOURCE_LOCKED",
             f"Cannot delete active job {job_id!r}. Current status: {row.status}.",
-            status=409,
         )
 
     delete_job_files(job_id)
 
     success = db_repo.delete_job(job_id)
     if not success:
-        raise SchemaValidationError(
-            "INTERNAL_SERVER_ERROR",
-            "Failed to delete job from database.",
-            status=500,
-        )
+        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Failed to delete job from database.")
 
     logger.info(f"Deleted job {job_id!r}")
     return Response(status_code=204)
@@ -438,29 +501,20 @@ async def bulk_delete_extract_jobs(
     ),
 ) -> Response:
     if confirm != "true":
-        raise SchemaValidationError(
-            "CONFIRMATION_REQUIRED",
-            "Bulk delete requires ?confirm=true.",
-            status=400,
-        )
+        raise ExtractException(400, "CONFIRMATION_REQUIRED", "Bulk delete requires ?confirm=true.")
 
     if db_repo.has_active_jobs():
-        raise SchemaValidationError(
-            "RESOURCE_LOCKED",
+        raise ExtractException(
+            409, "RESOURCE_LOCKED",
             "Cannot bulk-delete: one or more active jobs exist. "
             "Wait for them to complete or cancel them individually.",
-            status=409,
         )
 
     delete_all_job_files()
 
     success = db_repo.delete_all_jobs()
     if not success:
-        raise SchemaValidationError(
-            "INTERNAL_SERVER_ERROR",
-            "Failed to delete jobs from database.",
-            status=500,
-        )
+        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Failed to delete jobs from database.")
 
     logger.info("Bulk deleted all extraction jobs")
     return Response(status_code=204)
