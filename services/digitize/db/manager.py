@@ -359,9 +359,9 @@ class DatabaseManager:
             with get_db_session() as session:
                 stmt = (
                     pg_insert(DocumentChecksum)
-                    .values(sha256=sha256, doc_id=doc_id)
+                    .values(checksum=sha256, doc_id=doc_id)
                     .on_conflict_do_update(
-                        index_elements=["sha256"],
+                        index_elements=["checksum"],
                         set_={"doc_id": doc_id},
                     )
                 )
