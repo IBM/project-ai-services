@@ -7,7 +7,7 @@ import {
   InProgress,
   Delete,
 } from "@carbon/icons-react";
-import sharedStyles from "@/components/table/table.shared.module.scss";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 export const STATUS_CONFIG = {
   Initializing: {
@@ -112,22 +112,8 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
     MessageIcon = ErrorFilled;
     iconClassName = sharedStyles.messageIconError;
   } else {
-    const messageLower = message.toLowerCase();
-    const isError =
-      messageLower.includes("error") || messageLower.includes("failed");
-    const isSuccess =
-      messageLower.includes("success") || messageLower.includes("completed");
-
-    if (isError) {
-      MessageIcon = ErrorFilled;
-      iconClassName = sharedStyles.messageIconError;
-    } else if (isSuccess) {
-      MessageIcon = CheckmarkFilled;
-      iconClassName = sharedStyles.messageIconSuccess;
-    } else {
-      MessageIcon = InProgress;
-      iconClassName = sharedStyles.messageIconInfo;
-    }
+    MessageIcon = InProgress;
+    iconClassName = sharedStyles.messageIconInfo;
   }
 
   return (
@@ -139,8 +125,8 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
 };
 
 export const ActionCell = ({ rowId, rowData, onDelete }: ActionCellProps) => {
-  const status = rowData?.status?.toLowerCase() || "";
-  const isDeleteEnabled = status === "error" || status === "running";
+  const isDeleteEnabled =
+    rowData?.status === "Running" || rowData?.status === "Error";
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">
@@ -165,8 +151,7 @@ export const NameCell = ({
   rowData,
   onNameClick,
 }: NameCellProps) => {
-  const status = rowData?.status?.toLowerCase() || "";
-  const isRunning = status === "running";
+  const isRunning = rowData?.status === "Running";
 
   if (!isRunning || !onNameClick) {
     return <span>{String(value)}</span>;

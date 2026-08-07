@@ -34,13 +34,10 @@ const TableEmptyStates = ({
   }
 
   if (noData) {
-    // Capitalise first letter for the title
-    const capitalized =
-      entityName.charAt(0).toUpperCase() + entityName.slice(1);
     return (
       <NoDataEmptyState
         title={`Start by adding a ${entityName}`}
-        subtitle={`To deploy a new ${capitalized}, click Deploy.`}
+        subtitle={`To deploy a new ${entityName}, click Deploy.`}
         className={className}
       />
     );

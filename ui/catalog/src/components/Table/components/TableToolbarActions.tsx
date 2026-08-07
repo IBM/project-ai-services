@@ -14,9 +14,9 @@ import {
   Renew,
   Filter,
 } from "@carbon/icons-react";
-import type { TableHeaders } from "@/components/table/types";
-import { getToggleableHeaders } from "@/components/table/utils/tableUtils";
-import sharedStyles from "@/components/table/table.shared.module.scss";
+import type { TableHeaders } from "@/components/Table/types";
+import { getToggleableHeaders } from "@/components/Table/utils/tableUtils";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 interface TableToolbarActionsProps {
   /** Current search string. */
@@ -37,15 +37,14 @@ interface TableToolbarActionsProps {
   onResetColumns: () => void;
   /**
    * Optional slot for a filter control unique to a specific table.
-   * When provided it is rendered inside a Filter overflow menu between the
-   * refresh and export buttons.
-   * Deployed Services injects its service-filter RadioButtonGroup here.
-   * Digital Assistants omits this prop.
    */
   filterSlot?: ReactNode;
   /**
+   * Accessible label for the filter overflow menu button.
+   */
+  filterLabel?: string;
+  /**
    * Additional toolbar buttons rendered after the column-visibility menu.
-   * Both tables pass their primary "Deploy" button here.
    */
   children?: ReactNode;
 }
@@ -60,6 +59,7 @@ const TableToolbarActions = ({
   onToggleColumn,
   onResetColumns,
   filterSlot,
+  filterLabel = "Filter",
   children,
 }: TableToolbarActionsProps) => {
   const toggleableHeaders = getToggleableHeaders(headers);
@@ -90,8 +90,8 @@ const TableToolbarActions = ({
         {filterSlot && (
           <OverflowMenu
             renderIcon={Filter}
-            iconDescription="Filter by service"
-            aria-label="Filter by service"
+            iconDescription={filterLabel}
+            aria-label={filterLabel}
             size="lg"
             flipped
           >

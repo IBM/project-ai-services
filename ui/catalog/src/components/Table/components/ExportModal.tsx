@@ -50,7 +50,7 @@ const ExportModal = ({
       invalidText={exportErrorMessage}
       onChange={(e) => {
         onFileNameChange(e.target.value);
-        onClearError();
+        if (exportErrorMessage) onClearError();
       }}
     />
   </Modal>

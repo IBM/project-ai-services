@@ -1,5 +1,5 @@
-import { ActionableNotification } from "@carbon/react";
-import sharedStyles from "@/components/table/table.shared.module.scss";
+import { ActionableNotification, ToastNotification } from "@carbon/react";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 interface TableToastsProps {
   // --- Delete error toast ---
@@ -10,17 +10,13 @@ interface TableToastsProps {
   /** Error message detail shown as the toast subtitle. */
   deleteErrorMessage: string;
   /**
-   * Short label for the entity type, e.g. "digital assistant" or
-   * "service deployment". Used to form the toast title:
-   * "Delete {entityLabel} {deleteErrorRowName} failed"
-   */
+   * Short label for the entity type, e.g. "digital assistant" */
   entityLabel: string;
   /** Called when the close button on the delete-error toast is clicked. */
   onDeleteErrorClose: () => void;
   /** Called when the "Try again" action button is clicked. */
   onDeleteErrorRetry: () => Promise<void>;
 
-  // --- Export result toast ---
   /** Whether the export toast is visible. */
   exportToastOpen: boolean;
   /** "success" | "error" — controls the Carbon notification kind. */
@@ -58,10 +54,9 @@ const TableToasts = ({
       />
     )}
     {exportToastOpen && (
-      <ActionableNotification
+      <ToastNotification
         aria-label="close notification"
         kind={exportToastKind}
-        closeOnEscape
         title={
           exportToastKind === "success" ? "Export successful" : "Export failed"
         }

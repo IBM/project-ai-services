@@ -1,5 +1,6 @@
+import { useId } from "react";
 import { Modal, Checkbox, CheckboxGroup } from "@carbon/react";
-import sharedStyles from "@/components/table/table.shared.module.scss";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 interface DeleteModalProps {
   isOpen: boolean;
@@ -34,39 +35,42 @@ const DeleteModal = ({
   onConfirm,
   onClose,
   onCheckboxChange,
-}: DeleteModalProps) => (
-  <Modal
-    open={isOpen}
-    size="sm"
-    modalLabel={modalLabel}
-    modalHeading="Confirm delete"
-    primaryButtonText={isDeleting ? "Deleting..." : "Delete"}
-    secondaryButtonText="Cancel"
-    danger
-    primaryButtonDisabled={!isConfirmed || isDeleting}
-    onRequestClose={() => {
-      // Prevent closing the modal while deletion is in progress
-      if (!isDeleting) {
-        onClose();
-      }
-    }}
-    onRequestSubmit={onConfirm}
-  >
-    <p>{warningText}</p>
-    <div>
-      <CheckboxGroup
-        className={sharedStyles.deleteConfirmation}
-        legendText={confirmLegend}
-      >
-        <Checkbox
-          id="delete-modal-confirm-checkbox"
-          labelText={<strong>{itemName}</strong>}
-          checked={isConfirmed}
-          onChange={(_, { checked }) => onCheckboxChange(checked)}
-        />
-      </CheckboxGroup>
-    </div>
-  </Modal>
-);
+}: DeleteModalProps) => {
+  const checkboxId = useId();
+  return (
+    <Modal
+      open={isOpen}
+      size="sm"
+      modalLabel={modalLabel}
+      modalHeading="Confirm delete"
+      primaryButtonText={isDeleting ? "Deleting..." : "Delete"}
+      secondaryButtonText="Cancel"
+      danger
+      primaryButtonDisabled={!isConfirmed || isDeleting}
+      onRequestClose={() => {
+        // Prevent closing the modal while deletion is in progress
+        if (!isDeleting) {
+          onClose();
+        }
+      }}
+      onRequestSubmit={onConfirm}
+    >
+      <p>{warningText}</p>
+      <div>
+        <CheckboxGroup
+          className={sharedStyles.deleteConfirmation}
+          legendText={confirmLegend}
+        >
+          <Checkbox
+            id={checkboxId}
+            labelText={<strong>{itemName}</strong>}
+            checked={isConfirmed}
+            onChange={(_, { checked }) => onCheckboxChange(checked)}
+          />
+        </CheckboxGroup>
+      </div>
+    </Modal>
+  );
+};
 
 export default DeleteModal;
