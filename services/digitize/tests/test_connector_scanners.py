@@ -9,7 +9,7 @@ S3ConnectorConfig
   - effective_region extracted from endpoint_url
   - empty bucket_name raises ValueError
 
-_HashingWriter
+HashingWriter
   - MD5 of known bytes matches reference
   - empty stream gives correct empty-hash hexdigest
   - chunked writes produce same hash as bulk
@@ -25,7 +25,6 @@ S3Scanner
   - verify_integrity() matches single-part ETag
   - verify_integrity() skips multi-part ETag (returns True)
   - verify_integrity() returns False on mismatch
-  - test_connection() returns True on success, False on ClientError
   - close() resets _client to None
 
 build_scanner factory
@@ -46,9 +45,10 @@ from unittest.mock import MagicMock, patch
 import botocore.exceptions
 import pytest
 
-from digitize.connectors.config import S3ConnectorConfig
-from digitize.connectors.s3_scanner import S3Scanner, _HashingWriter
-from digitize.connectors.scanner_factory import build_scanner
+from digitize.connectors.scanners.config import S3ConnectorConfig
+from digitize.connectors.scanners.hashing import HashingWriter
+from digitize.connectors.scanners.s3_scanner import S3Scanner
+from digitize.connectors.scanners.scanner_factory import build_scanner
 
 
 # ---------------------------------------------------------------------------
@@ -209,26 +209,26 @@ class TestS3ConnectorConfig:
 
 
 # ---------------------------------------------------------------------------
-# _HashingWriter
+# HashingWriter
 # ---------------------------------------------------------------------------
 
 class TestHashingWriter:
     def test_md5_known_bytes(self):
         data = b"hello connector world"
         buf = io.BytesIO()
-        writer = _HashingWriter(buf)
+        writer = HashingWriter(buf)
         writer.write(data)
         assert writer.hexdigest == hashlib.md5(data).hexdigest()
 
     def test_md5_empty_stream(self):
         buf = io.BytesIO()
-        writer = _HashingWriter(buf)
+        writer = HashingWriter(buf)
         assert writer.hexdigest == hashlib.md5(b"").hexdigest()
 
     def test_chunked_same_as_bulk(self):
         data = b"abcdefgh" * 128
         buf = io.BytesIO()
-        writer = _HashingWriter(buf)
+        writer = HashingWriter(buf)
         for i in range(0, len(data), 16):
             writer.write(data[i : i + 16])
         assert writer.hexdigest == hashlib.md5(data).hexdigest()
@@ -236,12 +236,12 @@ class TestHashingWriter:
     def test_bytes_forwarded_to_dest(self):
         data = b"scanner bytes"
         buf = io.BytesIO()
-        writer = _HashingWriter(buf)
+        writer = HashingWriter(buf)
         writer.write(data)
         assert buf.getvalue() == data
 
     def test_readable_false_writable_true(self):
-        writer = _HashingWriter(io.BytesIO())
+        writer = HashingWriter(io.BytesIO())
         assert writer.readable() is False
         assert writer.writable() is True
 
@@ -376,7 +376,7 @@ class TestS3ScannerDownloadTo:
         call_kwargs = mock_client.download_fileobj.call_args.kwargs
         assert call_kwargs["Bucket"] == "test-bucket"
         assert call_kwargs["Key"] == "docs/report.pdf"
-        assert isinstance(call_kwargs["Fileobj"], _HashingWriter)
+        assert isinstance(call_kwargs["Fileobj"], HashingWriter)
 
     def test_returns_local_md5(self, tmp_path):
         import hashlib
@@ -432,20 +432,6 @@ class TestS3ScannerVerifyIntegrity:
     def test_multipart_etag_always_passes(self):
         """Multi-part ETags contain '-N'; integrity check must be skipped."""
         assert S3Scanner(_make_config()).verify_integrity("anylocalmd5", "abc123-4") is True
-
-
-class TestS3ScannerTestConnection:
-    def test_returns_true_on_success(self):
-        scanner = S3Scanner(_make_config())
-        scanner._client = MagicMock()
-        assert scanner.test_connection() is True
-
-    def test_returns_false_on_client_error(self):
-        scanner = S3Scanner(_make_config())
-        mock_client = MagicMock()
-        mock_client.head_bucket.side_effect = _make_client_error("403")
-        scanner._client = mock_client
-        assert scanner.test_connection() is False
 
 
 # ---------------------------------------------------------------------------

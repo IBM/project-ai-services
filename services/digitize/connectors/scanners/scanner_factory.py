@@ -3,7 +3,7 @@ connector/scanner_factory.py — factory that maps connector type to scanner.
 
 Usage
 -----
-    from digitize.connectors.scanner_factory import build_scanner
+    from digitize.connectors.scanners.scanner_factory import build_scanner
 
     scanner = build_scanner(connector_row)   # connector_row from DB
     scanner.connect()
@@ -25,18 +25,15 @@ from __future__ import annotations
 from typing import Any
 
 from common.misc_utils import get_logger
-from digitize.connectors.base_scanner import BaseScanner
-from digitize.connectors.config import S3ConnectorConfig
-from digitize.connectors.s3_scanner import S3Scanner
+from digitize.connectors.scanners.base_scanner import BaseScanner
+from digitize.connectors.scanners.config import S3ConnectorConfig
+from digitize.connectors.scanners.s3_scanner import S3Scanner
 
 logger = get_logger("scanner_factory")
 
 # ---------------------------------------------------------------------------
 # Registry — maps connector type → (scanner class, config class)
 # ---------------------------------------------------------------------------
-# SFTP scanner is intentionally absent from this PR; it will be added when
-# the SFTP scanner is implemented by another team member.
-
 _REGISTRY: dict[str, tuple[type[BaseScanner], type]] = {
     "s3": (S3Scanner, S3ConnectorConfig),
     # "ssh": (SFTPScanner, SFTPConnectorConfig),  # added in a future PR

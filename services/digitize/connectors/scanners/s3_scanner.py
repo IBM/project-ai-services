@@ -8,7 +8,7 @@ Design decisions
 * ``scan()`` returns the full object list with no dedup filtering.  All
   classification logic lives in the worker's _classify() method.
 
-* ``download_to()`` streams the file through _HashingWriter (inline MD5) so
+* ``download_to()`` streams the file through HashingWriter (inline MD5) so
   there is no second file-read to verify integrity.
 
 * ``source_checksum`` (S3 ETag) is written into ``documents.metadata`` after
@@ -25,7 +25,7 @@ ETag format reminder
   Multi-part upload  : ETag = MD5(raw_part_digests)-N — hex + "-N" suffix
 
 The ETag is used as-is as the dedup key.  For single-part objects the local
-MD5 computed by _HashingWriter will equal the ETag (without quotes); for
+MD5 computed by HashingWriter will equal the ETag (without quotes); for
 multi-part objects the local MD5 equals MD5(full_file_bytes) which differs
 from the stored multi-part ETag — this is expected and harmless because the
 worker deduplication key is always the S3 ETag from list_objects_v2.
@@ -33,8 +33,6 @@ worker deduplication key is always the S3 ETag from list_objects_v2.
 
 from __future__ import annotations
 
-import hashlib
-import io
 import os
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
@@ -44,49 +42,11 @@ import botocore.config
 import botocore.exceptions
 
 from common.misc_utils import get_logger
-from digitize.connectors.base_scanner import BaseScanner
-from digitize.connectors.config import S3ConnectorConfig
+from digitize.connectors.scanners.base_scanner import BaseScanner
+from digitize.connectors.scanners.config import S3ConnectorConfig
+from digitize.connectors.scanners.hashing import HashingWriter
 
 logger = get_logger("s3_scanner")
-
-
-# ---------------------------------------------------------------------------
-# Inline MD5 write wrapper
-# ---------------------------------------------------------------------------
-
-class _HashingWriter(io.RawIOBase):
-    """
-    Write-only file-like object that tees bytes to a destination file handle
-    while computing an MD5 digest inline in a single streaming pass.
-
-    Passed as ``Fileobj`` to ``boto3.client.download_fileobj()``.  boto3 calls
-    ``write(chunk)`` for every arriving network chunk; this wrapper:
-      - updates a running MD5 state with each chunk
-      - forwards every byte to the underlying real file handle
-
-    The full-file MD5 is available via ``hexdigest`` the instant
-    ``download_fileobj()`` returns — no second read of the staged file needed.
-    """
-
-    def __init__(self, dest_fh: io.BufferedWriter) -> None:
-        super().__init__()
-        self._dest = dest_fh
-        self._md5 = hashlib.md5()
-
-    def write(self, b: bytes) -> int:  # type: ignore[override]
-        self._md5.update(b)
-        return self._dest.write(b)
-
-    def readable(self) -> bool:
-        return False
-
-    def writable(self) -> bool:
-        return True
-
-    @property
-    def hexdigest(self) -> str:
-        """Hex MD5 of all bytes written so far."""
-        return self._md5.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +167,7 @@ class S3Scanner(BaseScanner):
             f"→ {local_path}"
         )
         with open(local_path, "wb") as fh:
-            writer = _HashingWriter(fh)
+            writer = HashingWriter(fh)
             self._client.download_fileobj(
                 Bucket=self._cfg.bucket_name,
                 Key=remote_path,
@@ -333,32 +293,13 @@ class S3Scanner(BaseScanner):
             )
 
     # ------------------------------------------------------------------ #
-    # Connection test (utility — used by connector CRUD attach flow)      #
-    # ------------------------------------------------------------------ #
-
-    def test_connection(self) -> bool:
-        """
-        Return True if the bucket is reachable with the configured credentials.
-
-        Calls ``head_bucket`` which requires only s3:ListBucket permission and
-        transfers no object data.  Uses the existing client when already
-        connected, otherwise builds a temporary one.
-        """
-        try:
-            self._head_bucket(self._client or self._build_client())
-            return True
-        except ConnectionError:
-            return False
-
-    # ------------------------------------------------------------------ #
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
 
     def _head_bucket(self, client) -> None:
         """Call head_bucket and raise ConnectionError on failure.
 
-        Shared by connect() (raises) and test_connection() (catches and
-        returns bool).  Keeps the bucket-reachability check in one place.
+        Used by connect() for pre-flight verification.
 
         Raises
         ------

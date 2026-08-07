@@ -2,29 +2,19 @@
 connector/config.py — pydantic configuration models for data-source connectors.
 
 Each connector type has its own typed config class that:
-  - reads from environment variables (pydantic-settings convention)
+  - is constructed exclusively from the ``connection_details`` JSONB stored in
+    the DB (via ``from_connection_details()`` or ``model_validate()``)
   - validates required fields
   - exposes computed properties (e.g. derived region, provider detection)
+
+No environment variable reading is performed — credentials come from the DB
+row, decrypted by the worker before the config is constructed.
 
 Connector types
 ---------------
 S3ConnectorConfig   — IBM COS and AWS S3 (provider auto-detected from endpoint_url)
 
 SFTP connector config is out of scope for this PR.
-
-Environment variables for S3
------------------------------
-CONNECTOR_S3_ENDPOINT_URL        — Full S3/COS endpoint URL.
-                                   AWS S3 : https://s3.<region>.amazonaws.com
-                                   IBM COS: https://s3.<region>.cloud-object-storage.appdomain.cloud
-                                   Omit for AWS and let boto3 auto-resolve.
-CONNECTOR_S3_BUCKET_NAME         — Bucket to sync documents from.
-CONNECTOR_S3_ACCESS_KEY_ID       — IAM key ID (AWS) or HMAC key ID (IBM COS).
-CONNECTOR_S3_SECRET_ACCESS_KEY   — IAM secret (AWS) or HMAC secret (IBM COS).
-CONNECTOR_S3_PREFIX              — Key prefix to scope listing (default: "", = bucket root).
-CONNECTOR_S3_DELIMITER           — Listing delimiter (default: "", = recursive).
-CONNECTOR_S3_DOWNLOAD_CONCURRENCY — Parallel download threads (default: 4).
-CONNECTOR_S3_VERIFY_SSL          — Verify TLS certificate (default: true).
 """
 
 from __future__ import annotations
@@ -32,8 +22,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -68,24 +57,19 @@ _COS_CROSSREGION_ALIAS: dict[str, str] = {
 # S3 connector configuration
 # ---------------------------------------------------------------------------
 
-class S3ConnectorConfig(BaseSettings):
+class S3ConnectorConfig(BaseModel):
     """
     Configuration for an S3-compatible data-source connector.
 
-    Works for both AWS S3 and IBM COS — provider is auto-detected from
-    ``endpoint_url``
+    Constructed exclusively from the ``connection_details`` JSONB dict stored
+    in the DB.  Use ``from_connection_details()`` (preferred) or
+    ``model_validate()`` directly.  No environment variables are read.
 
-    Instances are normally constructed by the connector CRUD API from the
-    ``connection_details`` JSON stored in the ``connectors`` DB table.  They
-    can also be created from environment variables for local testing (env
-    prefix: ``CONNECTOR_S3_``).
+    Works for both AWS S3 and IBM COS — provider is auto-detected from
+    ``endpoint_url``.
     """
 
-    model_config = SettingsConfigDict(
-        env_prefix="CONNECTOR_S3_",
-        # Accept extra fields from DB-sourced dicts without raising an error.
-        extra="ignore",
-    )
+    model_config = {"extra": "ignore"}
 
     bucket_name: str = Field(
         description="S3 / COS bucket to sync documents from.",
