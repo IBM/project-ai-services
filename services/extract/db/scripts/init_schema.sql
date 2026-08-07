@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     CONSTRAINT chk_extract_job_status
         CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
     CONSTRAINT chk_extract_source_type
-        CHECK (source_type IN ('txt', 'pdf'))
+        CHECK (source_type IN ('txt', 'md'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status

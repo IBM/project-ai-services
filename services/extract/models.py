@@ -125,8 +125,6 @@ class DocumentInfo(BaseModel):
     """Inline document info embedded in job detail responses."""
     name: str
     source_type: str
-    digitize_job_id: Optional[str] = None
-    digitize_doc_id: Optional[str] = None
 
 
 class JobDetailResponse(BaseModel):
