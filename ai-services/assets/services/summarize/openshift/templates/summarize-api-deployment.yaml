@@ -4,7 +4,7 @@ metadata:
   name: "summarize-api"
   labels:
     ai-services.io/service: {{ .Release.Name }}
-    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
@@ -16,7 +16,7 @@ spec:
     metadata:
       labels:
         ai-services.io/service: {{ .Release.Name }}
-        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: summarize-api
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
@@ -76,22 +76,22 @@ spec:
             - name: PORT
               value: "6000"
             - name: LLM_ENDPOINT
-              value: http://instruct-predictor:8000
+              value: http://llm-predictor:8000
             - name: LLM_MODEL
-              value: {{ .Values.llm.model.name | quote }}
+              value: {{ .Values.llm.model | quote }}
             - name: LLM_MAX_MODEL_LEN
-              value: {{ .Values.llm.model.maxModelLen | quote }}
+              value: "4096"
             - name: LLM_MAX_BATCH_SIZE
-              value: {{ .Values.llm.model.maxBatchSize | quote }}
+              value: "32"
             - name: LOG_LEVEL
               value: "{{ .Values.summarize.log_level }}"
-            {{- if .Values.llm.apiKey }}
+          {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: "vllm-instruct-api-key"
                   key: apiKey
-            {{- end }}
+          {{- end }}
           ports:
             - containerPort: 6000
               protocol: TCP

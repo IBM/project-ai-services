@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ThemeProvider } from './contexts/ThemeProvider';
 import MainLayout from './layouts/MainLayout';
 import JobMonitorPage from './pages/JobMonitorPage';

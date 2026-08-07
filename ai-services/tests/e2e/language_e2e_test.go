@@ -112,9 +112,21 @@ var _ = ginkgo.Describe("Language Support Tests",
 		// the existing Digitization Tests context in e2e_suite_test.go.
 		// ------------------------------------------------------------------ //
 		ginkgo.BeforeAll(func() {
-			if appName == "" {
-				ginkgo.Fail("Application name is not set — cannot run language support tests")
+
+			// appName is always non-empty — BeforeSuite generates one even when
+			// --app-name is not passed.  Check providedAppName (the raw flag value)
+			// to detect whether the caller targeted a real deployed application.
+			// Use ginkgo.Skip (not ginkgo.Fail) so the full suite continues past
+			// language tests when they are not the focus of the run.
+
+			if providedAppName == "" {
+				ginkgo.Skip(
+					"[LANG] Skipping Language Support Tests — " +
+						"--app-name was not provided; " +
+						"pass --app-name=<app> to target a running application",
+				)
 			}
+
 
 			logger.Infof("[LANG] Setting up Language Support Tests")
 

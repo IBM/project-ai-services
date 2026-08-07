@@ -372,7 +372,7 @@ func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, e
 	return exitCode, nil
 }
 
-func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
+func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
