@@ -1,2 +1,3 @@
 export { DeployFlow } from "./DigitalAssistantDeployFlow";
-export type { DeployFlowProps, DeployFormData, ServiceConfig } from "./types";
+export type { DeployFlowProps, ServiceConfig } from "./types";
+export type { DeployFormData } from "../Shared/types";

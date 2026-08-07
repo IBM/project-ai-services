@@ -8,10 +8,10 @@ import {
 } from "@carbon/react";
 import type {
   DeployFlowProps,
-  DeployFormData,
   DeployFlowState,
   DeployFlowAction,
 } from "./types.ts";
+import type { DeployFormData } from "../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
 import { deployApplication, fetchServices } from "@/api/applications.api";
