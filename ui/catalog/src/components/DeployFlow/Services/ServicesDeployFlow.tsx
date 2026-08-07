@@ -8,12 +8,12 @@ import {
 } from "@carbon/react";
 import type {
   ServicesDeployFlowProps,
-  DeployFormData,
   DeployFlowState,
   DeployFlowAction,
-  ComponentConfig,
 } from "./types.ts";
+import type { DeployFormData, ComponentConfig } from "../Shared/types";
 import { ACTION_TYPES } from "./types.ts";
+import { handleUpdateFormData } from "../Shared/utils/formData";
 import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform";
 import { extractDeployError } from "../Shared/utils/deployError";
@@ -60,15 +60,7 @@ const deployFlowReducer = (
     case ACTION_TYPES.SET_FORM_DATA:
       return { ...state, formData: action.payload };
     case ACTION_TYPES.UPDATE_FORM_DATA:
-      return {
-        ...state,
-        formData: { ...state.formData, ...action.payload },
-        showStepOneNameError:
-          "name" in action.payload
-            ? !String(action.payload.name ?? "").trim() &&
-              state.showStepOneNameError
-            : state.showStepOneNameError,
-      };
+      return handleUpdateFormData(state, action.payload);
     case ACTION_TYPES.SET_SELECTED_SERVICE:
       return { ...state, selectedServiceId: action.payload };
     case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
