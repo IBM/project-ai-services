@@ -105,8 +105,9 @@ func DownloadModelContainer(ctx context.Context, model, targetDir string) error 
 		},
 	}
 
-	// Run container with spec
-	exitCode, err := runtimeClient.RunContainerWithSpec(s)
+	// Run container with spec, passing ctx so cancellation (e.g. mid-deployment delete)
+	// stops the download container immediately instead of blocking until it finishes.
+	exitCode, err := runtimeClient.RunContainerWithSpec(ctx, s)
 	if err != nil {
 		return fmt.Errorf("failed to run container: %w", err)
 	}

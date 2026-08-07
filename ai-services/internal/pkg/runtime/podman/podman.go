@@ -377,8 +377,11 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 }
 
 // RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
+// ctx is used to interrupt the wait: if cancelled, the container is stopped and ctx.Err() is
+// returned so callers can distinguish a cancellation from a real container failure.
+// pc.Context (the Podman connection context) is still used for all Podman API calls.
 // Returns the exit code of the container.
-func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, error) {
+func (pc *PodmanClient) RunContainerWithSpec(ctx context.Context, s *specgen.SpecGenerator) (int32, error) {
 	// Create container
 	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
 	if err != nil {
@@ -392,13 +395,28 @@ func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, e
 		return -1, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Wait for container to complete
-	exitCode, err := containers.Wait(pc.Context, containerID, nil)
-	if err != nil {
-		return -1, fmt.Errorf("failed to wait for container: %w", err)
+	// Wait in a goroutine so we can react to ctx cancellation while the container runs.
+	type waitResult struct {
+		exitCode int32
+		err      error
 	}
+	done := make(chan waitResult, 1)
 
-	return exitCode, nil
+	go func() {
+		code, err := containers.Wait(pc.Context, containerID, nil)
+		done <- waitResult{code, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Caller cancelled (e.g. mid-deployment delete) — stop the container so it is
+		// cleaned up immediately. The spec has Remove=true so it auto-removes on stop.
+		_ = containers.Stop(pc.Context, containerID, nil)
+
+		return -1, ctx.Err()
+	case r := <-done:
+		return r.exitCode, r.err
+	}
 }
 
 func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
