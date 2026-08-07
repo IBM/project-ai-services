@@ -823,24 +823,29 @@ Subclass responsibilities: remote listing (yields `(remote_path, checksum)` pair
 ```text
 BaseScanner
   ├─ connect()
-  ├─ scan()    → list[(remote_path, checksum)]   # ALL remote files, no dedup filtering
-  ├─ download_to(remote_path, local_path)
+  ├─ scan()              → list[(remote_path, checksum)]   # ALL remote files, no dedup filtering
+  ├─ download_to(remote_path, local_path)  → str           # returns local hex digest
+  ├─ verify_integrity(local_checksum, remote_checksum) → bool   # concrete, overridable
   └─ close()
 
 BaseScanner
-  ├─ SFTPScanner   (checksum = remotely-computed MD5)
-  └─ S3Scanner     (checksum = S3 ETag from list_objects_v2)
+  ├─ SFTPScanner   (checksum = remotely-computed MD5 via md5sum)
+  └─ S3Scanner     (checksum = S3 ETag from list_objects_v2;
+                    overrides verify_integrity to skip multi-part ETags)
 ```
 
 ### 6.3 Interface stub
 
 ```python
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 class BaseScanner(ABC):
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: object) -> None:
         self._config = config
 
     @abstractmethod
@@ -854,17 +859,32 @@ class BaseScanner(ABC):
         ...
 
     @abstractmethod
-    def download_to(self, remote_path: str, local_path: Path) -> None: ...
+    def download_to(self, remote_path: str, local_path: Path) -> str:
+        """Download the file and return its local hex digest (computed inline,
+        no second file read).  The caller can pass this to verify_integrity().
+        """
+        ...
 
     @abstractmethod
     def close(self) -> None: ...
+
+    def verify_integrity(self, local_checksum: str, remote_checksum: str) -> bool:
+        """Concrete base implementation — direct equality check.
+        Correct for any transport whose checksum is a plain hex digest (e.g. SFTP md5sum).
+        Subclasses may override for format-specific logic (see S3Scanner).
+        """
+        match = local_checksum == remote_checksum
+        if not match:
+            logger.error("verify_integrity FAILED — local=%r, remote=%r",
+                         local_checksum, remote_checksum)
+        return match
 ```
 
 ### 6.4 Factory dispatch
 
-Factory dispatch lives in `services/digitize/connectors/scanner.py`:
+Factory dispatch lives in `services/digitize/connectors/scanner_factory.py`:
 
-- `ssh` → `SFTPScanner`
+- `ssh` → `SFTPScanner`  *(placeholder — implemented in a future PR)*
 - `s3` → `S3Scanner`
 
 ---
@@ -909,60 +929,72 @@ def scan(self) -> list[tuple[str, str]]:
 
 ### 7.2 S3 scanner
 
-**New file:** `services/digitize/connectors/s3_scanner.py`
+**File:** `services/digitize/connectors/s3_scanner.py`
 
 **Detailed design:** [S3 Scanner — Detailed Design Proposal](./s3-scanner-proposal.md)
 
 Behavior:
 
 - Auto-detect provider (AWS S3 or IBM COS) from `endpoint_url` hostname
-- Build boto3 client per tick using `IBMCOSConnector._build_client()`
+- Build boto3 client per tick in `connect()`
 - List objects via `list_objects_v2` paginator — yields `(key, checksum)` where checksum = S3 ETag; **the full list is returned without filtering**
 - Download files on demand (only those the worker places on `ingest_list`)
-- Store checksum in `connector_document_checksum.checksum` and `documents.metadata.source_checksum`
+- `download_to()` streams through `_HashingWriter` (inline MD5) and returns the local hex digest — no second file read
+- `verify_integrity()` overrides the base: skips the check for multi-part ETags (`<hex>-N`) since the ETag is `MD5(raw_part_digests)` and cannot be reproduced locally; delegates single-part ETags to the base equality check
+- Store only `source_checksum` in `connector_document_checksum.checksum` and `documents.metadata.source_checksum`
 
-S3 scan sketch:
+S3 scan + download sketch:
 
 ```python
 def scan(self) -> list[tuple[str, str]]:
-    all_files = []
-    for key, checksum in self._list_document_keys():
-        all_files.append((key, checksum))
-    return all_files
+    self._require_connected()
+    return list(self._list_document_keys())
 
 
-def download_and_register(self, key: str, checksum: str, staging_dir: Path) -> str:
-    local_path = staging_dir / Path(key).name
+def download_to(self, remote_path: str, local_path: Path) -> str:
+    self._require_connected()
     with open(local_path, "wb") as fh:
-        self._client.download_fileobj(Bucket=self._cfg.bucket_name, Key=key, Fileobj=fh)
-    doc_id = run_ingest_pipeline(local_path, connector_id=self._connector_id)
-    set_document_metadata(doc_id, {
-        "source_checksum": checksum,
-        "source_type":     "s3",
-        "bucket":          self._cfg.bucket_name,
-        "key":             key,
-    })
-    return doc_id
+        writer = _HashingWriter(fh)
+        self._client.download_fileobj(
+            Bucket=self._cfg.bucket_name, Key=remote_path, Fileobj=writer,
+        )
+    return writer.hexdigest   # local MD5, returned to caller for integrity check
+
+
+def verify_integrity(self, local_checksum: str, remote_checksum: str) -> bool:
+    if "-" in remote_checksum:   # multi-part ETag — cannot verify locally
+        return True
+    return super().verify_integrity(local_checksum, remote_checksum)
 ```
 
-**boto3 client construction** (provider auto-detected from `endpoint_url`):
+**boto3 client construction** — `endpoint_url` always forwarded when present; `addressing_style` set per provider to avoid boto3 path-style/virtual-hosted conflicts:
 
 ```python
-is_aws = "amazonaws.com" in cfg.endpoint_url
+addressing_style = "virtual" if self._cfg.is_aws else "path"
 
-client = boto3.Session(
-    aws_access_key_id=cfg.access_key_id,
-    aws_secret_access_key=cfg.secret_access_key,
-    region_name=_region_from_endpoint(cfg.endpoint_url),
-).client(
-    "s3",
-    config=botocore.config.Config(
-        signature_version="s3v4",
-        s3={"addressing_style": "auto" if is_aws else "path"},
-    ),
-    **({} if is_aws else {"endpoint_url": cfg.endpoint_url}),
+session = boto3.Session(
+    aws_access_key_id=self._cfg.access_key_id or None,
+    aws_secret_access_key=self._cfg.secret_access_key or None,
+    region_name=self._cfg.effective_region,
 )
+client_kwargs = {
+    "service_name": "s3",
+    "config": botocore.config.Config(
+        signature_version="s3v4",
+        s3={"addressing_style": addressing_style},
+    ),
+    "verify": self._cfg.verify_ssl,
+}
+if self._cfg.endpoint_url:
+    client_kwargs["endpoint_url"] = self._cfg.endpoint_url
+
+client = session.client(**client_kwargs)
 ```
+
+| Provider | `addressing_style` | `endpoint_url` forwarded |
+|---|---|---|
+| AWS S3 | `"virtual"` — `<bucket>.s3.<region>.amazonaws.com/<key>` | Yes (when supplied) |
+| IBM COS | `"path"` — `<host>/<bucket>/<key>` | Yes |
 
 ---
 
@@ -1339,12 +1371,12 @@ All connector DB functions from §5.1:
 
 ### PR 4 — Scanner Abstraction + SFTP Scanner
 
-**Files touched:** `connectors/base_scanner.py`, `connectors/scanner.py`, `connectors/sftp_scanner.py`
+**Files touched:** `connectors/base_scanner.py`, `connectors/scanner_factory.py`, `connectors/sftp_scanner.py`
 
 **What's to build:**
-- `BaseScanner` ABC with `connect()`, `scan()`, `download_to()`, `close()`
-- `build_scanner()` factory — dispatches on `type`
-- `SFTPScanner` — Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote MD5 via `ssh.exec_command(f'md5sum "{remote_file_path}"')`, staged download; `scan()` returns **all** files
+- `BaseScanner` ABC with `connect()`, `scan()`, `download_to() -> str`, `close()`, and concrete `verify_integrity()`
+- `build_scanner()` factory in `scanner_factory.py` — dispatches on `type`; SFTP placeholder commented until implemented
+- `SFTPScanner` — Paramiko connection (SFTP + SSH), recursive walk, extension filter, remote MD5 via `ssh.exec_command(f'md5sum "{remote_file_path}"')`, staged download; `scan()` returns **all** files; inherits base `verify_integrity()` (plain equality check is correct for SFTP MD5)
 
 **How to test:**
 - Unit test against a local mock SFTP server (e.g. `pytest-sftpserver` or `paramiko.SFTPServer` in a thread)
@@ -1355,17 +1387,22 @@ All connector DB functions from §5.1:
 
 ---
 
-### PR 5 — S3 Scanner
+### PR 5 — S3 Scanner ✅ Implemented
 
-**Files touched:** `connectors/s3_scanner.py`
+**Files touched:** `connectors/s3_scanner.py`, `connectors/config.py`, `connectors/scanner_factory.py`, `connectors/__init__.py`, `tests/test_connector_scanners.py`, `scripts/test_s3_connector.py`
 
-**What's to build:**
-- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()`, staged download; `scan()` returns **all** allowed objects without dedup filtering; checksum (S3 ETag) registered via `add_connector_checksum_entry()` on job completion; `set_document_metadata()` stores checksum and key. `upsert_file_checksum()` must NOT be called.
+**What was built:**
+- `S3Scanner` — boto3 `list_objects_v2` paginator, extension filter, `download_fileobj()` with inline MD5 via `_HashingWriter`; `scan()` returns **all** allowed objects without dedup filtering; `download_to()` returns local MD5 hex digest; `verify_integrity()` overrides base to skip multi-part ETags; checksum (S3 ETag) registered via `add_connector_to_membership()` on job completion; `set_document_metadata()` stores **only `source_checksum`**; `upsert_file_checksum()` is NOT called
+- `S3ConnectorConfig` — pydantic model with provider auto-detection, `effective_region` (includes IBM COS cross-region alias resolution: `us→us-south`, `eu→eu-de`, `ap→jp-tok`), `from_connection_details()` factory
+- `build_scanner()` factory in `scanner_factory.py` — accepts dict or ORM row
+- 39 unit tests — all passing (`tests/test_connector_scanners.py`)
+- Manual smoke-test script (`scripts/test_s3_connector.py`) — connect → list → download
 
-**How to test:**
-- Unit test with `moto` (mock AWS) — assert listing, extension filtering, and download
-- Assert `scan()` returns ALL allowed objects without pre-filtering against known_checksums
-- Assert `build_scanner("s3", config)` returns an `S3Scanner` instance
+**Key decisions vs original design:**
+- `download_to()` return type changed `None → str` (returns local MD5 for integrity verification)
+- No sidecar `.meta.json` — ingestion pipeline uses other means for checksum handling
+- `endpoint_url` always forwarded to boto3; `addressing_style` set explicitly per provider (`"virtual"` for AWS, `"path"` for COS) instead of conditionally withholding the URL
+- `verify_integrity()` added to `BaseScanner` as a concrete overridable method (not in original design)
 
 ---
 
