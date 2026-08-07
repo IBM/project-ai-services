@@ -1259,7 +1259,7 @@ def _classify(
 
 **New file:** `services/digitize/connectors/scheduler.py`
 
-`ConnectorScheduler` is a thin wrapper around an APScheduler `AsyncScheduler` singleton. It manages one `IntervalTrigger` job per connector and is the sole entry point for starting, stopping, and recovering sync jobs.
+`ConnectorScheduler` is a thin wrapper around an APScheduler `AsyncScheduler` singleton backed by a `PostgresDataStore`. It manages one `IntervalTrigger` job per connector and is the sole entry point for starting, stopping, and recovering sync jobs.
 
 ### 9.1 Responsibilities
 
@@ -1272,12 +1272,25 @@ PUT does not reschedule the job — `_run_tick` reads config from the DB at the 
 
 ### 9.2 Scheduler setup stub
 
+Jobs are stored in Postgres via APScheduler's `AsyncSQLAlchemyDataStore` so that job state survives process restarts. An event broker is not configured — this is intentional for the current single-instance deployment. It can be added later (e.g. `AsyncpgEventBroker`) when scaling to multiple instances.
+
 ```python
 from apscheduler import AsyncScheduler
+from apscheduler.datastores.async_sqlalchemy import AsyncSQLAlchemyDataStore
 from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy.ext.asyncio import create_async_engine
 
-# Module-level singleton — started in lifespan()
-_scheduler: AsyncScheduler = AsyncScheduler()
+from common.db.connection import get_database_url
+
+def _make_async_db_url() -> str:
+    """Convert the shared PostgreSQL URL to an asyncpg-compatible URL."""
+    return get_database_url().replace("postgresql://", "postgresql+asyncpg://", 1)
+
+
+# Module-level objects — initialised in lifespan()
+_async_engine = create_async_engine(_make_async_db_url())
+_data_store = AsyncSQLAlchemyDataStore(_async_engine)
+_scheduler: AsyncScheduler = AsyncScheduler(data_store=_data_store)
 
 
 async def register_connector_job(connector_id: str, interval_seconds: int) -> None:
@@ -1308,19 +1321,29 @@ async def trigger_now(connector_id: str) -> None:
     )
 ```
 
+**New dependencies** (add to `services/digitize/requirements.txt`):
+
+```
+apscheduler[asyncpg]
+```
+
+> `asyncpg` is the async Postgres driver required by `AsyncSQLAlchemyDataStore`. The `[asyncpg]` extra installs it alongside APScheduler.
+
 ### 9.3 Lifecycle
 
-Started and stopped in the FastAPI `lifespan()` hook:
+Started and stopped in the FastAPI `lifespan()` hook. Because job state lives in Postgres, the scheduler rehydrates all jobs from the data store on startup automatically. `register_connector_job()` is still called for each known connector with `replace_existing=True` to re-register any connector whose interval or next-run-time may have drifted while the instance was down.
 
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await _scheduler.start_in_background()
-    # Recover jobs for all persisted connectors
-    for connector in list_connectors():
-        await register_connector_job(connector.id, connector.sync_interval_seconds)
-    yield
-    await _scheduler.shutdown()
+    async with AsyncScheduler(data_store=_data_store) as scheduler:
+        _scheduler = scheduler
+        # Re-register jobs so interval/next_run_time stay consistent with DB config.
+        # replace_existing=True makes this a no-op for jobs that are already current.
+        for connector in list_connectors():
+            await register_connector_job(connector.id, connector.sync_interval_seconds)
+        yield
+    # Scheduler shuts down automatically on async-context exit.
 ```
 
 ![Scheduler Job Lifecycle](scheduler-lifecycle.svg)
@@ -1331,7 +1354,7 @@ async def lifespan(app: FastAPI):
 
 ### 10.1 Concurrency Model
 
-APScheduler runs jobs as coroutines on the same asyncio event loop as FastAPI/Uvicorn — fully async-native, no thread-pool overhead. `max_instances=1` on each job ensures no two ticks for the same connector overlap. Cross-connector concurrency (two different connectors ticking simultaneously) is safe — all shared state is protected by DB-level `ON CONFLICT DO NOTHING` constraints on `connector_document_checksum`.
+APScheduler runs jobs as coroutines on the same asyncio event loop as FastAPI/Uvicorn — fully async-native, no thread-pool overhead. `max_instances=1` on each job ensures no two ticks for the same connector overlap within the process. Cross-connector concurrency (two different connectors ticking simultaneously) is safe — all shared state is protected by DB-level `ON CONFLICT DO NOTHING` constraints on `connector_document_checksum`.
 
 A failing tick for one connector does not affect other connectors' scheduled jobs.
 
@@ -1346,7 +1369,7 @@ APScheduler's `IntervalTrigger` will fire the next scheduled tick regardless —
 
 ### 10.3 Lifespan Recovery
 
-On FastAPI startup: `_scheduler.start_in_background()` → iterate `list_connectors()` → call `register_connector_job()` for each. Jobs use `replace_existing=True` so re-registration on repeated startups is safe. No catalog re-push is needed.
+Because job state is persisted in Postgres, the instance that restarts automatically picks up the correct next-run-times from the data store. `register_connector_job()` is still called during lifespan startup with `replace_existing=True` to ensure interval and next-run-time are consistent with the current DB config; for jobs that are already up-to-date this is a cheap no-op.
 
 ### 10.4 No-Overlap Guard on `POST /sync`
 
@@ -1371,9 +1394,9 @@ If no row is returned, the endpoint returns `202` immediately without dispatchin
 
 > **Future:** when task cancellation is supported, DELETE will cancel the running task and wait for cleanup rather than returning `409`.
 
-### 10.6 Multi-Process Caveat
+### 10.6 Multi-Instance Consideration
 
-APScheduler with the default in-memory job store works correctly with a **single Uvicorn process**. If the service is scaled to multiple processes (e.g. Gunicorn + multiple Uvicorn processes), each process would register its own scheduler and fire duplicate ticks. Mitigation options if multi-process scaling is needed: switch to APScheduler's `SQLAlchemyJobStore` with a distributed lock, or move sync scheduling to a dedicated process or task queue (e.g. Celery, RQ).
+The current deployment runs a **single `digitize` instance**. The `AsyncSQLAlchemyDataStore` already persists jobs to Postgres, which is the prerequisite for scaling. When multiple instances are needed, add an `AsyncpgEventBroker` to the scheduler construction (§9.2) — this enables `LISTEN`/`NOTIFY`-based coordination so instances are notified of job changes in real time rather than polling. APScheduler's data-store advisory locks will then prevent duplicate ticks across instances with no other infrastructure changes required.
 
 ---
 
@@ -1549,24 +1572,38 @@ Assemble the full async coroutine (§8.3):
 
 ### PR 7 — Scheduler + Lifespan Recovery + `POST /sync` Dispatch
 
-**Files touched:** `services/digitize/connectors/scheduler.py`, `services/digitize/app.py` (lifespan hook), connector router/handler
+**Files touched:** `services/digitize/connectors/scheduler.py`, `services/digitize/app.py` (lifespan hook), connector router/handler, `services/digitize/requirements.txt`
 
 This PR wires the scheduler into the application and completes the last unimplemented endpoint piece.
 
+**Step 0 — Dependency**
+
+Add `apscheduler[asyncpg]` to `services/digitize/requirements.txt`. This pulls in `asyncpg` alongside APScheduler, which is required by `AsyncSQLAlchemyDataStore` and `AsyncpgEventBroker`.
+
 **Step 1 — `ConnectorScheduler` module**
 
-Create `scheduler.py` with the APScheduler `AsyncScheduler` singleton and three public functions (§9.2):
+Create `scheduler.py` with the APScheduler `AsyncScheduler` singleton backed by `AsyncSQLAlchemyDataStore` + `AsyncpgEventBroker`, and three public functions (§9.2):
 
+- `_make_async_db_url()` — converts the shared `postgresql://` URL from `get_database_url()` to `postgresql+asyncpg://`
+- Module-level `_async_engine`, `_data_store`, `_scheduler` constructed at import time
 - `register_connector_job(connector_id, interval_seconds)` — `IntervalTrigger`, `max_instances=1`, `replace_existing=True`, `next_run_time=datetime.now(UTC)`
 - `remove_connector_job(connector_id)` — `await _scheduler.remove_job(connector_id)`
 - `trigger_now(connector_id)` — one-shot `add_job` with `replace_existing=True`; used only by `POST /sync`
 
 **Step 2 — Lifespan hook**
 
-In `app.py`:
+In `app.py`, use the scheduler as an `async with` context manager (it starts and shuts down automatically):
 
-- On startup: `await _scheduler.start_in_background()` → iterate `list_connectors()` → `register_connector_job(c.id, c.sync_interval_seconds)` for each
-- On shutdown: `await _scheduler.shutdown()`
+```python
+async with AsyncScheduler(data_store=_data_store) as scheduler:
+    _scheduler = scheduler
+    for connector in list_connectors():
+        await register_connector_job(connector.id, connector.sync_interval_seconds)
+    yield
+```
+
+- The `async with` block replaces the old `start_in_background()` / `shutdown()` pair.
+- `register_connector_job()` is called for every known connector with `replace_existing=True` so that interval/next-run-time are up-to-date; it is a no-op when the job is already current in the data store.
 
 **Step 3 — Wire `POST /v1/connectors`**
 
@@ -1592,9 +1629,9 @@ In the connector router, complete the endpoint (§3.7):
 - `remove_connector_job` — assert `remove_job` called with the correct `connector_id`
 - `trigger_now` — assert `add_job` called with `replace_existing=True` and no `IntervalTrigger`
 - Lifespan hook — start app with 2 connectors in DB: assert `register_connector_job` called for each on startup
-- Lifespan hook — assert `_scheduler.shutdown()` called on app teardown
-- `POST /v1/connectors` integration test — assert scheduler job registered after successful attach
-- `DELETE /v1/connectors/{id}` integration test — assert job removed before DB teardown; assert `409` returned if `sync_status == 'syncing'`
+- Lifespan hook — assert scheduler context exits cleanly (no explicit `shutdown()` call needed)
+- `POST /v1/connectors` integration test — assert scheduler job registered after successful attach; job is visible in the data store (survives a scheduler restart)
+- `DELETE /v1/connectors/{id}` integration test — assert job removed from data store before DB teardown; assert `409` returned if `sync_status == 'syncing'`
 - `POST /sync` — idle connector: assert `202`, `_run_tick` dispatched as a background task, sync-log row opened
 - `POST /sync` — already syncing: assert `202` returned immediately, no second task dispatched, no new sync-log row inserted
 - `POST /sync` — unknown connector: assert `404`
