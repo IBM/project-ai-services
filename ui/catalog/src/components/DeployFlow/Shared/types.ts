@@ -71,3 +71,19 @@ export type SharedDeployFlowAction =
       payload: boolean;
     }
   | { type: typeof SHARED_ACTION_TYPES.RESET_STATE };
+
+export interface BaseDeployFlowProps {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}
+
+export interface BaseDeployFlowState {
+  currentStep: number;
+  isDeploying: boolean;
+  isEditing: boolean;
+  hasInsufficientResources: boolean;
+  deployError: string | null;
+  formData: DeployFormData;
+  showStepOneNameError: boolean;
+}

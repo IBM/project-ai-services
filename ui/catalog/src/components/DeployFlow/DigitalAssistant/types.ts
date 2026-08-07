@@ -2,9 +2,9 @@ import type { DeployOptionsResponse } from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
 import type {
-  DeployFormData,
   ServiceConfig as BaseServiceConfig,
   BaseStepProps,
+  BaseDeployFlowState,
   SharedDeployFlowAction,
 } from "../Shared/types";
 
@@ -13,23 +13,10 @@ export interface ServiceConfig extends BaseServiceConfig {
   inferenceBackend?: string;
 }
 
-export interface DeployFlowProps {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: () => void;
-}
-
-export interface DeployFlowState {
-  currentStep: number;
+export interface DeployFlowState extends BaseDeployFlowState {
   isLoading: boolean;
-  isDeploying: boolean;
-  isEditing: boolean;
-  hasInsufficientResources: boolean;
   error: string | null;
-  deployError: string | null;
   deployToastOpen: boolean;
-  formData: DeployFormData;
-  showStepOneNameError: boolean;
 }
 
 export const ACTION_TYPES = {

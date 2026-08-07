@@ -2,27 +2,18 @@ import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
 import type {
-  DeployFormData,
   BaseStepProps,
+  BaseDeployFlowProps,
+  BaseDeployFlowState,
   SharedDeployFlowAction,
 } from "../Shared/types";
 
-export interface ServicesDeployFlowProps {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: () => void;
+export interface ServicesDeployFlowProps extends BaseDeployFlowProps {
   preSelectedServiceId?: string;
 }
 
-export interface DeployFlowState {
-  currentStep: number;
-  isDeploying: boolean;
-  isEditing: boolean;
-  hasInsufficientResources: boolean;
-  deployError: string | null;
-  formData: DeployFormData;
+export interface DeployFlowState extends BaseDeployFlowState {
   selectedServiceId: string | null;
-  showStepOneNameError: boolean;
 }
 
 export const ACTION_TYPES = {
