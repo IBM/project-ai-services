@@ -38,6 +38,7 @@ type Runtime interface {
 	InspectContainer(nameOrId string) (*types.Container, error)
 	ContainerExists(nameOrID string) (bool, error)
 	ContainerLogs(containerNameOrID string) error
+	ExecInContainerWithCmd(podName, containerName string, command []string) (string, error)
 
 	// Network operations
 	ListRoutes(labelSelector string) ([]types.Route, error)
