@@ -14,6 +14,8 @@ var errOpenShiftNotSupported = errors.New("OpenShift runtime is not yet supporte
 
 // OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
 // It embeds ApplicationServiceBase for all shared DB operations.
+//
+// TODO(OCP): set base.DeploymentRegistry = NewDeploymentRegistry() in the OpenShift constructor when CreateApplication is implemented.
 type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
@@ -35,5 +37,3 @@ func (s *OpenShiftApplicationService) GetApplicationResources(_ context.Context,
 func (s *OpenShiftApplicationService) ApplicationsPs(_ context.Context, _ uuid.UUID) (*types.ApplicationPSResponse, error) {
 	return nil, errOpenShiftNotSupported
 }
-
-// Made with Bob

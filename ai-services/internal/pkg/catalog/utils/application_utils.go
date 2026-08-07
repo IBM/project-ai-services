@@ -16,7 +16,15 @@ import (
 )
 
 // HandleDeploymentStepError updates the application status to Error and logs the failure.
+// If the context has already been cancelled (e.g. a mid-deployment delete), it exits
+// silently so the deletion goroutine retains ownership of the application status.
 func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, stepContext string, err error) {
+	if ctx.Err() != nil {
+		logger.InfofCtx(ctx, "Deployment step %q for %s cancelled (deletion in progress)\n", stepContext, appID)
+
+		return
+	}
+
 	errMsg := fmt.Sprintf("%s: %v", stepContext, err)
 	if updateErr := UpdateApplicationStatus(ctx, appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status: %v\n", updateErr)
