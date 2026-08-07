@@ -74,25 +74,25 @@ class TestAlreadyExistsFileModel:
             filename="report.pdf",
             existing_doc_id="doc-old-1",
             existing_doc_name="old-report.pdf",
-            file_hash="sha256:abc123",
+            file_hash="abc123",
         )
         assert obj.filename == "report.pdf"
         assert obj.existing_doc_id == "doc-old-1"
         assert obj.existing_doc_name == "old-report.pdf"
-        assert obj.file_hash == "sha256:abc123"
+        assert obj.file_hash == "abc123"
 
     def test_model_dump(self):
         obj = AlreadyExistsFile(
             filename="a.pdf",
             existing_doc_id="d1",
             existing_doc_name="a_orig.pdf",
-            file_hash="sha256:ff",
+            file_hash="ff",
         )
         assert obj.model_dump() == {
             "filename": "a.pdf",
             "existing_doc_id": "d1",
             "existing_doc_name": "a_orig.pdf",
-            "file_hash": "sha256:ff",
+            "file_hash": "ff",
         }
 
 
@@ -207,7 +207,7 @@ class TestInitializeJobStateAlreadyExists:
             filename=filename,
             existing_doc_id="doc-existing-1",
             existing_doc_name="old.pdf",
-            file_hash="sha256:deadbeef",
+            file_hash="deadbeef",
         )
 
     def test_create_job_includes_already_exists_filenames(self):
@@ -275,7 +275,7 @@ class TestInitializeJobStateAlreadyExists:
         meta = skipped_call[1]["extra_metadata"]
         assert meta["existing_doc_id"] == "doc-existing-1"
         assert meta["existing_doc_name"] == "old.pdf"
-        assert meta["file_hash"] == "sha256:deadbeef"
+        assert meta["file_hash"] == "deadbeef"
 
     def test_no_already_exists_files_does_not_call_extra_create(self):
         mock_create_job = Mock()
@@ -403,13 +403,13 @@ class TestCreateDocumentNewParams:
             extra_metadata={
                 "existing_doc_id": "doc-old",
                 "existing_doc_name": "original.pdf",
-                "file_hash": "sha256:abc",
+                "file_hash": "abc",
             },
         )
         metadata = call_args[1]["metadata"]
         assert metadata["existing_doc_id"] == "doc-old"
         assert metadata["existing_doc_name"] == "original.pdf"
-        assert metadata["file_hash"] == "sha256:abc"
+        assert metadata["file_hash"] == "abc"
         assert "pages" in metadata  # base fields preserved
 
     def test_no_extra_metadata_keeps_base_fields(self):
@@ -444,7 +444,7 @@ class TestCategorizeFieldsNewKeys:
     into metadata_fields, not top_level_fields."""
 
     def test_file_hash_goes_to_metadata(self):
-        meta, top = _categorize_fields({"file_hash": "sha256:abc"})
+        meta, top = _categorize_fields({"file_hash": "abc"})
         assert "file_hash" in meta
         assert "file_hash" not in top
 
@@ -466,7 +466,7 @@ class TestCategorizeFieldsNewKeys:
     def test_mixed_fields_split_correctly(self):
         meta, top = _categorize_fields({
             "status": DocStatus.COMPLETED,
-            "file_hash": "sha256:abc",
+            "file_hash": "abc",
             "pages": 5,
         })
         assert "file_hash" in meta
@@ -547,10 +547,10 @@ class TestUpdateDocMetadataChecksumRegistration:
         mgr = DatabaseStatusManager("job-1")
         mgr.update_doc_metadata("doc-1", {
             "status": DocStatus.COMPLETED,
-            "file_hash": "sha256:abc123",
+            "file_hash": "abc123",
         })
 
-        mock_db_manager.upsert_file_checksum.assert_called_once_with("sha256:abc123", "doc-1")
+        mock_db_manager.upsert_file_checksum.assert_called_once_with("abc123", "doc-1")
 
     def test_checksum_not_upserted_without_file_hash(self, mock_db_manager):
         mock_db_manager.get_document_by_id.return_value = Mock(
@@ -574,7 +574,7 @@ class TestUpdateDocMetadataChecksumRegistration:
         mgr = DatabaseStatusManager("job-1")
         mgr.update_doc_metadata("doc-1", {
             "status": DocStatus.IN_PROGRESS,
-            "file_hash": "sha256:abc",
+            "file_hash": "abc",
         })
 
         mock_db_manager.upsert_file_checksum.assert_not_called()
@@ -862,7 +862,7 @@ class TestDatabaseManagerUpsertFileChecksum:
         session = MagicMock()
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            DatabaseManager.upsert_file_checksum("sha256:abc", "doc-1")
+            DatabaseManager.upsert_file_checksum("abc", "doc-1")
 
         session.execute.assert_called_once()
 
@@ -875,7 +875,7 @@ class TestDatabaseManagerUpsertFileChecksum:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
             # Must not propagate the error
-            DatabaseManager.upsert_file_checksum("sha256:abc", "doc-1")
+            DatabaseManager.upsert_file_checksum("abc", "doc-1")
 
 
 @pytest.mark.unit
@@ -888,7 +888,7 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            result = DatabaseManager.find_completed_document_by_hash("sha256:missing", "ingestion")
+            result = DatabaseManager.find_completed_document_by_hash("missing", "ingestion")
 
         assert result is None
 
@@ -910,7 +910,7 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            result = DatabaseManager.find_completed_document_by_hash("sha256:abc", "ingestion")
+            result = DatabaseManager.find_completed_document_by_hash("abc", "ingestion")
 
         assert result is mock_doc
         session.expunge.assert_called_once_with(mock_doc)
@@ -924,7 +924,7 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
             # DB errors must NOT raise — caller treats file as novel
-            result = DatabaseManager.find_completed_document_by_hash("sha256:x", "ingestion")
+            result = DatabaseManager.find_completed_document_by_hash("x", "ingestion")
 
         assert result is None
 
@@ -934,7 +934,7 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            DatabaseManager.find_completed_document_by_hash("sha256:abc", "digitization")
+            DatabaseManager.find_completed_document_by_hash("abc", "digitization")
 
         session.scalar.assert_called_once()
 

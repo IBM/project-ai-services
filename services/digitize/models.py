@@ -37,7 +37,7 @@ class AlreadyExistsFile(BaseModel):
     filename: str = Field(..., description="Original filename of the skipped file")
     existing_doc_id: str = Field(..., description="doc_id of the already-ingested document")
     existing_doc_name: str = Field(..., description="Name of the already-ingested document")
-    file_hash: str = Field(..., description="SHA-256 hash that matched, e.g. 'sha256:e3b0...'")
+    file_hash: str = Field(..., description="MD5 hash that matched.")
 
 
 class PaginationInfo(BaseModel):
@@ -80,6 +80,13 @@ class DocumentDetailResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    duplicate_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of shadow 'already_exists' document entries that point to this "
+            "document as their original. These duplicates will also be removed on delete."
+        ),
+    )
 
 
 class DocumentContentResponse(BaseModel):
