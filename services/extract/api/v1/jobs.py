@@ -76,7 +76,7 @@ def _validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
             415, "UNSUPPORTED_FILE_TYPE",
             f"Only .txt and .md files are accepted. Received: {raw_ext}",
         )
-    return filename, ext.lstrip(".")
+    return filename, (ext or "").lstrip(".")
 
 
 def _resolve_schema(schema_id: str):
@@ -306,8 +306,8 @@ async def list_extract_jobs(
             schema_id=row.schema_id,
             status=row.status,
             document_name=row.document_name,
-            submitted_at=fmt_dt(row.submitted_at),
-            completed_at=fmt_dt(row.completed_at),
+            submitted_at=fmt_dt(row.submitted_at) or "",
+            completed_at=fmt_dt(row.completed_at) or "",
         )
         for row in rows
     ]
@@ -354,8 +354,8 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
             source_type=row.source_type
         ),
         metadata=row.job_metadata,
-        submitted_at=fmt_dt(row.submitted_at),
-        completed_at=fmt_dt(row.completed_at),
+        submitted_at=fmt_dt(row.submitted_at) or "",
+        completed_at=fmt_dt(row.completed_at) or "",
         error=row.error,
     )
 
