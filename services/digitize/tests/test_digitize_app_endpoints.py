@@ -38,13 +38,27 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
 
     monkeypatch.setattr(digitize_app, "settings", fake_settings, raising=False)
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
-    # Patch queue-based admission: return 0 queued tasks so gate always passes.
-    monkeypatch.setattr(jobs_router.db_manager, "get_queued_counts", Mock(return_value={"ingestion": 0, "digitization": 0}))
-    # Stub out enqueue_conversion_tasks so tests don't touch the DB or read file pages.
+
+    # Build a single mock db_manager that covers all DB calls made by jobs.py.
+    # This must be set before TestClient is created so the patched reference is
+    # seen by every request handler.
+    mock_db_manager = Mock()
+    mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+    mock_db_manager.create_conversion_task = Mock(return_value=None)
+    # find_completed_document_by_hash returns None → every file is treated as novel.
+    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
+
+    # Stub out page count inside dg_util so enqueue_conversion_tasks doesn't read disk.
+    monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
+    # Stub out enqueue_conversion_tasks so tests don't insert DB rows.
     monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
+    # Stub out hash generation so tests don't need real file content.
+    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+
     # Stub out pipeline background tasks so TestClient doesn't execute them.
-    monkeypatch.setattr(jobs_router, "_run_digitize", AsyncMock())
-    monkeypatch.setattr(jobs_router, "_run_ingest", AsyncMock())
+    monkeypatch.setattr(jobs_router, "_run_digitize", Mock())
+    monkeypatch.setattr(jobs_router, "_run_ingest", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
@@ -53,13 +67,6 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # reset_db is now imported inside documents_router_module, not in app.py
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
-
-    # Stub out hash-based duplicate detection and queue-quota gate so tests
-    # run without a real DB.
-    mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
-    mock_hash_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
-    monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
     return TestClient(digitize_app.app)
 
@@ -271,11 +278,10 @@ class TestCreateJobs:
 
         # First file already exists; second is novel.
         mock_hash_db = Mock()
+        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         mock_hash_db.find_completed_document_by_hash = Mock(
             side_effect=[existing_doc, None]
         )
-        # get_queued_counts is called during queue-quota admission gate.
-        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         pdf_header = b"%PDF-1.4 test"
@@ -351,7 +357,8 @@ class TestJobsEndpoints:
             Mock(return_value={"job_id": "job-123", "status": JobStatus.COMPLETED.value}),
         )
         mock_delete = Mock()
-        # Patch delete_job on the object that jobs.py holds a reference to.
+        # jobs.py references db_manager through its own module namespace, which the
+        # fixture replaced with a mock.  Patch delete_job on that mock directly.
         monkeypatch.setattr(jobs_router_module.db_manager, "delete_job", mock_delete)
 
         response = digitize_test_client.delete("/v1/jobs/job-123")
@@ -516,6 +523,7 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 204
         reset_db_mock.assert_called_once()
+
 
 @pytest.mark.unit
 class TestImportExportEndpoints:
