@@ -12,8 +12,6 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	helmchart "helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
@@ -108,23 +106,6 @@ func SanitizeFilePath(path string) string {
 func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 	var files []*archive.BufferedFile
 
-	// Determine the values.yaml path for this chart's runtime
-	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
-	valuesPath := filepath.Join(catalogPath, runtimeStr, "values.yaml")
-
-	// Read and process @generate annotations in values.yaml once, before walking (only if the file exists)
-	var processedValuesData []byte
-	if _, err := fs.Stat(&assets.CatalogFS, valuesPath); err == nil {
-		valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
-		}
-		processedValuesData, err = utils.ProcessGenerateAnnotationsFromYAML(valuesData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process generate annotations: %w", err)
-		}
-	}
-
 	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -133,11 +114,6 @@ func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 		data, err := assets.CatalogFS.ReadFile(p)
 		if err != nil {
 			return err
-		}
-
-		// Use processed values.yaml data (with generated passwords) instead of the raw file
-		if filepath.ToSlash(p) == filepath.ToSlash(valuesPath) {
-			data = processedValuesData
 		}
 
 		rel := strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(catalogPath)+"/")
