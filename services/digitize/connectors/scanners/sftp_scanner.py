@@ -98,8 +98,15 @@ class SFTPScanner(BaseScanner):
         return local_md5
 
     def _remote_md5(self, remote_file_path: str) -> str:
-        _, stdout, _ = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
-        return stdout.read().decode().strip().split()[0]
+        _, stdout, stderr = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
+        output = stdout.read().decode().strip()
+        error_output = stderr.read().decode().strip()
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status != 0:
+            raise RuntimeError(
+                f"[sftp_scanner] Failed to compute md5 for {remote_file_path!r}: {error_output or output}"
+            )
+        return output.split()[0]
 
     def _walk_remote_tree(self, path: str) -> Iterator[str]:
         try:

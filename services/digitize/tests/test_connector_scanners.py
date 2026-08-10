@@ -721,11 +721,15 @@ class TestSFTPScannerScan:
             self._make_stat("report.pdf"),
             self._make_stat("manual.docx"),
         ]
-        mock_ssh.exec_command.side_effect = lambda cmd: (
-            None,
-            MagicMock(read=lambda: b"abc123  " + cmd.split('"')[1].encode()),
-            None,
-        )
+        def exec_command_side_effect(cmd):
+            stdout = MagicMock()
+            stdout.read.return_value = b"abc123  " + cmd.split('"')[1].encode()
+            stdout.channel.recv_exit_status.return_value = 0
+            stderr = MagicMock()
+            stderr.read.return_value = b""
+            return None, stdout, stderr
+
+        mock_ssh.exec_command.side_effect = exec_command_side_effect
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
@@ -743,11 +747,12 @@ class TestSFTPScannerScan:
             self._make_stat("readme.txt"),
             self._make_stat("archive.zip"),
         ]
-        mock_ssh.exec_command.return_value = (
-            None,
-            MagicMock(read=lambda: b"aabbcc  /data/report.pdf"),
-            None,
-        )
+        stdout = MagicMock()
+        stdout.read.return_value = b"aabbcc  /data/report.pdf"
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
@@ -774,11 +779,12 @@ class TestSFTPScannerScan:
             return []
 
         mock_sftp.listdir_attr.side_effect = listdir_attr_side_effect
-        mock_ssh.exec_command.return_value = (
-            None,
-            MagicMock(read=lambda: b"deadbeef  file"),
-            None,
-        )
+        stdout = MagicMock()
+        stdout.read.return_value = b"deadbeef  file"
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
@@ -803,15 +809,34 @@ class TestSFTPScannerScan:
         mock_sftp.listdir_attr.return_value = [self._make_stat("doc.pdf")]
 
         expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"
-        mock_ssh.exec_command.return_value = (
-            None,
-            MagicMock(read=lambda: f"{expected_md5}  /data/doc.pdf".encode()),
-            None,
-        )
+        stdout = MagicMock()
+        stdout.read.return_value = f"{expected_md5}  /data/doc.pdf".encode()
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
         assert result == [("/data/doc.pdf", expected_md5)]
+
+    def test_scan_raises_when_remote_md5_command_fails(self):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        mock_sftp.listdir_attr.return_value = [self._make_stat("doc.pdf")]
+
+        stdout = MagicMock()
+        stdout.read.return_value = b""
+        stdout.channel.recv_exit_status.return_value = 1
+        stderr = MagicMock()
+        stderr.read.return_value = b"md5sum: /data/doc.pdf: No such file or directory"
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        with pytest.raises(RuntimeError, match="Failed to compute md5"):
+            scanner.scan()
 
     def test_scan_skips_unreadable_dirs_gracefully(self):
         """An IOError from listdir_attr must be swallowed (logged, not raised)."""
@@ -835,11 +860,12 @@ class TestSFTPScannerScan:
             self._make_stat("a.pdf"),
             self._make_stat("b.pdf"),
         ]
-        mock_ssh.exec_command.return_value = (
-            None,
-            MagicMock(read=lambda: f"{same_md5}  file".encode()),
-            None,
-        )
+        stdout = MagicMock()
+        stdout.read.return_value = f"{same_md5}  file".encode()
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
