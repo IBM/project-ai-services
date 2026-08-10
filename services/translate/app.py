@@ -19,10 +19,18 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
+from lingua import Language
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.error_utils import http_exception_handler
-from common.misc_utils import set_log_level, get_logger, set_request_id, configure_uvicorn_logging
+from common.lang_utils import setup_language_detector
+from common.misc_utils import (
+    set_log_level,
+    get_logger,
+    set_request_id,
+    configure_uvicorn_logging,
+    create_llm_session,
+)
 from translate.settings import settings
 
 set_log_level(settings.common.app.log_level)
@@ -85,6 +93,17 @@ async def lifespan(app: FastAPI):
     # Initialise semaphores inside the running event loop.
     concurrency_manager.initialize()
     logger.info("✅ Concurrency semaphores initialized")
+
+    # Initialise shared requests.Session for blocking tokenize / vLLM calls.
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    logger.info("✅ LLM HTTP session initialized")
+
+    # Initialise lingua language detector (English + German are the v1 allowlist;
+    # Italian + French included for future-proofing and corpus sampling quality).
+    setup_language_detector(
+        [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH]
+    )
+    logger.info("✅ Language detector initialized")
 
     # Ensure cache directories exist.
     _ensure_cache_directories()
@@ -218,4 +237,3 @@ app.include_router(jobs_router, prefix="/v1/translate/jobs", tags=["jobs"])
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9000)
 
-# Made with Bob
