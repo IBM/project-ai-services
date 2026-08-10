@@ -172,7 +172,7 @@ async def list_schemas(
             schema_tokens=row.schema_tokens,
             examples_tokens=row.examples_tokens,
             custom_prompt_tokens=row.custom_prompt_tokens,
-            created_at=fmt_dt(row.created_at),
+            created_at=fmt_dt(row.created_at) or "",
         )
         for row in rows
     ]
@@ -218,7 +218,7 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
         schema_tokens=row.schema_tokens,
         examples_tokens=row.examples_tokens,
         custom_prompt_tokens=row.custom_prompt_tokens,
-        created_at=fmt_dt(row.created_at),
+        created_at=fmt_dt(row.created_at) or "",
     )
 
 

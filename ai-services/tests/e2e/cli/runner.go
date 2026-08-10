@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -1034,4 +1035,199 @@ func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (
 // The full dbmigrate subcommands require a live database; we verify help text in e2e.
 func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
 	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog failure runner helpers
+//
+// These functions are used exclusively by catalog_failure_test.go.  They wrap
+// raw exec.CommandContext calls (not runCLI) so that the combined output is
+// always returned to the caller even when the command exits non-zero — a
+// requirement for failure-test assertions that need to inspect the error text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogLoginMissingServer invokes `catalog login` without the required
+// --server flag.  cobra enforces required flags before RunE is called, so this
+// must fail with a "required flag(s) not set" message before touching the
+// network or any credentials.
+//
+// Returns combined stdout+stderr (always populated for flag errors) and the
+// exec error.
+func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		// --server is intentionally omitted.
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--server intentionally omitted)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (missing --server): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogLoginInvalidURL invokes `catalog login` with a --server value whose
+// URL scheme is neither http nor https.  validateServerURL() in login.go must
+// reject it in PreRunE before any network call is made.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		"--server", badURL,
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (bad URL %q expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), badURL,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (invalid URL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogWhoamiWithoutLogin invokes `catalog whoami` in a subprocess whose
+// HOME and XDG_CONFIG_HOME point to an empty temp directory, so no stored
+// credentials exist.  client.New() (called inside whoami's RunE) must fail.
+//
+// homeDir must be an existing, empty directory that the calling test owns.
+// Returns combined stdout+stderr and the exec error.
+func CatalogWhoamiWithoutLogin(ctx context.Context, cfg *config.Config, homeDir, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "whoami",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (HOME=%s — no credentials expected)",
+		cfg.AIServiceBin, strings.Join(args, " "), homeDir,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	// Redirect the user config directory so no real credentials are found.
+	// os.UserConfigDir() reads $HOME (Linux/macOS) and $XDG_CONFIG_HOME.
+	cmd.Env = filteredProcessEnv("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME")
+	cmd.Env = append(cmd.Env,
+		"HOME="+homeDir,
+		"XDG_CONFIG_HOME="+homeDir,
+	)
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog whoami (no credentials): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureUnpairedSSL invokes `catalog configure` with --ssl-cert but
+// without --ssl-key.  checkSSLFlagsPaired() in configure.go must reject it in
+// PreRunE before any state is modified.
+//
+// certPath can be any non-empty string — the flag validator only checks that
+// both flags are provided together; it does not read the file at this point.
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureUnpairedSSL(ctx context.Context, cfg *config.Config, certPath, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--ssl-cert", certPath,
+		// --ssl-key intentionally omitted to trigger the pairing check.
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--ssl-key omitted, pairing check expected)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (unpaired SSL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureInvalidPort invokes `catalog configure` with an --https-port
+// value outside the valid 1–65535 range.  validateConfigureFlags() in
+// configure.go must reject it in PreRunE before any deployment action runs.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureInvalidPort(ctx context.Context, cfg *config.Config, port int, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--https-port", fmt.Sprintf("%d", port),
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (port %d expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), port,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (invalid port %d): %w\n%s", port, err, output)
+	}
+
+	return output, nil
+}
+
+// filteredProcessEnv returns the current process environment (os.Environ) with
+// the named keys removed.  Used to strip HOME / XDG_CONFIG_HOME before
+// injecting test-isolated values into a subprocess.
+func filteredProcessEnv(excludeKeys ...string) []string {
+	exclude := make(map[string]struct{}, len(excludeKeys))
+	for _, k := range excludeKeys {
+		exclude[k] = struct{}{}
+	}
+
+	all := os.Environ()
+	filtered := make([]string, 0, len(all))
+
+	for _, pair := range all {
+		key := pair
+		if idx := strings.IndexByte(pair, '='); idx >= 0 {
+			key = pair[:idx]
+		}
+
+		if _, skip := exclude[key]; !skip {
+			filtered = append(filtered, pair)
+		}
+	}
+
+	return filtered
 }

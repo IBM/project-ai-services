@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useAuthStore } from "@/store/auth.store";
 import { logout, refreshAccessToken } from "@/services/auth";
-import { SESSION_CONFIG } from "@/constants/session.constants";
+import { SESSION_CONFIG } from "@/constants";
 import {
   getTimeUntilWarning,
   getTimeUntilLogout,
@@ -19,7 +19,6 @@ interface UseSessionTimeoutReturn {
   showWarning: boolean;
   timeRemaining: string;
   extendSession: () => void;
-  handleLogout: () => Promise<void>;
 }
 
 export const useSessionTimeout = (): UseSessionTimeoutReturn => {
@@ -61,48 +60,31 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
     }
   }, []);
 
-  const performLogout = useCallback(
-    async (logoutType: "auto" | "manual") => {
-      clearAllTimers();
+  const handleAutoLogout = useCallback(async () => {
+    clearAllTimers();
 
+    if (isMountedRef.current) {
+      setShowWarning(false);
+      showWarningRef.current = false;
+    }
+
+    try {
+      await logout();
+    } finally {
       if (isMountedRef.current) {
-        setShowWarning(false);
-        showWarningRef.current = false;
+        sessionStorage.setItem(
+          SESSION_STORAGE_KEYS.LOGOUT_REASON,
+          LogoutReason.INACTIVITY,
+        );
+        navigate(ROUTES.LOGIN, {
+          replace: true,
+          state: {
+            logoutReason: LogoutReason.INACTIVITY,
+          } as LoginLocationState,
+        });
       }
-
-      try {
-        await logout();
-      } finally {
-        if (isMountedRef.current) {
-          if (logoutType === "auto") {
-            sessionStorage.setItem(
-              SESSION_STORAGE_KEYS.LOGOUT_REASON,
-              LogoutReason.INACTIVITY,
-            );
-            navigate(ROUTES.LOGIN, {
-              replace: true,
-              state: {
-                logoutReason: LogoutReason.INACTIVITY,
-              } as LoginLocationState,
-            });
-          } else {
-            navigate(ROUTES.LOGOUT, { replace: true });
-          }
-        }
-      }
-    },
-    [navigate, clearAllTimers],
-  );
-
-  const handleAutoLogout = useCallback(
-    async () => performLogout("auto"),
-    [performLogout],
-  );
-
-  const handleManualLogout = useCallback(
-    async () => performLogout("manual"),
-    [performLogout],
-  );
+    }
+  }, [navigate, clearAllTimers]);
 
   const updateCountdown = useCallback(() => {
     const timeUntilLogout = getTimeUntilLogout(lastActivity);
@@ -237,6 +219,5 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
     showWarning,
     timeRemaining,
     extendSession: resetActivity,
-    handleLogout: handleManualLogout,
   };
 };

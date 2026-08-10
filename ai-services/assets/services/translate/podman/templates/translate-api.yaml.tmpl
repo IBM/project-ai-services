@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "translate-api-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+  annotations:
+    ai-services.io/routes: "9000:translate-api-{{ .InstanceSlug }}:api"
+    # ai-services.io/ports: "{{ or .Values.translate.port }}:9000"  # Uncomment to expose ports directly (bypasses Caddy)
+spec:
+  restartPolicy: always
+  volumes:
+    - name: translate-db-secret
+      secret:
+        secretName: "translate-db-secret-{{ .InstanceSlug }}"
+    {{- if .Values.llm.apiKey }}
+    - name: vllm-secret
+      secret:
+        secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
+    {{- end }}
+  initContainers:
+    - name: translate-db-init
+      image: "{{ .Values.translate.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/translate-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/translate-db-secret/password)
+          exec /var/venv/bin/python db/scripts/init_db.py
+      env:
+        - name: POSTGRES_HOST
+          value: "translate-db-{{ .InstanceSlug }}"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.translate.database }}"
+      volumeMounts:
+        - mountPath: /etc/secret/translate-db-secret
+          name: translate-db-secret
+          readOnly: true
+  containers:
+    - name: translate-api
+      image: "{{ .Values.translate.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+      args:
+        - |
+          export POSTGRES_USER=$(cat /etc/secret/translate-db-secret/username)
+          export POSTGRES_PASSWORD=$(cat /etc/secret/translate-db-secret/password)
+          {{- if .Values.llm.apiKey }}
+          export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+          {{- end }}
+          exec /var/venv/bin/python -m uvicorn translate.app:app \
+            --host 0.0.0.0 \
+            --port 9000 \
+            --loop uvloop \
+            --http httptools
+      env:
+        - name: POSTGRES_HOST
+          value: "translate-db-{{ .InstanceSlug }}"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.translate.database }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
+        - name: PORT
+          value: "9000"
+        - name: LLM_ENDPOINT
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
+        - name: LLM_MODEL
+          value: "{{ .Values.llm.model }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.llm.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.llm.maxBatchSize }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.translate.log_level }}"
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "1Gi"
+      ports:
+        - containerPort: 9000
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 9000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      volumeMounts:
+        - mountPath: /etc/secret/translate-db-secret
+          name: translate-db-secret
+          readOnly: true
+        {{- if .Values.llm.apiKey }}
+        - mountPath: /etc/secret/vllm-secret
+          name: vllm-secret
+          readOnly: true
+        {{- end }}
