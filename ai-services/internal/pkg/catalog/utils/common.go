@@ -27,11 +27,12 @@ var (
 
 // PodmanConfigureOptions contains the configuration for configuring the catalog service on Podman runtime.
 type PodmanConfigureOptions struct {
-	BaseDir     string
-	DomainName  string // Custom domain name for self-signed certificates
-	SSLCertPath string // Path to user-provided SSL certificate
-	SSLKeyPath  string // Path to user-provided SSL private key
-	HttpsPort   int
+	BaseDir           string
+	DomainName        string // Custom domain name for self-signed certificates
+	SSLCertPath       string // Path to user-provided SSL certificate
+	SSLKeyPath        string // Path to user-provided SSL private key
+	HttpsPort         int
+	WorkerGatewayPort int // gRPC worker gateway port; always active, default 9090
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
@@ -93,6 +94,9 @@ func extractConfigFromEnv(podEnv map[string]string, config *PodmanConfigureOptio
 	}
 	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
 		config.HttpsPort, _ = strconv.Atoi(value)
+	}
+	if value, ok := podEnv["WORKER_GATEWAY_PORT"]; ok {
+		config.WorkerGatewayPort, _ = strconv.Atoi(value)
 	}
 }
 

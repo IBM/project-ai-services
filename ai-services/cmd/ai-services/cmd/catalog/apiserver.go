@@ -64,7 +64,7 @@ func getOrGenerateSecretKey() (string, error) {
 }
 
 // runAPIServer initializes and starts the API server with the provided configuration.
-func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string) error {
+func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int) error {
 	secretKey, err := getOrGenerateSecretKey()
 	if err != nil {
 		return err
@@ -96,6 +96,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
 
 	// Initialize sync service for background DB-Pod synchronization
+	// TODO: implement sync service on remote machines
 	syncService, err := sync.NewSyncService(
 		applicationRepo,
 		serviceRepo,
@@ -137,6 +138,7 @@ func NewAPIServerCmd() *cobra.Command {
 		adminUserName          string
 		adminPasswordHash      string
 		runtimeType            string
+		workerGatewayPort      int
 	)
 
 	apiserverCmd := &cobra.Command{
@@ -165,7 +167,7 @@ Note:
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash)
+			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash, workerGatewayPort)
 		},
 	}
 
@@ -174,6 +176,7 @@ Note:
 	apiserverCmd.Flags().DurationVarP(&defaultRefreshTokenTTL, "refresh-token-ttl", "", defaultRefreshTokenTTL, "Time-to-live for refresh tokens")
 	apiserverCmd.Flags().StringVar(&adminUserName, "admin-username", "admin", "Username for the default admin user")
 	apiserverCmd.Flags().StringVar(&adminPasswordHash, "admin-password-hash", "", "Precomputed hash of the password for the default admin user")
+	apiserverCmd.Flags().IntVar(&workerGatewayPort, "workergateway-port", defaultWorkerGatewayPort, "Port for the gRPC worker gateway (always active, default 9090)")
 	common.ConfigureRuntimeFlag(apiserverCmd, &runtimeType)
 
 	return apiserverCmd
