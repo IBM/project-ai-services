@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.219
+  image: icr.io/ai-services-cicd/ai-services:v0.0.220
   runtime: ""
   adminPasswordHash: ""
   podman:
