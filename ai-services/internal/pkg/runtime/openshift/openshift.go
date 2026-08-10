@@ -649,7 +649,7 @@ func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
 //   - CPU  : rate(container_cpu_usage_seconds_total{pod="<name>",container!=""}[5m])
 //   - Memory: container_memory_working_set_bytes{pod="<name>",container!=""}
 //
-// Spyre card PCI addresses are read from the AIU_PCIE_IDS environment variable
+// Spyre card PCI addresses are read from the PCIDEVICE_IBM_COM_AIU_PF environment variable
 // set on each container in the pod spec (same convention as the Podman runtime).
 func (kc *OpenshiftClient) GetPodResources(podName string) (*types.PodResources, error) {
 	// Fetch the full pod spec to read container env vars for Spyre cards.
