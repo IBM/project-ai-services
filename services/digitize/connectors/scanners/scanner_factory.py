@@ -26,8 +26,9 @@ from typing import Any
 
 from common.misc_utils import get_logger
 from digitize.connectors.scanners.base_scanner import BaseScanner
-from digitize.connectors.scanners.config import S3ConnectorConfig
+from digitize.connectors.scanners.config import S3ConnectorConfig, SFTPConnectorConfig
 from digitize.connectors.scanners.s3_scanner import S3Scanner
+from digitize.connectors.scanners.sftp_scanner import SFTPScanner
 
 logger = get_logger("scanner_factory")
 
@@ -36,7 +37,7 @@ logger = get_logger("scanner_factory")
 # ---------------------------------------------------------------------------
 _REGISTRY: dict[str, tuple[type[BaseScanner], type]] = {
     "s3": (S3Scanner, S3ConnectorConfig),
-    # "ssh": (SFTPScanner, SFTPConnectorConfig),  # added in a future PR
+    "ssh": (SFTPScanner, SFTPConnectorConfig),
 }
 
 
@@ -86,6 +87,11 @@ def build_scanner(connector_row: Any) -> BaseScanner:
 
     if config_cls is S3ConnectorConfig:
         config = S3ConnectorConfig.from_connection_details(
+            connection_details,
+            allowed_extensions=allowed_extensions,
+        )
+    elif config_cls is SFTPConnectorConfig:
+        config = SFTPConnectorConfig.from_connection_details(
             connection_details,
             allowed_extensions=allowed_extensions,
         )

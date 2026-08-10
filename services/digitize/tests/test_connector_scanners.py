@@ -480,3 +480,550 @@ class TestBuildScanner:
         row = {"type": "ftp", "connection_details": {}, "allowed_extensions": []}
         with pytest.raises(ValueError, match="ftp"):
             build_scanner(row)
+
+
+# ---------------------------------------------------------------------------
+# Helpers — fake PEM key for unit tests (no real SSH needed)
+# ---------------------------------------------------------------------------
+
+# A minimal dummy PEM string that satisfies SFTPConnectorConfig validation
+# without being a real parseable key (the key is never sent to Paramiko in
+# unit tests — Paramiko is always mocked).
+_FAKE_PEM = "-----BEGIN RSA PRIVATE KEY-----\nFAKEKEYDATA\n-----END RSA PRIVATE KEY-----"
+
+
+def _make_sftp_config(**overrides) -> "SFTPConnectorConfig":
+    from digitize.connectors.scanners.config import SFTPConnectorConfig
+    defaults = dict(
+        host="sftp.example.com",
+        port=22,
+        username="user",
+        private_key_pem=_FAKE_PEM,
+        remote_path="/data",
+        allowed_extensions=[".pdf", ".docx"],
+    )
+    defaults.update(overrides)
+    return SFTPConnectorConfig(**defaults)
+
+
+def _make_sftp_scanner(**overrides) -> "SFTPScanner":
+    from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+    return SFTPScanner(_make_sftp_config(**overrides))
+
+
+# ---------------------------------------------------------------------------
+# SFTPConnectorConfig
+# ---------------------------------------------------------------------------
+
+class TestSFTPConnectorConfig:
+    def test_basic_construction(self):
+        cfg = _make_sftp_config()
+        assert cfg.host == "sftp.example.com"
+        assert cfg.port == 22
+        assert cfg.username == "user"
+        assert cfg.remote_path == "/data"
+        assert cfg.allowed_extensions == [".pdf", ".docx"]
+
+    def test_default_port_is_22(self):
+        cfg = _make_sftp_config()
+        assert cfg.port == 22
+
+    def test_default_remote_path_is_root(self):
+        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        cfg = SFTPConnectorConfig(
+            host="h",
+            username="u",
+            private_key_pem=_FAKE_PEM,
+        )
+        assert cfg.remote_path == "/"
+
+    def test_empty_host_raises(self):
+        with pytest.raises(ValueError, match="host"):
+            _make_sftp_config(host="  ")
+
+    def test_empty_username_raises(self):
+        with pytest.raises(ValueError, match="username"):
+            _make_sftp_config(username="")
+
+    def test_empty_private_key_raises(self):
+        with pytest.raises(ValueError, match="private_key_pem"):
+            _make_sftp_config(private_key_pem="  ")
+
+    def test_invalid_private_key_raises(self):
+        with pytest.raises(ValueError, match="PRIVATE KEY"):
+            _make_sftp_config(private_key_pem="not a pem string")
+
+    def test_allowed_extensions_without_dot_raises(self):
+        with pytest.raises(ValueError, match="'.'"):
+            _make_sftp_config(allowed_extensions=["pdf"])
+
+    def test_allowed_extensions_normalised_to_lowercase(self):
+        cfg = _make_sftp_config(allowed_extensions=[".PDF", ".DOCX"])
+        assert cfg.allowed_extensions == [".pdf", ".docx"]
+
+    def test_empty_remote_path_raises(self):
+        with pytest.raises(ValueError, match="remote_path"):
+            _make_sftp_config(remote_path="")
+
+    def test_from_connection_details(self):
+        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        details = {
+            "host": "sftp.example.com",
+            "username": "u",
+            "private_key_pem": _FAKE_PEM,
+        }
+        cfg = SFTPConnectorConfig.from_connection_details(
+            details, allowed_extensions=[".pdf"]
+        )
+        assert cfg.host == "sftp.example.com"
+        assert cfg.allowed_extensions == [".pdf"]
+
+    def test_from_connection_details_extensions_override(self):
+        """allowed_extensions kwarg takes precedence over any embedded value."""
+        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        details = {
+            "host": "h",
+            "username": "u",
+            "private_key_pem": _FAKE_PEM,
+            "allowed_extensions": [".txt"],
+        }
+        cfg = SFTPConnectorConfig.from_connection_details(
+            details, allowed_extensions=[".pdf"]
+        )
+        assert cfg.allowed_extensions == [".pdf"]
+
+    def test_extra_fields_ignored(self):
+        """model_config extra='ignore' — unknown keys must not raise."""
+        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        cfg = SFTPConnectorConfig.model_validate({
+            "host": "h",
+            "username": "u",
+            "private_key_pem": _FAKE_PEM,
+            "unknown_field": "should_be_ignored",
+        })
+        assert cfg.host == "h"
+
+
+# ---------------------------------------------------------------------------
+# SFTPScanner — connect / close
+# ---------------------------------------------------------------------------
+
+class TestSFTPScannerConnect:
+    def test_connect_opens_ssh_and_sftp(self):
+        """connect() must create an SSHClient, call connect(), and open SFTP."""
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        import paramiko
+
+        scanner = _make_sftp_scanner()
+
+        mock_ssh = MagicMock(spec=paramiko.SSHClient)
+        mock_sftp = MagicMock(spec=paramiko.SFTPClient)
+        mock_ssh.open_sftp.return_value = mock_sftp
+        mock_pkey = MagicMock()
+
+        with patch("digitize.connectors.scanners.sftp_scanner.paramiko.SSHClient",
+                   return_value=mock_ssh), \
+             patch.object(SFTPScanner, "_load_private_key", return_value=mock_pkey):
+            scanner.connect()
+
+        mock_ssh.connect.assert_called_once_with(
+            hostname="sftp.example.com",
+            port=22,
+            username="user",
+            pkey=mock_pkey,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        mock_ssh.open_sftp.assert_called_once()
+        assert scanner._ssh is mock_ssh
+        assert scanner._sftp is mock_sftp
+
+    def test_connect_raises_connection_error_on_bad_key(self):
+        import paramiko
+        scanner = _make_sftp_scanner()
+
+        with patch.object(
+            scanner.__class__, "_load_private_key",
+            side_effect=paramiko.SSHException("bad key"),
+        ):
+            with pytest.raises(ConnectionError, match="Failed to load private key"):
+                scanner.connect()
+
+    def test_connect_raises_connection_error_on_auth_failure(self):
+        import paramiko
+        scanner = _make_sftp_scanner()
+        mock_ssh = MagicMock(spec=paramiko.SSHClient)
+        mock_ssh.connect.side_effect = paramiko.AuthenticationException("denied")
+        mock_pkey = MagicMock()
+
+        with patch("digitize.connectors.scanners.sftp_scanner.paramiko.SSHClient",
+                   return_value=mock_ssh), \
+             patch.object(scanner.__class__, "_load_private_key", return_value=mock_pkey):
+            with pytest.raises(ConnectionError, match="Cannot connect"):
+                scanner.connect()
+
+    def test_close_clears_ssh_and_sftp(self):
+        import paramiko
+        scanner = _make_sftp_scanner()
+        scanner._ssh = MagicMock(spec=paramiko.SSHClient)
+        scanner._sftp = MagicMock(spec=paramiko.SFTPClient)
+
+        scanner.close()
+
+        assert scanner._ssh is None
+        assert scanner._sftp is None
+
+    def test_close_is_safe_when_not_connected(self):
+        """close() must not raise when called before connect()."""
+        scanner = _make_sftp_scanner()
+        scanner.close()  # should not raise
+
+    def test_scan_raises_if_not_connected(self):
+        scanner = _make_sftp_scanner()
+        with pytest.raises(RuntimeError, match="connect()"):
+            scanner.scan()
+
+    def test_download_to_raises_if_not_connected(self, tmp_path):
+        scanner = _make_sftp_scanner()
+        with pytest.raises(RuntimeError, match="connect()"):
+            scanner.download_to("/data/doc.pdf", tmp_path / "doc.pdf")
+
+
+# ---------------------------------------------------------------------------
+# SFTPScanner — scan (recursive listing + extension filtering)
+# ---------------------------------------------------------------------------
+
+class TestSFTPScannerScan:
+    def _attach(self, scanner, mock_sftp, mock_ssh):
+        """Wire pre-built mocks directly onto the scanner."""
+        scanner._sftp = mock_sftp
+        scanner._ssh = mock_ssh
+
+    def _make_stat(self, name: str, is_dir: bool = False):
+        """Return a minimal Paramiko SFTPAttributes-like object."""
+        import stat as stat_module
+        attrs = MagicMock()
+        attrs.filename = name
+        attrs.st_mode = (
+            stat_module.S_IFDIR | 0o755
+            if is_dir
+            else stat_module.S_IFREG | 0o644
+        )
+        return attrs
+
+    def test_scan_returns_allowed_files(self):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        # /data contains report.pdf and manual.docx
+        mock_sftp.listdir_attr.return_value = [
+            self._make_stat("report.pdf"),
+            self._make_stat("manual.docx"),
+        ]
+        mock_ssh.exec_command.side_effect = lambda cmd: (
+            None,
+            MagicMock(read=lambda: b"abc123  " + cmd.split('"')[1].encode()),
+            None,
+        )
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        result = scanner.scan()
+        paths = [r[0] for r in result]
+        assert "/data/report.pdf" in paths
+        assert "/data/manual.docx" in paths
+
+    def test_scan_filters_non_allowed_extensions(self):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        mock_sftp.listdir_attr.return_value = [
+            self._make_stat("report.pdf"),
+            self._make_stat("readme.txt"),
+            self._make_stat("archive.zip"),
+        ]
+        mock_ssh.exec_command.return_value = (
+            None,
+            MagicMock(read=lambda: b"aabbcc  /data/report.pdf"),
+            None,
+        )
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        result = scanner.scan()
+        paths = [r[0] for r in result]
+        assert any(p.endswith(".pdf") for p in paths)
+        assert not any(p.endswith(".txt") for p in paths)
+        assert not any(p.endswith(".zip") for p in paths)
+
+    def test_scan_recurses_into_subdirectories(self):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        # /data → subdir/, report.pdf
+        # /data/subdir → nested.docx
+        def listdir_attr_side_effect(path):
+            if path == "/data":
+                return [
+                    self._make_stat("subdir", is_dir=True),
+                    self._make_stat("report.pdf"),
+                ]
+            if path == "/data/subdir":
+                return [self._make_stat("nested.docx")]
+            return []
+
+        mock_sftp.listdir_attr.side_effect = listdir_attr_side_effect
+        mock_ssh.exec_command.return_value = (
+            None,
+            MagicMock(read=lambda: b"deadbeef  file"),
+            None,
+        )
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        result = scanner.scan()
+        paths = [r[0] for r in result]
+        assert "/data/report.pdf" in paths
+        assert "/data/subdir/nested.docx" in paths
+
+    def test_scan_empty_remote_dir_returns_empty_list(self):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_sftp.listdir_attr.return_value = []
+        self._attach(scanner, mock_sftp, MagicMock())
+
+        assert scanner.scan() == []
+
+    def test_scan_checksum_from_remote_md5(self):
+        """scan() must use the first token of md5sum output as the checksum."""
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        mock_sftp.listdir_attr.return_value = [self._make_stat("doc.pdf")]
+
+        expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"
+        mock_ssh.exec_command.return_value = (
+            None,
+            MagicMock(read=lambda: f"{expected_md5}  /data/doc.pdf".encode()),
+            None,
+        )
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        result = scanner.scan()
+        assert result == [("/data/doc.pdf", expected_md5)]
+
+    def test_scan_skips_unreadable_dirs_gracefully(self):
+        """An IOError from listdir_attr must be swallowed (logged, not raised)."""
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_sftp.listdir_attr.side_effect = IOError("Permission denied")
+        self._attach(scanner, mock_sftp, MagicMock())
+
+        # Must return empty list without raising
+        result = scanner.scan()
+        assert result == []
+
+    def test_scan_returns_full_list_without_dedup(self):
+        """All matched files must be returned — no dedup filtering in the scanner."""
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        same_md5 = "aaaa1111bbbb2222cccc3333dddd4444"
+        mock_sftp.listdir_attr.return_value = [
+            self._make_stat("a.pdf"),
+            self._make_stat("b.pdf"),
+        ]
+        mock_ssh.exec_command.return_value = (
+            None,
+            MagicMock(read=lambda: f"{same_md5}  file".encode()),
+            None,
+        )
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        result = scanner.scan()
+        assert len(result) == 2  # both returned even with identical checksums
+
+
+# ---------------------------------------------------------------------------
+# SFTPScanner — download_to
+# ---------------------------------------------------------------------------
+
+class TestSFTPScannerDownloadTo:
+    def _attach(self, scanner, mock_sftp, mock_ssh=None):
+        scanner._sftp = mock_sftp
+        scanner._ssh = mock_ssh or MagicMock()
+
+    def _fake_getfo(self, data: bytes):
+        """Return a side_effect for sftp.getfo that writes bytes to the fileobj."""
+        def _side_effect(remote_path, fileobj):
+            fileobj.write(data)
+        return _side_effect
+
+    def test_writes_bytes_to_local_path(self, tmp_path):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        content = b"pdf bytes here"
+        mock_sftp.getfo.side_effect = self._fake_getfo(content)
+        self._attach(scanner, mock_sftp)
+
+        local = tmp_path / "doc.pdf"
+        scanner.download_to("/data/doc.pdf", local)
+
+        assert local.read_bytes() == content
+
+    def test_returns_local_md5_hex(self, tmp_path):
+        import hashlib
+        content = b"some document content"
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_sftp.getfo.side_effect = self._fake_getfo(content)
+        self._attach(scanner, mock_sftp)
+
+        result = scanner.download_to("/data/doc.pdf", tmp_path / "doc.pdf")
+        assert result == hashlib.md5(content).hexdigest()
+
+    def test_calls_getfo_with_correct_remote_path(self, tmp_path):
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_sftp.getfo.side_effect = self._fake_getfo(b"x")
+        self._attach(scanner, mock_sftp)
+
+        scanner.download_to("/data/subdir/report.pdf", tmp_path / "report.pdf")
+
+        call_args = mock_sftp.getfo.call_args
+        assert call_args[0][0] == "/data/subdir/report.pdf"
+        assert isinstance(call_args[0][1], HashingWriter)
+
+    def test_hashing_writer_used_for_inline_md5(self, tmp_path):
+        """getfo Fileobj argument must be a HashingWriter — no second file read."""
+        scanner = _make_sftp_scanner()
+        mock_sftp = MagicMock()
+        mock_sftp.getfo.side_effect = self._fake_getfo(b"data")
+        self._attach(scanner, mock_sftp)
+
+        scanner.download_to("/remote/file.pdf", tmp_path / "file.pdf")
+
+        call_args = mock_sftp.getfo.call_args
+        assert isinstance(call_args[0][1], HashingWriter)
+
+
+# ---------------------------------------------------------------------------
+# SFTPScanner — verify_integrity (inherits base class direct equality)
+# ---------------------------------------------------------------------------
+
+class TestSFTPScannerVerifyIntegrity:
+    def test_matching_checksums_returns_true(self):
+        scanner = _make_sftp_scanner()
+        assert scanner.verify_integrity("abc123", "abc123") is True
+
+    def test_mismatched_checksums_returns_false(self):
+        scanner = _make_sftp_scanner()
+        assert scanner.verify_integrity("abc123", "def456") is False
+
+    def test_uses_direct_equality_not_s3_logic(self):
+        """SFTP checksums are plain MD5 hex — a dash does NOT mean skip."""
+        # S3Scanner would skip a checksum containing '-', but SFTPScanner must not.
+        scanner = _make_sftp_scanner()
+        assert scanner.verify_integrity("abc123", "abc-123") is False
+
+
+# ---------------------------------------------------------------------------
+# SFTPScanner — _load_private_key
+# ---------------------------------------------------------------------------
+
+class TestSFTPLoadPrivateKey:
+    def test_rsa_key_loaded(self):
+        """_load_private_key must succeed for an RSA PEM string."""
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        import paramiko
+
+        mock_rsa_key = MagicMock(spec=paramiko.RSAKey)
+        with patch.object(paramiko.RSAKey, "from_private_key", return_value=mock_rsa_key):
+            result = SFTPScanner._load_private_key(_FAKE_PEM)
+        assert result is mock_rsa_key
+
+    def test_falls_back_to_ecdsa_when_rsa_fails(self):
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        import paramiko
+
+        mock_ecdsa_key = MagicMock(spec=paramiko.ECDSAKey)
+        with patch.object(paramiko.RSAKey, "from_private_key",
+                          side_effect=paramiko.SSHException("not rsa")), \
+             patch.object(paramiko.ECDSAKey, "from_private_key",
+                          return_value=mock_ecdsa_key):
+            result = SFTPScanner._load_private_key(_FAKE_PEM)
+        assert result is mock_ecdsa_key
+
+    def test_falls_back_to_ed25519_when_rsa_and_ecdsa_fail(self):
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        import paramiko
+
+        mock_ed_key = MagicMock(spec=paramiko.Ed25519Key)
+        with patch.object(paramiko.RSAKey, "from_private_key",
+                          side_effect=paramiko.SSHException("not rsa")), \
+             patch.object(paramiko.ECDSAKey, "from_private_key",
+                          side_effect=paramiko.SSHException("not ecdsa")), \
+             patch.object(paramiko.Ed25519Key, "from_private_key",
+                          return_value=mock_ed_key):
+            result = SFTPScanner._load_private_key(_FAKE_PEM)
+        assert result is mock_ed_key
+
+    def test_raises_ssh_exception_when_no_key_type_matches(self):
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        import paramiko
+
+        with patch.object(paramiko.RSAKey, "from_private_key",
+                          side_effect=paramiko.SSHException("no")), \
+             patch.object(paramiko.ECDSAKey, "from_private_key",
+                          side_effect=paramiko.SSHException("no")), \
+             patch.object(paramiko.Ed25519Key, "from_private_key",
+                          side_effect=paramiko.SSHException("no")):
+            with pytest.raises(paramiko.SSHException, match="RSA, ECDSA, or Ed25519"):
+                SFTPScanner._load_private_key(_FAKE_PEM)
+
+
+# ---------------------------------------------------------------------------
+# build_scanner factory — ssh type
+# ---------------------------------------------------------------------------
+
+class TestBuildScannerSSH:
+    def _make_ssh_connector_dict(self) -> dict:
+        return {
+            "type": "ssh",
+            "connection_details": {
+                "host": "sftp.example.com",
+                "username": "user",
+                "private_key_pem": _FAKE_PEM,
+            },
+            "allowed_extensions": [".pdf", ".docx"],
+        }
+
+    def test_ssh_type_returns_sftp_scanner(self):
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        row = self._make_ssh_connector_dict()
+        scanner = build_scanner(row)
+        assert isinstance(scanner, SFTPScanner)
+
+    def test_sftp_scanner_config_populated(self):
+        row = self._make_ssh_connector_dict()
+        scanner = build_scanner(row)
+        assert scanner._cfg.host == "sftp.example.com"
+        assert scanner._cfg.username == "user"
+        assert scanner._cfg.allowed_extensions == [".pdf", ".docx"]
+
+    def test_ssh_accepts_orm_like_object(self):
+        from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+        row = SimpleNamespace(
+            type="ssh",
+            connection_details={
+                "host": "sftp.host",
+                "username": "admin",
+                "private_key_pem": _FAKE_PEM,
+            },
+            allowed_extensions=[".pdf"],
+        )
+        scanner = build_scanner(row)
+        assert isinstance(scanner, SFTPScanner)
+        assert scanner._cfg.host == "sftp.host"
