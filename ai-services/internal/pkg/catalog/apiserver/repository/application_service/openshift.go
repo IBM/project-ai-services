@@ -36,8 +36,9 @@ func (s *OpenShiftApplicationService) GetApplicationResources(ctx context.Contex
 	return s.ApplicationServiceBase.GetApplicationResources(ctx, id, catalogutils.AppNamespace(id))
 }
 
-func (s *OpenShiftApplicationService) ApplicationsPs(_ context.Context, _ uuid.UUID) (*types.ApplicationPSResponse, error) {
-	return nil, errOpenShiftNotSupported
+// ApplicationsPs retrieves pod/container status by querying the application's OpenShift namespace.
+func (s *OpenShiftApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
+	return s.ApplicationServiceBase.ApplicationsPs(ctx, appID, catalogutils.AppNamespace(appID))
 }
 
 // Made with Bob
