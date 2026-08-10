@@ -1,75 +1,94 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 580" width="660" height="580" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 700" width="800" height="700" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
   <defs>
     <marker id="a-arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
     <marker id="a-arrg" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2d9a5f"/></marker>
+    <marker id="a-arry" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>
   </defs>
 
   <!-- Catalog box -->
-  <rect x="250" y="10" width="160" height="36" rx="4" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
-  <text x="330" y="33" text-anchor="middle" font-weight="600" fill="#1f2328">Catalog</text>
+  <rect x="300" y="10" width="200" height="36" rx="4" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="400" y="33" text-anchor="middle" font-weight="600" fill="#1f2328">Catalog</text>
 
   <!-- Arrow down from Catalog to digitize box -->
-  <line x1="330" y1="46" x2="330" y2="82" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
-  <text x="338" y="68" font-size="11" fill="#57606a">POST / PUT / DELETE / GET</text>
+  <line x1="400" y1="46" x2="400" y2="82" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+  <text x="408" y="68" font-size="11" fill="#57606a">POST / PUT / DELETE / GET</text>
 
   <!-- digitize outer box -->
-  <rect x="20" y="82" width="620" height="480" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="20" y="82" width="760" height="600" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
   <text x="40" y="102" font-weight="700" font-size="13" fill="#1f2328">digitize</text>
 
   <!-- ── Connector API sub-box ── -->
-  <rect x="40" y="114" width="580" height="110" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
+  <rect x="40" y="114" width="720" height="110" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
   <text x="56" y="132" font-weight="600" fill="#1e40af">Connector API  (FastAPI router)</text>
 
   <!-- POST /v1/connectors -->
-  <rect x="56" y="142" width="172" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
-  <text x="142" y="159" text-anchor="middle" font-size="11" fill="#1e40af">POST /v1/connectors</text>
+  <rect x="56" y="142" width="160" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
+  <text x="136" y="159" text-anchor="middle" font-size="11" fill="#1e40af">POST /v1/connectors</text>
 
   <!-- POST /v1/connectors/{id}/sync -->
-  <rect x="238" y="142" width="198" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
-  <text x="337" y="159" text-anchor="middle" font-size="11" fill="#1e40af">POST /v1/connectors/{id}/sync</text>
+  <rect x="226" y="142" width="200" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
+  <text x="326" y="159" text-anchor="middle" font-size="11" fill="#1e40af">POST /v1/connectors/{id}/sync</text>
 
   <!-- DELETE /v1/connectors/{id} -->
-  <rect x="446" y="142" width="158" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
-  <text x="525" y="159" text-anchor="middle" font-size="11" fill="#1e40af">DELETE /v1/connectors/{id}</text>
+  <rect x="436" y="142" width="170" height="26" rx="3" fill="white" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="521" y="159" text-anchor="middle" font-size="11" fill="#991b1b" font-weight="600">DELETE /v1/connectors/{id}</text>
+
+  <!-- PUT /v1/connectors/{id} -->
+  <rect x="616" y="142" width="140" height="26" rx="3" fill="white" stroke="#3b82d4" stroke-width="1"/>
+  <text x="686" y="159" text-anchor="middle" font-size="11" fill="#1e40af">PUT /v1/connectors/{id}</text>
 
   <text x="56" y="194" fill="#1f2328" font-size="11">▸  validates payload · encrypts secret fields before DB write</text>
-  <text x="56" y="210" fill="#1f2328" font-size="11">▸  delegates job lifecycle to ConnectorScheduler · POST /sync uses DB atomic guard before dispatch</text>
+  <text x="56" y="210" fill="#1f2328" font-size="11">▸  DELETE: marks delete_pending, signals _pending_deletions, dispatches async teardown</text>
 
   <!-- Arrow from Connector API down to ConnectorScheduler -->
-  <line x1="330" y1="224" x2="330" y2="248" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+  <line x1="400" y1="224" x2="400" y2="248" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
 
   <!-- ── ConnectorScheduler sub-box ── -->
-  <rect x="40" y="248" width="580" height="130" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
+  <rect x="40" y="248" width="720" height="160" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
   <text x="56" y="268" font-weight="600" fill="#166534">ConnectorScheduler  (APScheduler AsyncScheduler singleton)</text>
   <text x="72" y="288" fill="#1f2328" font-size="11">▸  one IntervalTrigger job per active connector · max_instances=1 prevents overlapping ticks</text>
-  <text x="72" y="304" fill="#1f2328" font-size="11">▸  register_connector_job() on POST · remove_connector_job() on DELETE · trigger_now() on POST /sync</text>
-  <text x="72" y="320" fill="#1f2328" font-size="11">▸  lifespan recovery: re-registers all persisted connector jobs on startup</text>
+  <text x="72" y="304" fill="#1f2328" font-size="11">▸  register_connector_job() on POST · remove_connector_job() on DELETE · both share DB-level sync_status lock</text>
+  <text x="72" y="320" fill="#1f2328" font-size="11">▸  lifespan recovery: re-registers all persisted connector jobs on startup with fire_immediately=False</text>
+  <text x="72" y="336" fill="#1f2328" font-size="11">▸  APScheduler dispatches _run_tick_wrapped(), which acquires lock, registers task in _live_tasks, then awaits _run_tick()</text>
 
   <!-- _run_tick inner box -->
-  <rect x="72" y="334" width="516" height="36" rx="4" fill="#bbf7d0" stroke="#2d9a5f" stroke-width="1"/>
-  <text x="330" y="349" text-anchor="middle" font-weight="600" fill="#166534">_run_tick(connector_id)  — async coroutine dispatched by scheduler or POST /sync</text>
-  <text x="330" y="363" text-anchor="middle" font-size="11" fill="#1f2328">scan remote · classify (skip / cross-dup / ingest) · stage + ingest new files · delete orphans · finalise tick</text>
+  <rect x="72" y="348" width="656" height="48" rx="4" fill="#bbf7d0" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="400" y="364" text-anchor="middle" font-weight="600" fill="#166534">_run_tick(connector_id)  — async coroutine (Phase 0–5)</text>
+  <text x="400" y="380" text-anchor="middle" font-size="11" fill="#1f2328">Phases: load state → connect → scan → classify → ingest files → delete orphans → finalize</text>
 
-  <!-- Arrow from ConnectorScheduler down to Persistence -->
-  <line x1="330" y1="378" x2="330" y2="402" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+  <!-- Arrow from ConnectorScheduler down to Threading + Persistence -->
+  <line x1="400" y1="408" x2="400" y2="428" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
+
+  <!-- ── Thread Executor sub-box ── -->
+  <rect x="40" y="428" width="720" height="96" rx="4" fill="#e0e7ff" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="2,2"/>
+  <text x="56" y="446" font-weight="600" fill="#ca8a04">Thread Executor  (asyncio.run_in_executor → ThreadPoolExecutor)</text>
+  <text x="72" y="462" fill="#1f2328" font-size="11">▸  All blocking I/O offloaded: scanner.connect(), scanner.scan(), scanner.download_to()</text>
+  <text x="72" y="478" fill="#1f2328" font-size="11">▸  Sized in lifespan(): pool_size = max(connector_count + 4, 8) · each tick uses ≤ 1 thread at a time</text>
+  <text x="72" y="494" fill="#1f2328" font-size="11">▸  Event loop remains responsive during executor calls; CancelledError injected at each await</text>
+  <text x="72" y="510" fill="#1f2328" font-size="11">▸  Phase boundaries (after each phase): poll _pending_deletions set → raise CancelledError if present</text>
+
+  <!-- Arrow from Threading down to Persistence -->
+  <line x1="400" y1="524" x2="400" y2="544" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#a-arr)"/>
 
   <!-- ── Persistence sub-box ── -->
-  <rect x="40" y="402" width="580" height="142" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
-  <text x="56" y="420" font-weight="600" fill="#854d0e">Persistence</text>
+  <rect x="40" y="544" width="720" height="120" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
+  <text x="56" y="562" font-weight="600" fill="#854d0e">Persistence  (PostgreSQL + Job State)</text>
 
   <!-- Row 1 -->
-  <rect x="72" y="432" width="246" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="195" y="450" text-anchor="middle" fill="#854d0e">connectors</text>
-  <rect x="332" y="432" width="256" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="460" y="450" text-anchor="middle" fill="#854d0e">connector_document_checksum</text>
+  <rect x="72" y="576" width="220" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="182" y="594" text-anchor="middle" fill="#854d0e" font-size="11">connectors</text>
+  <rect x="302" y="576" width="220" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="412" y="594" text-anchor="middle" fill="#854d0e" font-size="11">connector_document_checksum</text>
+  <rect x="532" y="576" width="220" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="642" y="594" text-anchor="middle" fill="#854d0e" font-size="11">connector_sync_logs</text>
 
   <!-- Row 2 -->
-  <rect x="72" y="466" width="246" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="195" y="484" text-anchor="middle" fill="#854d0e">connector_sync_logs</text>
-  <rect x="332" y="466" width="256" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="460" y="484" text-anchor="middle" fill="#854d0e">document_checksum</text>
+  <rect x="72" y="610" width="220" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="182" y="628" text-anchor="middle" fill="#854d0e" font-size="11">APScheduler job state</text>
+  <rect x="302" y="610" width="450" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="527" y="628" text-anchor="middle" fill="#854d0e" font-size="11">document_checksum (user docs; read-only to connectors)</text>
 
-  <!-- Row 3: asyncio.Lock note -->
-  <rect x="72" y="500" width="516" height="26" rx="3" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="330" y="518" text-anchor="middle" fill="#854d0e">asyncio.Lock  (_ingest_lock)  — held Phase 2 → end of Phase 4a across all concurrent ticks</text>
+  <!-- In-process coordination box -->
+  <rect x="40" y="672" width="720" height="20" rx="3" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1" stroke-dasharray="1,1"/>
+  <text x="400" y="685" text-anchor="middle" fill="#166534" font-size="10" font-weight="600">In-process: _pending_deletions (set for DELETE) · _live_tasks (maps connector_id → current task for await_connector_tick_exit)</text>
 </svg>
