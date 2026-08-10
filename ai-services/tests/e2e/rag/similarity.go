@@ -27,6 +27,13 @@ import (
 // similaritySearchPath is the POST endpoint on the similarity service.
 const similaritySearchPath = "/v1/similarity-search"
 
+// HTTP status codes used by the similarity service validate functions.
+const (
+	httpStatusBadRequest          = 400
+	httpStatusUnprocessableEntity = 422
+	httpStatusServiceUnavailable  = 503
+)
+
 // PostSimilaritySearchRaw sends a POST to similarityBaseURL/v1/similarity-search
 // and always returns the raw HTTP status code and response body, regardless of
 // whether the request succeeded or failed.
@@ -54,6 +61,7 @@ func PostSimilaritySearchRaw(
 	if err != nil {
 		logger.Infof("[SIM][http] POST %s%s — transport error after %s: %v",
 			baseURL, similaritySearchPath, elapsed.Round(time.Millisecond), err)
+
 		return 0, "", fmt.Errorf("similarity search request failed: %w", err)
 	}
 	defer func() {
@@ -97,6 +105,7 @@ func parseSimilarityErrorBody(rawBody string) (code, message string, status int,
 	if env.Error.Code == "" {
 		return "", "", 0, fmt.Errorf("similarity error envelope missing 'code' field — body: %s", rawBody)
 	}
+
 	return env.Error.Code, env.Error.Message, env.Error.Status, nil
 }
 
@@ -107,7 +116,7 @@ func parseSimilarityErrorBody(rawBody string) (code, message string, status int,
 // ValidateSimilarityEmptyQueryError asserts that the service correctly rejected
 // an empty query with HTTP 400 and error code EMPTY_INPUT.
 func ValidateSimilarityEmptyQueryError(statusCode int, rawBody string) error {
-	if statusCode != 400 {
+	if statusCode != httpStatusBadRequest {
 		return fmt.Errorf("expected HTTP 400 for empty query, got %d — body: %s", statusCode, rawBody)
 	}
 	code, message, _, err := parseSimilarityErrorBody(rawBody)
@@ -120,13 +129,14 @@ func ValidateSimilarityEmptyQueryError(statusCode int, rawBody string) error {
 	if !strings.Contains(message, "query is required") {
 		return fmt.Errorf("expected message to contain %q, got %q", "query is required", message)
 	}
+
 	return nil
 }
 
 // ValidateSimilarityInvalidModeError asserts that the service correctly rejected
 // an unsupported mode value with HTTP 400 and error code INVALID_PARAMETER.
 func ValidateSimilarityInvalidModeError(statusCode int, rawBody string) error {
-	if statusCode != 400 {
+	if statusCode != httpStatusBadRequest {
 		return fmt.Errorf("expected HTTP 400 for invalid mode, got %d — body: %s", statusCode, rawBody)
 	}
 	code, message, _, err := parseSimilarityErrorBody(rawBody)
@@ -139,6 +149,7 @@ func ValidateSimilarityInvalidModeError(statusCode int, rawBody string) error {
 	if !strings.Contains(message, "mode must be one of") {
 		return fmt.Errorf("expected message to contain %q, got %q", "mode must be one of", message)
 	}
+
 	return nil
 }
 
@@ -149,12 +160,13 @@ func ValidateSimilarityInvalidModeError(statusCode int, rawBody string) error {
 // so this validator checks for the HTTP status and the presence of "top_k" in
 // the raw body — a shape-agnostic assertion that works for both response formats.
 func ValidateSimilarityInvalidTopKError(statusCode int, rawBody string) error {
-	if statusCode != 422 {
+	if statusCode != httpStatusUnprocessableEntity {
 		return fmt.Errorf("expected HTTP 422 for invalid top_k, got %d — body: %s", statusCode, rawBody)
 	}
 	if !strings.Contains(rawBody, "top_k") {
 		return fmt.Errorf("expected response body to reference %q for top_k validation error — body: %s", "top_k", rawBody)
 	}
+
 	return nil
 }
 
@@ -178,6 +190,7 @@ func ValidateSimilarityUnreachableError(err error) error {
 			return nil
 		}
 	}
+
 	return fmt.Errorf(
 		"expected transport error to contain one of %v — got: %s",
 		keywords, err.Error(),
@@ -187,7 +200,7 @@ func ValidateSimilarityUnreachableError(err error) error {
 // ValidateSimilarityNotReadyError asserts that the service correctly reported an
 // empty vector index with HTTP 503 and error code VECTOR_STORE_NOT_READY.
 func ValidateSimilarityNotReadyError(statusCode int, rawBody string) error {
-	if statusCode != 503 {
+	if statusCode != httpStatusServiceUnavailable {
 		return fmt.Errorf("expected HTTP 503 for empty index, got %d — body: %s", statusCode, rawBody)
 	}
 	code, message, _, err := parseSimilarityErrorBody(rawBody)
@@ -200,5 +213,6 @@ func ValidateSimilarityNotReadyError(statusCode int, rawBody string) error {
 	if !strings.Contains(message, "Ingest documents first") {
 		return fmt.Errorf("expected message to contain %q, got %q", "Ingest documents first", message)
 	}
+
 	return nil
 }
