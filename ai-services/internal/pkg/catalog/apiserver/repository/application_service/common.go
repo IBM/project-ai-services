@@ -723,9 +723,7 @@ func (s *ApplicationServiceBase) collectServicePods(
 	for _, service := range services {
 		pod, err := loadApplicationPods(rt, service.ID.String())
 		if err != nil {
-			logger.ErrorfCtx(ctx, "Failed to load service pod: %v", err)
-
-			continue
+			return nil, fmt.Errorf("failed to load service pod for service %s: %w", service.ID, err)
 		}
 		servicePods = append(servicePods, pod...)
 	}
@@ -745,9 +743,7 @@ func (s *ApplicationServiceBase) collectComponentPods(
 	for _, service := range services {
 		serviceDependencies, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
 		if err != nil {
-			logger.ErrorfCtx(ctx, "Failed to get dependencies for service %s: %v", service.ID, err)
-
-			continue
+			return nil, fmt.Errorf("failed to get dependencies for service %s: %w", service.ID, err)
 		}
 
 		for _, dependency := range serviceDependencies {
@@ -763,9 +759,7 @@ func (s *ApplicationServiceBase) collectComponentPods(
 
 			componentPod, err := loadApplicationPods(rt, componentID)
 			if err != nil {
-				logger.ErrorfCtx(ctx, "Failed to load component pod: %v", err)
-
-				continue
+				return nil, fmt.Errorf("failed to load component pod %s: %w", componentID, err)
 			}
 
 			componentMap[componentID] = componentPod
