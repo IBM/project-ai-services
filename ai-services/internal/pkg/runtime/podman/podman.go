@@ -741,10 +741,9 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 	return executor(pc.Context, containerID)
 }
 
-// ExecInContainerWithCmd satisfies the runtime.Runtime interface. podName has no
-// meaning in Podman's flat container model and is ignored; containerName is used
-// as the container ID directly. Delegates to ExecInContainerWithOutput.
-// TODO: implement fully when exec-in-container support is needed for Podman.
-func (pc *PodmanClient) ExecInContainerWithCmd(_, containerName string, command []string) (string, error) {
-	return pc.ExecInContainerWithOutput(containerName, command)
+// ExecInContainerWithCmd is not implemented for the Podman runtime.
+func (pc *PodmanClient) ExecInContainerWithCmd(_, _ string, _ []string) (string, error) {
+	logger.Errorf("unsupported method called!")
+
+	return "", fmt.Errorf("unsupported method")
 }
