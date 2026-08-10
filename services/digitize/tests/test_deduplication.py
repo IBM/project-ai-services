@@ -646,6 +646,7 @@ class TestUpdateJobStatsAlreadyExists:
 def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     """Thin test-client fixture focused on the de-duplication code paths."""
     import digitize.app as digitize_app
+    import digitize.api.v1.jobs as jobs_router_module
     import digitize.api.v1.documents as documents_router_module
     import digitize.api.v1.jobs as jobs_router_module
     from fastapi.testclient import TestClient
@@ -668,9 +669,23 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     )
     monkeypatch.setattr(digitize_app, "settings", fake_settings, raising=False)
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
-    # Stub queue-quota gate so all submissions are admitted.
-    monkeypatch.setattr(jobs_router_module.db_manager, "get_queued_counts",
-                        Mock(return_value={"ingestion": 0, "digitization": 0}))
+    # Single db_manager mock covering all calls made by jobs.py.
+    # Individual tests may replace this with their own mock via
+    # monkeypatch.setattr(jobs_router_module, "db_manager", ...) — in that case
+    # get_queued_counts must also be set on that replacement mock.
+    mock_db_manager = Mock()
+    mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
+
+    # Stub out dg_util helpers that touch disk / DB.
+    monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
+    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+
+    # Stub out pipeline background tasks.
+    monkeypatch.setattr(jobs_router_module, "_run_digitize", Mock())
+    monkeypatch.setattr(jobs_router_module, "_run_ingest", Mock())
+
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-x"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())

@@ -124,8 +124,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
       - _get_key_path → /dev/null (never touched because encryption is mocked)
       - db_ops.insert_connector, upsert_connector, etc.
     """
-    from unittest.mock import AsyncMock
-
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
     for path in (digitized_dir, staging_dir):
@@ -151,10 +149,24 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
 
     import digitize.api.v1.connectors as connectors_module
+    import digitize.api.v1.jobs as jobs_router_module
+    from unittest.mock import AsyncMock
 
     monkeypatch.setattr(connectors_module, "settings", fake_settings, raising=False)
 
-    # Misc stubs
+    # db_manager mock for jobs.py (queue gate + dedup).
+    mock_db_manager = Mock()
+    mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
+
+    # Stub dg_util helpers that touch disk / DB.
+    monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
+    monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
+    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+    monkeypatch.setattr(jobs_router_module, "_run_digitize", Mock())
+    monkeypatch.setattr(jobs_router_module, "_run_ingest", Mock())
+
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())
 
@@ -174,12 +186,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
             if k not in {"private_key", "secret_access_key"}
         },
     )
-
-    import digitize.api.v1.jobs as jobs_router_module
-    mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
-    mock_hash_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
-    monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
     # Scheduler stubs — prevent RuntimeError from uninitialised _scheduler
     import digitize.connectors.scheduler as scheduler_module
