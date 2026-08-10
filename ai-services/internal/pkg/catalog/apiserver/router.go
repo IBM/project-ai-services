@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/project-ai-services/ai-services/docs" // Import generated docs
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers/connectorhandlers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
@@ -19,63 +20,65 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
-	router := gin.Default()
 
-	// Apply RequestID middleware to all routes
+	router := gin.Default()
 	router.Use(middleware.RequestIDMiddleware())
 
-	// Health check endpoint
+	registerSystemRoutes(router)
+	registerAPIRoutes(router, authSvc, tokenMgr, blacklist, appService)
+
+	return router
+}
+
+// registerSystemRoutes adds health-check and Swagger routes that require no authentication.
+func registerSystemRoutes(router *gin.Engine) {
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	})
-
-	// Expose /health for liveness probes
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	})
-
-	// Swagger documentation endpoint
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+}
 
+// registerAPIRoutes adds all /api/v1 routes.
+func registerAPIRoutes(router *gin.Engine, authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface) {
 	authHandler := handlers.NewAuthHandler(authSvc)
 	catalogHandler := handlers.NewCatalogHandler()
 	resourcesHandler := handlers.NewResourcesHandler()
 	applicationHandler := handlers.NewApplicationHandler(appService)
+	connectorHandler := connectorhandlers.New()
 
 	v1 := router.Group("/api/v1")
-	{
-		v1.POST("/auth/login", authHandler.Login)
-		v1.POST("/auth/logout", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Logout)
-		v1.POST("/auth/refresh", authHandler.Refresh)
-		v1.GET("/auth/me", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Me)
-	}
 
-	// Catalog endpoints
+	v1.POST("/auth/login", authHandler.Login)
+	v1.POST("/auth/logout", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Logout)
+	v1.POST("/auth/refresh", authHandler.Refresh)
+	v1.GET("/auth/me", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Me)
+
+	// Catalog endpoints (authenticated)
 	catalog := v1.Group("")
 	catalog.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
-	{
-		catalog.GET("/resources", resourcesHandler.GetResources)
-		catalog.GET("/architectures", catalogHandler.ListArchitectures)
-		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
-		catalog.GET("/architectures/:id/deploy-options", catalogHandler.GetArchitectureDeployOptions)
-		catalog.GET("/services", catalogHandler.ListServices)
-		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
-		catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
-		catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
-		catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
-	}
+	catalog.GET("/resources", resourcesHandler.GetResources)
+	catalog.GET("/architectures", catalogHandler.ListArchitectures)
+	catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
+	catalog.GET("/architectures/:id/deploy-options", catalogHandler.GetArchitectureDeployOptions)
+	catalog.GET("/services", catalogHandler.ListServices)
+	catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
+	catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
+	catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
+	catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
+	catalog.GET("/connectors", connectorHandler.ListConnectorProviders)
+	catalog.GET("/connectors/:connector_type/providers/:provider_id/params", connectorHandler.GetConnectorProviderParams)
 
+	// Application endpoints (authenticated)
 	applications := v1.Group("applications")
 	applications.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
-	{
-		applications.GET("/", applicationHandler.ListApplications)
-		applications.GET("/:id", applicationHandler.GetApplicationByID)
-		applications.GET("/:id/resources", applicationHandler.GetApplicationResources)
-		applications.POST("/", applicationHandler.CreateApplication)
-		applications.PUT("/:id", applicationHandler.UpdateApplication)
-		applications.DELETE("/:id", applicationHandler.DeleteApplication)
-		applications.GET("/:id/ps", applicationHandler.ApplicationPS)
-	}
-
-	return router
+	applications.GET("/", applicationHandler.ListApplications)
+	applications.GET("/:id", applicationHandler.GetApplicationByID)
+	applications.GET("/:id/resources", applicationHandler.GetApplicationResources)
+	applications.POST("/", applicationHandler.CreateApplication)
+	applications.PUT("/:id", applicationHandler.UpdateApplication)
+	applications.DELETE("/:id", applicationHandler.DeleteApplication)
+	applications.GET("/:id/ps", applicationHandler.ApplicationPS)
 }

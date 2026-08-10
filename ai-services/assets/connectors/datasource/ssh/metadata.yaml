@@ -1,0 +1,14 @@
+# Connector identification
+type: connector
+id: ssh
+name: "SSH Remote File Server"
+description: "Connect to a remote file server over SSH as a document source for ingestion pipelines."
+
+# Connector type this provider belongs to
+connector_type: datasource
+connector_type_name: "Datasource"
+
+# Fields that contain sensitive credential values.
+# These values are encrypted at rest and never returned in API responses.
+sensitive_fields:
+  - private_key

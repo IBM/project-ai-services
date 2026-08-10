@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "S3 Datasource Configuration",
+  "required": [
+    "endpoint_url",
+    "bucket_name",
+    "access_key_id",
+    "secret_access_key",
+    "allowed_extensions"
+  ],
+  "properties": {
+    "endpoint_url": {
+      "type": "string",
+      "title": "Endpoint URL",
+      "description": "S3 endpoint URL (e.g. https://s3.us-east-1.amazonaws.com).",
+      "format": "uri"
+    },
+    "bucket_name": {
+      "type": "string",
+      "title": "Bucket Name",
+      "description": "Name of the S3 bucket to use as the content source."
+    },
+    "access_key_id": {
+      "type": "string",
+      "title": "Access Key ID",
+      "description": "AWS / S3-compatible access key identifier."
+    },
+    "secret_access_key": {
+      "type": "string",
+      "title": "Secret Access Key",
+      "description": "AWS / S3-compatible secret access key.",
+      "x-sensitive": true
+    },
+    "prefix": {
+      "type": "string",
+      "title": "Key Prefix",
+      "description": "Optional key prefix to scope the connector to a sub-path within the bucket."
+    },
+    "delimiter": {
+      "type": "string",
+      "title": "Delimiter",
+      "description": "Optional delimiter character used when listing objects (e.g. '/')."
+    },
+    "allowed_extensions": {
+      "type": "array",
+      "title": "Allowed File Extensions",
+      "description": "Restrict ingestion to objects whose key ends with one of these extensions (e.g. [\".pdf\", \".txt\"]).",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

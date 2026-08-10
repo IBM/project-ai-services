@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "SSH Datasource Configuration",
+  "required": [
+    "host",
+    "username",
+    "private_key",
+    "remote_path",
+    "allowed_extensions"
+  ],
+  "properties": {
+    "host": {
+      "type": "string",
+      "title": "Host",
+      "description": "Hostname or IP address of the remote SSH server."
+    },
+    "username": {
+      "type": "string",
+      "title": "Username",
+      "description": "SSH username used to authenticate."
+    },
+    "private_key": {
+      "type": "string",
+      "title": "Private Key",
+      "description": "PEM-encoded private key used for SSH authentication.",
+      "x-sensitive": true
+    },
+    "remote_path": {
+      "type": "string",
+      "title": "Remote Path",
+      "description": "Absolute path on the remote server to use as the content root (e.g. /data/documents)."
+    },
+    "allowed_extensions": {
+      "type": "array",
+      "title": "Allowed File Extensions",
+      "description": "Restrict ingestion to files whose name ends with one of these extensions (e.g. [\".pdf\", \".txt\"]).",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}
