@@ -803,23 +803,20 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 ## 9. Implementation Plan & PR Breakdown
 
 ### Implemented PRs
-- **PR 1 — DB Schema + ORM Models + Settings ✅:** `connectors`, `connector_document_checksum`, `connector_sync_logs` tables & ORM models created.
-- **PR 2 — DB Operations Layer ✅:** `manager.py` & `utils/db.py` methods implemented with tests in `test_connector_db.py`. (*Pending minor addition: `get_connector_sync_status(connector_id)` — `SELECT sync_status FROM connectors WHERE id = :id`*).
-- **PR 3 — REST API Endpoints ✅:** `connectors.py` CRUD & document visibility filtering in `documents.py`.
-- **PR 4a — Scanner Abstraction ✅:** `BaseScanner` interface & `scanner_factory.py`.
+- **PR 1 — DB Schema + ORM Models + Settings ✅:** `connectors`, `connector_document_checksum`, `connector_sync_logs` tables & ORM models created (`db/scripts/init_schema.sql`, `db/models.py`).
+- **PR 2 — DB Operations Layer ✅:** `manager.py` & `utils/db.py` methods fully implemented with tests in `test_connector_db.py`. All checksum helpers (`insert_connector_checksum`, `delete_connector_checksum`, `find_connector_doc_by_checksum`, `get_connector_checksums`, `get_all_connector_checksums`) and sync-log helpers (`open_sync_log`, `close_sync_log`, `update_sync_log_progress`, `get_sync_logs`) are present. (*Pending minor addition: `get_connector_sync_status(connector_id)` — `SELECT sync_status FROM connectors WHERE id = :id` — not yet in `manager.py` or `utils/db.py`*).
+- **PR 3 — REST API Endpoints ✅:** Full CRUD in `connectors.py` (`POST`, `PUT`, `DELETE`, `GET`, `GET /{id}`, `GET /{id}/syncs`). Connector-sourced document visibility filtering in `documents.py` (`exclude_connector_sourced=True` on list, `is_connector_sourced_document` guard on GET/DELETE).
+- **PR 4a — Scanner Abstraction ✅:** `BaseScanner` interface (`base_scanner.py`) & `scanner_factory.py` with `_REGISTRY` for `"s3"` and `"ssh"` types.
+- **PR 4b — SSH/SFTP Scanner ✅:** `SSHScanner` implemented in `connectors/scanners/ssh_scanner.py` (subclasses `BaseScanner`, uses Paramiko for SFTP walk + SSH `md5sum` hashing, registered in `scanner_factory.py` under `"ssh"`). Full unit-test coverage in `test_connector_scanners.py` (connect/close, scan, download, `_load_private_key`, factory registration). *(Note: file is named `ssh_scanner.py` rather than `sftp_scanner.py` as originally proposed — this is the accepted name.)*
 - **PR 5 — S3 Scanner ✅:** `S3Scanner` implementation & tests in `test_connector_scanners.py`.
 
 ---
 
 ### Pending PRs
 
-#### PR 4b — SFTP Scanner ❌
-- **Target File:** `services/digitize/connectors/scanners/sftp_scanner.py`
-- **Deliverables:** `SFTPScanner` subclassing `BaseScanner`. Uses Paramiko for SFTP walk and SSH `md5sum` hashing. Register in `scanner_factory.py` for type `"ssh"`. Unit tests.
-
 #### PR 6 — Core Sync Engine (`_classify` + `_run_tick`) ❌
 - **Target File:** `services/digitize/connectors/sync_tick.py`
-- **Deliverables:** Implement `_classify()`, `_process_new_files()`, `_delete_orphans()`, and `_run_tick()`. Wire DB helper functions and staging cleanup. Unit & integration tests.
+- **Deliverables:** Implement `_classify()`, `_process_new_files()`, `_delete_orphans()`, and `_run_tick()`. Wire DB helper functions and staging cleanup. Unit & integration tests in `tests/test_sync_tick.py` (test file exists but module is absent).
 - **Cancellation helper:** Add `_check_delete_pending(connector_id: str) -> None` (imported from `scheduler.py`) that does a live DB query — raises `asyncio.CancelledError()` if `connectors.sync_status == 'delete_pending'` for the given `connector_id`. No in-memory set. Call it:
   - At the start of `_run_tick` after acquiring the lock (phase boundary before scan).
   - At the top of the `_process_new_files` loop (before each download starts).
@@ -829,25 +826,26 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 - **Target Files:** `services/digitize/connectors/scheduler.py`, `app.py`, `connectors.py`
 - **Deliverables:**
   - Create `scheduler.py` (job registration, `_run_tick_wrapped`, `_check_delete_pending`, `_run_teardown`, `_finalize_open_sync_log`). No `_live_tasks` or `_pending_deletions` dicts.
-  - Wire `lifespan()` in `app.py` to start `AsyncScheduler` and recover jobs (`fire_immediately=False`).
-  - Wire `POST /v1/connectors/{id}/sync`: DB lock check → open log → `asyncio.create_task(_run_tick)`.
-  - Add `get_last_sync_log(connector_id)` to `manager.py` / `utils/db.py`.
-  - Add `reset_stale_syncing_connectors()` to `manager.py` / `utils/db.py`.
-  - Add `update_connector_status: bool = True` parameter to `close_sync_log` in `manager.py`; skip the `UPDATE connectors SET sync_status` statement when `False`.
-  - Add `SyncStatus.CANCELLED = "cancelled"` and `SyncStatus.DELETE_PENDING = "delete pending"` to `connectors/models.py`.
-  - Add `recover_connector_sync_state()` to `utils/recovery.py`; call it in `lifespan()` in `app.py` before scheduler job registration.
+  - Wire `lifespan()` in `app.py` to start `AsyncScheduler` and recover connector sync state (`fire_immediately=False`). Currently `app.py` only calls `recover_zombie_jobs()` — connector scheduler startup is absent.
+  - Wire `POST /v1/connectors/{id}/sync` in `connectors.py`: DB lock check → open log → `asyncio.create_task(_run_tick)`. Currently the endpoint does not exist.
+  - Add `get_last_sync_log(connector_id)` to `manager.py` / `utils/db.py` (not yet present).
+  - Add `reset_stale_syncing_connectors()` to `manager.py` / `utils/db.py` (not yet present).
+  - Add `update_connector_status: bool = True` parameter to `close_sync_log` in `manager.py`; skip the `UPDATE connectors SET sync_status` statement when `False` (parameter absent from current signature).
+  - Add `SyncStatus.CANCELLED = "cancelled"` and `SyncStatus.DELETE_PENDING = "delete pending"` to `connectors/models.py` (only `UP_TO_DATE`, `SYNCING`, `OUT_OF_SYNC`, `STARTED`, `COMPLETED`, `FAILED` exist today).
+  - Add `recover_connector_sync_state()` to `utils/recovery.py`; call it in `lifespan()` in `app.py` before scheduler job registration (currently only `recover_zombie_jobs()` is called).
 
 #### PR 9 — Non-Blocking DELETE Wiring ❌
 - **Target Files:** `services/digitize/api/v1/connectors.py`, `scheduler.py`
 - **Deliverables:**
-  - Read `sync_status` before marking delete.
-  - If `'syncing'`: `UPDATE sync_status = 'delete_pending'` → return `204`. Tick handles teardown via `_check_delete_pending`.
-  - If not `'syncing'`: `UPDATE sync_status = 'delete_pending'` → `asyncio.create_task(_run_teardown(id))` → return `204`.
+  - Replace the current blocking DELETE implementation (synchronous teardown in `connectors.py`) with the non-blocking flow:
+    - Read `sync_status` before marking delete.
+    - If `'syncing'`: `UPDATE sync_status = 'delete_pending'` → return `204`. Tick handles teardown via `_check_delete_pending`.
+    - If not `'syncing'`: `UPDATE sync_status = 'delete_pending'` → `asyncio.create_task(_run_teardown(id))` → return `204`.
   - Implement `_run_teardown()` in `scheduler.py`: `remove_connector_job` → checksum snapshot → per-checksum delete + doc cleanup → `delete_connector` → staging sweep.
 
 #### PR 8 — Cancelled Job Status (Enhancement) ❌
-- **Target Files:** `init_schema.sql`, `models.py`, `manager.py`, `connectors.py`
+- **Target Files:** `db/scripts/init_schema.sql`, `models.py`, `db/manager.py`, `connectors.py`
 - **Deliverables:**
-  - Update `jobs.status` check constraint to include `'cancelled'`.
-  - Add `JobStatus.CANCELLED = "cancelled"`.
-  - Add DB helper `cancel_connector_jobs(connector_id)` setting `accepted`/`in_progress` jobs for a connector to `cancelled`. Call during teardown.
+  - Update `jobs.status` check constraint in `init_schema.sql` to include `'cancelled'` (currently: `'accepted', 'in_progress', 'completed', 'failed'`).
+  - Add `JobStatus.CANCELLED = "cancelled"` to `models.py` (enum currently has only `ACCEPTED`, `IN_PROGRESS`, `COMPLETED`, `FAILED`).
+  - Add DB helper `cancel_connector_jobs(connector_id)` to `manager.py` / `utils/db.py` — sets `accepted`/`in_progress` jobs for a connector to `cancelled`. Call during teardown.
