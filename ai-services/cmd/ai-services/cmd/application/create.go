@@ -930,7 +930,7 @@ func extractProviderParams(prefix string, allParams map[string]string, providerP
 // Priority:
 // 1. User-specified provider (matched against deploy options).
 // 2. Default-marked provider.
-// 3. Provider containing "spyre" in its ID.
+// 3. Provider is "vllm-spyre".
 // 4. First available provider.
 // Returns an error if multiple providers are explicitly selected for the same component type.
 func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string, error) {
