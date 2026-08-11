@@ -202,7 +202,7 @@ async def _process_new_files(
         _check_delete_pending(connector_id)
 
         job_id = generate_uuid()
-        batch_dir_name = f"{connector_id}-{job_id}-{batch_number}"
+        batch_dir_name = f"{connector_id}-{sync_seq}-{batch_number}"
         batch_dir = staging_base / batch_dir_name
         batch_dir.mkdir(parents=True, exist_ok=True)
 
