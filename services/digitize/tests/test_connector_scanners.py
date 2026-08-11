@@ -345,7 +345,7 @@ class TestS3ScannerScan:
         assert scanner.scan() == []
 
     def test_no_dedup_filtering(self):
-        """scan() must return all files — no dedup in scanner."""
+        """scan() deduplicates within a walk — duplicate ETags are dropped."""
         cfg = _make_config()
         scanner = S3Scanner(cfg)
         page = self._make_page([
@@ -355,7 +355,7 @@ class TestS3ScannerScan:
         scanner._client = _make_mock_client([page])
 
         result = scanner.scan()
-        assert len(result) == 2  # both returned even with identical ETags
+        assert len(result) == 1  # second entry with duplicate ETag is dropped
 
 
 class TestS3ScannerDownloadTo:
@@ -438,6 +438,9 @@ class TestS3ScannerVerifyIntegrity:
 # build_scanner factory
 # ---------------------------------------------------------------------------
 
+_PATCH_DECRYPT = "digitize.connectors.scanners.scanner_factory.decrypt_secrets"
+
+
 class TestBuildScanner:
     def _make_connector_dict(self, connector_type: str = "s3") -> dict:
         return {
@@ -453,12 +456,14 @@ class TestBuildScanner:
 
     def test_s3_type_returns_s3_scanner(self):
         row = self._make_connector_dict("s3")
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert isinstance(scanner, S3Scanner)
 
     def test_s3_scanner_config_populated(self):
         row = self._make_connector_dict("s3")
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert scanner._cfg.bucket_name == "my-bucket"
         assert scanner._cfg.allowed_extensions == [".pdf", ".docx"]
 
@@ -472,14 +477,16 @@ class TestBuildScanner:
             },
             allowed_extensions=[".pdf"],
         )
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert isinstance(scanner, S3Scanner)
         assert scanner._cfg.bucket_name == "ns-bucket"
 
     def test_unknown_type_raises_value_error(self):
         row = {"type": "ftp", "connection_details": {}, "allowed_extensions": []}
-        with pytest.raises(ValueError, match="ftp"):
-            build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            with pytest.raises(ValueError, match="ftp"):
+                build_scanner(row)
 
 
 # ---------------------------------------------------------------------------
@@ -716,14 +723,20 @@ class TestSSHScannerScan:
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()
 
-        # /data contains report.pdf and manual.docx
+        # /data contains report.pdf and manual.docx — give each a unique md5
         mock_sftp.listdir_attr.return_value = [
             self._make_stat("report.pdf"),
             self._make_stat("manual.docx"),
         ]
+        _md5s = {
+            "/data/report.pdf": "aabbccdd11223344aabbccdd11223344",
+            "/data/manual.docx": "11223344aabbccdd11223344aabbccdd",
+        }
         def exec_command_side_effect(cmd):
+            path = cmd.split('"')[1]
+            md5 = _md5s.get(path, "deadbeefdeadbeefdeadbeefdeadbeef")
             stdout = MagicMock()
-            stdout.read.return_value = b"abc123  " + cmd.split('"')[1].encode()
+            stdout.read.return_value = f"{md5}  {path}".encode()
             stdout.channel.recv_exit_status.return_value = 0
             stderr = MagicMock()
             stderr.read.return_value = b""
@@ -779,12 +792,22 @@ class TestSSHScannerScan:
             return []
 
         mock_sftp.listdir_attr.side_effect = listdir_attr_side_effect
-        stdout = MagicMock()
-        stdout.read.return_value = b"deadbeef  file"
-        stdout.channel.recv_exit_status.return_value = 0
-        stderr = MagicMock()
-        stderr.read.return_value = b""
-        mock_ssh.exec_command.return_value = (None, stdout, stderr)
+        # Give each file a unique md5 so dedup doesn't discard one
+        _md5s = {
+            "/data/report.pdf": "aaaabbbbccccdddd1111222233334444",
+            "/data/subdir/nested.docx": "1111222233334444aaaabbbbccccdddd",
+        }
+        def exec_command_side_effect(cmd):
+            path = cmd.split('"')[1]
+            md5 = _md5s.get(path, "deadbeefdeadbeefdeadbeefdeadbeef")
+            stdout = MagicMock()
+            stdout.read.return_value = f"{md5}  {path}".encode()
+            stdout.channel.recv_exit_status.return_value = 0
+            stderr = MagicMock()
+            stderr.read.return_value = b""
+            return None, stdout, stderr
+
+        mock_ssh.exec_command.side_effect = exec_command_side_effect
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
@@ -850,7 +873,7 @@ class TestSSHScannerScan:
         assert result == []
 
     def test_scan_returns_full_list_without_dedup(self):
-        """All matched files must be returned — no dedup filtering in the scanner."""
+        """Duplicate md5s are deduplicated within a walk — only the first is kept."""
         scanner = _make_ssh_scanner()
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()
@@ -869,7 +892,7 @@ class TestSSHScannerScan:
         self._attach(scanner, mock_sftp, mock_ssh)
 
         result = scanner.scan()
-        assert len(result) == 2  # both returned even with identical checksums
+        assert len(result) == 1  # second entry with duplicate md5 is dropped
 
 
 # ---------------------------------------------------------------------------
@@ -1029,12 +1052,14 @@ class TestBuildScannerSSH:
     def test_ssh_type_returns_ssh_scanner(self):
         from digitize.connectors.scanners.ssh_scanner import SSHScanner
         row = self._make_ssh_connector_dict()
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert isinstance(scanner, SSHScanner)
 
     def test_ssh_scanner_config_populated(self):
         row = self._make_ssh_connector_dict()
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert scanner._cfg.host == "sftp.example.com"
         assert scanner._cfg.username == "user"
         assert scanner._cfg.allowed_extensions == [".pdf", ".docx"]
@@ -1050,6 +1075,7 @@ class TestBuildScannerSSH:
             },
             allowed_extensions=[".pdf"],
         )
-        scanner = build_scanner(row)
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+            scanner = build_scanner(row)
         assert isinstance(scanner, SSHScanner)
         assert scanner._cfg.host == "sftp.host"
