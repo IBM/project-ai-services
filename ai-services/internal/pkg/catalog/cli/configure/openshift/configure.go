@@ -2,6 +2,8 @@ package openshift
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -19,6 +21,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
+
+// connectorEncryptionKeySize is the number of random bytes used for the AES-256 connector encryption key.
+const connectorEncryptionKeySize = 32
 
 // DeployCatalog deploys the catalog service to OpenShift using the Helm chart.
 func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOptions) error {
@@ -136,6 +141,23 @@ func generateArgParams(rt *runtimeOpenshift.OpenshiftClient, passwordHash string
 		}
 
 		argParams[configure.ArgParamDBPassword] = dbPassword
+	}
+
+	// Generate the connector encryption key only when the secret does not yet exist.
+	// Re-runs of catalog configure must not rotate the key — doing so would silently
+	// corrupt all credentials already encrypted with the original key.
+	connectorSecretExists, err := rt.SecretExists(catalogconstants.CatalogConnectorSecretName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check connector secret existence: %w", err)
+	}
+
+	if !connectorSecretExists {
+		keyBytes := make([]byte, connectorEncryptionKeySize)
+		if _, err := rand.Read(keyBytes); err != nil {
+			return nil, fmt.Errorf("failed to generate connector encryption key: %w", err)
+		}
+
+		argParams[configure.ArgParamConnectorEncryptionKey] = base64.StdEncoding.EncodeToString(keyBytes)
 	}
 
 	return argParams, nil

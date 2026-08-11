@@ -92,6 +92,11 @@ spec:
                 secretKeyRef:
                   name: catalog-db-secret
                   key: db-password
+            - name: CONNECTOR_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-connector-secret
+                  key: connector-encryption-key
             - name: GIN_MODE
               value: "release"
             - name: AI_SERVICES_LOG_LEVEL

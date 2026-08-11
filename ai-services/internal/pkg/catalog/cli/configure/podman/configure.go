@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -154,6 +155,9 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string
 	return nil
 }
 
+// connectorEncryptionKeySize is the number of random bytes used for the AES-256 connector encryption key.
+const connectorEncryptionKeySize = 32
+
 // generateArgParams generates the argument parameters for template rendering.
 func generateArgParams(passwordHash string, httpsPort int) (map[string]string, error) {
 	// Generate database password
@@ -161,6 +165,14 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
 	}
+
+	// Generate a cryptographically secure 32-byte AES-256 key for connector credential encryption.
+	// The raw bytes are base64-encoded so they can be stored safely in a Kubernetes/Podman Secret.
+	connectorKeyBytes := make([]byte, connectorEncryptionKeySize)
+	if _, err := rand.Read(connectorKeyBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate connector encryption key: %w", err)
+	}
+	connectorEncryptionKey := base64.StdEncoding.EncodeToString(connectorKeyBytes)
 
 	// Determine auth file path
 	// Read and encode auth file content for secret
@@ -202,6 +214,7 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[configure.ArgParamConnectorEncryptionKey] = connectorEncryptionKey
 
 	return argParams, nil
 }

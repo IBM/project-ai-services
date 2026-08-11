@@ -2,8 +2,9 @@ package configure
 
 // ArgParam keys common to both Podman and OpenShift deployments.
 const (
-	ArgParamAdminPasswordHash = "backend.adminPasswordHash"
-	ArgParamDBPassword        = "db.password"
+	ArgParamAdminPasswordHash      = "backend.adminPasswordHash"
+	ArgParamDBPassword             = "db.password"
+	ArgParamConnectorEncryptionKey = "backend.connectorEncryptionKey"
 )
 
 // ArgParam keys used only by the OpenShift deployment.

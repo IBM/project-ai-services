@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,13 +17,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	pkgconstants "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
-const defaultRandomSecretKeyLength = 32
+const (
+	defaultRandomSecretKeyLength    = 32
+	connectorEncryptionKeyByteLen   = 32
+)
 
 // loadDBConfig loads database configuration from environment variables.
 func loadDBConfig() (db.Config, error) {
@@ -63,6 +68,89 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
+// loadConnectorEncryptionKey reads the CONNECTOR_ENCRYPTION_KEY environment variable,
+// base64-decodes it, and validates that it is exactly 32 bytes (required for AES-256).
+// Returns an error on startup if the key is absent or malformed so that misconfigurations
+// are caught immediately rather than at first use.
+func loadConnectorEncryptionKey() ([]byte, error) {
+	encoded := os.Getenv(string(pkgconstants.ConnectorEncryptionKey))
+	if encoded == "" {
+		return nil, fmt.Errorf("%s environment variable is required", pkgconstants.ConnectorEncryptionKey)
+	}
+
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("failed to base64-decode %s: %w", pkgconstants.ConnectorEncryptionKey, err)
+	}
+
+	if len(key) != connectorEncryptionKeyByteLen {
+		return nil, fmt.Errorf("%s must decode to exactly %d bytes (AES-256), got %d",
+			pkgconstants.ConnectorEncryptionKey, connectorEncryptionKeyByteLen, len(key))
+	}
+
+	return key, nil
+}
+
+// initApplicationService sets up the database pool, repositories, sync service,
+// and application service. The caller is responsible for closing the pool and
+// stopping the sync service via the returned cleanup function.
+func initApplicationService(ctx context.Context) (
+	appSvc apirepository.ApplicationServiceInterface,
+	blacklist *apirepository.DBTokenBlacklist,
+	cleanup func(),
+	err error,
+) {
+	dbConfig, err := loadDBConfig()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	pool, err := db.ConnectPool(ctx, dbConfig)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	logger.Infoln("Connected to database successfully")
+
+	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
+	bl := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
+
+	applicationRepo := repository.NewApplicationRepository(pool)
+	serviceRepo := repository.NewServiceRepository(pool)
+	componentRepo := repository.NewComponentRepository(pool)
+	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+
+	syncService, err := sync.NewSyncService(
+		applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo,
+		sync.DefaultSyncInterval,
+	)
+	if err != nil {
+		pool.Close()
+		bl.Stop()
+
+		return nil, nil, nil, fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		syncService.Stop(ctx)
+		pool.Close()
+		bl.Stop()
+
+		return nil, nil, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
+	svc := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
+
+	cleanup = func() {
+		syncService.Stop(ctx)
+		bl.Stop()
+		pool.Close()
+	}
+
+	return svc, bl, cleanup, nil
+}
+
 // runAPIServer initializes and starts the API server with the provided configuration.
 func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string) error {
 	secretKey, err := getOrGenerateSecretKey()
@@ -70,53 +158,18 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		return err
 	}
 
-	dbConfig, err := loadDBConfig()
-	if err != nil {
+	if _, err := loadConnectorEncryptionKey(); err != nil {
 		return err
 	}
 
 	ctx := context.Background()
-	pool, err := db.ConnectPool(ctx, dbConfig)
+	applicationService, blacklist, cleanup, err := initApplicationService(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer pool.Close()
-
-	logger.Infoln("Connected to database successfully")
+	defer cleanup()
 
 	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
-	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
-	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
-	defer blacklist.Stop()
-
-	// Initialize repositories
-	applicationRepo := repository.NewApplicationRepository(pool)
-	serviceRepo := repository.NewServiceRepository(pool)
-	componentRepo := repository.NewComponentRepository(pool)
-	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
-
-	// Initialize sync service for background DB-Pod synchronization
-	syncService, err := sync.NewSyncService(
-		applicationRepo,
-		serviceRepo,
-		componentRepo,
-		serviceDependencyRepo,
-		sync.DefaultSyncInterval,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to initialize sync service: %w", err)
-	}
-	syncService.Start(ctx)
-	defer syncService.Stop(ctx)
-
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		return fmt.Errorf("failed to initialize catalog provider: %w", err)
-	}
-
-	// Initialize application service with all required repositories
-	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
-
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
 

@@ -11,6 +11,12 @@ const (
 	// and holds a comma-separated list of PCI addresses, e.g.:
 	//   PCIDEVICE_IBM_COM_AIU_PF=0182:60:00.0,0183:70:00.0
 	PCIDeviceEnvKey Env = "PCIDEVICE_IBM_COM_AIU_PF"
+
+	// ConnectorEncryptionKey is the env var that holds the base64-encoded 32-byte AES-256 key
+	// used by the catalog backend to encrypt and decrypt sensitive connector credential fields
+	// before writing to and reading from the database. Provisioned at catalog configure time
+	// and mounted from the catalog-connector-secret Secret.
+	ConnectorEncryptionKey Env = "CONNECTOR_ENCRYPTION_KEY"
 )
 
 const (
