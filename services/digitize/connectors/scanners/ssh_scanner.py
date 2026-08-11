@@ -104,7 +104,8 @@ class SSHScanner(BaseScanner):
         exit_status = stdout.channel.recv_exit_status()
         if exit_status != 0:
             raise RuntimeError(
-                f"[ssh_scanner] Failed to compute md5 for {remote_file_path!r}: {error_output or output}"
+                f"[ssh_scanner] Failed to compute md5 for {remote_file_path!r}: "
+                f"stdout={output!r} stderr={error_output!r}"
             )
         return output.split()[0]
 
