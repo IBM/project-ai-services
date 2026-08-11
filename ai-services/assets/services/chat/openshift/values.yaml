@@ -1,5 +1,5 @@
 ui:
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.49
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.50
   resources:
     requests:
       memory: "512Mi"
