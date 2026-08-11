@@ -135,7 +135,7 @@ flowchart TD
 
 The catalog backend's `CatalogProvider` runs **inside the `ai-services--catalog` container**, not on the CLI host. `assets.CatalogFS` is baked into the binary at build time (via `go:embed`). For custom templates to be visible at runtime they must reach the container and be overlaid onto the embedded FS.
 
-Custom assets are delivered via the running catalog API: the client POSTs a `.tar.gz` bundle over HTTPS, and the apiserver writes the extracted contents to a dedicated named volume (`ai-services-bundles` on Podman, `catalog-bundles-pvc` on OpenShift) that it already owns. Both runtimes mount the volume at the well-known path `/data/catalog-bundles` inside the container. Bundles are stored under `<catalog_type>/<name>/` where `name = <catalog_id>-<version>` (e.g. `service/chat-2.0.0/`). At startup, `CatalogProvider` queries the DB for all `status = 'active'` rows, resolves each to its named directory, and builds a `CompositeCatalogFS`. Hot-reload happens in-process after every successful upload; no pod restart is needed.
+Custom assets are delivered via the running catalog API: the client POSTs a `.tar.gz` bundle over HTTPS, and the apiserver writes the extracted contents to a dedicated named volume (`ai-services-bundles` on Podman, `catalog-bundles-pvc` on OpenShift) that it already owns. Both runtimes mount the volume at the well-known path `/data/catalog-bundles` inside the container. Bundles are stored under `<catalog_type>/<name>/` where `name = <catalog_id>-<version>` (e.g. `service/chat-2.0.0/`). **At most one bundle per `catalog_id` is active at any time** — uploading a new version via `PUT` replaces the existing one. At startup, `CatalogProvider` queries the DB for all `status = 'active'` rows, resolves each to its named directory, and builds a `CompositeCatalogFS`. Hot-reload happens in-process after every successful upload; no pod restart is needed.
 
 ### 3.3 OpenShift path
 
@@ -404,7 +404,8 @@ Custom catalog assets are delivered by uploading a `.tar.gz` bundle to the runni
 | Goal | Detail |
 |---|---|
 | No restart required | `CatalogProvider` reloads the custom layer in-process after a successful upload |
-| Idempotent | Re-uploading the same `catalog_id` + `version` replaces the existing directory in-place |
+| Conflict-safe POST | `POST` raises `409 Conflict` if a bundle with the same `catalog_id` is already registered — use `PUT` to update |
+| Explicit update via PUT | `PUT /api/v1/catalog/bundles/:bundle_id` replaces the existing bundle; `catalog_id`, `catalog_type`, and `version` are all resolved from the archive and the existing DB record — not form fields |
 | Independent bundles | Each uploaded bundle exists separately; multiple bundles for different `catalog_id` values are all active simultaneously |
 | Authenticated | Uses the existing JWT `BearerAuth` middleware; only admin-role tokens are accepted |
 | Consistent across runtimes | Same API endpoint works for Podman and OpenShift; only the storage backend differs |
@@ -414,17 +415,21 @@ Custom catalog assets are delivered by uploading a `.tar.gz` bundle to the runni
 
 ### 7.2 New API endpoints
 
-Three endpoints are added to the existing router in [`apiserver/router.go`](ai-services/internal/pkg/catalog/apiserver/router.go:18) under the authenticated `catalog` group:
+Five endpoints are added to the existing router in [`apiserver/router.go`](ai-services/internal/pkg/catalog/apiserver/router.go:18) under the authenticated `catalog` group:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/catalog/bundles` | Upload a new bundle (`.tar.gz`). Each bundle is registered independently and activated on success. |
+| `POST` | `/api/v1/catalog/bundles` | Upload a **new** bundle (`.tar.gz`). Returns `409 Conflict` if a bundle with the same `catalog_id` already exists. |
+| `PUT` | `/api/v1/catalog/bundles/:bundle_id` | Replace an existing bundle identified by its internal record ID. Returns `404` if no bundle with that ID exists. `catalog_id` and `catalog_type` are resolved from the DB record. |
+| `DELETE` | `/api/v1/catalog/bundles/:bundle_id` | Delete a bundle by its internal record ID. Removes the on-disk directory and the DB record. Returns `404` if no bundle with that ID exists. |
 | `GET` | `/api/v1/catalog/bundles` | List all uploaded bundles (id, status, uploaded_at, size). |
 | `GET` | `/api/v1/catalog/bundles/:id` | Get the status of a specific bundle by ID. Used to poll after a `202` upload response. |
 
 #### 7.2.1 Upload bundle — `POST /api/v1/catalog/bundles`
 
-The request uses `multipart/form-data` so that the binary `.tar.gz` file and the text fields can travel together in the same request. The server validates `catalog_type` and `version` before touching the archive, then extracts directly into the versioned directory on the bundle volume.
+The request uses `multipart/form-data` so that the binary `.tar.gz` file and the text fields can travel together in the same request. The server validates `catalog_id`, `catalog_type`, and `version` before touching the archive, then extracts directly into the versioned directory on the bundle volume. The `catalog_id` form field is used as the bundle name component and must match the top-level directory inside the archive — a mismatch is rejected with `400`.
+
+When `dry_run=true` the request is handled **synchronously**: the archive is extracted to a temporary directory, validated, then immediately cleaned up. No DB record is written, `CatalogProvider` is not reloaded, and the conflict check is skipped — so a dry-run against an already-registered `catalog_id` is always allowed. The response is `200 OK` (valid) or `422` (invalid), returned inline without polling.
 
 ```
 POST /api/v1/catalog/bundles
@@ -434,13 +439,18 @@ Authorization: Bearer <admin-jwt>
 Form fields:
   file         (required)  — .tar.gz archive containing the catalog item
                              assets; max 50 MB compressed
+  catalog_id   (required)  — identifier for this catalog item, e.g. "my-service";
+                             must match the top-level directory name inside the archive;
+                             combined with version to form the on-disk bundle name
+                             (<catalog_id>-<version>)
   catalog_type (required)  — type of the catalog item in this bundle;
                              accepted values: "service", "component"
   version      (required)  — semantic version of this bundle, e.g. "1.0.0";
-                             used as the directory name under
-                             /data/catalog-bundles/<type>/<name>/
-                             where name = <catalog_id>-<version>
-  dry_run      (optional)  — "true" validates the archive without activating it
+                             combined with catalog_id to form the on-disk bundle name
+                             (<catalog_id>-<version>)
+                             (ignored for storage purposes when dry_run=true)
+  dry_run      (optional)  — "true" runs a synchronous validate-only pass;
+                             no DB record is written and nothing is activated
 ```
 
 **Example (curl):**
@@ -448,6 +458,7 @@ Form fields:
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@my-bundle.tar.gz" \
+  -F "catalog_id=my-service" \
   -F "catalog_type=service" \
   -F "version=1.0.0"
 ```
@@ -456,11 +467,13 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 | Status | Meaning |
 |---|---|
+| `200 OK` | **`dry_run=true` only.** Validation passed; archive is safe to upload for real. No record was written. |
 | `202 Accepted` | Bundle accepted; extraction and validation running asynchronously. Use the `Location` header to poll for status. |
-| `400 Bad Request` | Missing `file`, `catalog_type`, or `version` field; unrecognised `catalog_type`; invalid version format; wrong content-type; or archive exceeds size limit. |
+| `400 Bad Request` | Missing `file`, `catalog_id`, `catalog_type`, or `version` field; `catalog_id` does not match the archive's top-level directory name; unrecognised `catalog_type`; invalid version format; wrong content-type; or archive exceeds size limit. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
-| `422 Unprocessable Entity` | Archive extracted but validation failed (structured error list returned). |
+| `409 Conflict` | A bundle with the same `catalog_id` is already registered (**non-dry-run only**). Use `PUT /api/v1/catalog/bundles/:catalog_id` to update it. |
+| `422 Unprocessable Entity` | Validation failed (structured error list returned). Returned synchronously for `dry_run=true`, or via poll for normal uploads. |
 
 The response includes a `Location` header pointing to the status resource:
 
@@ -469,7 +482,7 @@ HTTP/1.1 202 Accepted
 Location: /api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ
 ```
 
-`catalog_type` is known immediately from the request field. `catalog_id` is resolved from the directory name inside the archive during extraction and populated once the archive is unpacked. Both are present in the `202` body:
+`catalog_id`, `catalog_type`, and `version` are all known immediately from the request fields and are present in the `202` body:
 
 ```json
 // 202 response body
@@ -503,7 +516,89 @@ Once the bundle reaches `active` or `failed` status, the polled response reflect
 }
 ```
 
-#### 7.2.2 List bundles — `GET /api/v1/catalog/bundles`
+#### 7.2.2 Update bundle — `PUT /api/v1/catalog/bundles/:bundle_id`
+
+Use `PUT` to replace an existing bundle identified by its internal record ID (`bundle_id`). The server looks up the record by `bundle_id` and derives `catalog_id` and `catalog_type` from it — neither is a form field. The only form fields are `file` and optionally `dry_run`.
+
+**Version is not a form field.** The version of the replacement bundle is read from the `metadata.yaml` inside the archive after extraction. If the metadata carries a new version the on-disk directory is named accordingly (`<catalog_id>-<new_version>/`). The `catalog_id` and `catalog_type` values inside the archive metadata must match the existing DB record — attempts to change them are rejected with `422`.
+
+Returns `404` if no bundle with that `bundle_id` exists.
+
+When `dry_run=true` the request is handled **synchronously**: the archive is extracted to a temporary directory and validated, then immediately cleaned up. The `404` check **still runs** — a dry-run with an unknown `bundle_id` returns `404` just as a real PUT would. No DB record is updated, the old bundle directory is untouched, and `CatalogProvider` is not reloaded. The response is `200 OK` (valid) or `422` (invalid), returned inline without polling.
+
+```
+PUT /api/v1/catalog/bundles/:bundle_id
+Content-Type: multipart/form-data
+Authorization: Bearer <admin-jwt>
+
+Path parameter:
+  :bundle_id   (required)  — internal record ID of the bundle to replace,
+                             e.g. bnd_01JW4X9K2M8VQRP3T5YZ
+
+Form fields:
+  file         (required)  — .tar.gz archive containing the replacement assets
+  dry_run      (optional)  — "true" runs a synchronous validate-only pass;
+                             existing bundle is untouched, nothing is activated
+```
+
+> `catalog_id`, `catalog_type`, and `version` are **not** form fields for `PUT`. `catalog_id` and `catalog_type` are resolved from the DB record and validated against the archive metadata — mismatches are rejected with `422`. `version` is read from the archive's `metadata.yaml` and used to derive the on-disk bundle name (`<catalog_id>-<version>/`).
+
+**Example (curl):**
+```bash
+curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@my-bundle-v2.tar.gz"
+```
+
+**Responses:**
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | **`dry_run=true` only.** Validation passed; replacement archive is safe to apply for real. Existing bundle unchanged. |
+| `202 Accepted` | Replacement bundle accepted; processing asynchronously. Poll `Location` header to get status. `version` and `name` in the response body are populated once the archive is extracted. |
+| `400 Bad Request` | Missing `file` field; archive top-level directory does not match the resolved `catalog_id`; wrong content-type; or archive exceeds size limit. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Token does not carry admin role. |
+| `404 Not Found` | No bundle with the given `bundle_id` exists. Use `POST` to create a new bundle first. (Returned for both normal and `dry_run=true` requests.) |
+| `422 Unprocessable Entity` | Validation failed, or the archive's `catalog_id`/`catalog_type` metadata differs from the existing record. Returned synchronously for `dry_run=true`, or via poll for normal updates. The existing bundle remains active in both cases. |
+
+The `202` body has the same shape as `POST` but `version` and `name` are initially empty strings (populated on the polled response once extraction completes). The old bundle directory (`<type>/<catalog_id>-<old_version>/`) is deleted from the volume only after the replacement is marked `active` in the DB — the existing bundle continues to serve templates throughout the async processing window.
+
+---
+
+#### 7.2.3 Delete bundle — `DELETE /api/v1/catalog/bundles/:bundle_id`
+
+Permanently removes a bundle: deletes the on-disk directory (`<catalog_type>/<catalog_id>-<version>/`) from the bundle volume, removes the DB row, and triggers a `CatalogProvider.Reload()` so the item is no longer served. Any application that was deployed using this bundle's `catalog_id` is **not** affected — existing deployed resources are independent of the catalog once launched.
+
+```
+DELETE /api/v1/catalog/bundles/:bundle_id
+Authorization: Bearer <admin-jwt>
+
+Path parameter:
+  :bundle_id   (required)  — internal record ID of the bundle to delete,
+                             e.g. bnd_01JW4X9K2M8VQRP3T5YZ
+```
+
+**Example (curl):**
+```bash
+curl -X DELETE https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Responses:**
+
+| Status | Meaning |
+|---|---|
+| `204 No Content` | Bundle deleted; on-disk directory removed and `CatalogProvider` reloaded. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Token does not carry admin role. |
+| `404 Not Found` | No bundle with the given `bundle_id` exists. |
+
+> Deletion is **synchronous** — the directory removal and `CatalogProvider.Reload()` happen in-process before the `204` is returned. There is no async processing step and no polling needed.
+
+---
+
+#### 7.2.4 List bundles — `GET /api/v1/catalog/bundles`
 
 Each bundle record carries `catalog_type` (the type declared by the uploader — `"service"` or `"component"`) and `catalog_id` (the item id within that type). Multiple bundles for different catalog items are all active simultaneously and each is listed independently.
 
@@ -540,11 +635,15 @@ Each bundle record carries `catalog_type` (the type declared by the uploader —
 
 ### 7.3 Bundle format
 
-A bundle is scoped to **one catalog item** — the type is declared by the client as a form field (`catalog_type`), and the `catalog_id` is derived from the top-level directory inside the archive. The archive must be a gzip-compressed tar (`.tar.gz`). The `version` form field combines with the `catalog_id` to form the unique on-disk directory name (`<catalog_id>-<version>`), ensuring each bundle has an isolated location on the volume.
+A bundle is scoped to **one catalog item**. The archive must be a gzip-compressed tar (`.tar.gz`). The `catalog_id` and `version` together form the unique on-disk directory name (`<catalog_id>-<version>`).
+
+For **POST**, `catalog_id`, `catalog_type`, and `version` are all declared as form fields. The server validates that the archive's top-level directory matches the supplied `catalog_id` — a mismatch is rejected with `400` before any extraction begins.
+
+For **PUT**, no form fields are needed beyond `file`. `catalog_id` and `catalog_type` are resolved from the existing DB record; `version` is read from `metadata.yaml` inside the archive after extraction. The `catalog_id` and `catalog_type` values inside the metadata are validated as immutable (must match the DB record) — a mismatch is rejected with `422`.
 
 ```
 my-bundle.tar.gz
-└── my-service/                     ← single item; directory name = catalog_id
+└── my-service/                     ← must match catalog_id form field
     ├── metadata.yaml
     └── podman/
         ├── metadata.yaml
@@ -553,24 +652,44 @@ my-bundle.tar.gz
             └── my-service.yaml.tmpl
 ```
 
-The server derives `catalog_id` from this top-level directory name and validates it matches the `catalog_type` form field. The `version` form field (e.g. `"1.0.0"`) determines where the extracted contents are stored on the volume.
+The `version` form field (e.g. `"1.0.0"`) combines with `catalog_id` to determine the on-disk bundle name (`my-service-1.0.0/`).
 
 **Rules:**
 - Paths containing `..` or absolute paths are rejected immediately (path-traversal guard, same principle as [`SanitizeFilePath`](ai-services/internal/pkg/catalog/utils/common.go:90)).
 - The archive must contain exactly one top-level directory; multiple items per archive are not supported.
+- The top-level directory name inside the archive must exactly equal the `catalog_id` form field — a mismatch is rejected with `400`.
 - Total uncompressed size must not exceed `MAX_BUNDLE_SIZE_UNCOMPRESSED` (default 200 MB).
-- The `catalog_id` derived from the top-level directory name must not match any built-in service already present in `assets.CatalogFS` — if it does, validation returns `422` and the extracted directory is deleted.
+- The `catalog_id` must not match any built-in service already present in `assets.CatalogFS` — if it does, validation returns `422` and the extracted directory is deleted.
 - All `metadata.yaml` files must pass validation for the declared `catalog_type` before the bundle is marked `active`.
 
 ---
 
 ### 7.4 Server-side processing pipeline
 
+#### POST — new bundle
+
 ```mermaid
 flowchart TD
-    REQ["POST /api/v1/catalog/bundles<br/>multipart/form-data<br/>file, catalog_type, version, dry_run"]
+    REQ["POST /api/v1/catalog/bundles<br/>multipart/form-data<br/>file, catalog_id, catalog_type, version, dry_run"]
     AUTH["AuthMiddleware<br/>JWT + admin role check"]
-    TYPECHECK["Validate catalog_type and version<br/>reject unknown type → 400"]
+    TYPECHECK["Validate catalog_id, catalog_type, version<br/>reject unknown type or missing fields → 400"]
+    DRYCHECK{"dry_run=true?"}
+
+    subgraph DRYPATH["Synchronous dry-run path"]
+        DR_SIZE["Size guard — max 50 MB compressed"]
+        DR_EXTRACT["Extract to /tmp/dryrun-uuid/"]
+        DR_PATHGUARD["Path-traversal guard"]
+        DR_VALIDATE["CatalogProvider.ValidateFS"]
+        DR_CLEANUP["Delete /tmp/dryrun-uuid/ (always)"]
+        DR_OK["200 OK — validation result"]
+        DR_FAIL["422 Unprocessable Entity — error list"]
+        DR_SIZE --> DR_EXTRACT --> DR_PATHGUARD --> DR_VALIDATE --> DR_CLEANUP
+        DR_CLEANUP -->|"valid"| DR_OK
+        DR_CLEANUP -->|"invalid"| DR_FAIL
+    end
+
+    CONFLICT["Check catalog_bundles table<br/>catalog_id already exists?"]
+    CONFLICT_RESP["409 Conflict<br/>use PUT to update"]
     RESP["202 Accepted immediately<br/>bundle_id, status: processing<br/>Location: /api/v1/catalog/bundles/:id"]
     SIZE["Size guard<br/>max 50 MB compressed"]
     EXTRACT["Extract to<br/>/data/catalog-bundles/type/name/<br/>name = catalog_id-version"]
@@ -593,7 +712,63 @@ flowchart TD
         VALIDATE -->|"invalid"| FAIL
     end
 
-    REQ --> AUTH --> TYPECHECK --> RESP
+    REQ --> AUTH --> TYPECHECK --> DRYCHECK
+    DRYCHECK -->|"yes"| DRYPATH
+    DRYCHECK -->|"no"| CONFLICT
+    CONFLICT -->|"exists"| CONFLICT_RESP
+    CONFLICT -->|"new"| RESP
+    RESP -.-> ASYNC
+```
+
+#### PUT — replace existing bundle
+
+```mermaid
+flowchart TD
+    REQ["PUT /api/v1/catalog/bundles/:bundle_id<br/>multipart/form-data<br/>file, dry_run"]
+    AUTH["AuthMiddleware<br/>JWT + admin role check"]
+    LOOKUP["Look up bundle_id in catalog_bundles<br/>resolve catalog_id + catalog_type from record<br/>not found → 404"]
+    DRYCHECK{"dry_run=true?"}
+
+    subgraph DRYPATH["Synchronous dry-run path"]
+        DR_SIZE["Size guard — max 50 MB compressed"]
+        DR_EXTRACT["Extract to /tmp/dryrun-uuid/"]
+        DR_PATHGUARD["Path-traversal guard"]
+        DR_VALIDATE["CatalogProvider.ValidateFS<br/>(catalog_id + catalog_type from DB record)"]
+        DR_CLEANUP["Delete /tmp/dryrun-uuid/ (always)"]
+        DR_OK["200 OK — validation result<br/>existing bundle untouched"]
+        DR_FAIL["422 Unprocessable Entity — error list<br/>existing bundle untouched"]
+        DR_SIZE --> DR_EXTRACT --> DR_PATHGUARD --> DR_VALIDATE --> DR_CLEANUP
+        DR_CLEANUP -->|"valid"| DR_OK
+        DR_CLEANUP -->|"invalid"| DR_FAIL
+    end
+
+    RESP["202 Accepted immediately<br/>bundle_id, status: processing<br/>version + name populated after extraction<br/>Location: /api/v1/catalog/bundles/:id"]
+    SIZE["Size guard<br/>max 50 MB compressed"]
+    EXTRACT["Extract to<br/>/data/catalog-bundles/type/new-name/<br/>new-name = catalog_id-version_from_metadata"]
+    PATHGUARD["Path-traversal guard<br/>reject .. and absolute paths<br/>verify exactly one top-level dir"]
+    METACHECK["Read version from metadata.yaml<br/>validate catalog_id + catalog_type unchanged<br/>mismatch → 422"]
+    VALIDATE["CatalogProvider.ValidateFS<br/>parse metadata for resolved catalog_type<br/>collect all errors"]
+
+    subgraph ASYNC["Goroutine — async after 202"]
+        SIZE --> EXTRACT --> PATHGUARD --> METACHECK --> VALIDATE
+
+        subgraph ACTIVATE["Activate — success path"]
+            direction LR
+            DBUPDATE["Update bundle record<br/>status = active, version + name from metadata"]
+            RMOLD["Delete old type/old-name/ directory"]
+            RELOAD["CatalogProvider.Reload()<br/>re-query active bundles from DB<br/>rebuild CompositeCatalogFS"]
+            DBUPDATE --> RMOLD --> RELOAD
+        end
+
+        FAIL["Delete new type/new-name/ directory<br/>update DB status = failed<br/>existing bundle remains active<br/>return 422 on poll"]
+
+        VALIDATE -->|"valid"| ACTIVATE
+        VALIDATE -->|"invalid"| FAIL
+    end
+
+    REQ --> AUTH --> LOOKUP --> DRYCHECK
+    DRYCHECK -->|"yes"| DRYPATH
+    DRYCHECK -->|"no"| RESP
     RESP -.-> ASYNC
 ```
 
@@ -601,7 +776,9 @@ flowchart TD
 
 - Extraction and validation run in a goroutine; the HTTP handler returns `202` immediately. The client polls `GET /api/v1/catalog/bundles/:id` until `status` is `active` or `failed`.
 - Each bundle gets its own named directory on the volume (`<type>/<name>/`) — uploading `service/my-service-1.0.0` and `service/chat-1.0.0` are entirely independent; neither touches the other.
-- Extraction goes directly into `<type>/<name>/` — no staging directory needed. Since the named directory is new and unique, there is nothing live to corrupt.
+- **POST** extraction goes directly into `<type>/<name>/` — no staging directory needed. Since the named directory is new and unique, there is nothing live to corrupt.
+- **PUT** extraction writes the new versioned directory alongside the old one. The old directory is removed only after the new bundle is marked `active` in the DB — the existing bundle continues to serve templates throughout the async window.
+- **PUT** METACHECK: after extraction, `metadata.yaml` is parsed to read `version` (used to construct the new directory name) and to assert that `catalog_id` and `catalog_type` are unchanged. A mismatch returns `422` and the extracted directory is deleted.
 - If validation fails, the newly written `<type>/<name>/` directory is deleted. All other active bundles remain unaffected.
 - The DB never marks a bundle `active` until validation passes — so even a partial extraction (e.g. process killed mid-way) is safe: `CatalogProvider` will not load a directory that has no `active` DB row.
 - `CatalogProvider.Reload()` re-queries the DB for all `status = 'active'` rows and rebuilds the `CompositeCatalogFS` under `sync.RWMutex`.
@@ -612,7 +789,7 @@ flowchart TD
 
 ### 7.5 New database migration
 
-Each row in `catalog_bundles` represents one uploaded bundle. The `name` column is derived server-side as `<catalog_id>-<version>` (e.g. `chat-2.0.0`) — it uniquely identifies a versioned bundle in a human-readable form and is used as the directory name on the volume. The `status` column tracks lifecycle: `processing → active` on success, `failed` on validation error. Multiple bundles for different `catalog_id` values are all `active` simultaneously; each exists independently.
+Each row in `catalog_bundles` represents one uploaded bundle. The `name` column is derived server-side as `<catalog_id>-<version>` (e.g. `chat-2.0.0`) — it identifies the specific versioned bundle and is used as the directory name on the volume. The `status` column tracks lifecycle: `processing → active` on success, `failed` on validation error. **Only one `active` row per `catalog_id` is permitted** — enforced by a partial unique index. Bundles for different `catalog_id` values are all `active` simultaneously; each exists independently.
 
 ```sql
 -- +goose Up
@@ -646,10 +823,18 @@ CREATE TABLE catalog_bundles (
     uploaded_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     activated_at     TIMESTAMPTZ
 );
+
+-- Enforce one active bundle per catalog_id at the DB level.
+-- 'processing' and 'failed' rows are exempt so that a replacement upload
+-- in flight does not block itself.
+CREATE UNIQUE INDEX uq_catalog_bundles_active_catalog_id
+    ON catalog_bundles (catalog_id)
+    WHERE status = 'active';
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+DROP INDEX  IF EXISTS uq_catalog_bundles_active_catalog_id;
 DROP TABLE  IF EXISTS catalog_bundles;
 DROP TYPE   IF EXISTS bundle_status;
 -- +goose StatementEnd
@@ -663,19 +848,19 @@ Bundle storage is **intentionally isolated** from `$AI_SERVICES_BASE_DIR`. This 
 
 #### Volume directory layout
 
-The volume is organised as `<catalog_type>/<name>/` where `name` is `<catalog_id>-<version>` (e.g. `chat-2.0.0`). Each uploaded bundle gets its own named directory. Bundles for different `catalog_id` values coexist on disk and are each independently `active`. Extraction writes directly into the named directory; no staging or rename step is needed.
+The volume is organised as `<catalog_type>/<name>/` where `name` is `<catalog_id>-<version>` (e.g. `chat-2.0.0`). At most **one versioned directory per `catalog_id`** exists on disk at any time — a `PUT` replaces the old directory with the new one once the replacement is marked `active`. Bundles for different `catalog_id` values coexist independently. Extraction writes directly into the new named directory; the old directory is removed only after the DB row is updated to `active`.
 
 ```
 /data/catalog-bundles/
 ├── service/
-│   ├── chat-2.0.0/              ← active
+│   ├── chat-2.0.0/              ← active (one version of "chat" at a time)
 │   │   ├── metadata.yaml
 │   │   └── podman/...
-│   └── my-service-1.0.0/        ← active (independent)
+│   └── my-service-1.0.0/        ← active (independent catalog_id)
 │       ├── metadata.yaml
 │       └── podman/...
 └── component/
-    └── my-llm-provider-1.0.0/   ← active (independent)
+    └── my-llm-provider-1.0.0/   ← active (independent catalog_id)
         └── metadata.yaml
 ```
 
@@ -820,30 +1005,39 @@ type BundleHandler struct {
 
 // UploadBundle godoc
 //
-//  @Summary     Upload a custom catalog bundle
-//  @Description Accepts a .tar.gz archive for a single catalog item. The
-//               caller declares the catalog_type ("service" or "component").
-//               The archive is validated and, if valid, hot-reloaded into
-//               the running CatalogProvider.
+//  @Summary     Upload a new custom catalog bundle
+//  @Description Accepts a .tar.gz archive for a single catalog item. The caller declares
+//               catalog_id, catalog_type, and version as form fields. The catalog_id must
+//               match the top-level directory name inside the archive. Returns 409 if a
+//               bundle with the same catalog_id is already registered — use PUT to update.
+//               The archive is validated and, if valid, hot-reloaded into CatalogProvider.
 //  @Tags        Catalog
 //  @Accept      multipart/form-data
 //  @Produce     json
 //  @Security    BearerAuth
 //  @Param       file         formData  file    true   ".tar.gz bundle archive (max 50 MB)"
+//  @Param       catalog_id   formData  string  true   "Catalog item identifier, e.g. my-service; must match archive top-level directory"
 //  @Param       catalog_type formData  string  true   "Catalog item type: service or component"
 //  @Param       version      formData  string  true   "Semantic version of this bundle, e.g. 1.0.0"
 //  @Param       dry_run      formData  string  false  "Validate only, do not apply (default: false)"
-//  @Success     202  {object}  BundleResponse   "Bundle accepted and processing"
-//  @Failure     400  {object}  ErrorResponse    "Invalid request or archive too large"
-//  @Failure     401  {object}  ErrorResponse    "Unauthorized"
-//  @Failure     403  {object}  ErrorResponse    "Admin role required"
+//  @Success     202  {object}  BundleResponse      "Bundle accepted and processing"
+//  @Failure     400  {object}  ErrorResponse       "Invalid request, catalog_id mismatch, or archive too large"
+//  @Failure     401  {object}  ErrorResponse       "Unauthorized"
+//  @Failure     403  {object}  ErrorResponse       "Admin role required"
+//  @Failure     409  {object}  ErrorResponse       "catalog_id already registered; use PUT"
 //  @Failure     422  {object}  BundleErrorResponse "Validation failed"
 //  @Router      /catalog/bundles [post]
 func (h *BundleHandler) UploadBundle(c *gin.Context) {
     // 1. Enforce size limit before reading into memory
     c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
 
-    // 2. Validate catalog_type before touching the archive
+    // 2. Validate all required fields before touching the archive
+    catalogID := c.PostForm("catalog_id")
+    if catalogID == "" {
+        c.JSON(http.StatusBadRequest, ErrorResponse{Error: "catalog_id is required"})
+        return
+    }
+
     catalogType := c.PostForm("catalog_type")
     if catalogType == "" {
         c.JSON(http.StatusBadRequest, ErrorResponse{Error: "catalog_type is required"})
@@ -875,7 +1069,37 @@ func (h *BundleHandler) UploadBundle(c *gin.Context) {
     dryRun := c.PostForm("dry_run") == "true"
     userID := c.GetString(middleware.CtxUserIDKey)
 
-    resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, header.Size, userID, catalogType, version, dryRun)
+    // 3. Dry-run: synchronous validate-only path — no DB write, no CatalogProvider reload,
+    //    conflict check skipped (the archive is never persisted).
+    //    catalog_id is passed so ValidateBundle can confirm the archive top-level dir matches.
+    if dryRun {
+        result, err := h.bundleService.ValidateBundle(c.Request.Context(), file, catalogID, catalogType)
+        if err != nil {
+            if valErr, ok := err.(*ValidationError); ok {
+                c.JSON(valErr.Code, valErr)
+                return
+            }
+            c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "dry-run validation failed unexpectedly"})
+            return
+        }
+        c.JSON(http.StatusOK, result)
+        return
+    }
+
+    // 4. Conflict check — only for real (non-dry-run) uploads.
+    exists, err := h.bundleService.CatalogIDExists(c.Request.Context(), catalogID)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to check existing bundles"})
+        return
+    }
+    if exists {
+        c.JSON(http.StatusConflict, ErrorResponse{
+            Error: fmt.Sprintf("a bundle with catalog_id %q already exists; use PUT /api/v1/catalog/bundles/%s to update it", catalogID, catalogID),
+        })
+        return
+    }
+
+    resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, header.Size, userID, catalogID, catalogType, version)
     if err != nil {
         if valErr, ok := err.(*ValidationError); ok {
             c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
@@ -886,6 +1110,192 @@ func (h *BundleHandler) UploadBundle(c *gin.Context) {
     }
 
     c.JSON(http.StatusAccepted, resp)
+}
+
+// UpdateBundle godoc
+//
+//  @Summary     Replace an existing catalog bundle
+//  @Description Replaces the bundle identified by bundle_id. catalog_id and catalog_type
+//               are resolved from the DB record — neither is a form field. Version is read
+//               from metadata.yaml inside the archive; catalog_id and catalog_type in the
+//               archive metadata must match the existing record (immutable). Returns 404 if
+//               no bundle with that bundle_id exists. The existing bundle remains active
+//               until the replacement is validated and activated.
+//  @Tags        Catalog
+//  @Accept      multipart/form-data
+//  @Produce     json
+//  @Security    BearerAuth
+//  @Param       bundle_id    path      string  true   "Internal record ID of the bundle to replace, e.g. bnd_01JW4X9K2M8VQRP3T5YZ"
+//  @Param       file         formData  file    true   ".tar.gz replacement archive (max 50 MB)"
+//  @Param       dry_run      formData  string  false  "Validate only, do not apply (default: false)"
+//  @Success     202  {object}  BundleResponse      "Replacement bundle accepted and processing; version populated after extraction"
+//  @Failure     400  {object}  ErrorResponse       "Missing file field or archive too large"
+//  @Failure     401  {object}  ErrorResponse       "Unauthorized"
+//  @Failure     403  {object}  ErrorResponse       "Admin role required"
+//  @Failure     404  {object}  ErrorResponse       "No bundle with this bundle_id; use POST to create a new one"
+//  @Failure     422  {object}  BundleErrorResponse "Validation failed or immutable fields differ; existing bundle unchanged"
+//  @Router      /catalog/bundles/{bundle_id} [put]
+func (h *BundleHandler) UpdateBundle(c *gin.Context) {
+    // 1. Enforce size limit before reading into memory
+    c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
+    bundleID := c.Param("bundle_id")
+
+    // 2. Resolve existing record by bundle_id — 404 if not found.
+    //    catalog_id and catalog_type are taken from the resolved record; neither
+    //    is supplied by the caller.
+    existing, err := h.bundleService.GetByBundleID(c.Request.Context(), bundleID)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to look up bundle"})
+        return
+    }
+    if existing == nil {
+        c.JSON(http.StatusNotFound, ErrorResponse{
+            Error: fmt.Sprintf("no bundle with id %q; use POST /api/v1/catalog/bundles to create a new one", bundleID),
+        })
+        return
+    }
+
+    // version is NOT a form field — it is read from metadata.yaml inside the archive.
+
+    file, header, err := c.Request.FormFile("file")
+    if err != nil {
+        c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable file field"})
+        return
+    }
+    defer file.Close()
+
+    if !strings.HasSuffix(header.Filename, ".tar.gz") {
+        c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+        return
+    }
+
+    dryRun := c.PostForm("dry_run") == "true"
+    userID := c.GetString(middleware.CtxUserIDKey)
+
+    // catalog_id and catalog_type are both taken from the resolved record.
+    // ValidateBundle and ReplaceBundle verify that the archive's top-level directory
+    // matches existing.CatalogID, and that catalog_id + catalog_type in metadata.yaml
+    // are unchanged (immutable). Version is read from metadata.yaml.
+
+    // 3. Dry-run: synchronous validate-only path — existing bundle is completely untouched.
+    //    The 404 check above still ran, so we know the bundle exists.
+    if dryRun {
+        result, err := h.bundleService.ValidateBundle(c.Request.Context(), file, existing.CatalogID, existing.CatalogType)
+        if err != nil {
+            if valErr, ok := err.(*ValidationError); ok {
+                c.JSON(valErr.Code, valErr)
+                return
+            }
+            c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "dry-run validation failed unexpectedly"})
+            return
+        }
+        c.JSON(http.StatusOK, result)
+        return
+    }
+
+    resp, err := h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, header.Size, userID)
+    // existing carries CatalogID, CatalogType, and the old Name — ReplaceBundle uses all three.
+    // Version is extracted from the archive's metadata.yaml inside ReplaceBundle.
+    if err != nil {
+        if valErr, ok := err.(*ValidationError); ok {
+            c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+            return
+        }
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "bundle replacement failed"})
+        return
+    }
+
+    c.JSON(http.StatusAccepted, resp)
+}
+
+// DeleteBundle godoc
+//
+//  @Summary     Delete a catalog bundle
+//  @Description Removes the bundle identified by bundle_id: deletes the on-disk directory
+//               and the DB record, then reloads CatalogProvider synchronously. Existing
+//               deployed applications are not affected.
+//  @Tags        Catalog
+//  @Produce     json
+//  @Security    BearerAuth
+//  @Param       bundle_id  path  string  true  "Internal record ID of the bundle to delete, e.g. bnd_01JW4X9K2M8VQRP3T5YZ"
+//  @Success     204  "Bundle deleted"
+//  @Failure     401  {object}  ErrorResponse  "Unauthorized"
+//  @Failure     403  {object}  ErrorResponse  "Admin role required"
+//  @Failure     404  {object}  ErrorResponse  "No bundle with this bundle_id"
+//  @Router      /catalog/bundles/{bundle_id} [delete]
+func (h *BundleHandler) DeleteBundle(c *gin.Context) {
+    bundleID := c.Param("bundle_id")
+
+    // 1. Resolve existing record — 404 if not found.
+    existing, err := h.bundleService.GetByBundleID(c.Request.Context(), bundleID)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to look up bundle"})
+        return
+    }
+    if existing == nil {
+        c.JSON(http.StatusNotFound, ErrorResponse{
+            Error: fmt.Sprintf("no bundle with id %q", bundleID),
+        })
+        return
+    }
+
+    // 2. Delete on-disk directory, remove DB record, reload CatalogProvider — all synchronous.
+    if err := h.bundleService.DeleteBundle(c.Request.Context(), existing); err != nil {
+        c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to delete bundle"})
+        return
+    }
+
+    c.Status(http.StatusNoContent)
+}
+```
+
+**`BundleServiceInterface` additions:**
+
+```go
+type BundleServiceInterface interface {
+    // ValidateBundle is the shared dry-run implementation used by both POST and PUT.
+    // It peeks at the archive's top-level directory, verifies it matches catalogID,
+    // extracts to a temp directory, runs CatalogProvider.ValidateFS for the given
+    // catalogType, then deletes the temp directory regardless of outcome.
+    // Returns a *ValidationResult on success (200) or a *ValidationError on failure (422).
+    // No DB row is written and CatalogProvider is never reloaded.
+    ValidateBundle(ctx context.Context, file io.Reader, catalogID, catalogType string) (*ValidationResult, error)
+
+    // ProcessBundle handles a real (non-dry-run) POST upload.
+    // The conflict check is performed by the handler before this is called.
+    // catalogID is the client-supplied identifier; the service verifies it matches
+    // the archive's top-level directory before extracting.
+    ProcessBundle(ctx context.Context, file io.Reader, size int64, userID, catalogID, catalogType, version string) (*BundleResponse, error)
+
+    // ReplaceBundle handles a real (non-dry-run) PUT update.
+    // existing is the current active bundle record; CatalogID, CatalogType, and Name
+    // are all read from it. Version is read from metadata.yaml inside the archive —
+    // it is not passed as a parameter. catalog_id and catalog_type in the archive
+    // metadata are validated to match existing.CatalogID and existing.CatalogType;
+    // a mismatch returns a ValidationError (422). The old on-disk directory is
+    // removed only after the new bundle is marked active.
+    ReplaceBundle(ctx context.Context, existing *Bundle, file io.Reader, size int64, userID string) (*BundleResponse, error)
+
+    // CatalogIDExists returns true if any active bundle row with the given catalog_id exists.
+    CatalogIDExists(ctx context.Context, catalogID string) (bool, error)
+
+    // GetByBundleID returns the bundle record for the given internal bundle ID, or nil.
+    // Used by PUT and DELETE to resolve the bundle from the path parameter.
+    GetByBundleID(ctx context.Context, bundleID string) (*Bundle, error)
+
+    // DeleteBundle removes the bundle's on-disk directory, deletes the DB record,
+    // and calls CatalogProvider.Reload() — all synchronously.
+    // existing must be the resolved record (provides CatalogType, Name for the path).
+    DeleteBundle(ctx context.Context, existing *Bundle) error
+}
+
+// ValidationResult is the 200 OK body returned by a successful dry-run.
+type ValidationResult struct {
+    Valid       bool     `json:"valid"`
+    CatalogID   string   `json:"catalog_id"`
+    CatalogType string   `json:"catalog_type"`
+    Warnings    []string `json:"warnings,omitempty"`
 }
 ```
 
@@ -1443,15 +1853,29 @@ curl -X POST https://catalog-api.<domain>/api/v1/auth/login \
 # Package the custom service directory
 tar -czf my-bundle.tar.gz services/
 
-# Upload the bundle (catalog_type and version are required fields)
+# Upload the bundle — POST creates a new entry (fails with 409 if catalog_id already exists)
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-bundle.tar.gz" \
+  -F "catalog_id=my-service" \
   -F "catalog_type=service" \
   -F "version=1.0.0"
 
 # Poll for activation using the bundle ID from the 202 response
 curl -s https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ \
+  -H "Authorization: Bearer $(cat token.txt)" | jq .status
+# "active"
+
+# Update the bundle — PUT uses the internal bundle_id from the 202 response above.
+# catalog_id, catalog_type, and version are all resolved from the archive metadata;
+# only the file is required. catalog_id and catalog_type are immutable.
+tar -czf my-bundle-v2.tar.gz services/
+curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ \
+  -H "Authorization: Bearer $(cat token.txt)" \
+  -F "file=@my-bundle-v2.tar.gz"
+
+# Poll for the replacement to go active
+curl -s https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_02EF9Z4PG2Q0XRS5V7WB \
   -H "Authorization: Bearer $(cat token.txt)" | jq .status
 # "active"
 ```
@@ -1497,6 +1921,7 @@ tar -czf chat-bundle.tar.gz services/chat
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@chat-bundle.tar.gz" \
+  -F "catalog_id=chat" \
   -F "catalog_type=service" \
   -F "version=2.0.0"
 
@@ -1526,16 +1951,48 @@ curl -s https://catalog-api.<domain>/api/v1/services \
 
 ### 10.5 Dry-run validation before applying
 
+`dry_run=true` is **synchronous** — the server extracts the archive to a temporary directory, validates it, cleans up, and replies inline. No `202` + polling is involved; you get a direct `200 OK` or `422`.
+
 ```bash
-# Validate without activating — useful in CI before promoting to production
-# All required fields (catalog_type, version) must be present even for dry_run
+# --- Validate a new bundle (POST dry-run) ---
+# The conflict check is skipped, so this works even if my-service is already registered.
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-bundle.tar.gz" \
+  -F "catalog_id=my-service" \
   -F "catalog_type=service" \
   -F "version=1.0.0" \
   -F "dry_run=true"
-# Returns 202 with status: "validated" (not promoted to active)
+# 200 OK
+# {
+#   "valid": true,
+#   "catalog_id": "my-service",
+#   "catalog_type": "service"
+# }
+
+# --- Validate a replacement bundle before applying (PUT dry-run) ---
+# The 404 check still runs — my-service must be registered, otherwise 404.
+curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/my-service \
+  -H "Authorization: Bearer $(cat token.txt)" \
+  -F "file=@my-bundle-v2.tar.gz" \
+  -F "version=2.0.0" \
+  -F "dry_run=true"
+# 200 OK — existing my-service bundle is completely untouched
+# {
+#   "valid": true,
+#   "catalog_id": "my-service",
+#   "catalog_type": "service"
+# }
+
+# --- Validation failure example ---
+curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
+  -H "Authorization: Bearer $(cat token.txt)" \
+  -F "file=@broken-bundle.tar.gz" \
+  -F "catalog_id=my-service" \
+  -F "catalog_type=service" \
+  -F "version=1.0.0" \
+  -F "dry_run=true"
+# 422 Unprocessable Entity — nothing was written to disk or DB
 ```
 
 ---
@@ -1547,7 +2004,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 | No bundle uploaded yet | Identical to current — `EmbeddedCatalogFS` only |
 | Volume mounted but no `status='active'` rows in DB | Only `EmbeddedCatalogFS` is used; behaviour identical to today |
 | Custom service has same `id` as built-in | Bundle is rejected with `422`; built-in is never shadowed |
-| Multiple bundles for different `catalog_id` values | All are `active` simultaneously; each is fully independent |
+| Multiple bundles for different `catalog_id` values | All are `active` simultaneously; each is fully independent. At most one bundle (one version) per `catalog_id` is active at any given time. |
 | Existing applications in the database | Unaffected; records reference `catalog_id` strings which remain stable |
 | `catalog_type` value not in the accepted list | Rejected immediately with `400` before the archive is touched |
 | New `catalog_type` value introduced in a future release | Existing clients that receive an unfamiliar `catalog_type` string are unaffected — they simply don't render that bundle type in their UI |
