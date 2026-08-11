@@ -58,6 +58,9 @@ func init() {
 
 const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
+
+	deleteNamespaceGracePeriod = int64(30)         // deleteNamespaceGracePeriod is the grace period in seconds for namespace deletion.
+	deleteNamespaceTimeout     = 5 * time.Minute   // deleteNamespaceTimeout is the maximum time to wait for a namespace deletion to complete.
 )
 
 // OpenshiftClient implements the Runtime interface for Openshift.
@@ -845,10 +848,10 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 }
 
 func (kc *OpenshiftClient) DeleteNamespace(name string) error {
-	gracePeriod := int64(30)
+	gracePeriod := deleteNamespaceGracePeriod
 	propagation := metav1.DeletePropagationForeground
 
-	ctx, cancel := context.WithTimeout(kc.Ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(kc.Ctx, deleteNamespaceTimeout)
 	defer cancel()
 
 	err := kc.KubeClient.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{
