@@ -2,17 +2,10 @@ package applicationservice
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 

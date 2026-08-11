@@ -2,7 +2,6 @@ package applicationservice
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -10,8 +9,6 @@ import (
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
-
-var errOpenShiftNotSupported = errors.New("OpenShift runtime is not yet supported")
 
 // OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
 // It embeds ApplicationServiceBase for all shared DB operations.

@@ -691,7 +691,6 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 // GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
 // namespace is the runtime namespace to query: empty string for Podman, AppNamespace(app.ID) for OpenShift.
 func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID, namespace string) (*types.ApplicationResourcesResponse, error) {
-func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
 	app, err := s.AppRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -1040,6 +1039,20 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 	}
 
 	return appPodList, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
 	if app.CreatedBy != user {
 		return nil, &ValidationError{
 			Code:    http.StatusForbidden,
