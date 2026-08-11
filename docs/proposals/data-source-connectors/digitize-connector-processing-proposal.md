@@ -532,12 +532,14 @@ async def _process_new_files(sync_seq: int, connector_id: str, scanner: BaseScan
     loop = asyncio.get_running_loop()
     staging_base = settings.digitize.staging_dir / "connectors"
     for batch_number, (remote_path, checksum) in enumerate(ingest_list):
+        _check_delete_pending(connector_id)  # skip starting a new download if delete is pending
         job_id = generate_job_id()
         batch_dir = staging_base / f"{connector_id}-{job_id}-{batch_number}"
         batch_dir.mkdir(parents=True, exist_ok=True)
         try:
             local_path = batch_dir / Path(remote_path).name
             await loop.run_in_executor(None, scanner.download_to, remote_path, local_path)
+            _check_delete_pending(connector_id)  # exit loop if delete arrived while downloading
             doc_id = await create_job(connector_id, checksum, staging_dir=batch_dir)
             insert_connector_checksum(connector_id, checksum, doc_id)
         except asyncio.CancelledError:
@@ -661,9 +663,9 @@ Scanners perform synchronous blocking I/O (`boto3` calls, Paramiko SFTP operatio
 ### 8.2 Execution & Cancellation Model
 - All blocking scanner methods (`connect`, `scan`, `download_to`) are called via `await loop.run_in_executor(None, scanner.<method>, *args)`.
 - Event loop remains fully responsive.
-- When `signal_connector_delete(connector_id)` is called during DELETE, the coroutine receives `CancelledError` at the current or next `await` boundary and cleans up gracefully.
-- Executor thread finishes its active network packet/syscall in background without blocking teardown response.
-- Safety net timeout (`30 s`) in `await_connector_tick_exit()` prevents stalled network connections from blocking teardown indefinitely.
+- When `signal_connector_delete(connector_id)` is called during DELETE, the ID is added to `_pending_deletions`. The tick polls this set via `_check_delete_pending(connector_id)` **before each download** (skips starting a new one) and **after each download returns** (exits the loop immediately). `CancelledError` is raised in the coroutine at those checkpoints, not inside the thread.
+- A download already in flight cannot be interrupted mid-stream; it runs to natural completion on its thread. Deletes that arrive between files are therefore nearly instant.
+- Safety net timeout (`30 s`) in `await_connector_tick_exit()` prevents a stalled in-flight download from blocking teardown indefinitely.
 
 ### 8.3 Thread Pool Sizing
 Each ticking connector holds at most **1 thread at a time**.
@@ -691,6 +693,7 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 #### PR 6 — Core Sync Engine (`_classify` + `_run_tick`) ❌
 - **Target File:** `services/digitize/connectors/sync_tick.py`
 - **Deliverables:** Implement `_classify()`, `_process_new_files()`, `_delete_orphans()`, and `_run_tick()`. Wire DB helper functions and staging cleanup. Unit & integration tests.
+- **Cancellation helper:** Add `_check_delete_pending(connector_id: str) -> None` (imported from `scheduler.py`) that raises `asyncio.CancelledError()` if `connector_id in _pending_deletions`. Call it at the top of the `_process_new_files` loop (before download) and once after `run_in_executor` returns (after download).
 
 #### PR 7 — Scheduler + Lifespan + `POST /sync` Dispatch ❌
 - **Target Files:** `services/digitize/connectors/scheduler.py`, `app.py`, `connectors.py`
