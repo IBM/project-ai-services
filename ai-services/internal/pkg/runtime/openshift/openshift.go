@@ -508,9 +508,16 @@ func (kc *OpenshiftClient) DeleteVolume(name string) error {
 }
 
 func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
-	logger.Warningln("Not implemented")
+	_, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
 
-	return false, nil
+		return false, fmt.Errorf("failed to check pvc existence: %w", err)
+	}
+
+	return true, nil
 }
 
 // GetSystemInfo returns cluster-level CPU, memory, and Spyre card availability.
