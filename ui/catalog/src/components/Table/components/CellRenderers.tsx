@@ -63,7 +63,7 @@ export interface ActionCellProps {
   rowId: string;
   rowData?: { status?: string };
   onDelete: (rowId: string) => void;
-  // Each table has its own delete eligibility rule and passes it explicitly. 
+  // Each table has its own delete eligibility rule and passes it explicitly.
   isDeleteEnabled: (status: string | undefined) => boolean;
 }
 
