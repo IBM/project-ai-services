@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 700" width="860" height="700" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 680" width="860" height="680" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
   <defs>
     <marker id="s-arr"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
     <marker id="s-arrg" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2d9a5f"/></marker>
@@ -12,128 +12,127 @@
        ═══════════════════════════════════════════════════════ -->
 
   <!-- OS Process outer box -->
-  <rect x="10" y="10" width="840" height="180" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
-  <text x="26" y="30" font-size="11" font-weight="600" fill="#57606a">OS Process (uvicorn — single worker)</text>
+  <rect x="10" y="10" width="840" height="160" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="26" y="30" font-size="11" font-weight="600" fill="#57606a">OS Process (uvicorn &#x2014; single worker)</text>
 
   <!-- Main asyncio event loop box -->
-  <rect x="26" y="40" width="380" height="54" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.5"/>
-  <text x="216" y="58" text-anchor="middle" font-weight="700" fill="#1e40af">asyncio event loop  (FastAPI / Uvicorn)</text>
-  <text x="216" y="74" text-anchor="middle" font-size="11" fill="#1e40af">handles HTTP · runs lifespan hooks</text>
-  <text x="216" y="88" text-anchor="middle" font-size="11" fill="#1e40af">PUT updates DB only — _run_tick re-reads config each tick</text>
+  <rect x="26" y="40" width="460" height="54" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.5"/>
+  <text x="256" y="58" text-anchor="middle" font-weight="700" fill="#1e40af">asyncio event loop  (FastAPI / Uvicorn)</text>
+  <text x="256" y="74" text-anchor="middle" font-size="11" fill="#1e40af">handles HTTP · runs lifespan hooks</text>
+  <text x="256" y="88" text-anchor="middle" font-size="11" fill="#1e40af">PUT updates DB only &#x2014; _run_tick re-reads config each tick</text>
 
   <!-- APScheduler box — same event loop -->
-  <rect x="420" y="40" width="250" height="54" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
-  <text x="545" y="58" text-anchor="middle" font-weight="700" fill="#166534">APScheduler  AsyncScheduler</text>
-  <text x="545" y="74" text-anchor="middle" font-size="11" fill="#166534">one IntervalTrigger job per connector</text>
-  <text x="545" y="88" text-anchor="middle" font-size="11" fill="#166534">max_instances=1  ·  runs on same event loop</text>
-
-  <!-- asyncio.Lock note -->
-  <rect x="680" y="40" width="160" height="54" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"/>
-  <text x="760" y="58" text-anchor="middle" font-weight="700" fill="#854d0e">asyncio.Lock</text>
-  <text x="760" y="74" text-anchor="middle" font-size="11" fill="#854d0e">_ingest_lock</text>
-  <text x="760" y="88" text-anchor="middle" font-size="11" fill="#854d0e">Phase 2 → end 4a</text>
+  <rect x="500" y="40" width="334" height="54" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
+  <text x="667" y="58" text-anchor="middle" font-weight="700" fill="#166534">APScheduler  AsyncScheduler</text>
+  <text x="667" y="74" text-anchor="middle" font-size="11" fill="#166534">one IntervalTrigger job per connector</text>
+  <text x="667" y="88" text-anchor="middle" font-size="11" fill="#166534">max_instances=1  ·  backed by PostgresDataStore</text>
 
   <!-- Note row -->
   <rect x="26" y="110" width="814" height="46" rx="4" fill="white" stroke="#e5e7eb" stroke-width="1"/>
-  <text x="433" y="129" text-anchor="middle" font-weight="700" fill="#1f2328">ConnectorScheduler  (module-level singleton)</text>
-  <text x="433" y="148" text-anchor="middle" font-size="11" fill="#57606a">register_connector_job(id, interval)  ·  remove_connector_job(id)  ·  trigger_now(id)  ·  lifespan: start_in_background() / shutdown()</text>
+  <text x="433" y="129" text-anchor="middle" font-weight="700" fill="#1f2328">ConnectorScheduler  (module-level singleton &#x2014; no _pending_deletions / no _live_tasks)</text>
+  <text x="433" y="148" text-anchor="middle" font-size="11" fill="#57606a">register_connector_job(id, interval)  ·  remove_connector_job(id)  ·  _check_delete_pending(id) reads DB  ·  lifespan: async with AsyncScheduler()</text>
 
   <!-- ═══════════════════════════════════════════════════════
        LEGEND
        ═══════════════════════════════════════════════════════ -->
-  <rect x="10" y="208" width="152" height="112" rx="4" fill="white" stroke="#e5e7eb" stroke-width="1"/>
-  <text x="20" y="226" font-weight="600" fill="#1f2328">Legend</text>
-  <line x1="20" y1="240" x2="52" y2="240" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
-  <text x="58" y="244" fill="#1f2328">API-triggered</text>
-  <line x1="20" y1="256" x2="52" y2="256" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
-  <text x="58" y="260" fill="#1f2328">Scheduler-driven</text>
-  <line x1="20" y1="272" x2="52" y2="272" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
-  <text x="58" y="276" fill="#1f2328">Error / remove</text>
-  <line x1="20" y1="288" x2="52" y2="288" stroke="#7c5cd8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#s-arrm)"/>
-  <text x="58" y="292" fill="#1f2328">Startup recovery</text>
-  <line x1="20" y1="304" x2="52" y2="304" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#s-arro)"/>
-  <text x="58" y="308" fill="#1f2328">No-op guard</text>
+  <rect x="10" y="188" width="152" height="112" rx="4" fill="white" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="20" y="206" font-weight="600" fill="#1f2328">Legend</text>
+  <line x1="20" y1="220" x2="52" y2="220" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
+  <text x="58" y="224" fill="#1f2328">API-triggered</text>
+  <line x1="20" y1="236" x2="52" y2="236" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
+  <text x="58" y="240" fill="#1f2328">Scheduler-driven</text>
+  <line x1="20" y1="252" x2="52" y2="252" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
+  <text x="58" y="256" fill="#1f2328">Error / remove</text>
+  <line x1="20" y1="268" x2="52" y2="268" stroke="#7c5cd8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#s-arrm)"/>
+  <text x="58" y="272" fill="#1f2328">Startup recovery</text>
+  <line x1="20" y1="284" x2="52" y2="284" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#s-arro)"/>
+  <text x="58" y="288" fill="#1f2328">No-op guard</text>
 
   <!-- ═══════════════════════════════════════════════════════
        SCHEDULER JOB LIFECYCLE  (center column)
        ═══════════════════════════════════════════════════════ -->
 
   <!-- Not Registered -->
-  <rect x="310" y="208" width="200" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1.5"/>
-  <text x="410" y="231" text-anchor="middle" font-weight="700" fill="#57606a">Not Registered</text>
+  <rect x="310" y="188" width="200" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="410" y="211" text-anchor="middle" font-weight="700" fill="#57606a">Not Registered</text>
 
   <!-- arrow: POST /v1/connectors → Registered -->
-  <line x1="410" y1="244" x2="410" y2="276" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
-  <text x="418" y="265" font-size="11" fill="#57606a">POST /v1/connectors</text>
+  <line x1="410" y1="224" x2="410" y2="256" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
+  <text x="418" y="245" font-size="11" fill="#57606a">POST /v1/connectors</text>
 
   <!-- Registered (Idle) -->
-  <rect x="310" y="276" width="200" height="36" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
-  <text x="410" y="296" text-anchor="middle" font-weight="700" fill="#166534">Registered  (Idle)</text>
-  <text x="410" y="308" text-anchor="middle" font-size="10" fill="#57606a">sync_status = 'up to date' / 'failed'</text>
+  <rect x="310" y="256" width="200" height="36" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
+  <text x="410" y="276" text-anchor="middle" font-weight="700" fill="#166534">Registered  (Idle)</text>
+  <text x="410" y="288" text-anchor="middle" font-size="10" fill="#57606a">sync_status = &#x27;up to date&#x27;</text>
 
   <!-- arrow: IntervalTrigger fires → Tick Running -->
-  <line x1="410" y1="314" x2="410" y2="346" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
-  <text x="418" y="335" font-size="11" fill="#57606a">IntervalTrigger fires</text>
+  <line x1="410" y1="294" x2="410" y2="326" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
+  <text x="418" y="315" font-size="11" fill="#57606a">IntervalTrigger fires</text>
 
   <!-- Tick Running -->
-  <rect x="310" y="346" width="200" height="36" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
-  <text x="410" y="366" text-anchor="middle" font-weight="700" fill="#166534">Tick Running</text>
-  <text x="410" y="378" text-anchor="middle" font-size="10" fill="#57606a">sync_status = 'syncing'</text>
+  <rect x="310" y="326" width="200" height="36" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1.5"/>
+  <text x="410" y="346" text-anchor="middle" font-weight="700" fill="#166534">Tick Running</text>
+  <text x="410" y="358" text-anchor="middle" font-size="10" fill="#57606a">sync_status = &#x27;syncing&#x27;</text>
 
   <!-- arrow: tick completes → Registered (Idle) -->
-  <path d="M510,364 C560,364 560,294 512,294" fill="none" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
-  <text x="530" y="335" font-size="11" fill="#57606a">completed</text>
+  <path d="M510,344 C560,344 560,274 512,274" fill="none" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
+  <text x="530" y="315" font-size="11" fill="#57606a">completed</text>
 
-  <!-- arrow: tick fails → Failed -->
-  <line x1="410" y1="382" x2="410" y2="414" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
-  <text x="418" y="403" font-size="11" fill="#c0392b">exception</text>
+  <!-- arrow: tick fails → Out of Sync -->
+  <line x1="410" y1="362" x2="410" y2="394" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
+  <text x="418" y="383" font-size="11" fill="#c0392b">exception</text>
 
-  <!-- Failed -->
-  <rect x="310" y="414" width="200" height="36" rx="4" fill="#fee2e2" stroke="#c0392b" stroke-width="1.5"/>
-  <text x="410" y="434" text-anchor="middle" font-weight="700" fill="#991b1b">Tick Failed</text>
-  <text x="410" y="446" text-anchor="middle" font-size="10" fill="#57606a">sync_status = 'failed: …'  ·  log closed</text>
+  <!-- Out of Sync -->
+  <rect x="310" y="394" width="200" height="36" rx="4" fill="#fee2e2" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="410" y="414" text-anchor="middle" font-weight="700" fill="#991b1b">Tick Failed</text>
+  <text x="410" y="426" text-anchor="middle" font-size="10" fill="#57606a">sync_status = &#x27;out of sync&#x27;  ·  log closed</text>
 
-  <!-- arrow: next IntervalTrigger fires again from Failed → Tick Running -->
-  <path d="M310,432 C260,432 260,364 308,364" fill="none" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
-  <text x="185" y="400" font-size="11" fill="#57606a">next interval</text>
-  <text x="185" y="413" font-size="11" fill="#57606a">fires anyway</text>
+  <!-- arrow: next IntervalTrigger fires again from Out of Sync → Tick Running -->
+  <path d="M310,412 C260,412 260,344 308,344" fill="none" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#s-arrg)"/>
+  <text x="185" y="380" font-size="11" fill="#57606a">next interval</text>
+  <text x="185" y="393" font-size="11" fill="#57606a">fires anyway</text>
 
   <!-- arrow: DELETE /v1/connectors → Removed -->
-  <line x1="410" y1="450" x2="410" y2="482" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
-  <text x="418" y="471" font-size="11" fill="#c0392b">DELETE /v1/connectors</text>
+  <line x1="410" y1="430" x2="410" y2="462" stroke="#c0392b" stroke-width="1.5" marker-end="url(#s-arrr)"/>
+  <text x="418" y="451" font-size="11" fill="#c0392b">DELETE /v1/connectors</text>
 
   <!-- Removed -->
-  <rect x="310" y="482" width="200" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1.5"/>
-  <text x="410" y="505" text-anchor="middle" font-weight="700" fill="#57606a">Removed</text>
-  <text x="410" y="517" text-anchor="middle" font-size="10" fill="#57606a">job de-registered · DB row deleted</text>
+  <rect x="310" y="462" width="200" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1.5"/>
+  <text x="410" y="485" text-anchor="middle" font-weight="700" fill="#57606a">Removed</text>
+  <text x="410" y="497" text-anchor="middle" font-size="10" fill="#57606a">job de-registered · DB row deleted</text>
 
   <!-- ═══════════════════════════════════════════════════════
        RIGHT COLUMN — POST /sync manual trigger path
        ═══════════════════════════════════════════════════════ -->
 
   <!-- POST /sync trigger box -->
-  <rect x="600" y="276" width="220" height="36" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.5"/>
-  <text x="710" y="293" text-anchor="middle" font-weight="700" fill="#1e40af">POST /sync request</text>
-  <text x="710" y="305" text-anchor="middle" font-size="10" fill="#57606a">try_acquire_sync_lock()</text>
+  <rect x="600" y="256" width="220" height="36" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.5"/>
+  <text x="710" y="273" text-anchor="middle" font-weight="700" fill="#1e40af">POST /sync request</text>
+  <text x="710" y="285" text-anchor="middle" font-size="10" fill="#57606a">try_acquire_sync_lock()</text>
 
   <!-- arrow from POST /sync to Tick Running (wins lock) -->
-  <line x1="600" y1="294" x2="512" y2="362" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
-  <text x="538" y="316" font-size="11" fill="#3b82d4">lock acquired →</text>
-  <text x="538" y="329" font-size="11" fill="#3b82d4">dispatch _run_tick</text>
+  <line x1="600" y1="274" x2="512" y2="342" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#s-arr)"/>
+  <text x="538" y="296" font-size="11" fill="#3b82d4">lock acquired &#x2192;</text>
+  <text x="538" y="309" font-size="11" fill="#3b82d4">dispatch _run_tick</text>
 
   <!-- no-op path: already syncing -->
-  <line x1="710" y1="312" x2="710" y2="370" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#s-arro)"/>
-  <rect x="634" y="370" width="150" height="36" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
-  <text x="709" y="387" text-anchor="middle" font-size="11" font-weight="600" fill="#854d0e">202 no-op</text>
-  <text x="709" y="400" text-anchor="middle" font-size="10" fill="#854d0e">already syncing — skip</text>
+  <line x1="710" y1="292" x2="710" y2="350" stroke="#ca8a04" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#s-arro)"/>
+  <rect x="634" y="350" width="150" height="36" rx="4" fill="#fef9c3" stroke="#ca8a04" stroke-width="1"/>
+  <text x="709" y="367" text-anchor="middle" font-size="11" font-weight="600" fill="#854d0e">202 no-op</text>
+  <text x="709" y="380" text-anchor="middle" font-size="10" fill="#854d0e">already syncing &#x2014; skip</text>
 
   <!-- ═══════════════════════════════════════════════════════
        BOTTOM — Startup recovery
        ═══════════════════════════════════════════════════════ -->
-  <rect x="190" y="570" width="460" height="36" rx="4" fill="#ede9fe" stroke="#7c5cd8" stroke-width="1"/>
-  <text x="420" y="585" text-anchor="middle" font-size="11" font-weight="600" fill="#4c1d95">FastAPI startup  (lifespan hook)</text>
-  <text x="420" y="599" text-anchor="middle" font-size="11" fill="#4c1d95">_scheduler.start_in_background()  →  iterate list_connectors()  →  register_connector_job() for each  →  replace_existing=True</text>
+  <rect x="190" y="550" width="460" height="48" rx="4" fill="#ede9fe" stroke="#7c5cd8" stroke-width="1"/>
+  <text x="420" y="568" text-anchor="middle" font-size="11" font-weight="600" fill="#4c1d95">FastAPI startup  (lifespan hook)</text>
+  <text x="420" y="582" text-anchor="middle" font-size="11" fill="#4c1d95">async with AsyncScheduler(data_store=AsyncSQLAlchemyDataStore(engine)) as sched:</text>
+  <text x="420" y="596" text-anchor="middle" font-size="11" fill="#4c1d95">iterate get_all_connectors() &#x2192; register_connector_job(id, interval, fire_immediately=False)</text>
 
   <!-- arrow from startup box to Registered (Idle) -->
-  <line x1="420" y1="570" x2="412" y2="514" stroke="#7c5cd8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#s-arrm)"/>
+  <line x1="420" y1="550" x2="412" y2="494" stroke="#7c5cd8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#s-arrm)"/>
+
+  <!-- Cancellation model note -->
+  <rect x="190" y="614" width="460" height="20" rx="3" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1" stroke-dasharray="1,1"/>
+  <text x="420" y="628" text-anchor="middle" font-size="10" fill="#166534" font-weight="600">Cancellation: _check_delete_pending() reads sync_status from DB &#x2014; no in-process _pending_deletions or _live_tasks</text>
 </svg>
