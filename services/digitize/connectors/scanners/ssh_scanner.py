@@ -13,10 +13,10 @@ from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.config import SFTPConnectorConfig
 from digitize.connectors.scanners.hashing import HashingWriter
 
-logger = get_logger("sftp_scanner")
+logger = get_logger("ssh_scanner")
 
 
-class SFTPScanner(BaseScanner):
+class SSHScanner(BaseScanner):
     def __init__(self, config: SFTPConnectorConfig) -> None:
         super().__init__(config)
         self._cfg: SFTPConnectorConfig = config
@@ -28,7 +28,7 @@ class SFTPScanner(BaseScanner):
             pkey = self._load_private_key(self._cfg.private_key_pem)
         except (paramiko.SSHException, ValueError) as exc:
             raise ConnectionError(
-                f"[sftp_scanner] Failed to load private key for {self._cfg.host}: {exc}"
+                f"[ssh_scanner] Failed to load private key for {self._cfg.host}: {exc}"
             ) from exc
 
         ssh = paramiko.SSHClient()
@@ -44,14 +44,14 @@ class SFTPScanner(BaseScanner):
             )
         except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
             raise ConnectionError(
-                f"[sftp_scanner] Cannot connect to {self._cfg.host}:{self._cfg.port} "
+                f"[ssh_scanner] Cannot connect to {self._cfg.host}:{self._cfg.port} "
                 f"as '{self._cfg.username}': {exc}"
             ) from exc
 
         self._ssh = ssh
         self._sftp = ssh.open_sftp()
         logger.info(
-            "[sftp_scanner] Connected — host=%s port=%d user=%s remote_path=%r",
+            "[ssh_scanner] Connected — host=%s port=%d user=%s remote_path=%r",
             self._cfg.host, self._cfg.port, self._cfg.username, self._cfg.remote_path,
         )
 
@@ -68,7 +68,7 @@ class SFTPScanner(BaseScanner):
             except Exception:
                 pass
             self._ssh = None
-        logger.debug("[sftp_scanner] Connection closed.")
+        logger.debug("[ssh_scanner] Connection closed.")
 
     def scan(self) -> list[tuple[str, str]]:
         self._require_connected()
@@ -76,24 +76,24 @@ class SFTPScanner(BaseScanner):
         found: list[tuple[str, str]] = []
         for remote_path in self._walk_remote_tree(self._cfg.remote_path):
             if os.path.splitext(remote_path)[1].lower() not in allowed:
-                logger.debug("[sftp_scanner] Skipping: %r", remote_path)
+                logger.debug("[ssh_scanner] Skipping: %r", remote_path)
                 continue
             found.append((remote_path, self._remote_md5(remote_path)))
         logger.info(
-            "[sftp_scanner] scan complete — %d document(s) found under %r",
+            "[ssh_scanner] scan complete — %d document(s) found under %r",
             len(found), self._cfg.remote_path,
         )
         return found
 
     def download_to(self, remote_path: str, local_path: Path) -> str:
         self._require_connected()
-        logger.debug("[sftp_scanner] Downloading sftp://%s%s → %s",
+        logger.debug("[ssh_scanner] Downloading sftp://%s%s → %s",
                      self._cfg.host, remote_path, local_path)
         with open(local_path, "wb") as fh:
             writer = HashingWriter(fh)
             self._sftp.getfo(remote_path, writer)
         local_md5 = writer.hexdigest
-        logger.debug("[sftp_scanner] Downloaded %s — local_md5=%s… size=%d bytes",
+        logger.debug("[ssh_scanner] Downloaded %s — local_md5=%s… size=%d bytes",
                      local_path.name, local_md5[:12], local_path.stat().st_size)
         return local_md5
 
@@ -104,7 +104,7 @@ class SFTPScanner(BaseScanner):
         exit_status = stdout.channel.recv_exit_status()
         if exit_status != 0:
             raise RuntimeError(
-                f"[sftp_scanner] Failed to compute md5 for {remote_file_path!r}: {error_output or output}"
+                f"[ssh_scanner] Failed to compute md5 for {remote_file_path!r}: {error_output or output}"
             )
         return output.split()[0]
 
@@ -112,7 +112,7 @@ class SFTPScanner(BaseScanner):
         try:
             entries = self._sftp.listdir_attr(path)
         except IOError as exc:
-            logger.warning("[sftp_scanner] Cannot list %r: %s", path, exc)
+            logger.warning("[ssh_scanner] Cannot list %r: %s", path, exc)
             return
         for entry in entries:
             full_path = path.rstrip("/") + "/" + entry.filename
@@ -124,7 +124,7 @@ class SFTPScanner(BaseScanner):
     def _require_connected(self) -> None:
         if self._sftp is None or self._ssh is None:
             raise RuntimeError(
-                "SFTPScanner.connect() must be called before scan() or download_to()."
+                "SSHScanner.connect() must be called before scan() or download_to()."
             )
 
     @staticmethod

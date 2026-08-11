@@ -14,7 +14,7 @@ Usage
 
 Adding a new scanner type
 -------------------------
-1. Implement a subclass of BaseScanner in a new module (e.g. sftp_scanner.py).
+1. Implement a subclass of BaseScanner in a new module (e.g. ssh_scanner.py).
 2. Add the connector type string to the ``_REGISTRY`` dict below.
 3. No other code needs to change — the worker calls build_scanner() and
    receives the correct instance.
@@ -28,7 +28,7 @@ from common.misc_utils import get_logger
 from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.config import S3ConnectorConfig, SFTPConnectorConfig
 from digitize.connectors.scanners.s3_scanner import S3Scanner
-from digitize.connectors.scanners.sftp_scanner import SFTPScanner
+from digitize.connectors.scanners.ssh_scanner import SSHScanner
 
 logger = get_logger("scanner_factory")
 
@@ -37,7 +37,7 @@ logger = get_logger("scanner_factory")
 # ---------------------------------------------------------------------------
 _REGISTRY: dict[str, tuple[type[BaseScanner], type]] = {
     "s3": (S3Scanner, S3ConnectorConfig),
-    "ssh": (SFTPScanner, SFTPConnectorConfig),
+    "ssh": (SSHScanner, SFTPConnectorConfig),
 }
 
 
@@ -90,7 +90,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
             connection_details,
             allowed_extensions=allowed_extensions,
         )
-    elif config_cls is SFTPConnectorConfig:
+    elif config_cls is SFTPConnectorConfig:  # used by SSHScanner
         config = SFTPConnectorConfig.from_connection_details(
             connection_details,
             allowed_extensions=allowed_extensions,
