@@ -1,6 +1,6 @@
 extract:
   port: ""
-  image: icr.io/ai-services-cicd/extract-service:v0.0.2
+  image: icr.io/ai-services-cicd/extract-service:v0.0.3
   log_level: "INFO"
   database: "extract_metadata"
 

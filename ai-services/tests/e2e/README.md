@@ -123,6 +123,11 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `failure-test` | Bootstrap negative-path coverage |
+| `catalog-configure` | Catalog service configure, uninstall, SSL, reset, and endpoint tests (podman-only) |
+| `catalog-configure && ssl` | SSL certificate deployment and reset tests only |
+| `catalog-configure && non-root` | Non-root user configure and permission tests only |
+| `catalog-configure && negative` | Negative/flag-validation tests that never deploy a catalog |
+| `catalog-configure && endpoints` | Live catalog API endpoint tests (require a running catalog) |
 
 ### Running Summarization Tests Only
 
@@ -441,6 +446,36 @@ Each failure `It()` block must:
 
 ---
 
+## Running Catalog Configure Tests
+
+`catalog_configure_test.go` covers the full `catalog configure` / `catalog uninstall` command surface — custom base directories, SSL certificate deployment, certificate reset, podman auth reset, idempotency, flag validation, and live API endpoints.
+
+**All tests in this file are podman-only.** They skip automatically on the OpenShift runtime.
+
+### Environment variables required
+
+```bash
+export CATALOG_PASSWORD=<your-catalog-admin-password>   # required — tests skip if unset
+
+# Registry credentials — used to pre-authenticate podman before image pulls
+export REGISTRY_URL="icr.io"
+export REGISTRY_USER_NAME=<registry-user>
+export REGISTRY_PASSWORD=<registry-password>
+
+# Optional — non-root user tests (skip if unset when running as root)
+export NONROOT_USER=<username>                          # Linux user with no sudo privilege
+```
+
+### Run commands
+
+```bash
+# Run all catalog configure tests
+CGO_ENABLED=0 GOFLAGS="-tags=containers_image_openpgp" \
+  ginkgo -r --timeout=0 --label-filter="catalog-configure" \
+  ./tests/e2e -- --runtime podman
+```
+---
+
 ## Running Language Support Tests
 
 The Language Support Tests validate the chatbot pipeline for German (DE), French (FR) and Italian (IT) — including automatic language detection, PDF ingestion, RAG retrieval, and golden dataset accuracy.
@@ -537,47 +572,49 @@ Below is an accurate overview of the current `ai-services/tests/e2e` layout and 
 
 ```text
 ai-services/tests/e2e/
-   ├─ e2e_suite_test.go           # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
-   ├─ README.md                   # suite usage, labels, prerequisites, and structure
-   ├─ nightly_run.sh              # helper script for scheduled suite execution
-   ├─ language_e2e_test.go        # Language support tests (DE/FR/IT) — TC-1 through TC-7
-   ├─ bootstrap_failure_test.go   # Bootstrap failure scenarios (registry, catalog, validation)
-   ├─ bootstrap/                  # runtime preparation and bootstrap helpers
+   ├─ e2e_suite_test.go              # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
+   ├─ README.md                      # suite usage, labels, prerequisites, and structure
+   ├─ nightly_run.sh                 # helper script for scheduled suite execution
+   ├─ catalog_configure_test.go      # Catalog configure/uninstall/SSL/reset/endpoint tests (podman-only)
+   ├─ language_e2e_test.go           # Language support tests (DE/FR/IT) — TC-1 through TC-7
+   ├─ bootstrap_failure_test.go      # Bootstrap failure scenarios (registry, catalog, validation)
+   ├─ bootstrap/                     # runtime preparation and bootstrap helpers
    │   ├─ bootstrap.go
    │   ├─ build.go
+   │   ├─ certs.go                   # self-signed wildcard cert generator and invalid cert writer
    │   ├─ env.go
    │   └─ podman.go
-   ├─ cleanup/                    # teardown helpers used by AfterSuite and tests
+   ├─ cleanup/                       # teardown helpers used by AfterSuite and tests
    │   └─ tear.go
-   ├─ cli/                        # helpers to invoke the ai-services CLI and validate output
+   ├─ cli/                           # helpers to invoke the ai-services CLI and validate output
    │   ├─ output.go
    │   └─ runner.go
-   ├─ common/                     # small reusable helpers used across tests (exec, files, JSON, retries)
+   ├─ common/                        # small reusable helpers used across tests (exec, files, JSON, retries)
    │   ├─ exec.go
    │   ├─ files.go
    │   ├─ json.go
    │   ├─ retry.go
    │   └─ vars.go
-   ├─ config/                     # test configuration helpers
+   ├─ config/                        # test configuration helpers
    │   └─ config.go
-   ├─ digitization/               # digitization api test helper functions
+   ├─ digitization/                  # digitization api test helper functions
    │   ├─ digitize.go
-   │   └─ digitize_lang.go        # language PDF path helpers and ingestion wrapper (DE/FR/IT)
-   ├─ ingestion/                  # document ingestion helpers and test fixtures
+   │   └─ digitize_lang.go           # language PDF path helpers and ingestion wrapper (DE/FR/IT)
+   ├─ ingestion/                     # document ingestion helpers and test fixtures
    │   ├─ ingest.go
    │   ├─ wait.go
-   │   └─ docs/                   # test documents for document ingestion and digitization
-   │       ├─ german.pdf          # German language fixture (IBM Power product page)
-   │       ├─ french.pdf          # French language fixture (IBM Power product page)
-   │       └─ italian.pdf         # Italian language fixture (IBM Power product page)
-   ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
+   │   └─ docs/                      # test documents for document ingestion and digitization
+   │       ├─ german.pdf             # German language fixture (IBM Power product page)
+   │       ├─ french.pdf             # French language fixture (IBM Power product page)
+   │       └─ italian.pdf            # Italian language fixture (IBM Power product page)
+   ├─ podman/                        # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
-   ├─ rag/                        # RAG-related test helpers
+   ├─ rag/                           # RAG-related test helpers
    │   ├─ evaluator.go
    │   ├─ golden.go
    │   ├─ judge.go
    │   └─ setup.go
-   ├─ similarity/                 # similarity API request/response helpers
+   ├─ similarity/                    # similarity API request/response helpers
    │   └─ similarity.go
-   └─ <other_test_files>          # add your `_test.go` files here (package `e2e`)
+   └─ <other_test_files>             # add your `_test.go` files here (package `e2e`)
 ```

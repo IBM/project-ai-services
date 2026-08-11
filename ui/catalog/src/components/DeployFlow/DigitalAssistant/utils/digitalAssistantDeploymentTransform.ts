@@ -1,8 +1,8 @@
 import type {
   DeployFormData,
   ComponentConfig,
-  ServiceConfig,
-} from "@/components/DeployFlow/DigitalAssistant/types";
+} from "@/components/DeployFlow/Shared/types";
+import type { ServiceConfig } from "@/components/DeployFlow/DigitalAssistant/types";
 import type {
   DeployOptionsResponse,
   DeployOptionsService as Service,
@@ -15,6 +15,11 @@ import type {
 } from "@/types/api.types";
 import { isInferenceComponent } from "./inferenceComponentHelper";
 import { shouldIncludeParam } from "@/utils/paramFilter";
+
+// DA-specific DeployFormData where services carry the DA-extended ServiceConfig (with inferenceBackend).
+type DADeployFormData = Omit<DeployFormData, "services"> & {
+  services: Record<string, ServiceConfig>;
+};
 
 /**
  * Determines the component type (llm or reranker) that uses the inference backend
@@ -238,7 +243,7 @@ function separateParams(
  * sharing the same provider+model have identical parameters and returns an error if not.
  */
 export function transformToDeploymentPayload(
-  formData: DeployFormData,
+  formData: DADeployFormData,
   deployOptions: DeployOptionsResponse,
   providerParamsCache: Record<string, ProviderSchema>,
   serviceParamsCache: Record<string, Record<string, unknown>>,

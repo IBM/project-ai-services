@@ -776,17 +776,7 @@ func ValidateCatalogLoginFailureOutput(output string) error {
 	return checkAnyPattern(output, "catalog login failure", knownPatterns)
 }
 
-// ValidateCatalogUnreachableOutput verifies that the output from a failed
-// `catalog login` attempt against an unreachable server contains a recognisable
-// connectivity-error string.
-//
-// Known strings emitted when the server cannot be reached:
-//   - "connection refused"
-//   - "no such host"
-//   - "timeout"
-//   - "context deadline exceeded"
-//   - "catalog login failed"
-//   - "dial tcp"
+// ValidateCatalogUnreachableOutput checks that a failed catalog login to an unreachable server contains a connectivity error.
 func ValidateCatalogUnreachableOutput(output string) error {
 	knownPatterns := []string{
 		"connection refused",
@@ -802,16 +792,7 @@ func ValidateCatalogUnreachableOutput(output string) error {
 	return checkAnyPattern(output, "catalog unreachable-server", knownPatterns)
 }
 
-// ValidateBootstrapValidateFailureOutput verifies that the output from a failed
-// `bootstrap validate` run contains a recognisable validation-error string.
-//
-// Known strings emitted when prerequisites are missing:
-//   - "validation failed"
-//   - "not found"
-//   - "podman"          (the missing component should be named in the error)
-//   - "prerequisite"
-//   - "failed"
-//   - "error"
+// ValidateBootstrapValidateFailureOutput verifies that a failed bootstrap validate contains a recognisable error string.
 func ValidateBootstrapValidateFailureOutput(output string) error {
 	knownPatterns := []string{
 		"validation failed",
@@ -825,14 +806,7 @@ func ValidateBootstrapValidateFailureOutput(output string) error {
 	return checkAnyPattern(output, "bootstrap validate failure", knownPatterns)
 }
 
-// ValidateInvalidRuntimeOutput verifies that the output from a
-// `bootstrap validate --runtime <invalid>` invocation contains the expected
-// rejection message emitted by bootstrapPersistentPreRunE in bootstrap.go:55:
-//
-//	"invalid runtime type: <value> (must be 'podman' or 'openshift').
-//	 Please specify runtime using --runtime flag"
-//
-// This is a pure CLI flag-validation failure — no system checks are run.
+// ValidateInvalidRuntimeOutput verifies that --runtime <invalid> is rejected with the expected error string.
 func ValidateInvalidRuntimeOutput(output string) error {
 	knownPatterns := []string{
 		"invalid runtime type",
@@ -843,15 +817,7 @@ func ValidateInvalidRuntimeOutput(output string) error {
 	return checkAnyPattern(output, "invalid runtime", knownPatterns)
 }
 
-// OutputIndicatesSpyreAbsence returns true when the bootstrap validate output
-// contains the specific error string emitted by SpyreRule.Verify() when no
-// Spyre PCI devices are found on the LPAR.
-//
-// This is used by the Spyre failure test as a pre-check to distinguish between
-// a Spyre-specific failure and any other kind of validate failure, so the test
-// only asserts the Spyre message when the output is actually Spyre-related.
-//
-// Source: internal/pkg/validators/podman/spyre/spyre.go — Verify() line 32.
+// OutputIndicatesSpyreAbsence returns true when output contains the Spyre hardware-absence error from SpyreRule.Verify().
 func OutputIndicatesSpyreAbsence(output string) bool {
 	spyreAbsencePatterns := []string{
 		"IBM Spyre Accelerator is not attached to the LPAR",
@@ -869,22 +835,8 @@ func OutputIndicatesSpyreAbsence(output string) bool {
 	return false
 }
 
-// ValidateSpyreAbsenceOutput verifies that the output from a failed
-// `bootstrap validate` run on a Spyre-less LPAR contains the expected
-// hardware-absence error emitted by SpyreRule.Verify().
-//
-// The exact message from the validator (spyre/spyre.go:32) is:
-//
-//	"IBM Spyre Accelerator is not attached to the LPAR"
-//
-// The hint from the validator (spyre/spyre.go:68) is:
-//
-//	"Run 'ai-services bootstrap configure' to fix configuration issues."
-//
-// Both are checked here so the test validates that the operator receives
-// not only the error but also guidance on how to resolve it.
+// ValidateSpyreAbsenceOutput verifies that a Spyre-less LPAR bootstrap validate contains the hardware-absence error and remediation hint.
 func ValidateSpyreAbsenceOutput(output string) error {
-	// Primary error — must always be present.
 	if !strings.Contains(output, "IBM Spyre Accelerator is not attached to the LPAR") {
 		return fmt.Errorf(
 			"spyre absence output missing expected error message.\n"+
@@ -894,8 +846,6 @@ func ValidateSpyreAbsenceOutput(output string) error {
 		)
 	}
 
-	// Remediation hint — validates the operator gets actionable guidance.
-	// Uses a substring match so minor phrasing changes don't break the test.
 	if !strings.Contains(strings.ToLower(output), "bootstrap configure") {
 		return fmt.Errorf(
 			"spyre absence output missing remediation hint (expected mention of 'bootstrap configure').\n"+
@@ -1037,4 +987,88 @@ func ValidateCatalogConfigureInvalidPortOutput(output string) error {
 	}
 
 	return checkAnyPattern(output, "catalog configure invalid port", knownPatterns)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog configure validators
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ValidateCatalogCustomPathOutput delegates to ValidateCatalogConfigureOutput; the output format is identical for custom basedir.
+func ValidateCatalogCustomPathOutput(output string) error {
+	return ValidateCatalogConfigureOutput(output)
+}
+
+// ValidateCatalogResetCertOutput validates that 'catalog configure --reset-certificate' completed successfully.
+func ValidateCatalogResetCertOutput(output string) error {
+	patterns := []string{
+		"certificate",
+		"reset",
+		"success",
+		"reload",
+		"caddy",
+		"updated",
+	}
+
+	return checkAnyPattern(output, "catalog configure --reset-certificate", patterns)
+}
+
+// ValidateCatalogResetAuthOutput validates that 'catalog configure --reset-podman-auth' completed successfully.
+func ValidateCatalogResetAuthOutput(output string) error {
+	patterns := []string{
+		"podman auth",
+		"auth.json",
+		"reset",
+		"success",
+		"updated",
+		"authentication",
+	}
+
+	return checkAnyPattern(output, "catalog configure --reset-podman-auth", patterns)
+}
+
+// ValidateCatalogInvalidFlagCombinationOutput verifies that a mutually-exclusive flag combination is rejected.
+func ValidateCatalogInvalidFlagCombinationOutput(output string) error {
+	patterns := []string{
+		"cannot be used",
+		"invalid",
+		"flag",
+		"error",
+		"cannot use",
+		"together",
+	}
+
+	return checkAnyPattern(output, "catalog configure invalid flag combination", patterns)
+}
+
+// ValidateCatalogCertDomainMismatchOutput verifies that a certificate whose domain does not match the configured domain is rejected.
+func ValidateCatalogCertDomainMismatchOutput(output string) error {
+	patterns := []string{
+		"domain",
+		"mismatch",
+		"certificate",
+		"invalid",
+		"error",
+		"does not match",
+	}
+
+	return checkAnyPattern(output, "catalog configure cert domain mismatch", patterns)
+}
+
+// ValidateCatalogInvalidCertOutput verifies that invalid (non-PEM) certificate content is rejected at flag-validation.
+func ValidateCatalogInvalidCertOutput(output string) error {
+	patterns := []string{
+		"certificate",
+		"invalid",
+		"error",
+		"failed",
+		"validation",
+		"cannot",
+	}
+
+	return checkAnyPattern(output, "catalog configure invalid certificate", patterns)
+}
+
+// ValidateCatalogUninstallCustomPathOutput delegates to ValidateCatalogUninstallOutput; output format is identical for custom basedir.
+func ValidateCatalogUninstallCustomPathOutput(output string) error {
+	return ValidateCatalogUninstallOutput(output)
 }

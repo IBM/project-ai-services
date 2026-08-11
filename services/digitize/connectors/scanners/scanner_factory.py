@@ -14,7 +14,7 @@ Usage
 
 Adding a new scanner type
 -------------------------
-1. Implement a subclass of BaseScanner in a new module (e.g. sftp_scanner.py).
+1. Implement a subclass of BaseScanner in a new module (e.g. ssh_scanner.py).
 2. Add the connector type string to the ``_REGISTRY`` dict below.
 3. No other code needs to change — the worker calls build_scanner() and
    receives the correct instance.
@@ -25,9 +25,12 @@ from __future__ import annotations
 from typing import Any
 
 from common.misc_utils import get_logger
+from digitize.connectors.encryption import decrypt_secrets
 from digitize.connectors.scanners.base_scanner import BaseScanner
-from digitize.connectors.scanners.config import S3ConnectorConfig
+from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.scanners.s3_scanner import S3Scanner
+from digitize.connectors.scanners.ssh_scanner import SSHScanner
+from digitize.settings import settings
 
 logger = get_logger("scanner_factory")
 
@@ -36,7 +39,7 @@ logger = get_logger("scanner_factory")
 # ---------------------------------------------------------------------------
 _REGISTRY: dict[str, tuple[type[BaseScanner], type]] = {
     "s3": (S3Scanner, S3ConnectorConfig),
-    # "ssh": (SFTPScanner, SFTPConnectorConfig),  # added in a future PR
+    "ssh": (SSHScanner, SSHConnectorConfig),
 }
 
 
@@ -49,7 +52,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
     connector_row:
         Any object (ORM model, dataclass, or dict) that exposes:
           - ``.type``               → str  (e.g. ``"s3"``, ``"ssh"``)
-          - ``.connection_details`` → dict  (decrypted; type-specific fields)
+          - ``.connection_details`` → dict  (encrypted as stored in the DB)
           - ``.allowed_extensions`` → list[str]  (e.g. ``[".pdf", ".docx"]``)
 
         A plain dict with those keys is also accepted.
@@ -75,6 +78,9 @@ def build_scanner(connector_row: Any) -> BaseScanner:
         connection_details = connector_row.connection_details or {}
         allowed_extensions = connector_row.allowed_extensions or [".pdf", ".docx"]
 
+    key_path = settings.digitize.connector.encryption_key_path
+    connection_details = decrypt_secrets(connector_type, connection_details, key_path)
+
     if connector_type not in _REGISTRY:
         supported = sorted(_REGISTRY.keys())
         raise ValueError(
@@ -86,6 +92,11 @@ def build_scanner(connector_row: Any) -> BaseScanner:
 
     if config_cls is S3ConnectorConfig:
         config = S3ConnectorConfig.from_connection_details(
+            connection_details,
+            allowed_extensions=allowed_extensions,
+        )
+    elif config_cls is SSHConnectorConfig:
+        config = SSHConnectorConfig.from_connection_details(
             connection_details,
             allowed_extensions=allowed_extensions,
         )

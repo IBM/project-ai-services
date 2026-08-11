@@ -1,4 +1,8 @@
-import type { DeployFormData, ServiceConfig, ComponentConfig } from "../types";
+import type {
+  DeployFormData,
+  ServiceConfig,
+  ComponentConfig,
+} from "../../Shared/types";
 import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
 
 export const initializeFormData = (

@@ -9,6 +9,7 @@ venv
 vendor
 .claude/
 .vscode/
+.bob/
 
 # Coverage reports
 .coverage
