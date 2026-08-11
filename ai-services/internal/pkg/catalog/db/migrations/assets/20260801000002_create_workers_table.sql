@@ -30,6 +30,7 @@ CREATE TABLE workers (
     runtime_type   worker_runtime_type NOT NULL DEFAULT 'podman',
     status         worker_status       NOT NULL DEFAULT 'pending',
     last_heartbeat TIMESTAMPTZ,
+    metadata       JSONB,
     registered_at  TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ         NOT NULL DEFAULT NOW()
 );

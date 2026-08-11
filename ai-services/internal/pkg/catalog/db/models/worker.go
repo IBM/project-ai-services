@@ -30,6 +30,7 @@ type Worker struct {
 	RuntimeType   WorkerRuntimeType `json:"runtime_type"`
 	Status        WorkerStatus      `json:"status"`
 	LastHeartbeat *time.Time        `json:"last_heartbeat,omitempty"`
+	Metadata      map[string]any    `json:"metadata,omitempty"`
 	RegisteredAt  time.Time         `json:"registered_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
 }

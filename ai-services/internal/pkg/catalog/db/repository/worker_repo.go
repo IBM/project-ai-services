@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -41,14 +42,24 @@ func NewWorkerRepository(pool *pgxpool.Pool) WorkerRepository {
 }
 
 // Upsert inserts a worker or, on name conflict, updates runtime_type, status,
-// and timestamps. ID, RegisteredAt, and UpdatedAt are populated via RETURNING.
+// metadata, and timestamps. ID, RegisteredAt, and UpdatedAt are populated via RETURNING.
 func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
+	var metadataJSON []byte
+	if worker.Metadata != nil {
+		var err error
+		metadataJSON, err = json.Marshal(worker.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal worker metadata: %w", err)
+		}
+	}
+
 	query := `
-		INSERT INTO workers (name, runtime_type, status)
-		VALUES ($1, $2, $3)
+		INSERT INTO workers (name, runtime_type, status, metadata)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (name) DO UPDATE
 			SET runtime_type   = EXCLUDED.runtime_type,
 			    status         = EXCLUDED.status,
+			    metadata       = EXCLUDED.metadata,
 			    registered_at  = NOW(),
 			    updated_at     = NOW()
 		RETURNING id, registered_at, updated_at
@@ -58,6 +69,7 @@ func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
 		worker.Name,
 		worker.RuntimeType,
 		worker.Status,
+		metadataJSON,
 	).Scan(&worker.ID, &worker.RegisteredAt, &worker.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to upsert worker: %w", err)
@@ -110,7 +122,7 @@ func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) error {
 // GetAll returns all worker rows ordered by registered_at ascending.
 func (r *workerRepo) GetAll(ctx context.Context) ([]models.Worker, error) {
 	query := `
-		SELECT id, name, runtime_type, status, last_heartbeat, registered_at, updated_at
+		SELECT id, name, runtime_type, status, last_heartbeat, metadata, registered_at, updated_at
 		FROM workers
 		ORDER BY registered_at ASC
 	`
@@ -125,19 +137,25 @@ func (r *workerRepo) GetAll(ctx context.Context) ([]models.Worker, error) {
 
 	for rows.Next() {
 		var (
-			w  models.Worker
-			hb sql.NullTime
+			w            models.Worker
+			hb           sql.NullTime
+			metadataJSON []byte
 		)
 
 		if err := rows.Scan(
 			&w.ID, &w.Name, &w.RuntimeType, &w.Status,
-			&hb, &w.RegisteredAt, &w.UpdatedAt,
+			&hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan worker row: %w", err)
 		}
 
 		if hb.Valid {
 			w.LastHeartbeat = &hb.Time
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
+			}
 		}
 
 		workers = append(workers, w)
