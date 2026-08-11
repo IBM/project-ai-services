@@ -74,11 +74,20 @@ class SSHScanner(BaseScanner):
         self._require_connected()
         allowed = frozenset(self._cfg.allowed_extensions)
         found: list[tuple[str, str]] = []
+        seen_md5s: set[str] = set()
         for remote_path in self._walk_remote_tree(self._cfg.remote_path):
             if os.path.splitext(remote_path)[1].lower() not in allowed:
                 logger.debug("[ssh_scanner] Skipping: %r", remote_path)
                 continue
-            found.append((remote_path, self._remote_md5(remote_path)))
+            md5 = self._remote_md5(remote_path)
+            if md5 in seen_md5s:
+                logger.debug(
+                    "[ssh_scanner] Duplicate md5 %s… — discarding %r",
+                    md5[:12], remote_path,
+                )
+                continue
+            seen_md5s.add(md5)
+            found.append((remote_path, md5))
         logger.info(
             "[ssh_scanner] scan complete — %d document(s) found under %r",
             len(found), self._cfg.remote_path,
