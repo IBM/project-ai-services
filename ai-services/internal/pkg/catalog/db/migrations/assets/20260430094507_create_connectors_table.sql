@@ -1,5 +1,10 @@
 -- +goose Up
 -- +goose StatementBegin
+-- Connector status enum
+CREATE TYPE connector_status AS ENUM (
+    'connected',
+    'offline'
+);
 -- Create connectors table.
 CREATE TABLE connectors (
     id         UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -26,4 +31,5 @@ DROP INDEX IF EXISTS idx_connectors_status;
 DROP INDEX IF EXISTS idx_connectors_provider;
 DROP INDEX IF EXISTS idx_connectors_type;
 DROP TABLE IF EXISTS connectors;
+DROP TYPE IF EXISTS connector_status;
 -- +goose StatementEnd

@@ -24,18 +24,11 @@ CREATE TYPE component_status AS ENUM (
     'Running',
     'Error'
 );
-
--- Connector status enum
-CREATE TYPE connector_status AS ENUM (
-    'connected',
-    'offline'
-);
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 -- Drop custom types in reverse order
-DROP TYPE IF EXISTS connector_status;
 DROP TYPE IF EXISTS component_status;
 DROP TYPE IF EXISTS service_status;
 DROP TYPE IF EXISTS status;
