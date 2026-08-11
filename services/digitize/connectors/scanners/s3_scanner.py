@@ -5,8 +5,8 @@ Implements BaseScanner for AWS S3 and IBM COS (S3-compatible) sources.
 
 Design decisions
 ----------------
-* ``scan()`` returns the full object list with no dedup filtering.  All
-  classification logic lives in the worker's _classify() method.
+* ``scan()`` returns the object list with within-walk duplicate ETags removed
+  (first occurrence wins).  Cross-walk dedup lives in the worker's _classify().
 
 * ``download_to()`` streams the file through HashingWriter (inline MD5) so
   there is no second file-read to verify integrity.
@@ -117,17 +117,30 @@ class S3Scanner(BaseScanner):
         ``checksum`` is the raw S3 ETag (quotes stripped), available for free
         from ``list_objects_v2`` with no extra API call.
 
-        No dedup filtering is applied — the worker's _classify() receives the
-        full list and decides what to ingest, skip, or mark as an orphan.
+        Within-walk deduplication is applied: if the same ETag appears more
+        than once during the listing, only the first encountered ``(key, etag)``
+        pair is kept.  Subsequent objects with an already-seen ETag are
+        discarded.  Cross-walk dedup remains the worker's responsibility.
 
         Returns
         -------
         list[tuple[str, str]]
-            All (key, etag) pairs for documents with allowed extensions.
-            Empty list if the bucket/prefix contains no matching objects.
+            All (key, etag) pairs for documents with allowed extensions and no
+            duplicate ETags.  Empty list if the bucket/prefix contains no
+            matching objects.
         """
         self._require_connected()
-        all_files = list(self._list_document_keys())
+        seen_etags: set[str] = set()
+        all_files: list[tuple[str, str]] = []
+        for key, etag in self._list_document_keys():
+            if etag in seen_etags:
+                logger.debug(
+                    "[s3_scanner] Duplicate ETag %s… — discarding %r",
+                    etag[:12], key,
+                )
+                continue
+            seen_etags.add(etag)
+            all_files.append((key, etag))
         logger.info(
             f"[s3_scanner] scan complete — "
             f"{len(all_files)} document(s) found in "

@@ -24,6 +24,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # Required by execEnvInContainer to read live container env vars (Spyre card PCI addresses)
+  # via the Kubernetes API pod/exec subresource — no oc binary needed.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

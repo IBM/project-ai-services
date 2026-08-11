@@ -779,23 +779,43 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 	return runCLI(ctx, cfg, "application templates command run", "application", "templates", "--runtime", appRuntime)
 }
 
-// CatalogConfigure deploys or ensures the catalog service is running.
-// Uses a PTY so the password prompt on first run can be satisfied non-interactively.
-func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+// catalogConfigureRunPTY runs 'catalog configure' via PTY with password prompts; shared by all configure variants.
+func catalogConfigureRunPTY(ctx context.Context, cfg *config.Config, errLabel string, args []string) (string, error) {
 	password := bootstrap.GetCatalogAdminPassword()
 	if password == "" {
 		return "", fmt.Errorf("CATALOG_PASSWORD environment variable is not set")
 	}
 
-	args := []string{"catalog", "configure", "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	if err := catalogRegistryLogin(); err != nil {
+		logger.Warningf("[CLI] registry login warning (non-fatal): %v", err)
+	}
 
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, password+"\n"+password+"\n")
 	if err != nil {
-		return output, fmt.Errorf("catalog configure failed: %w\n%s", err, output)
+		return output, fmt.Errorf("%s failed: %w\n%s", errLabel, err, output)
 	}
 
 	return output, nil
+}
+
+// CatalogConfigure runs 'catalog configure' with default settings via PTY.
+func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure",
+		[]string{"catalog", "configure", "--runtime", appRuntime},
+	)
+}
+
+// catalogRegistryLogin logs podman into the registry using CI-injected REGISTRY_URL/REGISTRY_USER_NAME/REGISTRY_PASSWORD.
+func catalogRegistryLogin() error {
+	if url, uname, pswd := bootstrap.GetPodManCreds(); url != "" && uname != "" && pswd != "" {
+		logger.Infof("[CLI] Logging podman into registry %s", url)
+		if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
+			return fmt.Errorf("registry login failed for %s: %w", url, err)
+		}
+	}
+
+	return nil
 }
 
 // runWithPTY starts cmd in a PTY, writes input to the master, and returns all output.
@@ -1000,8 +1020,7 @@ func ExtractURLsFromOutput(output string) []string {
 	return urls
 }
 
-// CatalogApiServerHelp runs 'catalog apiserver --help' and returns the output.
-// The real apiserver requires a live database; we only verify its help text in e2e.
+// CatalogApiServerHelp runs 'catalog apiserver --help'; the real apiserver requires a live DB so only help is tested.
 func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "catalog apiserver help", "catalog", "apiserver", "--help", "--runtime", appRuntime)
 }
@@ -1031,8 +1050,7 @@ func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (
 	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout", "--runtime", appRuntime)
 }
 
-// CatalogDbMigrateHelp runs 'catalog dbmigrate --help' and returns the output.
-// The full dbmigrate subcommands require a live database; we verify help text in e2e.
+// CatalogDbMigrateHelp runs 'catalog dbmigrate --help'; full dbmigrate requires a live DB so only help is tested.
 func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
 	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
 }
@@ -1230,4 +1248,49 @@ func filteredProcessEnv(excludeKeys ...string) []string {
 	}
 
 	return filtered
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog configure runner helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogConfigureWithBasedir runs 'catalog configure --basedir <path>' via PTY.
+func CatalogConfigureWithBasedir(ctx context.Context, cfg *config.Config, basedir string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --basedir",
+		[]string{"catalog", "configure", "--basedir", basedir, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureWithSSL runs 'catalog configure --ssl-cert <cert> --ssl-key <key>' via PTY.
+func CatalogConfigureWithSSL(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --ssl-cert/--ssl-key",
+		[]string{"catalog", "configure", "--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureResetCert runs 'catalog configure --reset-certificate --ssl-cert <cert> --ssl-key <key>'.
+func CatalogConfigureResetCert(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-certificate",
+		"catalog", "configure", "--reset-certificate",
+		"--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureResetAuth runs 'catalog configure --reset-podman-auth'.
+func CatalogConfigureResetAuth(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-podman-auth",
+		"catalog", "configure", "--reset-podman-auth", "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureWithArgs runs 'catalog configure' with arbitrary extra args for negative / flag-combo tests.
+func CatalogConfigureWithArgs(ctx context.Context, cfg *config.Config, appRuntime string, extraArgs ...string) (string, error) {
+	args := append([]string{"catalog", "configure", "--runtime", appRuntime}, extraArgs...)
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	return output, err
 }

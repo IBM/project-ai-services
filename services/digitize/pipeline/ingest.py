@@ -24,7 +24,7 @@ def create_indexing_handler(
     emb_model_dict: dict,
     status_mgr: Optional[DatabaseStatusManager],
     doc_id_dict: Optional[dict],
-    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
@@ -33,7 +33,7 @@ def create_indexing_handler(
         emb_model_dict: Dictionary containing embedding model configuration
         status_mgr: Status manager for updating document status
         doc_id_dict: Mapping of document names to IDs
-        file_checksum_dict: Optional mapping of filename -> sha256 hash string
+        file_checksum_dict: Optional mapping of filename -> md5 hex digest
 
     Returns:
         Callable that handles indexing of a single document's chunks
@@ -139,7 +139,7 @@ def ingest(
     directory_path: Path,
     job_id: Optional[str] = None,
     doc_id_dict: Optional[dict] = None,
-    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
 
     def ingestion_failed():

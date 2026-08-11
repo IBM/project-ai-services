@@ -6,14 +6,11 @@ import {
   InlineLoading,
   ActionableNotification,
 } from "@carbon/react";
-import type {
-  DeployFlowProps,
-  DeployFormData,
-  DeployFlowState,
-  DeployFlowAction,
-} from "./types.ts";
+import type { DeployFlowState, DeployFlowAction } from "./types.ts";
+import type { BaseDeployFlowProps, DeployFormData } from "../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
+import { handleUpdateFormData } from "../Shared/utils/formData";
 import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { extractDeployError } from "../Shared/utils/deployError";
@@ -64,15 +61,7 @@ const deployFlowReducer = (
     case ACTION_TYPES.SET_FORM_DATA:
       return { ...state, formData: action.payload };
     case ACTION_TYPES.UPDATE_FORM_DATA:
-      return {
-        ...state,
-        formData: { ...state.formData, ...action.payload },
-        showStepOneNameError:
-          "name" in action.payload
-            ? !String(action.payload.name ?? "").trim() &&
-              state.showStepOneNameError
-            : state.showStepOneNameError,
-      };
+      return handleUpdateFormData(state, action.payload);
     case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
       return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
@@ -87,7 +76,11 @@ const deployFlowReducer = (
   }
 };
 
-export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
+export const DeployFlow = ({
+  open,
+  onClose,
+  onSubmit,
+}: BaseDeployFlowProps) => {
   const { deployOptions, isLoading, error } = useDeployOptions();
 
   const {

@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -106,8 +107,10 @@ func (e *DeploymentExecutor) executeOpenShiftDeployment(
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
 ) error {
-	// Initialize OpenShift runtime client
-	rt, err := openshiftRuntime.NewOpenshiftClient()
+	// Initialize OpenShift runtime client scoped to the application's namespace
+	// so that ListRoutes, ListPods etc. query the correct namespace.
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	rt, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift runtime: %w", err)
 	}

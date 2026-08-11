@@ -4,4 +4,5 @@ storage: 10Gi
 replicas: 1
 auth:
   username: "admin"
-  password: "AiServices@12345"
+  # @generate:password
+  password: ""
