@@ -123,17 +123,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Start the appropriate server
 	if httpMode {
-		// Create JWT token validator
-		iamEndpoint, ok := os.LookupEnv("IAM_ENDPOINT")
-		if !ok {
-			iamEndpoint = "https://iam.cloud.ibm.com/identity/keys"
-		}
-		jwtValidator, err := server.NewJWTTokenValidator(iamEndpoint)
-		if err != nil {
-			return fmt.Errorf("failed to create token validator: %w", err)
-		}
-		tokenValidator := server.NewTokenValidatorAdapter(jwtValidator)
-
 		// Create simple implementations for dependencies
 		logger := &server.StdLogger{}
 		signalHandler := &server.OSSignalHandler{}
@@ -149,7 +138,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 			port,
 			aggregator,
 			tags,
-			tokenValidator,
 			logger,
 			signalHandler,
 			rateLimiter,
