@@ -63,6 +63,7 @@ export interface ActionCellProps {
   rowId: string;
   rowData?: { status?: string };
   onDelete: (rowId: string) => void;
+  isDeleteEnabled?: (status: string | undefined) => boolean;
 }
 
 export interface NameCellProps {
@@ -124,9 +125,16 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
   );
 };
 
-export const ActionCell = ({ rowId, rowData, onDelete }: ActionCellProps) => {
-  const isDeleteEnabled =
-    rowData?.status === "Running" || rowData?.status === "Error";
+const defaultIsDeleteEnabled = (status: string | undefined) =>
+  status === "Running" || status === "Error";
+
+export const ActionCell = ({
+  rowId,
+  rowData,
+  onDelete,
+  isDeleteEnabled = defaultIsDeleteEnabled,
+}: ActionCellProps) => {
+  const deleteEnabled = isDeleteEnabled(rowData?.status);
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">
@@ -138,7 +146,7 @@ export const ActionCell = ({ rowId, rowData, onDelete }: ActionCellProps) => {
           </div>
         }
         isDelete
-        disabled={!isDeleteEnabled}
+        disabled={!deleteEnabled}
         onClick={() => onDelete(rowId)}
       />
     </OverflowMenu>
