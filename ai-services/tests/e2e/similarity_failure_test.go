@@ -58,6 +58,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/cli"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
+	"github.com/project-ai-services/ai-services/tests/e2e/similarity"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
@@ -67,7 +68,7 @@ import (
 // may run.  Tests 1–3 exercise pure HTTP validation (no vectorstore I/O), and
 // Test 4 explicitly uses an unreachable URL — both should resolve in well under
 // 30 seconds.  Critically, this timeout MUST be shorter than sharedRAGClient's
-// global httpClientTimeout (10 minutes) so that TC-4 never hangs waiting for a
+// global httpClientTimeout (25 minutes) so that TC-4 never hangs waiting for a
 // TCP connection that will never arrive.
 const similarityFailureTestTimeout = 30 * time.Second
 
@@ -214,7 +215,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 
 						// 2. HTTP 400 with EMPTY_INPUT error code and expected message.
 						gomega.Expect(
-							rag.ValidateSimilarityEmptyQueryError(statusCode, rawBody),
+							similarity.ValidateSimilarityEmptyQueryError(statusCode, rawBody),
 						).To(gomega.Succeed())
 
 						logger.Infof(
@@ -264,7 +265,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 						)
 
 						gomega.Expect(
-							rag.ValidateSimilarityInvalidModeError(statusCode, rawBody),
+							similarity.ValidateSimilarityInvalidModeError(statusCode, rawBody),
 						).To(gomega.Succeed())
 
 						logger.Infof(
@@ -318,7 +319,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 						)
 
 						gomega.Expect(
-							rag.ValidateSimilarityInvalidTopKError(statusCode, rawBody),
+							similarity.ValidateSimilarityInvalidTopKError(statusCode, rawBody),
 						).To(gomega.Succeed())
 
 						logger.Infof(
@@ -339,9 +340,9 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 		// of any deployed service.
 		//
 		// The context timeout (similarityFailureTestTimeout = 30s) is deliberately
-		// shorter than sharedRAGClient's 10-minute global timeout.  This guarantees
+		// shorter than sharedRAGClient's 25-minute global timeout.  This guarantees
 		// that DNS failure or TCP connection refusal causes a rapid context-
-		// deadline-exceeded error rather than a 10-minute hang.
+		// deadline-exceeded error rather than a 25-minute hang.
 		ginkgo.Context("Connectivity Failures",
 			func() {
 				ginkgo.It(
@@ -349,7 +350,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 					ginkgo.Label("failure-test", "similarity-failure", "similarity-connectivity", "spyre-independent"),
 					func() {
 						// Context timeout MUST be shorter than sharedRAGClient.Timeout
-						// (10 minutes) so the test never hangs on DNS/TCP failure.
+						// (25 minutes) so the test never hangs on DNS/TCP failure.
 						ctx, cancel := withTimeout(similarityFailureTestTimeout)
 						defer cancel()
 
@@ -371,7 +372,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 						// Validate that the error is a transport-level failure
 						// (not a structured API response wrapped as ErrNonRetriable).
 						gomega.Expect(
-							rag.ValidateSimilarityUnreachableError(transportErr),
+							similarity.ValidateSimilarityUnreachableError(transportErr),
 						).To(gomega.Succeed())
 
 						logger.Infof(
@@ -493,7 +494,7 @@ var _ = ginkgo.Describe("Similarity Search Failure Scenarios",
 						}
 	
 						gomega.Expect(
-							rag.ValidateSimilarityNotReadyError(statusCode, rawBody),
+							similarity.ValidateSimilarityNotReadyError(statusCode, rawBody),
 						).To(gomega.Succeed())
 	
 						logger.Infof(
