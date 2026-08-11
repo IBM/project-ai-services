@@ -845,7 +845,13 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 }
 
 func (kc *OpenshiftClient) DeleteNamespace(name string) error {
-	err := kc.KubeClient.CoreV1().Namespaces().Delete(kc.Ctx, name, metav1.DeleteOptions{})
+	gracePeriod := int64(30)
+	propagation := metav1.DeletePropagationForeground
+
+	err := kc.KubeClient.CoreV1().Namespaces().Delete(kc.Ctx, name, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+		PropagationPolicy:  &propagation,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to delete namespace %q: %w", name, err)
 	}
