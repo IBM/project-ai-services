@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator
 
 from common.misc_utils import get_logger
 from extract.settings import settings
+from extract.utils.exceptions import ExtractException
 
 logger = get_logger("schema_utils")
 
@@ -652,13 +653,12 @@ def check_extraction_budget(
             "total_required_tokens": total,
             "excess_tokens": total - max_model_len,
         }
-        raise SchemaValidationError(
+        raise ExtractException(413,
             "CONTEXT_LIMIT_EXCEEDED",
             (
                 "Input does not fit in the model context window. "
                 "Reduce input size or use the async job path with a smaller document."
             ),
-            status=413,
             details=details,
         )
 

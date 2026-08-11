@@ -249,5 +249,11 @@ async def validate_with_retry(
             "Model output failed schema validation after one retry.",
             details={"validation_errors": str(retry_err), "raw_output": raw_retry_output},
         )
+    except Exception as e:
+        logger.error(e)
+        raise ExtractException(500,
+            "INTERNAL_SERVER_ERROR",
+            "Something went wrong. Please try again later."
+        )
 
     return parsed_output, 2, extra_prompt_tokens, extra_completion_tokens

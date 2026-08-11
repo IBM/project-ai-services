@@ -32,7 +32,7 @@ from extract.models import (
     JobsListResponse,
     PaginationInfo,
 )
-from extract.state import concurrency_limiter
+from extract.state import concurrency_limiter, job_limiter
 from extract.settings import settings
 from extract.utils.exceptions import ExtractException
 from extract.utils.request import check_request_body_size
@@ -135,11 +135,6 @@ async def extract_sync(request: Request) -> JSONResponse:
             "Server is at maximum vLLM concurrency. Please retry later.",
         )
 
-    # ------------------------------------------------------------------
-    # Resolve LLM config once — cached after the first call, but kept
-    # outside the semaphore to avoid holding the slot during any cold-start
-    # network probes.
-    # ------------------------------------------------------------------
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
     llm_model: str = llm_model_dict.get("llm_model", "")
@@ -150,49 +145,52 @@ async def extract_sync(request: Request) -> JSONResponse:
     #       One semaphore slot held across BOTH the initial call and the
     #       validation retry so a second attempt cannot be starved.
     # ------------------------------------------------------------------
-    async with concurrency_limiter:
 
-        # ── 3. Exact input token count via /tokenize ─────────────────────
-        try:
-            input_tokens: int = await asyncio.to_thread(
-                _tokenize, body.text, llm_endpoint
-            )
-        except Exception as exc:
-            logger.error(f"Tokenization failed: {exc}", exc_info=True)
-            raise ExtractException(
-                503, "TOKENIZATION_ERROR",
-                "Failed to tokenise the input text. "
-                "Ensure the vLLM /tokenize endpoint is reachable.",
-            )
 
-        # ── 4. Hard context-window guard ─────────────────────────────────
-        #       check_extraction_budget raises SchemaValidationError(413)
-        #       with full diagnostics — catch and re-raise as ExtractException.
-        try:
-            reserved_output = check_extraction_budget(
-                input_tokens=input_tokens,
-                schema_tokens=schema_row.schema_tokens,
-                examples_tokens=schema_row.examples_tokens,
-                custom_prompt_tokens=schema_row.custom_prompt_tokens,
-                max_model_len=max_model_len,
-            )
-        except SchemaValidationError as budget_exc:
-            raise ExtractException(
-                budget_exc.status,
-                budget_exc.code,
-                budget_exc.message,
-                details=budget_exc.details,
-            ) from budget_exc
-
-        # ── 5. Prompt assembly ────────────────────────────────────────────
-        few_shot_block = render_few_shot_block(schema_row.examples)
-        messages = build_messages(
-            normalized_schema=schema_row.json_schema,
-            few_shot_block=few_shot_block,
-            input_text=body.text,
-            custom_prompt=schema_row.custom_prompt,
+    # ── 3. Exact input token count via /tokenize ─────────────────────
+    try:
+        input_tokens: int = await asyncio.to_thread(
+            _tokenize, body.text, llm_endpoint
+        )
+    except Exception as exc:
+        logger.error(f"Tokenization failed: {exc}", exc_info=True)
+        raise ExtractException(
+            503, "TOKENIZATION_ERROR",
+            "Failed to tokenise the input text. "
+            "Ensure the vLLM /tokenize endpoint is reachable.",
         )
 
+    # ── 4. Hard context-window guard ─────────────────────────────────
+    #       check_extraction_budget raises SchemaValidationError(413)
+    #       with full diagnostics — catch and re-raise as ExtractException.
+    try:
+        reserved_output = check_extraction_budget(
+            input_tokens=input_tokens,
+            schema_tokens=schema_row.schema_tokens,
+            examples_tokens=schema_row.examples_tokens,
+            custom_prompt_tokens=schema_row.custom_prompt_tokens,
+            max_model_len=max_model_len,
+        )
+    except ExtractException as ext_exc:
+        raise ext_exc
+    except Exception as e:
+        logger.error(e)
+        raise ExtractException(500,
+            "INTERNAL_SERVER_ERROR",
+            "Something went wrong. Please try again later."
+        )
+
+    # ── 5. Prompt assembly ────────────────────────────────────────────
+    few_shot_block = render_few_shot_block(schema_row.examples)
+    messages = build_messages(
+        normalized_schema=schema_row.json_schema,
+        few_shot_block=few_shot_block,
+        input_text=body.text,
+        custom_prompt=schema_row.custom_prompt,
+    )
+
+
+    async with concurrency_limiter:
         # ── 6. First vLLM call ────────────────────────────────────────────
         vllm_resp = await call_vllm_safe(
             messages, reserved_output, schema_row.json_schema, llm_endpoint, llm_model
@@ -210,8 +208,7 @@ async def extract_sync(request: Request) -> JSONResponse:
             raise ExtractException(
                 413, "OUTPUT_BUDGET_EXCEEDED",
                 "The model output was truncated because it reached the reserved "
-                "output token limit. Adjust OUTPUT_TOKEN_FACTOR, MIN_OUTPUT_TOKENS, "
-                "or MAX_OUTPUT_TOKENS via environment configuration.",
+                "output token limit.",
                 details={
                     "reserved_output_tokens": reserved_output,
                     "finish_reason": "length",
@@ -266,8 +263,7 @@ async def extract_sync(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 def _check_job_admission() -> None:
-    """Raise 429 if the job concurrency slot is exhausted."""
-    from extract.state import job_limiter  # deferred to avoid circular import
+    """Raise 429 if the concurrency slot is exhausted."""
     if job_limiter.locked():
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
@@ -303,7 +299,9 @@ def _resolve_schema(schema_id: str):
     """
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
-        raise ExtractException(404, "SCHEMA_NOT_FOUND", f"No schema with id {schema_id!r}.")
+        raise ExtractException(
+            404,"SCHEMA_NOT_FOUND",
+              f"No schema with id {schema_id!r}.")
     return row
 
 
@@ -349,7 +347,11 @@ def _stage_and_persist(
 
 
 # ---------------------------------------------------------------------------
-
+# Probe size for binary-detection heuristics. 8 KB is large enough to catch
+# null bytes, invalid UTF-8, or control-character runs in virtually any
+# misnamed binary file, while aligning with the OS page size and Python's
+# default IO buffer. The full UTF-8 decode in the worker catches anything
+# deeper; this probe just moves obvious rejections to submission time.
 # Probe size for binary-detection heuristics.
 MAX_PROBE_BYTES = 8192
 
@@ -370,12 +372,12 @@ async def _validate_file_content(file: UploadFile) -> None:
         decoded = probe.decode("utf-8")
     except UnicodeDecodeError:
         raise ExtractException(400, "BAD_REQUEST", "File content is not valid UTF-8 text.")
-
+    # Gate 2: no null bytes
     if b"\x00" in probe:
         raise ExtractException(
             415, "BAD_REQUEST", "File contains null bytes and appears to be binary."
         )
-
+    # Gate 3: low control character ratio
     control_count = sum(
         1 for ch in decoded
         if unicodedata.category(ch).startswith("Cc")
@@ -386,7 +388,7 @@ async def _validate_file_content(file: UploadFile) -> None:
             415, "BAD_REQUEST",
             "File contains excessive control characters and appears to be binary.",
         )
-
+    # Gate 4: reject text files that are actually PDFs
     if probe[:4] == b"%PDF":
         ext = os.path.splitext(file.filename or "")[1].lower()
         raise ExtractException(
@@ -449,7 +451,6 @@ async def _process_extract_job(job_id: str) -> None:
     in a follow-up iteration.  For now it acquires the job_limiter slot so
     semaphore accounting is correct and immediately releases it.
     """
-    from extract.state import job_limiter  # deferred to avoid circular import
     async with job_limiter:
         logger.info(f"Background worker invoked for job {job_id} (stub — no processing yet)")
 
