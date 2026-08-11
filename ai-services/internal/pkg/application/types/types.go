@@ -62,7 +62,8 @@ type ListOptions struct {
 
 // InfoOptions contains parameters for displaying application info.
 type InfoOptions struct {
-	Name string
+	Name   string
+	Legacy bool
 }
 
 // LogsOptions contains parameters for displaying application logs.
