@@ -1,10 +1,5 @@
 basePath: /api/v1
 definitions:
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse:
-    properties:
-      error:
-        type: string
-    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component:
     properties:
       component_type:
@@ -243,7 +238,7 @@ definitions:
       type:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector:
     properties:
       connector_type:
         description: e.g. "datasource"
@@ -260,11 +255,6 @@ definitions:
       name:
         description: display name
         type: string
-      sensitive_fields:
-        description: fields to strip from responses
-        items:
-          type: string
-        type: array
       type:
         description: always "connector"
         type: string
@@ -1148,21 +1138,21 @@ paths:
           description: List of providers
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector'
             type: array
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Connector type not found
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: List connector providers
       tags:
-      - Connectors
+      - Catalog
   /connectors/{connector_type}/providers/{provider_id}/params:
     get:
       description: Returns the JSON Schema for the configuration parameters of a specific
@@ -1189,16 +1179,16 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Connector type or provider not found
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get connector provider parameters
       tags:
-      - Connectors
+      - Catalog
   /resources:
     get:
       description: Retrieves system resource information including CPU, memory, and

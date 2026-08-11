@@ -875,7 +875,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Connectors"
+                    "Catalog"
                 ],
                 "summary": "List connector providers",
                 "parameters": [
@@ -892,20 +892,20 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector"
                             }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Connector type not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -923,7 +923,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Connectors"
+                    "Catalog"
                 ],
                 "summary": "Get connector provider parameters",
                 "parameters": [
@@ -953,13 +953,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Connector type or provider not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -1207,14 +1207,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_handlers.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component": {
             "type": "object",
             "required": [
@@ -1571,7 +1563,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector": {
             "type": "object",
             "properties": {
                 "connector_type": {
@@ -1593,13 +1585,6 @@ const docTemplate = `{
                 "name": {
                     "description": "display name",
                     "type": "string"
-                },
-                "sensitive_fields": {
-                    "description": "fields to strip from responses",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "type": {
                     "description": "always \"connector\"",
