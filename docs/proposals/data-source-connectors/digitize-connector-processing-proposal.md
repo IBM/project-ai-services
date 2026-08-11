@@ -336,6 +336,7 @@ POST /v1/connectors/{connector_id}/sync
 | `open_sync_log(connector_id)` | Create tick log row with `seq = COALESCE(MAX(seq), 0) + 1` and status `'started'`. |
 | `close_sync_log(connector_id, seq, status, error, counters, update_connector_status)` | Finalize log row. When `update_connector_status=True` (default), also updates connector `last_sync_at` / `sync_status`. Pass `update_connector_status=False` when closing a log with `'cancelled'` so that `connectors.sync_status` stays `'delete_pending'`. |
 | `get_last_sync_log(connector_id)` | `SELECT ... FROM connector_sync_logs WHERE connector_id = :id ORDER BY seq DESC LIMIT 1`. Returns the most-recent log row or `None`. Used by `_run_teardown` to detect open logs. |
+| `reset_stale_syncing_connectors()` | On startup: `UPDATE connectors SET sync_status='out of sync' WHERE sync_status='syncing'`. Returns the list of affected `connector_id` values. Used by `recover_connector_sync_state()`. |
 | `update_sync_log_progress()` | Increment progress counters during execution. |
 | `get_sync_logs(connector_id, limit, offset)` | Paginated log history query. |
 
@@ -398,6 +399,26 @@ class DatabaseManager:
                 {"id": connector_id},
             ).one_or_none()
             return result is not None
+
+    @staticmethod
+    def reset_stale_syncing_connectors() -> list[str]:
+        """
+        Called once on startup. Any connector still marked 'syncing' was
+        interrupted by a crash — the tick will never self-recover because
+        try_acquire_sync_lock guards with sync_status != 'syncing'.
+
+        Resets them to 'out of sync' so the scheduler can acquire the lock
+        on the next tick. Returns the list of affected connector_id values
+        so the caller can close their open sync logs.
+        """
+        with get_db_session() as session:
+            result = session.execute(
+                update(Connector)
+                .where(Connector.sync_status == SyncStatus.SYNCING)
+                .values(sync_status=SyncStatus.OUT_OF_SYNC)
+                .returning(Connector.id)
+            )
+            return [row[0] for row in result]
 ```
 
 ---
@@ -679,7 +700,56 @@ def _finalize_open_sync_log(connector_id: str) -> None:
 
 ---
 
-### 7.3 Lifespan Integration (`app.py`)
+### 7.3 Crash Recovery (`utils/recovery.py`)
+
+**File:** `services/digitize/utils/recovery.py`
+
+`recover_connector_sync_state()` is called once at startup, before the scheduler
+begins firing ticks. It addresses two invariants broken by a mid-tick crash:
+
+1. **Stuck `sync_status`** — a connector left as `'syncing'` will never tick again
+   because `try_acquire_sync_lock` guards with `sync_status != 'syncing'`. Reset to
+   `'out of sync'` so the next scheduled tick can acquire the lock.
+2. **Open sync log** — a log row left as `'started'` has no terminal state. Close it
+   to `'failed'` with a crash error message, mirroring how `recover_zombie_jobs()`
+   handles regular jobs. `update_connector_status=False` is passed because
+   `reset_stale_syncing_connectors()` already set the connector status correctly.
+
+```python
+def recover_connector_sync_state() -> int:
+    """
+    Startup crash recovery for connector sync state.
+
+    For every connector that was left in 'syncing' by a previous crash:
+      1. Reset connectors.sync_status → 'out of sync'  (single bulk UPDATE)
+      2. Close the open sync log row → status='failed', error='...'
+
+    Returns the number of connectors recovered.
+    """
+    stale_ids = reset_stale_syncing_connectors()   # bulk UPDATE, returns affected ids
+    if not stale_ids:
+        logger.debug("✅ No stale syncing connectors found on startup")
+        return 0
+
+    for connector_id in stale_ids:
+        logger.warning(f"Recovering stale sync state for connector {connector_id!r}")
+        last_log = get_last_sync_log(connector_id)
+        if last_log is not None and last_log.status not in _TERMINAL_SYNC_LOG_STATUSES:
+            close_sync_log(
+                connector_id,
+                seq=last_log.seq,
+                status=SyncStatus.FAILED,
+                error="Service restarted during sync tick",
+                update_connector_status=False,  # reset_stale_syncing_connectors already set it
+            )
+
+    logger.info(f"🔄 Recovered {len(stale_ids)} stale connector(s) on startup")
+    return len(stale_ids)
+```
+
+---
+
+### 7.4 Lifespan Integration (`app.py`)
 
 ```python
 @asynccontextmanager
@@ -689,6 +759,9 @@ async def lifespan(app: FastAPI):
 
     async with AsyncScheduler(data_store=data_store) as sched:
         scheduler_module._scheduler = sched
+
+        # Crash recovery: close any open sync logs and unblock stale 'syncing' connectors.
+        recover_connector_sync_state()
 
         # Recover existing connectors without resetting schedules (fire_immediately=False)
         for connector in get_all_connectors():
@@ -759,8 +832,10 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
   - Wire `lifespan()` in `app.py` to start `AsyncScheduler` and recover jobs (`fire_immediately=False`).
   - Wire `POST /v1/connectors/{id}/sync`: DB lock check → open log → `asyncio.create_task(_run_tick)`.
   - Add `get_last_sync_log(connector_id)` to `manager.py` / `utils/db.py`.
+  - Add `reset_stale_syncing_connectors()` to `manager.py` / `utils/db.py`.
   - Add `update_connector_status: bool = True` parameter to `close_sync_log` in `manager.py`; skip the `UPDATE connectors SET sync_status` statement when `False`.
   - Add `SyncStatus.CANCELLED = "cancelled"` and `SyncStatus.DELETE_PENDING = "delete pending"` to `connectors/models.py`.
+  - Add `recover_connector_sync_state()` to `utils/recovery.py`; call it in `lifespan()` in `app.py` before scheduler job registration.
 
 #### PR 9 — Non-Blocking DELETE Wiring ❌
 - **Target Files:** `services/digitize/api/v1/connectors.py`, `scheduler.py`
