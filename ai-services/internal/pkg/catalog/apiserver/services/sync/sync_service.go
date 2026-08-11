@@ -49,8 +49,8 @@ type SyncService struct {
 	serviceDepsRepo dbrepo.ServiceDependencyRepository
 	syncInterval    time.Duration
 	stopChan        chan struct{}
-	syncMutex       sync.Mutex // Prevents overlapping sync cycles
-	isSyncing       bool       // Tracks if a sync is currently running
+	syncMutex       sync.Mutex  // Prevents overlapping sync cycles
+	isSyncing       bool        // Tracks if a sync is currently running
 	runtimeSync     RuntimeSync // Runtime-specific sync backend
 }
 
@@ -184,8 +184,8 @@ func (s *SyncService) performSync(ctx context.Context) {
 // 2. Sync services
 // 3. Update application status based on collected errors.
 func (s *SyncService) syncApplication(ctx context.Context, app *models.Application) error {
-	// Initialize runtime client
-	rt, err := vars.RuntimeFactory.Create("")
+	// Initialize runtime client in the application namespace.
+	rt, err := vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
 	if err != nil {
 		return fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -538,4 +538,3 @@ func (s *SyncService) updateApplicationStatus(ctx context.Context, app *models.A
 
 	return nil
 }
-
