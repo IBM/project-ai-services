@@ -182,19 +182,24 @@ func NewAPIServerCmd() *cobra.Command {
 		Use:   "apiserver",
 		Short: "Manage AI Services API server",
 		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
-		Example: `  # Start with local admin credentials (no ManageIQ)
+		Example: ` # Start the API server with default settings
 	 ai-services catalog apiserver --admin-password-hash <PASSWORD_HASH> --runtime podman
 
-	 # Start pointing at a ManageIQ instance (Flow A + Flow B enabled)
-	 ai-services catalog apiserver --manageiq-url https://9.20.202.144:8443 --manageiq-insecure-tls --runtime podman
+	 # Start the API server on a custom port
+	 ai-services catalog apiserver --port 9090 --admin-password-hash <PASSWORD_HASH> --runtime podman
 
-	 # Start on a custom port with ManageIQ
-	 ai-services catalog apiserver --port 9090 --manageiq-url https://miq.example.com --runtime podman
+	 # Start with custom admin username
+	 ai-services catalog apiserver --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with custom token TTL settings
+	 ai-services catalog apiserver --access-token-ttl 30m --refresh-token-ttl 48h --admin-password-hash <PASSWORD_HASH> --runtime podman
+
+	 # Start with all custom settings
+	 ai-services catalog apiserver --port 9090 --admin-username myadmin --admin-password-hash <PASSWORD_HASH> --access-token-ttl 30m --refresh-token-ttl 48h --runtime podman
 
 Note:
   - Requires database connection via environment variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)
-  - AUTH_JWT_SECRET environment variable is recommended for production use
-  - When --manageiq-url is set, --admin-password-hash is ignored for authentication`,
+  - AUTH_JWT_SECRET environment variable is recommended for production use`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
@@ -211,6 +216,9 @@ Note:
 	apiserverCmd.Flags().IntVar(&workerGatewayPort, "workergateway-port", defaultWorkerGatewayPort, "Port for the gRPC worker gateway (always active, default 9090)")
 	apiserverCmd.Flags().StringVar(&manageiqURL, "manageiq-url", "", "ManageIQ base URL for AuthN/AuthZ, e.g. https://9.20.202.144:8443 (enables Flow A + Flow B)")
 	apiserverCmd.Flags().BoolVar(&manageiqInsecure, "manageiq-insecure-tls", false, "Skip TLS verification for ManageIQ (self-signed certs)")
+	// Hide the ManageIQ flags
+	_ = apiserverCmd.Flags().MarkHidden("manageiq-url")
+	_ = apiserverCmd.Flags().MarkHidden("manageiq-insecure-tls")
 	common.ConfigureRuntimeFlag(apiserverCmd, &runtimeType)
 
 	return apiserverCmd

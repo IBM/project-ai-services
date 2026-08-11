@@ -37,9 +37,6 @@ var (
 	domainName  string
 	sslCertPath string
 	sslKeyPath  string
-	// ManageIQ flags for catalog configure command.
-	manageiqURL      string
-	manageiqInsecure bool
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
 	// WorkerGateway port — always active, defaults to 9090.
@@ -385,21 +382,6 @@ func initConfigurePodmanDeployFlags() {
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
 	)
-	// ManageIQ integration flags
-	configureCmd.Flags().StringVar(
-		&manageiqURL,
-		"manageiq-url",
-		"",
-		"ManageIQ base URL for AuthN/AuthZ, e.g. https://9.20.202.144:8443 (enables Flow A + Flow B).\n"+
-			"Example: --manageiq-url https://miq.example.com\n",
-	)
-
-	configureCmd.Flags().BoolVar(
-		&manageiqInsecure,
-		"manageiq-insecure-tls",
-		false,
-		"Skip TLS verification for ManageIQ (use for self-signed certificates).\n",
-	)
 }
 
 func initConfigurePodmanResetFlags() {
@@ -440,9 +422,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).
 		AddPodmanFlag("reset-podman-auth", nil).
-		AddPodmanFlag("reset-certificate", nil).
-		AddPodmanFlag("manageiq-url", nil).
-		AddPodmanFlag("manageiq-insecure-tls", nil)
+		AddPodmanFlag("reset-certificate", nil)
 
 	// OpenShift-only flags.
 	builder.AddOpenShiftFlag("timeout", nil)
