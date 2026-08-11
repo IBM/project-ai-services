@@ -12,7 +12,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	runtimetypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // OpenshiftDeletion handles application deletion operations.
@@ -23,7 +24,6 @@ type OpenshiftDeletion struct {
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
-	delUtils              *common.Deletion
 }
 
 // NewOpenshiftDeletion creates a new deletion service instance.
@@ -35,8 +35,6 @@ func NewOpenshiftDeletion(
 	componentRepo dbrepo.ComponentRepository,
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
 ) *OpenshiftDeletion {
-	delUtils := common.NewDeletion(appRepo, serviceRepo, componentRepo, serviceDependencyRepo)
-
 	return &OpenshiftDeletion{
 		rt:                    rt,
 		ns:                    ns,
@@ -44,44 +42,48 @@ func NewOpenshiftDeletion(
 		serviceRepo:           serviceRepo,
 		componentRepo:         componentRepo,
 		serviceDependencyRepo: serviceDependencyRepo,
-		delUtils:              delUtils,
 	}
 }
 
 // PerformDeletion executes the deletion in four ordered phases:
-// 1. Services: helm-uninstall all service releases, then delete their DB records
-// 2. Components: helm-uninstall all orphaned component releases, then delete their DB records
+// 1. Services: helm-uninstall all service releases, delete PVC based on keepData flag, then delete their DB records
+// 2. Components: helm-uninstall all orphaned component releases, delete PVC based on keepData flag, then delete their DB records
 // 3. ServiceRuntime: helm-uninstall serving-runtimes for both cpu and spyre-cards.
-// 4. Delete PVC: When keepData is false, PVCs in the application namespace are also deleted.
-func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, keepData bool) {
+// 4. Namespace: Delete application namespace based on keepData flag.
+func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
 	logger.InfofCtx(ctx, "Deleting OpenShift deployment with application id '%s'  in namespace '%s'\n",
 		appID, s.ns)
-
-	orphanedComponents, err := s.delUtils.IdentifyOrphanedComponents(ctx, appID, services)
-	if err != nil {
-		return // Error already logged and status updated
-	}
 
 	// Uninstall application services
 	errorMessages := s.deleteServices(ctx, s.ns, appID, services, keepData)
 
 	// Uninstall application components
-	componentErr := s.deleteComponents(ctx, s.ns, appID, orphanedComponents, keepData)
+	componentErr := s.deleteComponents(ctx, s.ns, appID, orphanedComponentIDs, keepData)
 	errorMessages = append(errorMessages, componentErr...)
 
 	// Uninstall Serving runtimes
-	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx, s.ns, appID)
+	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx, s.ns)
 	errorMessages = append(errorMessages, servingRuntimeErr...)
 
+	// Delete namespace of the application
+	if !keepData {
+		logger.InfofCtx(ctx, "Deleting '%s' namespace.", s.ns)
+		if err := s.rt.DeleteNamespace(s.ns); err != nil {
+			errMsg := fmt.Sprintf("failed to delete '%s' namespace: %v", s.ns, err)
+			logger.Errorf(errMsg)
+			errorMessages = append(errorMessages, errMsg)
+		}
+	}
+
 	if len(errorMessages) > 0 {
-		s.delUtils.HandleDeletionFailure(ctx, appID, errorMessages)
+		common.HandleDeletionFailure(ctx, s.appRepo, appID, errorMessages)
 
 		return
 	}
 
 	// Delete application from DB only if no errors occurred
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		s.delUtils.HandleStepError(ctx, appID, "application DB deletion failed", err)
+		common.HandleStepError(ctx, s.appRepo, appID, "application DB deletion failed", err)
 
 		return
 	}
@@ -164,11 +166,18 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, app
 	return errorMessages
 }
 
-func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns string, appID uuid.UUID) []string {
+func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns string) []string {
 	var errorMessages []string
 
-	runtimes, err := s.rt.ListServingRuntimes(map[string][]string{
-		"label": []string{constants.PrerequisiteLabelKey},
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "serving.kserve.io",
+		Version: "v1alpha1",
+		Kind:    "ServingRuntimeList",
+	})
+
+	response, err := s.rt.ListCRD(list, map[string][]string{
+		"label": {constants.PrerequisiteLabelKey},
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to list serving runtimes: %s", err)
@@ -177,8 +186,12 @@ func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns 
 		return []string{errMsg}
 	}
 
-	for _, sr := range runtimes {
-		release := getServingRuntimeRelease(sr)
+	for _, item := range response {
+		release := item.Labels[constants.PrerequisiteLabelKey]
+		if release == "" {
+			release = item.Name
+		}
+
 		logger.InfofCtx(ctx, "Uninstalling '%s' serving runtime release.", release)
 
 		if err := catalogutils.HelmUninstall(ctx, ns, release); err != nil {
@@ -190,17 +203,6 @@ func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns 
 	}
 
 	return errorMessages
-}
-
-// getServingRuntimeRelease returns the Helm release name for a ServingRuntime.
-// The release name is stored in the ai-services.io/prerequisite label value,
-// which is set to {{ .Release.Name }} during Helm chart installation.
-func getServingRuntimeRelease(sr runtimetypes.ServingRuntime) string {
-	if release, ok := sr.Labels[constants.PrerequisiteLabelKey]; ok && release != "" {
-		return release
-	}
-
-	return sr.Name
 }
 
 // deleteVolume deletes PVCs associated with the given resource ID when keepData is false.

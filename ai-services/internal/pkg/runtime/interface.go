@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type Runtime interface {
@@ -43,8 +44,12 @@ type Runtime interface {
 	// Network operations
 	ListRoutes(labelSelector string) ([]types.Route, error)
 
-	// ServingRuntime operations
-	ListServingRuntimes(filters map[string][]string) ([]types.ServingRuntime, error)
+	// ListCRD populates crd list
+	// resources in the namespace that carry every label key in filters["label"].
+	ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error)
+
+	// Namespace operations
+	DeleteNamespace(name string) error
 
 	// PVC operations
 	DeletePVCs(appLabel string) error

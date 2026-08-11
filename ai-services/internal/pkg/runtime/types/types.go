@@ -67,8 +67,8 @@ type PodResources struct {
 	SpyreCards []string // List of Spyre card PCI addresses
 }
 
-// ServingRuntime represents a KServe ServingRuntime resource (serving.kserve.io/v1alpha1).
-type ServingRuntime struct {
+// CRDResource represents a custom resource in openshift.
+type CRDResource struct {
 	Name   string
 	Labels map[string]string
 }
