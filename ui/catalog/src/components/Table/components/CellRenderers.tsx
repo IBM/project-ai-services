@@ -63,7 +63,8 @@ export interface ActionCellProps {
   rowId: string;
   rowData?: { status?: string };
   onDelete: (rowId: string) => void;
-  isDeleteEnabled?: (status: string | undefined) => boolean;
+  // Each table has its own delete eligibility rule and passes it explicitly. 
+  isDeleteEnabled: (status: string | undefined) => boolean;
 }
 
 export interface NameCellProps {
@@ -125,14 +126,11 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
   );
 };
 
-const defaultIsDeleteEnabled = (status: string | undefined) =>
-  status === "Running" || status === "Error";
-
 export const ActionCell = ({
   rowId,
   rowData,
   onDelete,
-  isDeleteEnabled = defaultIsDeleteEnabled,
+  isDeleteEnabled,
 }: ActionCellProps) => {
   const deleteEnabled = isDeleteEnabled(rowData?.status);
 
