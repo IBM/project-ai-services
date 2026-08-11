@@ -252,11 +252,15 @@ DELETE /v1/connectors/{connector_id} (API Handler)
 _run_teardown(connector_id) (Background asyncio.Task)
   │
   ├─ Step A: remove_connector_job(connector_id) → unregisters APScheduler job
-  ├─ Step B: snapshot owned checksums for connector
-  ├─ Step C: remove_connector_checksum_entry row by row
+  ├─ Step B: _finalize_open_sync_log(connector_id)
+  │            └─ get_last_sync_log → if status not in {completed, failed, cancelled}
+  │               → close_sync_log(status='cancelled', update_connector_status=False)
+  │               (no-op if last log is already terminal, or if no log exists)
+  ├─ Step C: snapshot owned checksums for connector
+  ├─ Step D: remove_connector_checksum_entry row by row
   │            └─ if remaining_owner_count == 0 → best-effort delete_document_internal(doc_id)
-  ├─ Step D: DELETE FROM connectors WHERE id = :connector_id (cascades to sync_logs)
-  └─ Step E: cleanup_connector_staging_dirs(connector_id)
+  ├─ Step E: DELETE FROM connectors WHERE id = :connector_id (cascades to sync_logs)
+  └─ Step F: cleanup_connector_staging_dirs(connector_id)
 ```
 
 ![Delete Flow](delete-flow.svg)
@@ -330,7 +334,8 @@ POST /v1/connectors/{connector_id}/sync
 | `get_connector_sync_status(connector_id)` | `SELECT sync_status FROM connectors WHERE id = :id`. Returns the current status string or `None` if not found. Used by `_check_delete_pending`. |
 | `try_acquire_sync_lock(connector_id)` | Atomic `UPDATE connectors SET sync_status='syncing' WHERE id=:id AND sync_status!='syncing' RETURNING id`. |
 | `open_sync_log(connector_id)` | Create tick log row with `seq = COALESCE(MAX(seq), 0) + 1` and status `'started'`. |
-| `close_sync_log(connector_id, seq, status, error, counters)` | Finalize log row & update connector `last_sync_at` / `sync_status` in single transaction. |
+| `close_sync_log(connector_id, seq, status, error, counters, update_connector_status)` | Finalize log row. When `update_connector_status=True` (default), also updates connector `last_sync_at` / `sync_status`. Pass `update_connector_status=False` when closing a log with `'cancelled'` so that `connectors.sync_status` stays `'delete_pending'`. |
+| `get_last_sync_log(connector_id)` | `SELECT ... FROM connector_sync_logs WHERE connector_id = :id ORDER BY seq DESC LIMIT 1`. Returns the most-recent log row or `None`. Used by `_run_teardown` to detect open logs. |
 | `update_sync_log_progress()` | Increment progress counters during execution. |
 | `get_sync_logs(connector_id, limit, offset)` | Paginated log history query. |
 
@@ -633,6 +638,14 @@ async def _run_teardown(connector_id: str) -> None:
     """
     await remove_connector_job(connector_id)
 
+    # Guard: ensure the last sync log (if any) is in a terminal state before
+    # delete_connector cascades the connector_sync_logs rows away.
+    # Case A (tick was running): _cancel_tick already closed the log as
+    #   'cancelled' before dispatching this task — the check is a no-op.
+    # Case B (no tick was running): the last log may be stuck in 'started'
+    #   from a previous crash. Close it to 'cancelled' now.
+    _finalize_open_sync_log(connector_id)
+
     owned_rows = get_connector_checksums_with_docs(connector_id)
     for checksum, doc_id in owned_rows:
         remaining, _ = remove_connector_checksum_entry(connector_id, checksum)
@@ -641,6 +654,27 @@ async def _run_teardown(connector_id: str) -> None:
 
     delete_connector(connector_id)          # cascades to connector_sync_logs
     cleanup_connector_staging_dirs(connector_id)
+
+
+_TERMINAL_SYNC_LOG_STATUSES = {SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELLED}
+
+
+def _finalize_open_sync_log(connector_id: str) -> None:
+    """Close the most-recent sync log to 'cancelled' if it is not already in a
+    terminal state (completed | failed | cancelled).
+
+    Uses update_connector_status=False so that connectors.sync_status remains
+    'delete_pending' — _run_teardown will remove the connector row entirely
+    moments later, so no further status update is needed.
+    """
+    last_log = get_last_sync_log(connector_id)
+    if last_log is not None and last_log.status not in _TERMINAL_SYNC_LOG_STATUSES:
+        close_sync_log(
+            connector_id,
+            seq=last_log.seq,
+            status=SyncStatus.CANCELLED,
+            update_connector_status=False,
+        )
 ```
 
 ---
@@ -721,9 +755,12 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 #### PR 7 — Scheduler + Lifespan + `POST /sync` Dispatch ❌
 - **Target Files:** `services/digitize/connectors/scheduler.py`, `app.py`, `connectors.py`
 - **Deliverables:**
-  - Create `scheduler.py` (job registration, `_run_tick_wrapped`, `_check_delete_pending`, `_run_teardown`). No `_live_tasks` or `_pending_deletions` dicts.
+  - Create `scheduler.py` (job registration, `_run_tick_wrapped`, `_check_delete_pending`, `_run_teardown`, `_finalize_open_sync_log`). No `_live_tasks` or `_pending_deletions` dicts.
   - Wire `lifespan()` in `app.py` to start `AsyncScheduler` and recover jobs (`fire_immediately=False`).
   - Wire `POST /v1/connectors/{id}/sync`: DB lock check → open log → `asyncio.create_task(_run_tick)`.
+  - Add `get_last_sync_log(connector_id)` to `manager.py` / `utils/db.py`.
+  - Add `update_connector_status: bool = True` parameter to `close_sync_log` in `manager.py`; skip the `UPDATE connectors SET sync_status` statement when `False`.
+  - Add `SyncStatus.CANCELLED = "cancelled"` and `SyncStatus.DELETE_PENDING = "delete pending"` to `connectors/models.py`.
 
 #### PR 9 — Non-Blocking DELETE Wiring ❌
 - **Target Files:** `services/digitize/api/v1/connectors.py`, `scheduler.py`
