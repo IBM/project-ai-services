@@ -485,13 +485,13 @@ Location: /api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ
 `catalog_id`, `catalog_type`, and `version` are all known immediately from the request fields and are present in the `202` body:
 
 ```json
-// 202 response body
+// 202 response body — size_bytes is null until extraction completes
 {
   "id":           "bnd_01JW4X9K2M8VQRP3T5YZ",
   "name":         "my-service-1.0.0",
   "status":       "processing",
   "uploaded_at":  "2026-05-12T09:14:02Z",
-  "size_bytes":   143360,
+  "size_bytes":   null,
   "catalog_type": "service",
   "catalog_id":   "my-service",
   "version":      "1.0.0",
@@ -499,7 +499,7 @@ Location: /api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ
 }
 ```
 
-Once the bundle reaches `active` or `failed` status, the polled response reflects the final outcome:
+Once the bundle reaches `active` or `failed` status, the polled response reflects the final outcome including the uncompressed on-disk size:
 
 ```json
 // after activation — GET /api/v1/catalog/bundles/bnd_01JW4X9K2M8VQRP3T5YZ
@@ -508,7 +508,7 @@ Once the bundle reaches `active` or `failed` status, the polled response reflect
   "name":         "my-service-1.0.0",
   "status":       "active",
   "uploaded_at":  "2026-05-12T09:14:02Z",
-  "size_bytes":   143360,
+  "size_bytes":   286720,
   "catalog_type": "service",
   "catalog_id":   "my-service",
   "version":      "1.0.0",
@@ -609,7 +609,7 @@ Each bundle record carries `catalog_type` (the type declared by the uploader —
       "id":           "bnd_01JW4X9K2M8VQRP3T5YZ",
       "status":       "active",
       "uploaded_at":  "2026-05-12T09:14:02Z",
-      "size_bytes":   143360,
+      "size_bytes":   286720,
       "name":         "my-service-1.0.0",
       "catalog_type": "service",
       "catalog_id":   "my-service",
@@ -621,7 +621,7 @@ Each bundle record carries `catalog_type` (the type declared by the uploader —
       "name":         "my-llm-provider-1.0.0",
       "status":       "active",
       "uploaded_at":  "2026-05-13T11:30:00Z",
-      "size_bytes":   98304,
+      "size_bytes":   196608,
       "catalog_type": "component",
       "catalog_id":   "my-llm-provider",
       "version":      "1.0.0",
@@ -809,6 +809,8 @@ CREATE TABLE catalog_bundles (
     name             VARCHAR(200)   NOT NULL,
 
     status           bundle_status  NOT NULL DEFAULT 'processing',
+    -- Uncompressed on-disk size in bytes, populated after extraction completes.
+    -- NULL on the immediate 202 response; set once the bundle reaches 'active' or 'failed'.
     size_bytes       BIGINT,
 
     -- The catalog item type declared by the uploader: "service", "component", …
@@ -820,8 +822,7 @@ CREATE TABLE catalog_bundles (
 
     error            TEXT,
     uploaded_by      VARCHAR(100),
-    uploaded_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    activated_at     TIMESTAMPTZ
+    uploaded_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );
 
 -- Enforce one active bundle per catalog_id at the DB level.
