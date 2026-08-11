@@ -248,7 +248,7 @@ class SSHConnectorConfig(BaseModel):
     host: str = Field(description="SFTP server hostname or IP address.")
     port: int = Field(default=22, ge=1, le=65535, description="SFTP port.")
     username: str = Field(description="SSH login username.")
-    private_key_pem: str = Field(description="PEM-encoded RSA/ECDSA/Ed25519 private key (decrypted).")
+    private_key: str = Field(description="PEM-encoded RSA/ECDSA/Ed25519 private key (decrypted).")
     remote_path: str = Field(default="/", description="Absolute remote directory to scan recursively.")
     allowed_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".docx"],
@@ -269,14 +269,14 @@ class SSHConnectorConfig(BaseModel):
             raise ValueError("username must not be empty.")
         return v.strip()
 
-    @field_validator("private_key_pem")
+    @field_validator("private_key")
     @classmethod
     def _check_private_key(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError("private_key_pem must not be empty.")
+            raise ValueError("private_key must not be empty.")
         if "PRIVATE KEY" not in v:
             raise ValueError(
-                "private_key_pem does not look like a PEM private key "
+                "private_key does not look like a PEM private key "
                 "(expected 'PRIVATE KEY' in the value)."
             )
         return v.strip()

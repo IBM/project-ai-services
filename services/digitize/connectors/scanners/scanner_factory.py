@@ -25,10 +25,12 @@ from __future__ import annotations
 from typing import Any
 
 from common.misc_utils import get_logger
+from digitize.connectors.encryption import decrypt_secrets
 from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.scanners.s3_scanner import S3Scanner
 from digitize.connectors.scanners.ssh_scanner import SSHScanner
+from digitize.settings import settings
 
 logger = get_logger("scanner_factory")
 
@@ -50,7 +52,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
     connector_row:
         Any object (ORM model, dataclass, or dict) that exposes:
           - ``.type``               → str  (e.g. ``"s3"``, ``"ssh"``)
-          - ``.connection_details`` → dict  (decrypted; type-specific fields)
+          - ``.connection_details`` → dict  (encrypted as stored in the DB)
           - ``.allowed_extensions`` → list[str]  (e.g. ``[".pdf", ".docx"]``)
 
         A plain dict with those keys is also accepted.
@@ -75,6 +77,9 @@ def build_scanner(connector_row: Any) -> BaseScanner:
         connector_type = connector_row.type
         connection_details = connector_row.connection_details or {}
         allowed_extensions = connector_row.allowed_extensions or [".pdf", ".docx"]
+
+    key_path = settings.digitize.connector.encryption_key_path
+    connection_details = decrypt_secrets(connector_type, connection_details, key_path)
 
     if connector_type not in _REGISTRY:
         supported = sorted(_REGISTRY.keys())

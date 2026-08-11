@@ -498,7 +498,7 @@ def _make_sftp_config(**overrides) -> "SSHConnectorConfig":
         host="sftp.example.com",
         port=22,
         username="user",
-        private_key_pem=_FAKE_PEM,
+        private_key=_FAKE_PEM,
         remote_path="/data",
         allowed_extensions=[".pdf", ".docx"],
     )
@@ -533,7 +533,7 @@ class TestSSHConnectorConfig:
         cfg = SSHConnectorConfig(
             host="h",
             username="u",
-            private_key_pem=_FAKE_PEM,
+            private_key=_FAKE_PEM,
         )
         assert cfg.remote_path == "/"
 
@@ -546,12 +546,12 @@ class TestSSHConnectorConfig:
             _make_sftp_config(username="")
 
     def test_empty_private_key_raises(self):
-        with pytest.raises(ValueError, match="private_key_pem"):
-            _make_sftp_config(private_key_pem="  ")
+        with pytest.raises(ValueError, match="private_key"):
+            _make_sftp_config(private_key="  ")
 
     def test_invalid_private_key_raises(self):
         with pytest.raises(ValueError, match="PRIVATE KEY"):
-            _make_sftp_config(private_key_pem="not a pem string")
+            _make_sftp_config(private_key="not a pem string")
 
     def test_allowed_extensions_without_dot_raises(self):
         with pytest.raises(ValueError, match="'.'"):
@@ -570,7 +570,7 @@ class TestSSHConnectorConfig:
         details = {
             "host": "sftp.example.com",
             "username": "u",
-            "private_key_pem": _FAKE_PEM,
+            "private_key": _FAKE_PEM,
         }
         cfg = SSHConnectorConfig.from_connection_details(
             details, allowed_extensions=[".pdf"]
@@ -584,7 +584,7 @@ class TestSSHConnectorConfig:
         details = {
             "host": "h",
             "username": "u",
-            "private_key_pem": _FAKE_PEM,
+            "private_key": _FAKE_PEM,
             "allowed_extensions": [".txt"],
         }
         cfg = SSHConnectorConfig.from_connection_details(
@@ -598,7 +598,7 @@ class TestSSHConnectorConfig:
         cfg = SSHConnectorConfig.model_validate({
             "host": "h",
             "username": "u",
-            "private_key_pem": _FAKE_PEM,
+            "private_key": _FAKE_PEM,
             "unknown_field": "should_be_ignored",
         })
         assert cfg.host == "h"
@@ -1021,7 +1021,7 @@ class TestBuildScannerSSH:
             "connection_details": {
                 "host": "sftp.example.com",
                 "username": "user",
-                "private_key_pem": _FAKE_PEM,
+                "private_key": _FAKE_PEM,
             },
             "allowed_extensions": [".pdf", ".docx"],
         }
@@ -1046,7 +1046,7 @@ class TestBuildScannerSSH:
             connection_details={
                 "host": "sftp.host",
                 "username": "admin",
-                "private_key_pem": _FAKE_PEM,
+                "private_key": _FAKE_PEM,
             },
             allowed_extensions=[".pdf"],
         )
