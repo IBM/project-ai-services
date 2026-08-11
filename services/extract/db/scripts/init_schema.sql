@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     json_schema           JSONB NOT NULL,
     examples              JSONB,
     custom_prompt         TEXT,
+    is_schema_inferred    BOOLEAN NOT NULL DEFAULT FALSE,
     schema_tokens         INTEGER NOT NULL,
     examples_tokens       INTEGER NOT NULL DEFAULT 0,
     custom_prompt_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     CONSTRAINT chk_extract_job_status
         CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
     CONSTRAINT chk_extract_source_type
-        CHECK (source_type IN ('txt', 'pdf'))
+        CHECK (source_type IN ('txt', 'md'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status

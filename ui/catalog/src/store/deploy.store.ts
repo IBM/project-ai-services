@@ -5,7 +5,6 @@ import type {
   ServiceSummary,
   ArchitectureDetailsResponse,
   DeployOptionsResponse,
-  ResourcesResponse,
   ProviderSchema,
 } from "@/types/api.types";
 
@@ -52,12 +51,6 @@ interface DeployState {
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
 
-  // Resources cache - not persisted (dynamic data)
-  resources: ResourcesResponse | null;
-  resourcesLoading: boolean;
-  resourcesError: string | null;
-  resourcesFetchedAt: number | null;
-
   // Provider params cache - persisted with 1-hour cache
   providerParams: Record<string, ProviderParamsCache>;
 
@@ -94,12 +87,6 @@ interface DeployState {
   setDeployOptionsError: (error: string | null) => void;
   clearDeployOptions: () => void;
 
-  // Resources actions
-  setResources: (data: ResourcesResponse) => void;
-  setResourcesLoading: (loading: boolean) => void;
-  setResourcesError: (error: string | null) => void;
-  clearResources: () => void;
-
   // Provider params actions
   setProviderParams: (
     componentType: string,
@@ -122,7 +109,6 @@ interface DeployState {
   isServiceSummariesStale: () => boolean;
   isArchitectureDetailsStale: () => boolean;
   isDeployOptionsStale: (architectureId: string) => boolean;
-  isResourcesStale: () => boolean;
   isProviderParamsStale: (componentType: string, providerId: string) => boolean;
   isServiceParamsStale: (serviceId: string) => boolean;
 
@@ -140,8 +126,6 @@ const CACHE_VERSION = "1.0.0";
 const CATALOG_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes for catalog metadata
 const DEPLOY_OPTIONS_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes for deploy options
 const PARAMS_CACHE_DURATION = 60 * 60 * 1000; // 1 hour for provider/service params
-const RESOURCES_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes for resources (dynamic data)
-
 export const useDeployStore = create<DeployState>()(
   persist(
     (set, get) => ({
@@ -171,12 +155,6 @@ export const useDeployStore = create<DeployState>()(
       deployOptions: {},
       deployOptionsLoading: false,
       deployOptionsError: null,
-
-      // Resources state
-      resources: null,
-      resourcesLoading: false,
-      resourcesError: null,
-      resourcesFetchedAt: null,
 
       // Provider params state
       providerParams: {},
@@ -292,27 +270,6 @@ export const useDeployStore = create<DeployState>()(
           deployOptionsError: null,
         }),
 
-      // Resources actions
-      setResources: (data) =>
-        set({
-          resources: data,
-          resourcesError: null,
-          resourcesFetchedAt: Date.now(),
-          resourcesLoading: false,
-        }),
-
-      setResourcesLoading: (loading) => set({ resourcesLoading: loading }),
-
-      setResourcesError: (error) =>
-        set({ resourcesError: error, resourcesLoading: false }),
-
-      clearResources: () =>
-        set({
-          resources: null,
-          resourcesError: null,
-          resourcesFetchedAt: null,
-        }),
-
       // Provider params actions
       setProviderParams: (componentType, providerId, data) => {
         const key = `${componentType}:${providerId}`;
@@ -383,12 +340,6 @@ export const useDeployStore = create<DeployState>()(
         return Date.now() - cached.fetchedAt > DEPLOY_OPTIONS_CACHE_DURATION;
       },
 
-      isResourcesStale: () => {
-        const { resourcesFetchedAt } = get();
-        if (!resourcesFetchedAt) return true;
-        return Date.now() - resourcesFetchedAt > RESOURCES_CACHE_DURATION;
-      },
-
       isProviderParamsStale: (componentType, providerId) => {
         const key = `${componentType}:${providerId}`;
         const cached = get().providerParams[key];
@@ -418,9 +369,6 @@ export const useDeployStore = create<DeployState>()(
           architectureDetailsFetchedAt: null,
           deployOptions: {},
           deployOptionsError: null,
-          resources: null,
-          resourcesError: null,
-          resourcesFetchedAt: null,
           providerParams: {},
           serviceParams: {},
         });

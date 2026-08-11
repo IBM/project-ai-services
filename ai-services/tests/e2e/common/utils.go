@@ -7,31 +7,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 )
 
-// HTTPClientConfig contains configuration for HTTP clients.
+// HTTPClientConfig holds configuration for HTTP clients.
 type HTTPClientConfig struct {
-	Timeout time.Duration
-	// InsecureSkipVerify skips TLS certificate verification (useful for self-signed certs).
-	InsecureSkipVerify bool
-	// PoolConnections enables connection pooling for better performance.
-	PoolConnections bool
+	Timeout            time.Duration
+	InsecureSkipVerify bool // skip TLS verification (self-signed certs in test envs)
+	PoolConnections    bool // enable connection pooling for repeated requests
 }
 
-// GetHTTPClient returns an HTTP client configured with the given config.
-// If poolConnections is true, uses a shared transport with connection pooling.
-// Otherwise, creates a minimal client suitable for single requests.
+// DefaultHTTPConfig returns sensible defaults for HTTP communication.
+func DefaultHTTPConfig() HTTPClientConfig {
+	return HTTPClientConfig{
+		Timeout:            10 * time.Second, //nolint:mnd
+		InsecureSkipVerify: true,
+		PoolConnections:    true,
+	}
+}
+
+// GetHTTPClient builds an HTTP client from config.
+// When PoolConnections is false a minimal single-use client is returned.
 func GetHTTPClient(config HTTPClientConfig) *http.Client {
 	tlsConfig := &tls.Config{InsecureSkipVerify: config.InsecureSkipVerify} //nolint:gosec
 
 	if !config.PoolConnections {
-		// Minimal client for simple one-off requests
 		return &http.Client{
 			Timeout: config.Timeout,
 			Transport: &http.Transport{
@@ -40,11 +47,10 @@ func GetHTTPClient(config HTTPClientConfig) *http.Client {
 		}
 	}
 
-	// Pooled transport for better performance across multiple requests
 	transport := &http.Transport{
-		TLSClientConfig:      tlsConfig,
-		MaxIdleConnsPerHost:  4,                //nolint:mnd
-		IdleConnTimeout:      90 * time.Second, //nolint:mnd
+		TLSClientConfig:       tlsConfig,
+		MaxIdleConnsPerHost:   4,                //nolint:mnd
+		IdleConnTimeout:       90 * time.Second, //nolint:mnd
 		ResponseHeaderTimeout: 35 * time.Second, //nolint:mnd
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second, //nolint:mnd
@@ -58,16 +64,13 @@ func GetHTTPClient(config HTTPClientConfig) *http.Client {
 	}
 }
 
-// DrainAndClose drains and closes an HTTP response body,
-// allowing the underlying TCP connection to be returned to the pool.
+// DrainAndClose drains and closes an HTTP response body to allow connection reuse.
 func DrainAndClose(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, body)
 	_ = body.Close()
 }
 
-// DoRequest sends an HTTP request with the given method, URL, body, and content type.
-// It handles request creation, client setup, body reading, and cleanup.
-// Returns (responseBody, statusCode, error).
+// DoRequest sends an HTTP request and returns (responseBody, statusCode, error).
 func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, contentType string, config HTTPClientConfig) ([]byte, int, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -98,12 +101,12 @@ func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, cont
 	return respBody, resp.StatusCode, nil
 }
 
-// DoGET sends a GET request and returns (body, statusCode, error).
+// DoGET sends a GET request.
 func DoGET(ctx context.Context, url string, config HTTPClientConfig) ([]byte, int, error) {
 	return DoRequest(ctx, http.MethodGet, url, nil, "", config)
 }
 
-// DoPOST sends a POST request with the given body and content type.
+// DoPOST sends a POST request with a body and content type.
 func DoPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string, config HTTPClientConfig) ([]byte, int, error) {
 	return DoRequest(ctx, http.MethodPost, url, body, contentType, config)
 }
@@ -113,9 +116,8 @@ func DoDELETE(ctx context.Context, url string, config HTTPClientConfig) ([]byte,
 	return DoRequest(ctx, http.MethodDelete, url, nil, "", config)
 }
 
-// ValidateStatusAndUnmarshal checks that the HTTP status code matches the expected status,
-// then unmarshals the response body into the provided value.
-// If v is nil, skips unmarshaling.
+// ValidateStatusAndUnmarshal verifies the status code then unmarshals body into v.
+// If v is nil, unmarshaling is skipped.
 func ValidateStatusAndUnmarshal(body []byte, statusCode, expectedStatus int, v any) error {
 	if statusCode != expectedStatus {
 		return fmt.Errorf("unexpected status code %d: %s", statusCode, string(body))
@@ -132,17 +134,58 @@ func ValidateStatusAndUnmarshal(body []byte, statusCode, expectedStatus int, v a
 	return nil
 }
 
-// ErrorResponse represents a generic API error response body.
-// Expects JSON with an "error" field containing "code", "message", and "status" fields.
+// ErrorResponse is the standard API error envelope.
+// Shape: {"error":{"code":N,"message":"...","status":"..."}}.
 type ErrorResponse struct {
 	Error struct {
-		Code    int    `json:"code"`    // HTTP status code as number
-		Message string `json:"message"` // Error message
-		Status  string `json:"status"`  // Error status string (e.g., "UNSUPPORTED_FILE_TYPE")
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"` // e.g. "UNSUPPORTED_FILE_TYPE"
 	} `json:"error,omitempty"`
 }
 
-// ParseErrorResponse parses the response body as an error response.
+// BuildMultipartBody builds a multipart/form-data body with a single file field.
+// Shared by packages that need to POST files.
+func BuildMultipartBody(fieldName, filePath string) (*bytes.Buffer, *multipart.Writer, error) {
+	return BuildMultipartBodyWithFields(fieldName, filePath, nil)
+}
+
+// BuildMultipartBodyWithFields builds a multipart/form-data body with a file field
+// and optional extra string fields (e.g. "level", "length").
+// Pass nil or an empty map when no extra fields are needed.
+func BuildMultipartBodyWithFields(fieldName, filePath string, fields map[string]string) (*bytes.Buffer, *multipart.Writer, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile(fieldName, filepath.Base(filePath))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create form file: %w", err)
+	}
+
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, nil, fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	for k, v := range fields {
+		if err := writer.WriteField(k, v); err != nil {
+			return nil, nil, fmt.Errorf("failed to write field %s: %w", k, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	return body, writer, nil
+}
+
+// ParseErrorResponse unmarshals a non-success response body into an ErrorResponse.
 func ParseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error) {
 	var errorResp ErrorResponse
 	if err := json.Unmarshal(respBody, &errorResp); err != nil {
@@ -150,6 +193,16 @@ func ParseErrorResponse(respBody []byte, statusCode int) (*ErrorResponse, error)
 	}
 
 	return &errorResp, nil
+}
+
+// ExpectErrorResponse parses an error response when status != successStatus.
+// Returns an error if the server unexpectedly returned a success status.
+func ExpectErrorResponse(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
+	if statusCode != successStatus {
+		return ParseErrorResponse(body, statusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
 // GetTestPDFPath returns the absolute path to the shared test PDF fixture (test_doc.pdf)
@@ -172,8 +225,7 @@ func IsResourceLockedError(err error) bool {
 		return false
 	}
 
-	msg := err.Error()
-	if !strings.Contains(msg, "409") {
+	if !strings.Contains(err.Error(), "409") {
 		return false
 	}
 
@@ -190,4 +242,18 @@ func IsRateLimitError(err error) bool {
 	return strings.Contains(err.Error(), "429") &&
 		(strings.Contains(err.Error(), "RATE_LIMIT_EXCEEDED") ||
 			strings.Contains(err.Error(), "Too many"))
+}
+
+// SummaryContainsAnyKeyword reports whether summary contains at least one of
+// the given keywords (case-insensitive). The first matched keyword is returned
+// together with true so callers can include it in assertion failure messages.
+func SummaryContainsAnyKeyword(summary string, keywords []string) (string, bool) {
+	lower := strings.ToLower(summary)
+	for _, kw := range keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return kw, true
+		}
+	}
+
+	return "", false
 }

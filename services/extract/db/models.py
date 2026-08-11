@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -46,6 +47,10 @@ class ExtractionSchema(Base):
     json_schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
     examples: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     custom_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # True when json_schema is inferred from examples rather than supplied
+    # explicitly by the caller.
+    is_schema_inferred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Token counts cached at registration time (schemas are immutable so these
     # never go stale and save one /tokenize call per extraction request).
@@ -116,7 +121,7 @@ class ExtractJob(Base):
             name="chk_extract_job_status",
         ),
         CheckConstraint(
-            "source_type IN ('txt', 'pdf')",
+            "source_type IN ('txt', 'md')",
             name="chk_extract_source_type",
         ),
         Index("idx_extract_jobs_submitted_at_status", "submitted_at", "status"),

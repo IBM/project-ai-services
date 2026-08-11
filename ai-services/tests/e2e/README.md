@@ -45,8 +45,11 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
       - This target runs all tests under `tests/e2e` using `ginkgo -r ./tests/e2e`
       - It can be customized by setting environment variables `TEST_ARGS` for example `make test TEST_ARGS="-v"`.
       - The `test-generate-report` runs the entire test and stores a JUnit XML report in `tests/e2e/reports/report-$(RUN_ID).xml`
+      - The required build tags (`exclude_graphdriver_btrfs containers_image_openpgp remote`) are applied automatically via `TEST_BASE` in the Makefile.
 
    3. Run using the Ginkgo CLI
+
+      > **Important:** always supply `-tags "$TAGS"` when invoking `ginkgo` directly. Without these tags the build will fail with `gpgme: build constraints exclude all Go files` because `containers/podman` pulls in a C-library binding that is excluded by these tags.
 
       ```bash
       ### install ginkgo
@@ -55,11 +58,18 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
       ### add the installation path to PATH
       export PATH=$PATH:$(go env GOPATH)/bin
 
+      ### set build tags once — reuse in all ginkgo commands below
+      export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+
       ### run the whole suite
-      ginkgo -r --timeout=3h ./tests/e2e --runtime=<openshift/podman - default is podman>
+      ginkgo -r -tags "$TAGS" \
+        --timeout=3h ./tests/e2e -- --runtime=<openshift/podman - default is podman>
 
       ### to generate a junit report with ginkgo
-      ginkgo  -r --timeout=3h --runtime=<openshift/podman - default is podman> --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/...
+      ginkgo -r -tags "$TAGS" \
+        --timeout=3h --runtime=<openshift/podman - default is podman> \
+        --junit-report=e2e-report.xml --output-dir=tests/e2e/reports \
+        ./tests/e2e/...
       ```
 
 ## Environment variables to set before running tests
@@ -110,8 +120,36 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `golden-dataset-validation` | RAG golden dataset validation against an existing application |
 | `digitization-tests` | Digitization API coverage against an existing or suite-created application |
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
+| `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `failure-test` | Bootstrap negative-path coverage |
+| `catalog-configure` | Catalog service configure, uninstall, SSL, reset, and endpoint tests (podman-only) |
+| `catalog-configure && ssl` | SSL certificate deployment and reset tests only |
+| `catalog-configure && non-root` | Non-root user configure and permission tests only |
+| `catalog-configure && negative` | Negative/flag-validation tests that never deploy a catalog |
+| `catalog-configure && endpoints` | Live catalog API endpoint tests (require a running catalog) |
+
+### Running Summarization Tests Only
+
+```bash
+# Using make (recommended — build tags applied automatically)
+make test TEST_ARGS="--label-filter=summarization-tests --timeout=3h" \
+  APP_NAME=<appname> APP_RUNTIME=podman
+
+# Using go run (tags required — or set TAGS var as shown above)
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+go run github.com/onsi/ginkgo/v2/ginkgo \
+  -tags "$TAGS" \
+  --label-filter="summarization-tests" \
+  --timeout=3h --v \
+  . \
+  -- -app-name=<appname> -template=summarize -runtime=podman
+
+# Using ginkgo CLI directly
+ginkgo -r -tags "$TAGS" \
+  --label-filter="summarization-tests" --timeout=3h \
+  ./tests/e2e -- --app-name=<appname> --template=summarize --runtime=podman
+```
 
 ## Running Golden Dataset Validation Independently
 
@@ -162,8 +200,9 @@ make test TEST_ARGS="--label-filter=golden-dataset-validation" APP_NAME=<existin
 
 OR
 
-```
-ginkgo -r ./tests/e2e \
+```bash
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  ./tests/e2e \
   --label-filter=golden-dataset-validation \
   -- \
   --app-name=<existing-app-name>
@@ -196,7 +235,9 @@ make test TEST_ARGS="--label-filter=\"digitization-tests\" --timeout=2h" APP_NAM
 OR
 
 ```bash
-ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="digitization-tests" --timeout=2h \
+  ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
 
 ## Running Similarity API Tests Independently
@@ -219,7 +260,9 @@ make test TEST_ARGS="--label-filter=\"similarity-tests\" --timeout=2h" APP_NAME=
 OR
 
 ```bash
-ginkgo -r --label-filter="similarity-tests" --timeout=2h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="similarity-tests" --timeout=2h \
+  ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
 
 ## Running Application Backup And Restore Tests
@@ -247,7 +290,9 @@ make test TEST_ARGS="--label-filter=\"app-backup-restore\" --timeout=3h" APP_NAM
 OR
 
 ```bash
-ginkgo -r --label-filter="app-backup-restore" --timeout=3h ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="app-backup-restore" --timeout=3h \
+  ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
 
 ## Running Bootstrap Failure Tests
@@ -260,7 +305,7 @@ Point the test suite at the binary you just built:
 ```bash
 export AI_SERVICES_BIN=<path to ai-services binary>
 ```
-### Run all failure tests
+### Run all Bootstrap failure tests
 
 ```bash
 ginkgo -r \
@@ -332,6 +377,59 @@ export CATALOG_SERVER_URL="..."        # optional — auto-discovered from 'cata
 | `failure-test && catalog` | Wrong catalog password + unreachable catalog server |
 | `failure-test && validation` | `bootstrap validate` with missing Podman |
 
+## Running Catalog Failure Tests
+
+### Option 1 — Ginkgo CLI
+
+Always pass `--tags` to exclude C library dependencies.
+
+```bash
+cd ai-services
+
+# Run all 5 catalog failure tests
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure" \
+  --timeout=3m \
+  ./tests/e2e
+
+# Run only login/whoami failures (Tests 1, 2, 3)
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure && catalog-login" \
+  --timeout=2m \
+  ./tests/e2e
+
+# Run only configure failures (Tests 4, 5)
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure && catalog-configure" \
+  --timeout=2m \
+  ./tests/e2e
+```
+
+Pass `--runtime=podman` after `--` if the default does not match your environment:
+
+```bash
+ginkgo -r \
+  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="catalog-failure" \
+  --timeout=3m \
+  ./tests/e2e -- --runtime=podman
+```
+
+### Option 2 — `make test`
+
+```bash
+cd ai-services
+
+make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m"
+
+# With explicit runtime
+make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m" APP_RUNTIME=podman
+```
+
+
 ### Adding new failure tests
 
 Follow the same component-per-file convention:
@@ -346,6 +444,36 @@ Each failure `It()` block must:
 3. Call the matching `ValidateXxxFailureOutput()` function in `cli/output.go` to verify the error message is actionable.
 4. Clean up any environment changes in a `defer` block.
 
+---
+
+## Running Catalog Configure Tests
+
+`catalog_configure_test.go` covers the full `catalog configure` / `catalog uninstall` command surface — custom base directories, SSL certificate deployment, certificate reset, podman auth reset, idempotency, flag validation, and live API endpoints.
+
+**All tests in this file are podman-only.** They skip automatically on the OpenShift runtime.
+
+### Environment variables required
+
+```bash
+export CATALOG_PASSWORD=<your-catalog-admin-password>   # required — tests skip if unset
+
+# Registry credentials — used to pre-authenticate podman before image pulls
+export REGISTRY_URL="icr.io"
+export REGISTRY_USER_NAME=<registry-user>
+export REGISTRY_PASSWORD=<registry-password>
+
+# Optional — non-root user tests (skip if unset when running as root)
+export NONROOT_USER=<username>                          # Linux user with no sudo privilege
+```
+
+### Run commands
+
+```bash
+# Run all catalog configure tests
+CGO_ENABLED=0 GOFLAGS="-tags=containers_image_openpgp" \
+  ginkgo -r --timeout=0 --label-filter="catalog-configure" \
+  ./tests/e2e -- --runtime podman
+```
 ---
 
 ## Running Language Support Tests
@@ -395,7 +523,9 @@ make test TEST_ARGS="--label-filter=language-smoke --timeout=30m" APP_NAME=<exis
 make test TEST_ARGS="--label-filter=language-golden --timeout=3h" APP_NAME=<existing-app-name>
 
 # Using ginkgo CLI directly
-ginkgo -r --label-filter=language-tests --timeout=3h ./tests/e2e -- --app-name=<existing-app-name>
+ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter=language-tests --timeout=3h \
+  ./tests/e2e -- --app-name=<existing-app-name>
 ```
 
 ## Adding new E2E tests
@@ -442,47 +572,49 @@ Below is an accurate overview of the current `ai-services/tests/e2e` layout and 
 
 ```text
 ai-services/tests/e2e/
-   ├─ e2e_suite_test.go           # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
-   ├─ README.md                   # suite usage, labels, prerequisites, and structure
-   ├─ nightly_run.sh              # helper script for scheduled suite execution
-   ├─ language_e2e_test.go        # Language support tests (DE/FR/IT) — TC-1 through TC-7
-   ├─ bootstrap_failure_test.go   # Bootstrap failure scenarios (registry, catalog, validation)
-   ├─ bootstrap/                  # runtime preparation and bootstrap helpers
+   ├─ e2e_suite_test.go              # Ginkgo suite entrypoint — BeforeSuite/AfterSuite and global test setup
+   ├─ README.md                      # suite usage, labels, prerequisites, and structure
+   ├─ nightly_run.sh                 # helper script for scheduled suite execution
+   ├─ catalog_configure_test.go      # Catalog configure/uninstall/SSL/reset/endpoint tests (podman-only)
+   ├─ language_e2e_test.go           # Language support tests (DE/FR/IT) — TC-1 through TC-7
+   ├─ bootstrap_failure_test.go      # Bootstrap failure scenarios (registry, catalog, validation)
+   ├─ bootstrap/                     # runtime preparation and bootstrap helpers
    │   ├─ bootstrap.go
    │   ├─ build.go
+   │   ├─ certs.go                   # self-signed wildcard cert generator and invalid cert writer
    │   ├─ env.go
    │   └─ podman.go
-   ├─ cleanup/                    # teardown helpers used by AfterSuite and tests
+   ├─ cleanup/                       # teardown helpers used by AfterSuite and tests
    │   └─ tear.go
-   ├─ cli/                        # helpers to invoke the ai-services CLI and validate output
+   ├─ cli/                           # helpers to invoke the ai-services CLI and validate output
    │   ├─ output.go
    │   └─ runner.go
-   ├─ common/                     # small reusable helpers used across tests (exec, files, JSON, retries)
+   ├─ common/                        # small reusable helpers used across tests (exec, files, JSON, retries)
    │   ├─ exec.go
    │   ├─ files.go
    │   ├─ json.go
    │   ├─ retry.go
    │   └─ vars.go
-   ├─ config/                     # test configuration helpers
+   ├─ config/                        # test configuration helpers
    │   └─ config.go
-   ├─ digitization/               # digitization api test helper functions
+   ├─ digitization/                  # digitization api test helper functions
    │   ├─ digitize.go
-   │   └─ digitize_lang.go        # language PDF path helpers and ingestion wrapper (DE/FR/IT)
-   ├─ ingestion/                  # document ingestion helpers and test fixtures
+   │   └─ digitize_lang.go           # language PDF path helpers and ingestion wrapper (DE/FR/IT)
+   ├─ ingestion/                     # document ingestion helpers and test fixtures
    │   ├─ ingest.go
    │   ├─ wait.go
-   │   └─ docs/                   # test documents for document ingestion and digitization
-   │       ├─ german.pdf          # German language fixture (IBM Power product page)
-   │       ├─ french.pdf          # French language fixture (IBM Power product page)
-   │       └─ italian.pdf         # Italian language fixture (IBM Power product page)
-   ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
+   │   └─ docs/                      # test documents for document ingestion and digitization
+   │       ├─ german.pdf             # German language fixture (IBM Power product page)
+   │       ├─ french.pdf             # French language fixture (IBM Power product page)
+   │       └─ italian.pdf            # Italian language fixture (IBM Power product page)
+   ├─ podman/                        # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
-   ├─ rag/                        # RAG-related test helpers
+   ├─ rag/                           # RAG-related test helpers
    │   ├─ evaluator.go
    │   ├─ golden.go
    │   ├─ judge.go
    │   └─ setup.go
-   ├─ similarity/                 # similarity API request/response helpers
+   ├─ similarity/                    # similarity API request/response helpers
    │   └─ similarity.go
-   └─ <other_test_files>          # add your `_test.go` files here (package `e2e`)
+   └─ <other_test_files>             # add your `_test.go` files here (package `e2e`)
 ```

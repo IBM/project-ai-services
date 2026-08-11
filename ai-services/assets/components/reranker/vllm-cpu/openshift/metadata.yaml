@@ -5,3 +5,4 @@ version: "1.0.0"
 resources:
   cpu: 8
   memory: 4294967296 # 4Gi in bytes
+  storage: 10737418240 # 10Gi for reranker model storage in bytes

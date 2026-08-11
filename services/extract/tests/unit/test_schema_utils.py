@@ -12,6 +12,7 @@ from extract.utils.schema import (
     check_extraction_budget,
     check_schema_share_in_context,
     compute_reserved_output,
+    infer_schema_from_examples,
     normalize_schema,
     validate_examples,
     validate_json_schema_structure,
@@ -241,6 +242,191 @@ class TestValidateExamples:
             )
         assert exc_info.value.details["example_index"] == 1
 
+
+
+# ---------------------------------------------------------------------------
+# infer_schema_from_examples
+# ---------------------------------------------------------------------------
+
+class TestInferSchemaFromExamples:
+    """Tests for the schema-inference path (no explicit json_schema supplied)."""
+
+    # ------------------------------------------------------------------
+    # Basic happy paths
+    # ------------------------------------------------------------------
+
+    def test_single_example_flat_types(self):
+        examples = [{"text": "t", "output": {"name": "Alice", "age": 30, "score": 9.5, "active": True}}]
+        schema = infer_schema_from_examples(examples)
+
+        assert schema["type"] == "object"
+        props = schema["properties"]
+        assert props["name"] == {"type": "string"}
+        assert props["age"] == {"type": "integer"}
+        assert props["score"] == {"type": "number"}
+        assert props["active"] == {"type": "boolean"}
+
+    def test_single_example_all_fields_required(self):
+        """Every field from a single example must appear in required."""
+        examples = [{"text": "t", "output": {"a": "x", "b": 1}}]
+        schema = infer_schema_from_examples(examples)
+        assert set(schema["required"]) == {"a", "b"}
+
+    def test_field_present_in_all_examples_is_required(self):
+        examples = [
+            {"text": "t1", "output": {"name": "Alice", "opt": "x"}},
+            {"text": "t2", "output": {"name": "Bob"}},
+        ]
+        schema = infer_schema_from_examples(examples)
+        assert "name" in schema["required"]
+        assert "opt" not in schema["required"]
+
+    def test_field_absent_from_all_examples_has_no_required(self):
+        """If every example omits a field entirely, it never appears at all."""
+        examples = [
+            {"text": "t1", "output": {"a": 1}},
+            {"text": "t2", "output": {"b": 2}},
+        ]
+        schema = infer_schema_from_examples(examples)
+        # Neither field is present in all examples.
+        assert "required" not in schema or set(schema.get("required", [])) == set()
+
+    def test_null_value_infers_null_type(self):
+        examples = [{"text": "t", "output": {"field": None}}]
+        schema = infer_schema_from_examples(examples)
+        assert schema["properties"]["field"] == {"type": "null"}
+
+    def test_list_value_infers_array_type(self):
+        examples = [{"text": "t", "output": {"tags": ["a", "b"]}}]
+        schema = infer_schema_from_examples(examples)
+        assert schema["properties"]["tags"] == {'type': 'array', 'items': {'type': 'string'}}
+
+    # ------------------------------------------------------------------
+    # Nested dict (recursive)
+    # ------------------------------------------------------------------
+
+    def test_nested_dict_becomes_object_sub_schema(self):
+        examples = [
+            {"text": "t", "output": {"address": {"street": "Main St", "zip": "12345"}}}
+        ]
+        schema = infer_schema_from_examples(examples)
+        addr = schema["properties"]["address"]
+        assert addr["type"] == "object"
+        assert addr["properties"]["street"] == {"type": "string"}
+        assert addr["properties"]["zip"] == {"type": "string"}
+
+    def test_nested_dict_merged_across_examples(self):
+        """Same nested field seen in two examples with the same types merges cleanly."""
+        examples = [
+            {"text": "t1", "output": {"meta": {"a": "x"}}},
+            {"text": "t2", "output": {"meta": {"b": 1}}},
+        ]
+        schema = infer_schema_from_examples(examples)
+        meta = schema["properties"]["meta"]
+        assert meta["type"] == "object"
+        assert meta["properties"]["a"] == {"type": "string"}
+        assert meta["properties"]["b"] == {"type": "integer"}
+
+    def test_deeply_nested_dict(self):
+        examples = [{"text": "t", "output": {"a": {"b": {"c": 42}}}}]
+        schema = infer_schema_from_examples(examples)
+        assert schema["properties"]["a"]["properties"]["b"]["properties"]["c"] == {"type": "integer"}
+
+    # ------------------------------------------------------------------
+    # bool vs int disambiguation
+    # ------------------------------------------------------------------
+
+    def test_bool_not_confused_with_integer(self):
+        """Python bool is a subclass of int; must be typed as boolean, not integer."""
+        examples = [{"text": "t", "output": {"flag": True}}]
+        schema = infer_schema_from_examples(examples)
+        assert schema["properties"]["flag"] == {"type": "boolean"}
+
+    # ------------------------------------------------------------------
+    # Type-conflict detection
+    # ------------------------------------------------------------------
+
+    def test_conflicting_types_raises(self):
+        examples = [
+            {"text": "t1", "output": {"amount": 100}},
+            {"text": "t2", "output": {"amount": "one hundred"}},
+        ]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        err = exc_info.value
+        assert err.code == "SCHEMA_INFERENCE_CONFLICT"
+        assert err.status == 400
+        assert "amount" in err.message
+
+    def test_conflicting_nested_types_raises(self):
+        examples = [
+            {"text": "t1", "output": {"meta": {"val": 1}}},
+            {"text": "t2", "output": {"meta": {"val": "one"}}},
+        ]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        assert exc_info.value.code == "SCHEMA_INFERENCE_CONFLICT"
+        assert "meta.val" in exc_info.value.message
+
+    def test_conflicting_top_level_vs_nested_type_raises(self):
+        """A string in one example and an object in another must raise a conflict."""
+        examples = [
+            {"text": "t1", "output": {"field": "plain"}},
+            {"text": "t2", "output": {"field": {"nested": 1}}},
+        ]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        assert exc_info.value.code == "SCHEMA_INFERENCE_CONFLICT"
+
+    # ------------------------------------------------------------------
+    # Error cases
+    # ------------------------------------------------------------------
+
+    def test_no_examples_raises(self):
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples([])
+        assert exc_info.value.code == "INFERENCE_NO_EXAMPLES"
+        assert exc_info.value.status == 400
+
+    def test_non_dict_output_raises(self):
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples([{"text": "t", "output": ["not", "a", "dict"]}])
+        assert exc_info.value.code == "INFERENCE_INVALID_EXAMPLE"
+        assert exc_info.value.status == 400
+
+    def test_non_dict_output_reports_correct_index(self):
+        examples = [
+            {"text": "t1", "output": {"ok": 1}},
+            {"text": "t2", "output": "not an object"},
+        ]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        assert "examples[1]" in exc_info.value.message
+
+    # ------------------------------------------------------------------
+    # Empty output dict
+    # ------------------------------------------------------------------
+
+    def test_empty_output_dict_raises_error(self):
+        examples = [{"text": "t", "output": {}}]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            infer_schema_from_examples(examples)
+        assert exc_info.value.code == "INFERENCE_EMPTY_EXAMPLE"
+
+    # ------------------------------------------------------------------
+    # Schema structure is valid draft 2020-12
+    # ------------------------------------------------------------------
+
+    def test_inferred_schema_passes_structural_validation(self):
+        """The schema produced by inference must itself pass validate_json_schema_structure."""
+        examples = [
+            {"text": "t1", "output": {"name": "Alice", "age": 30}},
+            {"text": "t2", "output": {"name": "Bob", "age": 25, "city": "Berlin"}},
+        ]
+        schema = infer_schema_from_examples(examples)
+        # Should not raise.
+        validate_json_schema_structure(schema)
+        assert schema["required"] == ["name", "age"]
 
 
 # ---------------------------------------------------------------------------
