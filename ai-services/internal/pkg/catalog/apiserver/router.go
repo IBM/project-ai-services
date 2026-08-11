@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/project-ai-services/ai-services/docs" // Import generated docs
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers/connectorhandlers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
@@ -47,7 +46,6 @@ func registerAPIRoutes(router *gin.Engine, authSvc auth.Service, tokenMgr *auth.
 	catalogHandler := handlers.NewCatalogHandler()
 	resourcesHandler := handlers.NewResourcesHandler()
 	applicationHandler := handlers.NewApplicationHandler(appService)
-	connectorHandler := connectorhandlers.New()
 
 	v1 := router.Group("/api/v1")
 
@@ -68,8 +66,8 @@ func registerAPIRoutes(router *gin.Engine, authSvc auth.Service, tokenMgr *auth.
 	catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
 	catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
 	catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
-	catalog.GET("/connectors", connectorHandler.ListConnectorProviders)
-	catalog.GET("/connectors/:connector_type/providers/:provider_id/params", connectorHandler.GetConnectorProviderParams)
+	catalog.GET("/connectors", catalogHandler.ListConnectorProviders)
+	catalog.GET("/connectors/:connector_type/providers/:provider_id/params", catalogHandler.GetConnectorProviderParams)
 
 	// Application endpoints (authenticated)
 	applications := v1.Group("applications")

@@ -180,6 +180,16 @@ type ComponentSummary struct {
 	ComponentType string `json:"component_type"`
 }
 
+// Connector holds the metadata loaded from a connector's metadata.yaml file.
+type Connector struct {
+	Type              string `yaml:"type" json:"type"`                               // always "connector"
+	ID                string `yaml:"id" json:"id"`                                   // e.g. "s3", "ssh"
+	Name              string `yaml:"name" json:"name"`                               // display name
+	Description       string `yaml:"description" json:"description"`                 // short description
+	ConnectorType     string `yaml:"connector_type" json:"connector_type"`           // e.g. "datasource"
+	ConnectorTypeName string `yaml:"connector_type_name" json:"connector_type_name"` // display label for connector_type
+}
+
 // RuntimeMetadata contains runtime-specific metadata.
 type RuntimeMetadata struct {
 	Name    string `yaml:"name" json:"name"`
@@ -327,17 +337,6 @@ func yamlNodeToMapping(node *yaml.Node) OrderedMap {
 	}
 
 	return result
-}
-
-// ConnectorProvider holds the metadata loaded from a connector's metadata.yaml file.
-type ConnectorProvider struct {
-	Type              string   `yaml:"type" json:"type"`                                   // always "connector"
-	ID                string   `yaml:"id" json:"id"`                                       // e.g. "s3", "ssh"
-	Name              string   `yaml:"name" json:"name"`                                   // display name
-	Description       string   `yaml:"description" json:"description"`                     // short description
-	ConnectorType     string   `yaml:"connector_type" json:"connector_type"`               // e.g. "datasource"
-	ConnectorTypeName string   `yaml:"connector_type_name" json:"connector_type_name"`     // display label for connector_type
-	SensitiveFields   []string `yaml:"sensitive_fields" json:"sensitive_fields,omitempty"` // fields to strip from responses
 }
 
 // Made with Bob

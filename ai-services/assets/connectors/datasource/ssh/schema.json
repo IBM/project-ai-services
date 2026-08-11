@@ -24,7 +24,7 @@
       "type": "string",
       "title": "Private Key",
       "description": "PEM-encoded private key used for SSH authentication.",
-      "x-sensitive": true
+      "format": "password"
     },
     "remote_path": {
       "type": "string",

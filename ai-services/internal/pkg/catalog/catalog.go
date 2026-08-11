@@ -26,6 +26,7 @@ type catalogItem struct {
 	Architecture *types.Architecture
 	Service      *types.Service
 	Component    *types.Component
+	Connector    *types.Connector
 }
 
 // CatalogProvider provides access to catalog items.
@@ -104,7 +105,7 @@ func isValidMetadataPath(catalogType string, pathLength int) bool {
 	switch catalogType {
 	case constants.CatalogTypeArchitectures, constants.CatalogTypeServices:
 		return pathLength == constants.MinPathPartsForArchOrService
-	case constants.CatalogTypeComponents:
+	case constants.CatalogTypeComponents, constants.CatalogTypeConnectors:
 		return pathLength == constants.MinPathPartsForComponent
 	default:
 		return false
@@ -120,6 +121,8 @@ func parseAndStoreMetadata(ctx context.Context, catalogType, path, appPath strin
 		return parseService(ctx, path, appPath, data, items)
 	case constants.CatalogTypeComponents:
 		return parseComponent(ctx, path, appPath, data, items)
+	case constants.CatalogTypeConnectors:
+		return parseConnector(ctx, path, appPath, data, items)
 	}
 
 	return nil
@@ -179,6 +182,26 @@ func parseComponent(ctx context.Context, path, appPath string, data []byte, item
 	return nil
 }
 
+// parseConnector parses and stores a connector.
+func parseConnector(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
+	var conn types.Connector
+	if unmarshalErr := yaml.Unmarshal(data, &conn); unmarshalErr != nil {
+		logger.DebugfCtx(ctx, "failed to parse connector at %s: %v", path, unmarshalErr)
+
+		return nil
+	}
+
+	// Use composite key for connectors: {connector_type}/{id}
+	// This allows same ID across different connector types
+	connectorKey := fmt.Sprintf("%s/%s", conn.ConnectorType, conn.ID)
+	items[connectorKey] = &catalogItem{
+		Path:      appPath,
+		Connector: &conn,
+	}
+
+	return nil
+}
+
 // LoadArchitecture loads an architecture by ID from cache.
 func (p *CatalogProvider) LoadArchitecture(id string) (*types.Architecture, error) {
 	item, ok := sharedItems[id]
@@ -209,6 +232,18 @@ func (p *CatalogProvider) LoadComponent(componentType, id string) (*types.Compon
 	}
 
 	return item.Component, nil
+}
+
+// LoadConnector loads a connector by connector type and ID from cache.
+// connectorType examples: "datasource".
+func (p *CatalogProvider) LoadConnector(connectorType, id string) (*types.Connector, error) {
+	connectorKey := fmt.Sprintf("%s/%s", connectorType, id)
+	item, ok := sharedItems[connectorKey]
+	if !ok || item.Connector == nil {
+		return nil, fmt.Errorf("connector '%s/%s' not found", connectorType, id)
+	}
+
+	return item.Connector, nil
 }
 
 // GetCatalogItemPath returns the application path for a given ID.
@@ -297,6 +332,41 @@ func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 	return components, nil
 }
 
+// ListConnectors lists all connectors for a given connector type from cache.
+// Returns an error when the type is not registered.
+func (p *CatalogProvider) ListConnectors(connectorType string) ([]*types.Connector, error) {
+	result := make([]*types.Connector, 0)
+	found := false
+
+	for key, item := range sharedItems {
+		if item.Connector == nil {
+			continue
+		}
+		if strings.HasPrefix(key, connectorType+"/") {
+			result = append(result, item.Connector)
+			found = true
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("connector type %q not found", connectorType)
+	}
+
+	return result, nil
+}
+
+// ListAllConnectors lists every connector across all registered connector types from cache.
+func (p *CatalogProvider) ListAllConnectors() []*types.Connector {
+	result := make([]*types.Connector, 0)
+	for _, item := range sharedItems {
+		if item.Connector != nil {
+			result = append(result, item.Connector)
+		}
+	}
+
+	return result
+}
+
 // ListServicesWithRuntime lists all available deployable services
 // Runtime parameter kept for API compatibility but not used
 // Only returns services where DependencyOnly is false (default).
@@ -321,6 +391,13 @@ func (p *CatalogProvider) ServiceExists(id string) bool {
 // ComponentExists checks if a component exists.
 func (p *CatalogProvider) ComponentExists(componentType, id string) bool {
 	_, err := p.LoadComponent(componentType, id)
+
+	return err == nil
+}
+
+// ConnectorExists checks if a connector exists.
+func (p *CatalogProvider) ConnectorExists(connectorType, id string) bool {
+	_, err := p.LoadConnector(connectorType, id)
 
 	return err == nil
 }

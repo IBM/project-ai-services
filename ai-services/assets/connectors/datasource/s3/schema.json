@@ -30,7 +30,7 @@
       "type": "string",
       "title": "Secret Access Key",
       "description": "AWS / S3-compatible secret access key.",
-      "x-sensitive": true
+      "format": "password"
     },
     "prefix": {
       "type": "string",

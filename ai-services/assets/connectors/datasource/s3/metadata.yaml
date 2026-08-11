@@ -7,8 +7,3 @@ description: "Connect to an S3-compatible object storage bucket as a document so
 # Connector type this provider belongs to
 connector_type: datasource
 connector_type_name: "Datasource"
-
-# Fields that contain sensitive credential values.
-# These values are encrypted at rest and never returned in API responses.
-sensitive_fields:
-  - secret_access_key
