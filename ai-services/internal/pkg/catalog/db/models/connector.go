@@ -10,8 +10,8 @@ import (
 type ConnectorStatus string
 
 const (
-	ConnectorStatusConnected ConnectorStatus = "Connected"
-	ConnectorStatusOffline   ConnectorStatus = "Offline"
+	ConnectorStatusConnected ConnectorStatus = "connected"
+	ConnectorStatusOffline   ConnectorStatus = "offline"
 )
 
 // Connector represents a tenant-level named remote content source registered in the catalog.
@@ -23,7 +23,7 @@ type Connector struct {
 	Provider  string          `json:"provider"`
 	Status    ConnectorStatus `json:"status"`
 	Message   string          `json:"message,omitempty"`
-	Metadata  map[string]any  `json:"metadata,omitempty"`
+	Metadata  map[string]any  `json:"-"` // never serialised to API responses; contains sensitive credential fields
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
 }
