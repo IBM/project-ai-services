@@ -251,11 +251,11 @@ DELETE /v1/connectors/{connector_id} (API Handler)
 ```text
 _run_teardown(connector_id) (Background asyncio.Task)
   │
-  ├─ Step A: remove_connector_job(connector_id) → unregisters APScheduler job
-  ├─ Step B: _finalize_open_sync_log(connector_id)
+  ├─ Step A: _finalize_open_sync_log(connector_id)
   │            └─ get_last_sync_log → if status not in {completed, failed, cancelled}
   │               → close_sync_log(status='cancelled', update_connector_status=False)
   │               (no-op if last log is already terminal, or if no log exists)
+  ├─ Step B: remove_connector_job(connector_id) → unregisters APScheduler job
   ├─ Step C: snapshot owned checksums for connector
   ├─ Step D: remove_connector_checksum_entry row by row
   │            └─ if remaining_owner_count == 0 → best-effort delete_document_internal(doc_id)
@@ -657,8 +657,6 @@ async def _run_teardown(connector_id: str) -> None:
     - By the DELETE handler directly (when no tick was running at delete time).
     - By _run_tick's except CancelledError block (when a tick was interrupted).
     """
-    await remove_connector_job(connector_id)
-
     # Guard: ensure the last sync log (if any) is in a terminal state before
     # delete_connector cascades the connector_sync_logs rows away.
     # Case A (tick was running): _cancel_tick already closed the log as
@@ -666,6 +664,8 @@ async def _run_teardown(connector_id: str) -> None:
     # Case B (no tick was running): the last log may be stuck in 'started'
     #   from a previous crash. Close it to 'cancelled' now.
     _finalize_open_sync_log(connector_id)
+
+    await remove_connector_job(connector_id)
 
     owned_rows = get_connector_checksums_with_docs(connector_id)
     for checksum, doc_id in owned_rows:
@@ -841,7 +841,7 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
     - Read `sync_status` before marking delete.
     - If `'syncing'`: `UPDATE sync_status = 'delete_pending'` → return `204`. Tick handles teardown via `_check_delete_pending`.
     - If not `'syncing'`: `UPDATE sync_status = 'delete_pending'` → `asyncio.create_task(_run_teardown(id))` → return `204`.
-  - Implement `_run_teardown()` in `scheduler.py`: `remove_connector_job` → checksum snapshot → per-checksum delete + doc cleanup → `delete_connector` → staging sweep.
+  - Implement `_run_teardown()` in `scheduler.py`: `_finalize_open_sync_log` → `remove_connector_job` → checksum snapshot → per-checksum delete + doc cleanup → `delete_connector` → staging sweep.
 
 #### PR 8 — Cancelled Job Status (Enhancement) ❌
 - **Target Files:** `db/scripts/init_schema.sql`, `models.py`, `db/manager.py`, `connectors.py`
