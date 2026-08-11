@@ -182,23 +182,31 @@ def _classify(
 # Phase 4a — download + ingest new files
 # ---------------------------------------------------------------------------
 
+_BATCH_SIZE = 10
+
+
 async def _process_new_files(
     sync_seq: int,
     connector_id: str,
     scanner,
     ingest_list: list[tuple[str, str]],
 ) -> tuple[int, int]:
-    """Download and ingest each file in *ingest_list*.
+    """Download and ingest *ingest_list* in batches of up to 10 files.
+
+    Each batch of up to 10 files is downloaded into a single staging directory,
+    registered as a single job, and passed to ``ingest()`` together.
 
     Returns (new_count, failed_count).  Staging directories are removed after
-    each file regardless of success.
+    each batch regardless of success.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
     new_count = 0
     failed_count = 0
 
-    for batch_number, (remote_path, checksum) in enumerate(ingest_list):
-        # Cancellation checkpoint: bail before each download starts.
+    for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
+        batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
+
+        # Cancellation checkpoint: bail before each batch download starts.
         _check_delete_pending(connector_id)
 
         job_id = generate_uuid()
@@ -206,37 +214,44 @@ async def _process_new_files(
         batch_dir = staging_base / batch_dir_name
         batch_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            local_checksum = await asyncio.to_thread(
-                scanner.download_to, remote_path, batch_dir / Path(remote_path).name
-            )
-            # Cancellation checkpoint: bail after the blocking download returns.
-            _check_delete_pending(connector_id)
-            scanner.verify_integrity(local_checksum, checksum)
+        # checksum → filename for post-ingest checksum registration
+        checksum_to_filename: dict[str, str] = {}
 
-            filename = Path(remote_path).name
+        try:
+            for remote_path, checksum in batch:
+                filename = Path(remote_path).name
+                local_checksum = await asyncio.to_thread(
+                    scanner.download_to, remote_path, batch_dir / filename
+                )
+                # Cancellation checkpoint: bail after each blocking download.
+                _check_delete_pending(connector_id)
+                scanner.verify_integrity(local_checksum, checksum)
+                checksum_to_filename[checksum] = filename
+
+            filenames = list(checksum_to_filename.values())
             job_name = f"{connector_id} - {sync_seq} - {batch_number}"
             doc_id_dict = initialize_job_state(
                 job_id=job_id,
                 operation=OperationType.INGESTION,
                 output_format=OutputFormat.JSON,
-                documents_info=[filename],
+                documents_info=filenames,
                 job_name=job_name,
             )
-            doc_id = doc_id_dict[filename]
-            add_connector_checksum_entry(connector_id, checksum, doc_id)
+
+            for checksum, filename in checksum_to_filename.items():
+                add_connector_checksum_entry(connector_id, checksum, doc_id_dict[filename])
 
             await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
-            new_count += 1
+            new_count += len(batch)
             update_sync_log(sync_seq, new_files=new_count)
 
         except Exception as exc:
             logger.warning(
-                f"Failed to ingest {remote_path!r} for connector {connector_id!r}: {exc}",
+                f"Failed to ingest batch {batch_number!r} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
-            failed_count += 1
+            failed_count += len(batch)
             update_sync_log(sync_seq, failed_files=failed_count)
 
         finally:
