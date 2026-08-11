@@ -13,7 +13,7 @@ row, decrypted by the worker before the config is constructed.
 Connector types
 ---------------
 S3ConnectorConfig   — IBM COS and AWS S3 (provider auto-detected from endpoint_url)
-SFTPConnectorConfig — SFTP/SSH sources (private-key auth; remote MD5 via md5sum)
+SSHConnectorConfig — SFTP/SSH sources (private-key auth; remote MD5 via md5sum)
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ class S3ConnectorConfig(BaseModel):
         return cls.model_validate(payload)
 
 
-class SFTPConnectorConfig(BaseModel):
+class SSHConnectorConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     host: str = Field(description="SFTP server hostname or IP address.")
@@ -304,7 +304,7 @@ class SFTPConnectorConfig(BaseModel):
         cls,
         details: dict,
         allowed_extensions: Optional[list[str]] = None,
-    ) -> "SFTPConnectorConfig":
+    ) -> "SSHConnectorConfig":
         payload = dict(details)
         if allowed_extensions is not None:
             payload["allowed_extensions"] = allowed_extensions

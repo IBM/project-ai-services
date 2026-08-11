@@ -23,7 +23,7 @@ Design contract
   per-file ingest jobs complete, under the process-wide ingest_lock.
 """
 
-from digitize.connectors.scanners.config import S3ConnectorConfig, SFTPConnectorConfig
+from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.hashing import HashingWriter
 from digitize.connectors.scanners.s3_scanner import S3Scanner
@@ -32,7 +32,7 @@ from digitize.connectors.scanners.scanner_factory import build_scanner
 
 __all__ = [
     "S3ConnectorConfig",
-    "SFTPConnectorConfig",
+    "SSHConnectorConfig",
     "BaseScanner",
     "HashingWriter",
     "S3Scanner",

@@ -486,14 +486,14 @@ class TestBuildScanner:
 # Helpers — fake PEM key for unit tests (no real SSH needed)
 # ---------------------------------------------------------------------------
 
-# A minimal dummy PEM string that satisfies SFTPConnectorConfig validation
+# A minimal dummy PEM string that satisfies SSHConnectorConfig validation
 # without being a real parseable key (the key is never sent to Paramiko in
 # unit tests — Paramiko is always mocked).
 _FAKE_PEM = "-----BEGIN RSA PRIVATE KEY-----\nFAKEKEYDATA\n-----END RSA PRIVATE KEY-----"
 
 
-def _make_sftp_config(**overrides) -> "SFTPConnectorConfig":
-    from digitize.connectors.scanners.config import SFTPConnectorConfig
+def _make_sftp_config(**overrides) -> "SSHConnectorConfig":
+    from digitize.connectors.scanners.config import SSHConnectorConfig
     defaults = dict(
         host="sftp.example.com",
         port=22,
@@ -503,7 +503,7 @@ def _make_sftp_config(**overrides) -> "SFTPConnectorConfig":
         allowed_extensions=[".pdf", ".docx"],
     )
     defaults.update(overrides)
-    return SFTPConnectorConfig(**defaults)
+    return SSHConnectorConfig(**defaults)
 
 
 def _make_ssh_scanner(**overrides) -> "SSHScanner":
@@ -512,10 +512,10 @@ def _make_ssh_scanner(**overrides) -> "SSHScanner":
 
 
 # ---------------------------------------------------------------------------
-# SFTPConnectorConfig
+# SSHConnectorConfig
 # ---------------------------------------------------------------------------
 
-class TestSFTPConnectorConfig:
+class TestSSHConnectorConfig:
     def test_basic_construction(self):
         cfg = _make_sftp_config()
         assert cfg.host == "sftp.example.com"
@@ -529,8 +529,8 @@ class TestSFTPConnectorConfig:
         assert cfg.port == 22
 
     def test_default_remote_path_is_root(self):
-        from digitize.connectors.scanners.config import SFTPConnectorConfig
-        cfg = SFTPConnectorConfig(
+        from digitize.connectors.scanners.config import SSHConnectorConfig
+        cfg = SSHConnectorConfig(
             host="h",
             username="u",
             private_key_pem=_FAKE_PEM,
@@ -566,13 +566,13 @@ class TestSFTPConnectorConfig:
             _make_sftp_config(remote_path="")
 
     def test_from_connection_details(self):
-        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        from digitize.connectors.scanners.config import SSHConnectorConfig
         details = {
             "host": "sftp.example.com",
             "username": "u",
             "private_key_pem": _FAKE_PEM,
         }
-        cfg = SFTPConnectorConfig.from_connection_details(
+        cfg = SSHConnectorConfig.from_connection_details(
             details, allowed_extensions=[".pdf"]
         )
         assert cfg.host == "sftp.example.com"
@@ -580,22 +580,22 @@ class TestSFTPConnectorConfig:
 
     def test_from_connection_details_extensions_override(self):
         """allowed_extensions kwarg takes precedence over any embedded value."""
-        from digitize.connectors.scanners.config import SFTPConnectorConfig
+        from digitize.connectors.scanners.config import SSHConnectorConfig
         details = {
             "host": "h",
             "username": "u",
             "private_key_pem": _FAKE_PEM,
             "allowed_extensions": [".txt"],
         }
-        cfg = SFTPConnectorConfig.from_connection_details(
+        cfg = SSHConnectorConfig.from_connection_details(
             details, allowed_extensions=[".pdf"]
         )
         assert cfg.allowed_extensions == [".pdf"]
 
     def test_extra_fields_ignored(self):
         """model_config extra='ignore' — unknown keys must not raise."""
-        from digitize.connectors.scanners.config import SFTPConnectorConfig
-        cfg = SFTPConnectorConfig.model_validate({
+        from digitize.connectors.scanners.config import SSHConnectorConfig
+        cfg = SSHConnectorConfig.model_validate({
             "host": "h",
             "username": "u",
             "private_key_pem": _FAKE_PEM,

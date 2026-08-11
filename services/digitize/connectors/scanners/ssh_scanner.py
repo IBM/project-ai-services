@@ -10,16 +10,16 @@ import paramiko
 
 from common.misc_utils import get_logger
 from digitize.connectors.scanners.base_scanner import BaseScanner
-from digitize.connectors.scanners.config import SFTPConnectorConfig
+from digitize.connectors.scanners.config import SSHConnectorConfig
 from digitize.connectors.scanners.hashing import HashingWriter
 
 logger = get_logger("ssh_scanner")
 
 
 class SSHScanner(BaseScanner):
-    def __init__(self, config: SFTPConnectorConfig) -> None:
+    def __init__(self, config: SSHConnectorConfig) -> None:
         super().__init__(config)
-        self._cfg: SFTPConnectorConfig = config
+        self._cfg: SSHConnectorConfig = config
         self._ssh: Optional[paramiko.SSHClient] = None
         self._sftp: Optional[paramiko.SFTPClient] = None
 
