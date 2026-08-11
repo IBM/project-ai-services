@@ -5,9 +5,7 @@ import styles from "./Connectors.module.scss";
 const Connectors = () => {
   return (
     <div className={styles.connectorsContainer}>
-      <PageHeader
-        title="Connectors"
-      />
+      <PageHeader title="Connectors" />
     </div>
   );
 };
