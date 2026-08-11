@@ -372,7 +372,7 @@ func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, e
 	return exitCode, nil
 }
 
-func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
+func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
@@ -427,6 +427,12 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 
 func (pc *PodmanClient) SecretExists(nameOrID string) (bool, error) {
 	return secrets.Exists(pc.Context, nameOrID)
+}
+
+func (pc *PodmanClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
 }
 
 // Type returns the runtime type for PodmanClient.
@@ -495,7 +501,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 	availableCards, err := spyre.FindFreeCards(ctx)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Could not find available Spyre cards: %v", err)
-		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+		accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 			Total:     totalCount,
 			Available: 0,
 		}
@@ -505,7 +511,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 
 	availableCount := len(availableCards)
 
-	accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+	accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 		Total:     totalCount,
 		Available: availableCount,
 	}
@@ -589,24 +595,11 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 
 // collectSpyreCards extracts Spyre card PCI addresses from container environment variables.
 func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
-	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
-		for _, env := range containerInspect.Config.Env {
-			pciAddressPrefix := string(constants.PCIAddressKey) + "="
-			if strings.HasPrefix(env, pciAddressPrefix) {
-				// Extract the value after "AIU_PCIE_IDS="
-				pciAddresses := strings.TrimPrefix(env, pciAddressPrefix)
-				// Split by spaces and filter out empty strings
-				addresses := strings.Fields(pciAddresses)
-				for _, addr := range addresses {
-					if addr != "" {
-						*spyreCards = append(*spyreCards, addr)
-					}
-				}
-
-				return
-			}
-		}
+	if containerInspect.Config == nil || containerInspect.Config.Env == nil {
+		return
 	}
+	addrs := spyre.ParseEnvVarAddresses(containerInspect.Config.Env, string(constants.PCIAddressKey), " ")
+	*spyreCards = append(*spyreCards, addrs...)
 }
 
 // ExecInContainer executes a command in a container using podman exec command.
@@ -746,4 +739,11 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 
 	// Execute the provided function with the sidecar
 	return executor(pc.Context, containerID)
+}
+
+// ExecInContainerWithCmd is not implemented for the Podman runtime.
+func (pc *PodmanClient) ExecInContainerWithCmd(_, _ string, _ []string) (string, error) {
+	logger.Errorf("unsupported method called!")
+
+	return "", fmt.Errorf("unsupported method")
 }

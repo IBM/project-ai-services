@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -14,11 +15,24 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
+)
+
+// Catalog service ID and endpoint type constants used to look up URLs via the catalog API.
+// These match the catalog_id values in the service metadata YAML files and the route
+// type field written to the database by the podman deployer.
+const (
+	catalogSvcChat       = "chat"
+	catalogSvcDigitize   = "digitize"
+	catalogSvcSimilarity = "similarity"
+	endpointTypeAPI      = "api"
+	endpointTypeUI       = "ui"
 )
 
 // Service name substrings used to identify catalog URLs in 'application info' output.
@@ -30,6 +44,7 @@ const (
 	svcChatBotUI       = "chat-bot-ui"
 	svcDigitizeBackend = "digitize-backend"
 	svcSimilarityAPI   = "similarity-api"
+	svcSummarizeAPI    = "summarize-api"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -223,6 +238,71 @@ func CreateRAGAppAndValidate(
 	return output, nil
 }
 
+// AppEndpoints holds the service endpoint URLs resolved from the catalog API.
+// Keys are catalog service IDs (e.g. "chat", "digitize", "similarity").
+// Values are maps of endpoint type → URL (e.g. "api" → "https://...").
+type AppEndpoints map[string]map[string]string
+
+// ChatBackendURL returns the chat service API (backend) URL.
+func (e AppEndpoints) ChatBackendURL() string { return e[catalogSvcChat][endpointTypeAPI] }
+
+// ChatUIURL returns the chat service UI URL.
+func (e AppEndpoints) ChatUIURL() string { return e[catalogSvcChat][endpointTypeUI] }
+
+// DigitizeURL returns the digitize service API (backend) URL.
+func (e AppEndpoints) DigitizeURL() string { return e[catalogSvcDigitize][endpointTypeAPI] }
+
+// SimilarityURL returns the similarity service API URL.
+func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][endpointTypeAPI] }
+
+// CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
+func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
+	appClient, err := client.NewApplicationClient()
+	if err != nil {
+		return nil, fmt.Errorf("catalog client init: %w", err)
+	}
+
+	list, err := appClient.ListApplications(nil)
+	if err != nil {
+		return nil, fmt.Errorf("list applications: %w", err)
+	}
+
+	for _, app := range list.Data {
+		if app.Name == appName {
+			return buildAppEndpoints(app.Services), nil
+		}
+	}
+
+	return nil, fmt.Errorf("application %q not found via catalog API", appName)
+}
+
+// buildAppEndpoints converts a service list into an AppEndpoints map.
+func buildAppEndpoints(services []types.ApplicationService) AppEndpoints {
+	eps := make(AppEndpoints)
+	for _, svc := range services {
+		svcEps := collectEndpoints(svc.Endpoints)
+		if len(svcEps) > 0 {
+			eps[svc.CatalogID] = svcEps
+		}
+	}
+
+	return eps
+}
+
+// collectEndpoints extracts type→URL pairs from an endpoint list.
+func collectEndpoints(endpoints []map[string]any) map[string]string {
+	result := make(map[string]string)
+	for _, ep := range endpoints {
+		epType, _ := ep["type"].(string)
+		epURL, _ := ep["url"].(string)
+		if epType != "" && epURL != "" {
+			result[epType] = epURL
+		}
+	}
+
+	return result
+}
+
 // getRAGURLs returns backend and UI URLs for a deployed RAG application.
 // For podman, URLs come from 'application info'; for openshift from the create output.
 func getRAGURLs(ctx context.Context, cfg *config.Config, appRuntime, appName, createOutput, backendPort, uiPort string) (backendURL, uiURL string, isCatalogPath bool, err error) {
@@ -352,6 +432,18 @@ func ExtractCatalogDigitizeURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcDigitizeBackend)
 }
 
+// ExtractDigitizeURL returns the digitize-backend URL from 'application info' output.
+func ExtractDigitizeURL(infoOutput string) string {
+	if u := ExtractCatalogDigitizeURL(infoOutput); u != "" {
+		return u
+	}
+	if urls := ExtractURLsFromOutput(infoOutput); len(urls) > 0 {
+		return strings.Replace(urls[0], "ui", "digitize-api", 1)
+	}
+
+	return ""
+}
+
 // ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
 // Falls back to legacy plain-HTTP extraction for non-catalog podman environments.
 func ExtractSimilarityAPIURL(infoOutput string) string {
@@ -376,13 +468,28 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 	return ""
 }
 
+// ExtractCatalogSummarizeURL parses the 'application info' output for the
+// summarize service URL.
+//
+// Actual output line:
+//
+//	"- Summarize API is available to use at https://summarize-api-<slug>.<domain>."
+//
+// We match on URL-host substring "summarize-api" which is stable regardless
+// of human-readable title changes in info.md.
+func ExtractCatalogSummarizeURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSummarizeAPI)
+}
+
 // WaitForApplicationInfoURLs polls 'application info' until service URLs are present.
 // For podman requires both chat-bot-backend and similarity-api; for openshift any URL suffices.
 func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
 	deadline := time.Now().Add(maxWait)
 	attempt := 0
+
 	for time.Now().Before(deadline) {
 		attempt++
+
 		infoOutput, infoErr := ApplicationInfo(ctx, cfg, appName, appRuntime)
 		if infoErr != nil {
 			logger.Warningf("[WAIT] application info attempt %d failed: %v — retrying", attempt, infoErr)
@@ -390,6 +497,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 
 			continue
 		}
+
 		if appRuntime == "podman" {
 			backendURL, _ := extractCatalogRAGURLs(infoOutput)
 			similarityURL := ExtractSimilarityAPIURL(infoOutput)
@@ -404,9 +512,11 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 				return infoOutput, nil
 			}
 		}
+
 		logger.Infof("[WAIT] application info attempt %d: URLs not yet present (pods may still be starting), retrying in %s", attempt, pollInterval)
 		time.Sleep(pollInterval)
 	}
+
 	infoOutput, _ := ApplicationInfo(ctx, cfg, appName, appRuntime)
 
 	return infoOutput, fmt.Errorf("timed out waiting for application info URLs after %s (%d attempts)", maxWait, attempt)
@@ -553,21 +663,8 @@ func StartApplication(
 	return output, nil
 }
 
-// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
-func DeleteAppSkipCleanup(
-	ctx context.Context,
-	cfg *config.Config,
-	appName string,
-	appRuntime string,
-) (string, error) {
-	args := []string{
-		"application", "delete", appName,
-		"--skip-cleanup",
-		"--yes",
-		"--runtime", appRuntime,
-	}
-
-	output, err := runCLI(ctx, cfg, "application delete --skip-cleanup", args...)
+func deleteAppWithArgs(ctx context.Context, cfg *config.Config, appName string, appRuntime string, errLabel string, args []string) (string, error) {
+	output, err := runCLI(ctx, cfg, errLabel, args...)
 	if err != nil {
 		return output, err
 	}
@@ -596,9 +693,71 @@ func DeleteAppSkipCleanup(
 	return output, nil
 }
 
+// DeleteApp deletes an application with normal cleanup.
+func DeleteApp(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete", args)
+}
+
+// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
+func DeleteAppSkipCleanup(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	appRuntime string,
+) (string, error) {
+	args := []string{
+		"application", "delete", appName,
+		"--skip-cleanup",
+		"--yes",
+		"--runtime", appRuntime,
+	}
+
+	return deleteAppWithArgs(ctx, cfg, appName, appRuntime, "application delete --skip-cleanup", args)
+}
+
 // ApplicationInfo runs the 'application info' command.
 func ApplicationInfo(ctx context.Context, cfg *config.Config, appName string, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "application info", "application", "info", appName, "--runtime", appRuntime)
+}
+
+// ApplicationBackup runs the 'application backup' command.
+func ApplicationBackup(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+	args := []string{
+		"application", "backup", appName,
+		"--target", target,
+		"--runtime", appRuntime,
+	}
+	if filename != "" {
+		args = append(args, "--filename", filename)
+	}
+
+	return runCLI(ctx, cfg, "application backup", args...)
+}
+
+// ApplicationRestore runs the 'application restore' command.
+func ApplicationRestore(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+	args := []string{
+		"application", "restore", appName,
+		"--target", target,
+		"--runtime", appRuntime,
+		"--yes",
+	}
+	if filename != "" {
+		args = append(args, "--filename", filename)
+	}
+
+	return runCLI(ctx, cfg, "application restore", args...)
 }
 
 // ModelList lists models for a given application template.
@@ -620,23 +779,43 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 	return runCLI(ctx, cfg, "application templates command run", "application", "templates", "--runtime", appRuntime)
 }
 
-// CatalogConfigure deploys or ensures the catalog service is running.
-// Uses a PTY so the password prompt on first run can be satisfied non-interactively.
-func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+// catalogConfigureRunPTY runs 'catalog configure' via PTY with password prompts; shared by all configure variants.
+func catalogConfigureRunPTY(ctx context.Context, cfg *config.Config, errLabel string, args []string) (string, error) {
 	password := bootstrap.GetCatalogAdminPassword()
 	if password == "" {
 		return "", fmt.Errorf("CATALOG_PASSWORD environment variable is not set")
 	}
 
-	args := []string{"catalog", "configure", "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	if err := catalogRegistryLogin(); err != nil {
+		logger.Warningf("[CLI] registry login warning (non-fatal): %v", err)
+	}
 
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, password+"\n"+password+"\n")
 	if err != nil {
-		return output, fmt.Errorf("catalog configure failed: %w\n%s", err, output)
+		return output, fmt.Errorf("%s failed: %w\n%s", errLabel, err, output)
 	}
 
 	return output, nil
+}
+
+// CatalogConfigure runs 'catalog configure' with default settings via PTY.
+func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure",
+		[]string{"catalog", "configure", "--runtime", appRuntime},
+	)
+}
+
+// catalogRegistryLogin logs podman into the registry using CI-injected REGISTRY_URL/REGISTRY_USER_NAME/REGISTRY_PASSWORD.
+func catalogRegistryLogin() error {
+	if url, uname, pswd := bootstrap.GetPodManCreds(); url != "" && uname != "" && pswd != "" {
+		logger.Infof("[CLI] Logging podman into registry %s", url)
+		if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
+			return fmt.Errorf("registry login failed for %s: %w", url, err)
+		}
+	}
+
+	return nil
 }
 
 // runWithPTY starts cmd in a PTY, writes input to the master, and returns all output.
@@ -689,28 +868,27 @@ func CatalogInfo(ctx context.Context, cfg *config.Config, appRuntime string) (st
 	return runCLI(ctx, cfg, "catalog info", "catalog", "info", "--runtime", appRuntime)
 }
 
-// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
-func ExtractCatalogBackendURL(infoOutput string) string {
-	const backendMarker = "Catalog Backend API is available at "
-	for _, line := range strings.Split(infoOutput, "\n") {
+// extractMarkerURL scans output line-by-line for marker and returns the trimmed text after it.
+func extractMarkerURL(output, marker string) string {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if idx := strings.Index(line, backendMarker); idx >= 0 {
-			return strings.TrimSpace(line[idx+len(backendMarker):])
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimRight(strings.TrimSpace(line[idx+len(marker):]), " .,")
 		}
 	}
 
 	return ""
 }
 
+// ExtractCatalogBackendURL extracts the Catalog Backend API URL from 'catalog info' output.
+func ExtractCatalogBackendURL(infoOutput string) string {
+	return extractMarkerURL(infoOutput, "Catalog Backend API is available at ")
+}
+
 // ExtractCatalogBackendURLFromConfigureOutput extracts the Catalog Backend URL from 'catalog configure' output.
 func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string {
-	const backendMarker = "Access the Catalog Backend at "
-	for _, line := range strings.Split(configureOutput, "\n") {
-		line = strings.TrimSpace(line)
-		idx := strings.Index(line, backendMarker)
-		if idx >= 0 {
-			return strings.TrimRight(strings.TrimSpace(line[idx+len(backendMarker):]), " .,")
-		}
+	if u := extractMarkerURL(configureOutput, "Access the Catalog Backend at "); u != "" {
+		return u
 	}
 
 	return ExtractCatalogBackendURL(configureOutput)
@@ -840,4 +1018,279 @@ func ExtractURLsFromOutput(output string) []string {
 	}
 
 	return urls
+}
+
+// CatalogApiServerHelp runs 'catalog apiserver --help'; the real apiserver requires a live DB so only help is tested.
+func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog apiserver help", "catalog", "apiserver", "--help", "--runtime", appRuntime)
+}
+
+// CatalogHashpw runs 'catalog hashpw --stdin' with the provided password piped via stdin.
+func CatalogHashpw(ctx context.Context, cfg *config.Config, password, appRuntime string) (string, error) {
+	args := []string{"catalog", "hashpw", "--stdin", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString(password + "\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return output, fmt.Errorf("catalog hashpw failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogWhoami runs 'catalog whoami' and returns the combined output.
+func CatalogWhoami(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog whoami", "catalog", "whoami", "--runtime", appRuntime)
+}
+
+// CatalogLogout runs 'catalog logout' and returns the combined output.
+func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout", "--runtime", appRuntime)
+}
+
+// CatalogDbMigrateHelp runs 'catalog dbmigrate --help'; full dbmigrate requires a live DB so only help is tested.
+func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
+	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog failure runner helpers
+//
+// These functions are used exclusively by catalog_failure_test.go.  They wrap
+// raw exec.CommandContext calls (not runCLI) so that the combined output is
+// always returned to the caller even when the command exits non-zero — a
+// requirement for failure-test assertions that need to inspect the error text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogLoginMissingServer invokes `catalog login` without the required
+// --server flag.  cobra enforces required flags before RunE is called, so this
+// must fail with a "required flag(s) not set" message before touching the
+// network or any credentials.
+//
+// Returns combined stdout+stderr (always populated for flag errors) and the
+// exec error.
+func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		// --server is intentionally omitted.
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--server intentionally omitted)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (missing --server): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogLoginInvalidURL invokes `catalog login` with a --server value whose
+// URL scheme is neither http nor https.  validateServerURL() in login.go must
+// reject it in PreRunE before any network call is made.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		"--server", badURL,
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (bad URL %q expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), badURL,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (invalid URL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogWhoamiWithoutLogin invokes `catalog whoami` in a subprocess whose
+// HOME and XDG_CONFIG_HOME point to an empty temp directory, so no stored
+// credentials exist.  client.New() (called inside whoami's RunE) must fail.
+//
+// homeDir must be an existing, empty directory that the calling test owns.
+// Returns combined stdout+stderr and the exec error.
+func CatalogWhoamiWithoutLogin(ctx context.Context, cfg *config.Config, homeDir, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "whoami",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (HOME=%s — no credentials expected)",
+		cfg.AIServiceBin, strings.Join(args, " "), homeDir,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	// Redirect the user config directory so no real credentials are found.
+	// os.UserConfigDir() reads $HOME (Linux/macOS) and $XDG_CONFIG_HOME.
+	cmd.Env = filteredProcessEnv("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME")
+	cmd.Env = append(cmd.Env,
+		"HOME="+homeDir,
+		"XDG_CONFIG_HOME="+homeDir,
+	)
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog whoami (no credentials): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureUnpairedSSL invokes `catalog configure` with --ssl-cert but
+// without --ssl-key.  checkSSLFlagsPaired() in configure.go must reject it in
+// PreRunE before any state is modified.
+//
+// certPath can be any non-empty string — the flag validator only checks that
+// both flags are provided together; it does not read the file at this point.
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureUnpairedSSL(ctx context.Context, cfg *config.Config, certPath, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--ssl-cert", certPath,
+		// --ssl-key intentionally omitted to trigger the pairing check.
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--ssl-key omitted, pairing check expected)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (unpaired SSL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureInvalidPort invokes `catalog configure` with an --https-port
+// value outside the valid 1–65535 range.  validateConfigureFlags() in
+// configure.go must reject it in PreRunE before any deployment action runs.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureInvalidPort(ctx context.Context, cfg *config.Config, port int, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--https-port", fmt.Sprintf("%d", port),
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (port %d expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), port,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (invalid port %d): %w\n%s", port, err, output)
+	}
+
+	return output, nil
+}
+
+// filteredProcessEnv returns the current process environment (os.Environ) with
+// the named keys removed.  Used to strip HOME / XDG_CONFIG_HOME before
+// injecting test-isolated values into a subprocess.
+func filteredProcessEnv(excludeKeys ...string) []string {
+	exclude := make(map[string]struct{}, len(excludeKeys))
+	for _, k := range excludeKeys {
+		exclude[k] = struct{}{}
+	}
+
+	all := os.Environ()
+	filtered := make([]string, 0, len(all))
+
+	for _, pair := range all {
+		key := pair
+		if idx := strings.IndexByte(pair, '='); idx >= 0 {
+			key = pair[:idx]
+		}
+
+		if _, skip := exclude[key]; !skip {
+			filtered = append(filtered, pair)
+		}
+	}
+
+	return filtered
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog configure runner helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogConfigureWithBasedir runs 'catalog configure --basedir <path>' via PTY.
+func CatalogConfigureWithBasedir(ctx context.Context, cfg *config.Config, basedir string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --basedir",
+		[]string{"catalog", "configure", "--basedir", basedir, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureWithSSL runs 'catalog configure --ssl-cert <cert> --ssl-key <key>' via PTY.
+func CatalogConfigureWithSSL(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --ssl-cert/--ssl-key",
+		[]string{"catalog", "configure", "--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureResetCert runs 'catalog configure --reset-certificate --ssl-cert <cert> --ssl-key <key>'.
+func CatalogConfigureResetCert(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-certificate",
+		"catalog", "configure", "--reset-certificate",
+		"--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureResetAuth runs 'catalog configure --reset-podman-auth'.
+func CatalogConfigureResetAuth(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-podman-auth",
+		"catalog", "configure", "--reset-podman-auth", "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureWithArgs runs 'catalog configure' with arbitrary extra args for negative / flag-combo tests.
+func CatalogConfigureWithArgs(ctx context.Context, cfg *config.Config, appRuntime string, extraArgs ...string) (string, error) {
+	args := append([]string{"catalog", "configure", "--runtime", appRuntime}, extraArgs...)
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	return output, err
 }

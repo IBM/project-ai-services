@@ -1,0 +1,15 @@
+FROM icr.io/ai-services-cicd/service-base:v0.0.34
+
+WORKDIR /opt/services/extract
+
+ENV PYTHONPATH=/opt/services
+
+COPY common /opt/services/common
+COPY extract/ .
+
+# Uncomment when you have extract specific requirements.txt
+# RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+
+CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
+     "--host", "0.0.0.0", "--port", "6000", \
+     "--loop", "uvloop", "--http", "httptools"]

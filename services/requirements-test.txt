@@ -35,6 +35,14 @@ psutil==7.2.2
 SQLAlchemy==2.0.49
 psycopg2-binary==2.9.11
 
+# S3 connector dependencies (required by digitize connector tests)
+boto3==1.38.0
+botocore==1.38.0
+s3transfer==0.12.0
+
+# SFTP scanner dependencies (required by digitize connector tests)
+paramiko==5.0.0
+
 # Document processing (required by digitize)
 pypdfium2==5.9.0
 pdfplumber==0.11.9

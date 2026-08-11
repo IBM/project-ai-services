@@ -1,0 +1,9 @@
+storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+model: ibm-granite/granite-embedding-278m-multilingual
+resources:
+  requests:
+    cpu: "8"
+    memory: "4Gi"
+  limits:
+    cpu: "8"
+    memory: "4Gi"

@@ -1,6 +1,6 @@
 import { Theme, SideNav, SideNavItems, SideNavLink } from '@carbon/react';
 import { Activity, Document } from '@carbon/icons-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 import { useRef, useEffect } from 'react';
 import { useTheme } from '@contexts/useTheme';
 import styles from './Navbar.module.scss';

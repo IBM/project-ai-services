@@ -9,8 +9,11 @@ kind: ClusterRole
 metadata:
   name: ai-services-manager
 rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["serving.kserve.io"]
-    resources: ["inferenceservices"]
+    resources: ["inferenceservices", "servingruntimes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["secrets"]
@@ -21,6 +24,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # Required by execEnvInContainer to read live container env vars (Spyre card PCI addresses)
+  # via the Kubernetes API pod/exec subresource — no oc binary needed.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -33,6 +41,10 @@ rules:
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Required by GetSystemInfo / getSpyreCardInfo to read node capacity and allocatable resources.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -45,4 +57,20 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: ai-services-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# Grants the backend SA access to query the OpenShift Thanos Querier (port 9091).
+# Without this the Thanos HTTP endpoint returns 403 Forbidden (plain text),
+# which causes a JSON parse error in GetSystemInfo.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-services-monitoring-view-binding
+subjects:
+  - kind: ServiceAccount
+    name: ai-services-sa
+    namespace: ai-services
+roleRef:
+  kind: ClusterRole
+  name: cluster-monitoring-view
   apiGroup: rbac.authorization.k8s.io

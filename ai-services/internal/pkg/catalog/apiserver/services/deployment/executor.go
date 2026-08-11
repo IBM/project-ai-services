@@ -6,8 +6,11 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
@@ -66,7 +69,7 @@ func (e *DeploymentExecutor) executeDeployment(
 	case types.RuntimeTypePodman:
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
-		return fmt.Errorf("OpenShift deployment not yet implemented")
+		return e.executeOpenShiftDeployment(ctx, plan, req)
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
@@ -95,6 +98,32 @@ func (e *DeploymentExecutor) executePodmanDeployment(
 	)
 
 	// Execute deployment - handles both architectures and standalone services
+	return deployer.ExecuteDeployment(ctx, plan, req)
+}
+
+// executeOpenShiftDeployment executes deployment for the OpenShift runtime via Helm.
+func (e *DeploymentExecutor) executeOpenShiftDeployment(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+) error {
+	// Initialize OpenShift runtime client scoped to the application's namespace
+	// so that ListRoutes, ListPods etc. query the correct namespace.
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	rt, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
+	if err != nil {
+		return fmt.Errorf("failed to initialize OpenShift runtime: %w", err)
+	}
+
+	// Create openshift deployer
+	deployer := openshift.NewOpenShiftDeployer(
+		rt,
+		e.catalogProvider,
+		e.appRepo,
+		e.serviceRepo,
+		e.componentRepo,
+	)
+
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
 

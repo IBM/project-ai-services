@@ -4,6 +4,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import requests
 from contextvars import ContextVar
@@ -284,19 +285,32 @@ def setup_digitized_doc_dir():
     os.makedirs(settings.digitize.digitized_docs_dir, exist_ok=True)
     return settings.digitize.digitized_docs_dir
 
-def generate_file_checksum(file):
-    sha256 = hashlib.sha256()
-    with open(file, 'rb') as f:
-        for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+def generate_file_checksum(file) -> str:
+    """Compute an MD5 hex digest of a file.
+
+    Accepts either a file path (str or Path) or raw bytes.  When passed bytes
+    the entire content is hashed in one shot; when passed a path the file is
+    read in chunks so arbitrarily large files can be processed without loading
+    them entirely into memory.
+
+    Returns:
+        32-character hex string.
+    """
+    md5 = hashlib.md5()
+    if isinstance(file, (bytes, bytearray)):
+        md5.update(file)
+    else:
+        with open(file, 'rb') as f:
+            for chunk in iter(lambda: f.read(128 * md5.block_size), b''):
+                md5.update(chunk)
+    return md5.hexdigest()
 
 def verify_checksum(file, checksum_file):
-    file_sha256 = generate_file_checksum(file)
+    file_checksum = generate_file_checksum(file)
     f = open(checksum_file, "r")
     data = f.read()
     csum = data.split(' ')[0]
-    if csum == file_sha256:
+    if csum == file_checksum:
         return True
     return False
 
@@ -359,22 +373,40 @@ def validate_document_file(filename: str, content) -> None:
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
 
-def get_utc_timestamp() -> str:
+_UNSET = object()
+
+def get_utc_timestamp(dt=_UNSET) -> Optional[str]:
     """
-    Generate UTC timestamp in ISO format with 'Z' suffix.
+    Serialize a datetime to ISO 8601 string with 'Z' suffix, or generate the
+    current UTC timestamp if no argument is provided.
+
+    Args:
+        dt: An existing datetime object to serialize.  Pass no argument (or
+            omit) to generate the current UTC time.  Pass None to get None
+            back (e.g. for optional nullable fields).
 
     Returns:
-        ISO 8601 formatted timestamp string with 'Z' suffix
+        ISO 8601 formatted timestamp string with 'Z' suffix, or None if dt
+        is explicitly passed as None.
     """
     from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if dt is _UNSET:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if dt is None:
+        return None
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 logger = get_logger("cleanup")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
-def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
+def cleanup_staging_directory(
+    job_id: str,
+    staging_base_dir: Path,
+    *,
+    ignore_errors: bool = False,
+) -> bool:
     """
     Clean up the staging directory for a specific job.
 
@@ -384,6 +416,10 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
     Args:
         job_id: Unique identifier of the job
         staging_base_dir: Base directory where staging directories are created
+        ignore_errors: When True, per-file errors inside the tree are silently
+            swallowed (passed directly to ``shutil.rmtree``). Useful for
+            best-effort cleanup where leaving partial remnants is acceptable
+            (e.g. connector staging directories on DELETE).
 
     Returns:
         True if cleanup was successful or directory didn't exist, False if cleanup failed
@@ -396,7 +432,7 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
         return True
 
     try:
-        shutil.rmtree(staging_dir)
+        shutil.rmtree(staging_dir, ignore_errors=ignore_errors)
         logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
         return True
     except Exception as e:

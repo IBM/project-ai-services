@@ -3,7 +3,7 @@ Database operations — utils/db.py
 
 All functions that directly interact with the database via db_manager:
 CRUD for jobs and documents, advisory import/export lock, DatabaseStatusManager,
-and the get_status_manager factory.
+connector DB operations, and the get_status_manager factory.
 """
 
 from datetime import datetime, timezone
@@ -31,6 +31,11 @@ from digitize.models import (
     ExportEntitySummary,
     ExportPagination,
     ImportExportData,
+)
+from digitize.db.models import (
+    Connector,
+    ConnectorSyncLog,
+    Document,
 )
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
@@ -235,7 +240,9 @@ def get_job(job_id: str) -> Optional[dict]:
                 JobDocumentSummary(
                     id=doc.doc_id,
                     name=doc.name,
-                    status=doc.status
+                    status=doc.status,
+                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
+                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
                 )
                 for doc in documents
             ]
@@ -302,7 +309,9 @@ def get_all_jobs(
                 JobDocumentSummary(
                     id=doc.doc_id,
                     name=doc.name,
-                    status=doc.status
+                    status=doc.status,
+                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
+                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
                 )
                 for doc in documents
             ]
@@ -338,7 +347,10 @@ def create_document(
     job_id: str,
     output_format: OutputFormat,
     operation: str,
-    submitted_at: str
+    submitted_at: str,
+    initial_status: DocStatus = DocStatus.ACCEPTED,
+    completed_at: Optional[str] = None,
+    extra_metadata: Optional[dict] = None,
 ) -> None:
     """
     Create document metadata in database.
@@ -350,34 +362,51 @@ def create_document(
         output_format: Output format for the document
         operation: Type of operation (ingestion/digitization)
         submitted_at: ISO timestamp when document was submitted
+        initial_status: Initial document status (defaults to ACCEPTED)
+        completed_at: Optional ISO timestamp for immediately-terminal documents
+        extra_metadata: Optional extra fields merged into the metadata JSONB
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot create document without database connection.")
 
     try:
-        # Parse ISO timestamp to datetime
+        # Parse ISO timestamps to datetime
         submitted_dt = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+        completed_dt = (
+            datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+            if completed_at else None
+        )
+
+        metadata: dict = {
+            "pages": 0,
+            "tables": 0,
+            "timing_in_secs": {
+                "digitizing": None,
+                "processing": None,
+                "chunking": None,
+                "indexing": None,
+            },
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
 
         # Create document in database
-        db_manager.create_document(
+        result = db_manager.create_document(
             doc_id=doc_id,
             name=doc_name,
             doc_type=operation,
-            status=DocStatus.ACCEPTED,
+            status=initial_status,
             output_format=output_format.value,
             submitted_at=submitted_dt,
+            completed_at=completed_dt,
             job_id=job_id,
-            metadata={
-                "pages": 0,
-                "tables": 0,
-                "timing_in_secs": {
-                    "digitizing": None,
-                    "processing": None,
-                    "chunking": None,
-                    "indexing": None
-                }
-            }
+            metadata=metadata,
         )
+        if result is None:
+            raise RuntimeError(
+                f"db_manager.create_document returned None for doc_id={doc_id} "
+                f"(name={doc_name!r}). Check logs for the underlying DB error."
+            )
         logger.info(f"Created document {doc_id} in database")
 
     except Exception as e:
@@ -441,11 +470,34 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
         raise
 
 
+def is_connector_sourced_document(doc_id: str) -> bool:
+    """
+    Return True if *doc_id* appears in connector_document_checksum (i.e. is
+    connector-sourced and must not be exposed via user-facing document APIs).
+    """
+    try:
+        with get_db_session() as session:
+            from sqlalchemy import exists
+
+            stmt = select(
+                exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
+            )
+            return bool(session.scalar(stmt))
+    except Exception as exc:
+        logger.error(
+            f"DB error in is_connector_sourced_document({doc_id!r}): {exc}",
+            exc_info=True,
+        )
+        # Safe default: do not block on error — treat as user-submitted.
+        return False
+
+
 def get_all_documents_paginated(
     status: Optional[str] = None,
     name: Optional[str] = None,
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    exclude_connector_sourced: bool = False,
 ) -> tuple[List[dict], int]:
     """
     Get all documents from database.
@@ -455,6 +507,8 @@ def get_all_documents_paginated(
         name: Filter by document name (partial match)
         limit: Maximum number of documents to return
         offset: Number of documents to skip
+        exclude_connector_sourced: When True, omit docs whose doc_id appears
+            in connector_document_checksum (connector-sourced documents)
 
     Returns:
         Tuple of (list of document dictionaries, total count)
@@ -468,7 +522,8 @@ def get_all_documents_paginated(
             status=status,
             name=name,
             limit=limit,
-            offset=offset
+            offset=offset,
+            exclude_connector_sourced=exclude_connector_sourced,
         )
 
         # Convert SQLAlchemy models to dictionaries
@@ -996,6 +1051,14 @@ class DatabaseStatusManager:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
                 logger.debug(f"Updated document {doc_id} in database")
+                # Register the checksum once the document is marked COMPLETED so
+                # that future uploads of the same content are caught via the
+                # document_checksum table.
+                if (
+                    update_params.get("status") == DocStatus.COMPLETED
+                    and "file_hash" in metadata_fields
+                ):
+                    db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
             else:
                 logger.warning(f"Document {doc_id} not found in database for update")
 
@@ -1029,12 +1092,17 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics
+        # ALREADY_EXISTS is a terminal resolved state — count it with completed.
         stats = {
             "total_documents": len(documents),
-            "completed": sum(1 for d in documents if d.status == DocStatus.COMPLETED.value),
+            "completed": sum(
+                1 for d in documents
+                if d.status in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+            ),
             "failed": sum(1 for d in documents if d.status == DocStatus.FAILED.value),
             "in_progress": sum(
                 1 for d in documents if d.status in [
+                    DocStatus.ACCEPTED.value,
                     DocStatus.IN_PROGRESS.value,
                     DocStatus.DIGITIZED.value,
                     DocStatus.PROCESSED.value,
@@ -1102,7 +1170,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
@@ -1120,5 +1188,210 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
 def _extract_value(v: Any) -> Any:
     """Extract .value from enums, return raw value otherwise."""
     return v.value if hasattr(v, "value") else v
+
+
+# ============================================================================
+# Connector Operations
+# ============================================================================
+
+def insert_connector(
+    connector_id: str,
+    name: str,
+    connector_type: str,
+    connection_details: dict,
+    allowed_extensions: list,
+    sync_interval_seconds: int,
+) -> None:
+    """
+    Insert a new connector row on first-time POST /v1/connectors.
+
+    Raises IntegrityError if the id already exists (maps to 409).
+    """
+    db_manager.insert_connector(
+        connector_id=connector_id,
+        name=name,
+        connector_type=connector_type,
+        connection_details=connection_details,
+        allowed_extensions=allowed_extensions,
+        sync_interval_seconds=sync_interval_seconds,
+    )
+
+
+def upsert_connector(
+    connector_id: str,
+    name: Optional[str] = None,
+    connection_details: Optional[dict] = None,
+    allowed_extensions: Optional[list] = None,
+) -> None:
+    """
+    Partial update of an existing connector for PUT /v1/connectors/{id}.
+
+    Raises FileNotFoundError if no connector with the given id exists.
+    """
+    db_manager.update_connector(
+        connector_id=connector_id,
+        name=name,
+        connection_details=connection_details,
+        allowed_extensions=allowed_extensions,
+    )
+
+
+def get_active_connector(connector_id: str) -> Optional[Connector]:
+    """
+    Fetch a single connector by id.
+
+    Returns the ORM object or None if not found.
+    """
+    return db_manager.get_connector_by_id(connector_id)
+
+
+def list_connectors() -> List[Connector]:
+    """Return all connectors ordered by attached_at descending."""
+    return db_manager.get_all_connectors()
+
+
+def delete_active_connector(connector_id: str) -> bool:
+    """
+    Delete a connector row by id (cascades to connector_sync_logs).
+
+    Returns True if a row was deleted, False if not found.
+    """
+    return db_manager.delete_connector(connector_id)
+
+
+# ----------------------------------------------------------------------------
+# Checksum membership helpers
+# ----------------------------------------------------------------------------
+
+def lookup_connector_content_by_checksum(checksum: str) -> Optional[str]:
+    """
+    Return the doc_id if any connector has already registered this checksum,
+    else None.
+    """
+    return db_manager.find_connector_doc_by_checksum(checksum)
+
+
+def list_connector_checksums(connector_id: str) -> List[str]:
+    """Return all checksums currently owned by the given connector."""
+    return db_manager.get_connector_checksums(connector_id)
+
+
+def list_all_checksums() -> List[str]:
+    """Return all distinct checksums across all connectors."""
+    return db_manager.get_all_connector_checksums()
+
+
+def add_connector_checksum_entry(
+    connector_id: str, checksum: str, doc_id: str
+) -> None:
+    """
+    Insert a new (checksum, connector_id, doc_id) row.
+
+    No-op if the row already exists (ON CONFLICT DO NOTHING).
+    """
+    db_manager.insert_connector_checksum(connector_id, checksum, doc_id)
+
+
+def remove_connector_checksum_entry(
+    connector_id: str, checksum: str
+) -> tuple[int, Optional[str]]:
+    """
+    Delete the (checksum, connector_id) row.
+
+    Returns (remaining_owner_count, doc_id), or (0, None) if not found.
+    """
+    return db_manager.delete_connector_checksum(connector_id, checksum)
+
+
+# ----------------------------------------------------------------------------
+# Sync log helpers
+# ----------------------------------------------------------------------------
+
+def open_new_sync_log(
+    connector_id: str,
+    started_at: Optional[datetime] = None,
+) -> int:
+    """
+    Create a new sync-log row and set connector sync_status to 'syncing'.
+
+    Returns the generated seq value.
+    """
+    return db_manager.open_sync_log(connector_id, started_at=started_at)
+
+
+def close_sync_log(
+    connector_id: str,
+    seq: int,
+    status: str,
+    finished_at: Optional[datetime] = None,
+    total_files: Optional[int] = None,
+    new_files: Optional[int] = None,
+    removed_files: Optional[int] = None,
+    failed_files: Optional[int] = None,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Finalize a sync-log row and update connector last_sync_at / sync_status.
+
+    Returns True on success, False if the sync-log row was not found.
+    """
+    return db_manager.close_sync_log(
+        connector_id=connector_id,
+        seq=seq,
+        status=status,
+        finished_at=finished_at,
+        total_files=total_files,
+        new_files=new_files,
+        removed_files=removed_files,
+        failed_files=failed_files,
+        error=error,
+    )
+
+
+def update_sync_log(
+    log_id: int,
+    total_files: Optional[int] = None,
+    new_files: Optional[int] = None,
+    removed_files: Optional[int] = None,
+    failed_files: Optional[int] = None,
+) -> bool:
+    """
+    Write live progress counters into an in-progress sync-log row.
+
+    Returns True on success, False if the row was not found.
+    """
+    return db_manager.update_sync_log_progress(
+        log_id=log_id,
+        total_files=total_files,
+        new_files=new_files,
+        removed_files=removed_files,
+        failed_files=failed_files,
+    )
+
+
+def list_sync_logs(
+    connector_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[List[ConnectorSyncLog], int]:
+    """
+    Return paginated sync-log rows for a connector, newest first.
+
+    Returns (items, total_count).
+    """
+    return db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
+
+
+# ----------------------------------------------------------------------------
+# Document metadata helper
+# ----------------------------------------------------------------------------
+
+def set_document_metadata(doc_id: str, metadata: dict) -> bool:
+    """
+    Merge *metadata* into documents.doc_metadata (atomic key-level JSONB merge).
+
+    Returns True on success, False if the document row was not found.
+    """
+    return db_manager.merge_document_metadata(doc_id, metadata)
 
 # Made with Bob

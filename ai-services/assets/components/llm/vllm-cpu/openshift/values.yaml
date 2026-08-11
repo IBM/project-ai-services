@@ -1,0 +1,10 @@
+storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+model: ibm-granite/granite-3.3-8b-instruct
+apiKey: ""
+resources:
+  requests:
+    cpu: "12"
+    memory: "150Gi"
+  limits:
+    cpu: "12"
+    memory: "150Gi"

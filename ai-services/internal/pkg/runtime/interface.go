@@ -27,6 +27,7 @@ type Runtime interface {
 	ListSecrets(filters map[string][]string) ([]string, error)
 	DeleteSecret(name string) error
 	SecretExists(nameOrID string) (bool, error)
+	UpdateSecret(name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations
 	DeleteVolume(name string) error
@@ -37,9 +38,10 @@ type Runtime interface {
 	InspectContainer(nameOrId string) (*types.Container, error)
 	ContainerExists(nameOrID string) (bool, error)
 	ContainerLogs(containerNameOrID string) error
+	ExecInContainerWithCmd(podName, containerName string, command []string) (string, error)
 
 	// Network operations
-	ListRoutes() ([]types.Route, error)
+	ListRoutes(labelSelector string) ([]types.Route, error)
 
 	// PVC operations
 	DeletePVCs(appLabel string) error
