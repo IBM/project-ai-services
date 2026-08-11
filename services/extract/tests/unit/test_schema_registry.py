@@ -19,6 +19,7 @@ def _mock_schema_row(
     schema_id="schema-001",
     name="invoice-extraction",
     description="Test schema",
+    is_schema_inferred=False,
     json_schema=None,
     examples=None,
     custom_prompt=None,
@@ -31,6 +32,7 @@ def _mock_schema_row(
     row.schema_id = schema_id
     row.name = name
     row.description = description
+    row.is_schema_inferred = is_schema_inferred
     row.json_schema = json_schema or {
         "type": "object",
         "properties": {"name": {"type": "string"}},
@@ -66,6 +68,31 @@ _VALID_SCHEMA_BODY_WITH_EXAMPLE = {
             "output": {"invoice_number": "001", "total_amount": 100.0},
         }
     ],
+}
+
+# Body that omits json_schema — schema should be inferred from examples.
+_INFER_SCHEMA_BODY = {
+    "name": "invoice-inferred",
+    "description": "Schema inferred from examples",
+    "examples": [
+        {
+            "text": "Invoice #001 Total: 100",
+            "output": {"invoice_number": "001", "total_amount": 100.0},
+        },
+        {
+            "text": "Invoice #002 Total: 200",
+            "output": {"invoice_number": "002", "total_amount": 200.0},
+        },
+    ],
+}
+
+_INFERRED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "invoice_number": {"type": "string"},
+        "total_amount": {"type": "number"},
+    },
+    "required": ["invoice_number", "total_amount"],
 }
 
 
@@ -211,6 +238,83 @@ class TestRegisterSchema:
             json={"name": "has space!", "json_schema": {"type": "object", "properties": {}}},
         )
         assert resp.status_code == 422
+
+    def test_neither_schema_nor_examples_returns_400(self, extract_test_client):
+        """Omitting both json_schema and examples must return 400 MISSING_SCHEMA."""
+        with patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False):
+            resp = extract_test_client.post(
+                "/v1/schemas",
+                json={"name": "no-schema-no-examples"},
+            )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "MISSING_SCHEMA"
+
+    def test_inferred_schema_from_examples_returns_201(self, extract_test_client, monkeypatch):
+        """When json_schema is absent, schema is inferred from examples and registered."""
+        monkeypatch.setattr(
+            "extract.api.v1.schema.asyncio.to_thread",
+            AsyncMock(return_value=(40, 60, 0)),
+        )
+        inferred_row = _mock_schema_row(
+            name="invoice-inferred",
+            json_schema=_INFERRED_SCHEMA,
+        )
+        with patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
+             patch("extract.api.v1.schema.infer_schema_from_examples", return_value=_INFERRED_SCHEMA) as mock_infer, \
+             patch("extract.utils.schema.normalize_schema", return_value=_INFERRED_SCHEMA), \
+             patch("extract.api.v1.schema.validate_json_schema_structure"), \
+             patch("extract.api.v1.schema.validate_examples"), \
+             patch("extract.api.v1.schema.check_schema_share_in_context"), \
+             patch("extract.api.v1.schema.db_repo.create_schema", return_value=inferred_row) as mock_create:
+            resp = extract_test_client.post("/v1/schemas", json=_INFER_SCHEMA_BODY)
+
+        assert resp.status_code == 201
+        # infer_schema_from_examples must have been called with the two example dicts.
+        mock_infer.assert_called_once()
+        # is_schema_inferred=True must be forwarded to the DB layer.
+        _, kwargs = mock_create.call_args
+        assert kwargs.get("is_schema_inferred") is True
+
+    def test_inferred_schema_conflict_returns_400(self, extract_test_client):
+        """Type conflict across examples during inference must surface as 400."""
+        body = {
+            "name": "conflict-schema",
+            "examples": [
+                {"text": "t1", "output": {"amount": 100}},
+                {"text": "t2", "output": {"amount": "one hundred"}},
+            ],
+        }
+        with patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
+             patch(
+                 "extract.api.v1.schema.infer_schema_from_examples",
+                 side_effect=SchemaValidationError(
+                     "SCHEMA_INFERENCE_CONFLICT",
+                     "Cannot infer schema: field 'amount' has conflicting types",
+                     400,
+                 ),
+             ):
+            resp = extract_test_client.post("/v1/schemas", json=body)
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "SCHEMA_INFERENCE_CONFLICT"
+
+    def test_inferred_schema_no_examples_returns_400(self, extract_test_client):
+        """Sending an explicit empty examples list with no json_schema must return 400."""
+        with patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
+             patch(
+                 "extract.api.v1.schema.infer_schema_from_examples",
+                 side_effect=SchemaValidationError(
+                     "INFERENCE_NO_EXAMPLES",
+                     "Cannot infer schema: no examples provided.",
+                     400,
+                 ),
+             ):
+            resp = extract_test_client.post(
+                "/v1/schemas",
+                json={"name": "no-examples", "examples": []},
+            )
+        # FastAPI strips empty list to None via Optional, so the MISSING_SCHEMA guard fires first.
+        assert resp.status_code == 400
 
 
 

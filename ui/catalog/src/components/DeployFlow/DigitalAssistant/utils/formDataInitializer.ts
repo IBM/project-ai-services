@@ -7,8 +7,8 @@ import type { DeployOptionsResponse } from "@/types/api.types";
 import type {
   DeployFormData,
   ComponentConfig,
-  ServiceConfig,
-} from "@/components/DeployFlow/DigitalAssistant/types";
+} from "@/components/DeployFlow/Shared/types";
+import type { ServiceConfig } from "@/components/DeployFlow/DigitalAssistant/types";
 import { getDefaultInferenceBackendProviderId } from "./inferenceComponentHelper";
 
 // Initializes form data structure from deploy options with default values

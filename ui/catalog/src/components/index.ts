@@ -12,7 +12,6 @@ export type { SolutionCardProps } from "./SolutionCard";
 export { default as DeployedServicesTable } from "./DeployedServicesTable";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
-  DeployFlowProps,
   DeployFormData,
   ServiceConfig,
 } from "./DeployFlow/DigitalAssistant";

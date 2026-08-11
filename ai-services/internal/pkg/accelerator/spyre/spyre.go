@@ -10,6 +10,29 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+// ParseEnvVarAddresses scans lines of `key=value` env output for the given key
+// and returns the addresses found in the value, split by delimiter and trimmed.
+// Handles both comma-delimited (OpenShift/Kubernetes device plugin) and
+// space-delimited (Podman AIU_PCIE_IDS) formats.
+func ParseEnvVarAddresses(envLines []string, key, delimiter string) []string {
+	prefix := key + "="
+	for _, line := range envLines {
+		if strings.HasPrefix(line, prefix) {
+			value := strings.TrimPrefix(line, prefix)
+			var addrs []string
+			for _, addr := range strings.Split(value, delimiter) {
+				if addr = strings.TrimSpace(addr); addr != "" {
+					addrs = append(addrs, addr)
+				}
+			}
+
+			return addrs
+		}
+	}
+
+	return nil
+}
+
 // ListCards lists all Spyre cards attached to the system.
 func ListCards(ctx context.Context) ([]string, error) {
 	spyreDeviceIDsList := []string{}
