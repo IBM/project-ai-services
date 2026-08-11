@@ -845,10 +845,13 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 }
 
 func (kc *OpenshiftClient) DeleteNamespace(name string) error {
-	gracePeriod := int64(0)
+	gracePeriod := int64(30)
 	propagation := metav1.DeletePropagationForeground
 
-	err := kc.KubeClient.CoreV1().Namespaces().Delete(kc.Ctx, name, metav1.DeleteOptions{
+	ctx, cancel := context.WithTimeout(kc.Ctx, 5*time.Minute)
+	defer cancel()
+
+	err := kc.KubeClient.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{
 		GracePeriodSeconds: &gracePeriod,
 		PropagationPolicy:  &propagation,
 	})
