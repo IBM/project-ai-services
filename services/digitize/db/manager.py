@@ -870,6 +870,29 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_connector_sync_status(connector_id: str) -> Optional[str]:
+        """
+        Return the current sync_status string for a connector.
+
+        Does a minimal SELECT sync_status query — does not load the full row.
+        Returns None if the connector does not exist.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(Connector.sync_status)
+                    .where(Connector.id == connector_id)
+                )
+                row = session.execute(stmt).one_or_none()
+                return row[0] if row else None
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_connector_sync_status({connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
     def get_all_connectors() -> List[Connector]:
         """
         Return all connectors ordered by attached_at descending.

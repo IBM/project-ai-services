@@ -669,4 +669,39 @@ class TestSetDocumentMetadata:
             result = set_document_metadata(DOC_ID_A, {"source_type": "sftp"})
         assert result is False
 
+
+# ===========================================================================
+# get_connector_sync_status
+# ===========================================================================
+
+class TestGetConnectorSyncStatus:
+    def _call(self, session_mock, connector_id=CONNECTOR_ID):
+        from digitize.utils.db import get_connector_sync_status
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session_mock)):
+            return get_connector_sync_status(connector_id)
+
+    def test_returns_status_string(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = ("syncing",)
+        result = self._call(session)
+        assert result == "syncing"
+
+    def test_returns_none_when_not_found(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = None
+        result = self._call(session)
+        assert result is None
+
+    def test_returns_delete_pending(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = ("delete pending",)
+        result = self._call(session)
+        assert result == "delete pending"
+
+    def test_returns_none_on_db_error(self):
+        session = MagicMock()
+        session.execute.side_effect = SQLAlchemyError("timeout")
+        result = self._call(session)
+        assert result is None
+
 # Made with Bob

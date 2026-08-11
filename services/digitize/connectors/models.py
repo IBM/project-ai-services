@@ -21,23 +21,28 @@ class SyncStatus:
     """String constants for connector sync_status and sync-log status columns.
 
     Connector.sync_status lifecycle:
-        UP_TO_DATE  ──► SYNCING  ──► UP_TO_DATE  (tick completed cleanly)
-                          └──► OUT_OF_SYNC (tick finished with errors)
+        UP_TO_DATE    ──► SYNCING       ──► UP_TO_DATE    (tick completed cleanly)
+                            └──► OUT_OF_SYNC              (tick finished with errors)
+        UP_TO_DATE    ──► DELETE_PENDING                  (DELETE, no active sync)
+        SYNCING       ──► DELETE_PENDING                  (DELETE arrived mid-sync)
 
     ConnectorSyncLog.status lifecycle:
         STARTED ──► COMPLETED  (all files processed successfully)
-                └──► FAILED    (fatal tick error or partial failure)
+                ├──► FAILED    (fatal tick error or partial failure)
+                └──► CANCELLED (tick was cancelled via DELETE_PENDING)
     """
 
     # Connector.sync_status values
     UP_TO_DATE = "up to date"
     SYNCING = "syncing"
     OUT_OF_SYNC = "out of sync"
+    DELETE_PENDING = "delete pending"
 
     # ConnectorSyncLog.status values
     STARTED = "started"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # ---------------------------------------------------------------------------

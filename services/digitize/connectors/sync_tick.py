@@ -30,6 +30,7 @@ from digitize.utils.db import (
     add_connector_checksum_entry,
     close_sync_log,
     get_active_connector,
+    get_connector_sync_status,
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
@@ -40,6 +41,25 @@ from digitize.utils.db import (
 from digitize.utils.jobs import generate_uuid, initialize_job_state
 
 logger = get_logger("sync_tick")
+
+
+# ---------------------------------------------------------------------------
+# Cancellation helper
+# ---------------------------------------------------------------------------
+
+def _check_delete_pending(connector_id: str) -> None:
+    """
+    Raise asyncio.CancelledError if the connector is marked for deletion.
+
+    Performs a live DB query — no in-memory state.  Called at the three
+    phase boundaries inside run_tick / _process_new_files so that a DELETE
+    request is honoured promptly without leaving the tick running to completion.
+    """
+    status = get_connector_sync_status(connector_id)
+    if status == "delete pending":
+        raise asyncio.CancelledError(
+            f"Connector {connector_id!r} marked delete_pending — tick cancelled"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +87,9 @@ async def run_tick(connector_id: str) -> None:
     removed: int = 0
 
     try:
+        # Phase boundary: check for DELETE_PENDING before any remote I/O starts.
+        _check_delete_pending(connector_id)
+
         await asyncio.to_thread(scanner.connect)
         scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
 
@@ -92,6 +115,11 @@ async def run_tick(connector_id: str) -> None:
             removed_files=removed,
             failed_files=failed,
         )
+
+    except asyncio.CancelledError:
+        logger.info(f"Tick cancelled for connector {connector_id!r} (delete_pending)")
+        _cancel_tick(sync_seq, connector_id)
+        raise
 
     except Exception as exc:
         logger.error(
@@ -170,6 +198,9 @@ async def _process_new_files(
     failed_count = 0
 
     for batch_number, (remote_path, checksum) in enumerate(ingest_list):
+        # Cancellation checkpoint: bail before each download starts.
+        _check_delete_pending(connector_id)
+
         job_id = generate_uuid()
         batch_dir_name = f"{connector_id}-{job_id}-{batch_number}"
         batch_dir = staging_base / batch_dir_name
@@ -179,6 +210,8 @@ async def _process_new_files(
             local_checksum = await asyncio.to_thread(
                 scanner.download_to, remote_path, batch_dir / Path(remote_path).name
             )
+            # Cancellation checkpoint: bail after the blocking download returns.
+            _check_delete_pending(connector_id)
             scanner.verify_integrity(local_checksum, checksum)
 
             filename = Path(remote_path).name
@@ -264,6 +297,21 @@ def _complete_tick(
         f"Tick completed for {connector_id!r} — "
         f"total={total_files} new={new_files} removed={removed_files} failed={failed_files}"
     )
+
+
+def _cancel_tick(sync_seq: int, connector_id: str) -> None:
+    """Close the sync log with status='cancelled' after a CancelledError."""
+    try:
+        close_sync_log(
+            connector_id=connector_id,
+            seq=sync_seq,
+            status="cancelled",
+        )
+    except Exception as close_exc:
+        logger.error(
+            f"Failed to close sync log for {connector_id!r} after cancellation: {close_exc}",
+            exc_info=True,
+        )
 
 
 def _fail_tick(sync_seq: int, connector_id: str, exc: Exception) -> None:

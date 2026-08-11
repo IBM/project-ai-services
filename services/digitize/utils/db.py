@@ -1245,6 +1245,16 @@ def get_active_connector(connector_id: str) -> Optional[Connector]:
     return db_manager.get_connector_by_id(connector_id)
 
 
+def get_connector_sync_status(connector_id: str) -> Optional[str]:
+    """
+    Return the current sync_status string for a connector.
+
+    Does a minimal SELECT — does not load the full row.
+    Returns None if the connector does not exist.
+    """
+    return db_manager.get_connector_sync_status(connector_id)
+
+
 def list_connectors() -> List[Connector]:
     """Return all connectors ordered by attached_at descending."""
     return db_manager.get_all_connectors()
