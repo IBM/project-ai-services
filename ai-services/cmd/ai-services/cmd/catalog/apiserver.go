@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	defaultRandomSecretKeyLength    = 32
-	connectorEncryptionKeyByteLen   = 32
+	defaultRandomSecretKeyLength  = 32
+	connectorEncryptionKeyByteLen = 32
 )
 
 // loadDBConfig loads database configuration from environment variables.
@@ -119,6 +119,7 @@ func initApplicationService(ctx context.Context) (
 	componentRepo := repository.NewComponentRepository(pool)
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
 
+	// TODO: implement sync service on remote machines
 	syncService, err := sync.NewSyncService(
 		applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo,
 		sync.DefaultSyncInterval,
