@@ -281,7 +281,7 @@ async def _run_teardown(connector_id: str) -> None:
             )
 
         # Step F: sweep any residual batch staging directories
-        _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
+        _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} teardown complete")
     except Exception as exc:
@@ -310,20 +310,27 @@ def _best_effort_delete_document(doc_id: str) -> None:
         )
 
 
-def _sweep_connector_staging(connector_id: str, staging_connectors_dir) -> None:
+def _sweep_staging_dir(
+    connector_id: str,
+    staging_connectors_dir,
+    sync_seq: int | None = None,
+) -> None:
     """
     Remove any residual batch staging directories for *connector_id*.
 
     Per-batch dirs are named ``<connector_id>-<job_id>-<batch_number>`` and are
     cleaned up inline after each ingest.  This sweep only has work to do when a
     worker crashed mid-tick and left a directory behind.
+
+    When *sync_seq* is given the sweep is narrowed to dirs matching
+    ``<connector_id>-<sync_seq>-*`` (i.e. only the batches of that sync).
     """
     from pathlib import Path
 
     base = Path(staging_connectors_dir)
     if not base.exists():
         return
-    prefix = f"{connector_id}-"
+    prefix = f"{connector_id}-{sync_seq}-" if sync_seq is not None else f"{connector_id}-"
     for entry in base.iterdir():
         if entry.is_dir() and entry.name.startswith(prefix):
             cleanup_staging_directory(entry.name, base, ignore_errors=True)

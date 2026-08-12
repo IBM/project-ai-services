@@ -370,33 +370,19 @@ def _handle_interrupt(
         _cancel_tick(sync_seq, connector_id)
         # Note: close_sync_log() automatically sets connector to OUT_OF_SYNC when
         # sync log status is CANCELLED. Cleanup staging directory for this sync.
-        _sweep_sync_staging(connector_id, sync_seq)
+        from digitize.api.v1.connectors import _sweep_staging_dir
+        from digitize.settings import settings
+        _sweep_staging_dir(
+            connector_id,
+            settings.digitize.staging_dir / "connectors",
+            sync_seq=sync_seq,
+        )
 
     elif interrupt_type == InterruptType.DELETE_CONNECTOR:
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
         # Run full teardown: remove checksums, delete orphaned docs, delete connector row
         _run_delete_teardown(connector_id)
-
-
-def _sweep_sync_staging(connector_id: str, sync_seq: int) -> None:
-    """Remove staging directories for a specific sync (pattern: {connector_id}-{sync_seq}-*)."""
-    from digitize.settings import settings
-    staging_base = settings.digitize.staging_dir / "connectors"
-    try:
-        if not staging_base.exists():
-            return
-        # Pattern: {connector_id}-{sync_seq}-* (matches all batch directories for this sync)
-        prefix = f"{connector_id}-{sync_seq}-"
-        for entry in staging_base.iterdir():
-            if entry.is_dir() and entry.name.startswith(prefix):
-                cleanup_staging_directory(entry.name, staging_base, ignore_errors=True)
-        logger.debug(f"Swept staging directories for sync {connector_id!r}:{sync_seq}")
-    except Exception as exc:
-        logger.warning(
-            f"Error sweeping staging directories for {connector_id!r}:{sync_seq}: {exc}",
-            exc_info=True,
-        )
 
 
 def _run_delete_teardown(connector_id: str) -> None:
@@ -414,7 +400,7 @@ def _run_delete_teardown(connector_id: str) -> None:
         delete_active_connector,
     )
     from digitize.settings import settings
-    from digitize.api.v1.connectors import _sweep_connector_staging
+    from digitize.api.v1.connectors import _sweep_staging_dir
 
     logger.info(f"Running full teardown for connector {connector_id!r}")
     try:
@@ -441,7 +427,7 @@ def _run_delete_teardown(connector_id: str) -> None:
             )
 
         # Step 3: sweep all residual batch staging directories for this connector
-        _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
+        _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} full teardown complete")
     except Exception as exc:

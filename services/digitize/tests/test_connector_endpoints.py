@@ -363,7 +363,7 @@ class TestRunTeardown:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            with patch("digitize.api.v1.connectors._sweep_connector_staging"):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
                 from digitize.api.v1.connectors import _run_teardown
                 await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_called_once_with("doc-0001")
@@ -384,7 +384,7 @@ class TestRunTeardown:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            with patch("digitize.api.v1.connectors._sweep_connector_staging"):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
                 from digitize.api.v1.connectors import _run_teardown
                 await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_not_called()
