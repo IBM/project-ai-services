@@ -289,21 +289,50 @@ class TestPutConnector:
 # ===========================================================================
 
 class TestDeleteConnector:
-    def test_returns_204_on_success(self, connector_test_client, monkeypatch):
+    """
+    The DELETE endpoint is non-blocking: it always returns 204 immediately.
+
+    Case A (SYNCING)  — mark DELETE_PENDING, return 204; tick handles teardown.
+    Case B (not SYNCING) — mark DELETE_PENDING, schedule _run_teardown, return 204.
+
+    _run_teardown itself is exercised by TestRunTeardown below.
+    """
+
+    def _patch_mark(self, monkeypatch, return_value=True):
+        mock = Mock(return_value=return_value)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.mark_sync_delete_pending",
+            mock,
+        )
+        return mock
+
+    def test_returns_204_case_b_not_syncing(self, connector_test_client, monkeypatch):
+        """Case B: not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
+        mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
         )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connector_checksums",
-            Mock(return_value=[]),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.delete_active_connector",
-            Mock(return_value=True),
-        )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+        def _consume_coro(coro):
+            coro.close()  # prevent "coroutine never awaited" warning
+        with patch("digitize.api.v1.connectors.asyncio.create_task", side_effect=_consume_coro) as task_mock:
+            response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 204
+        mark_mock.assert_called_once_with(CONNECTOR_ID)
+        task_mock.assert_called_once()
+
+    def test_returns_204_case_a_syncing(self, connector_test_client, monkeypatch):
+        """Case A: syncing → mark DELETE_PENDING, return 204; no teardown task created."""
+        mark_mock = self._patch_mark(monkeypatch)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
+        )
+        with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
+            response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+        assert response.status_code == 204
+        mark_mock.assert_called_once_with(CONNECTOR_ID)
+        task_mock.assert_not_called()
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
@@ -313,21 +342,14 @@ class TestDeleteConnector:
         response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 404
 
-    def test_returns_409_when_sync_in_progress(self, connector_test_client, monkeypatch):
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
-        )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
-        assert response.status_code == 409
 
-    def test_deletes_document_when_last_owner(self, connector_test_client, monkeypatch):
-        """When remaining_owner_count == 0 after removing a checksum, the doc is deleted."""
+@pytest.mark.asyncio
+class TestRunTeardown:
+    """Unit tests for the _run_teardown background coroutine."""
+
+    async def test_deletes_document_when_last_owner(self, monkeypatch):
+        """remaining_owner_count == 0 → document is deleted."""
         doc_delete_mock = Mock()
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
-        )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
             Mock(return_value=["abc123"]),
@@ -341,16 +363,14 @@ class TestDeleteConnector:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+            with patch("digitize.api.v1.connectors._sweep_connector_staging"):
+                from digitize.api.v1.connectors import _run_teardown
+                await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_called_once_with("doc-0001")
 
-    def test_does_not_delete_doc_when_other_owners_remain(self, connector_test_client, monkeypatch):
+    async def test_does_not_delete_doc_when_other_owners_remain(self, monkeypatch):
         """remaining_owner_count > 0 → doc must NOT be deleted."""
         doc_delete_mock = Mock()
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
-        )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
             Mock(return_value=["abc123"]),
@@ -364,7 +384,9 @@ class TestDeleteConnector:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+            with patch("digitize.api.v1.connectors._sweep_connector_staging"):
+                from digitize.api.v1.connectors import _run_teardown
+                await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_not_called()
 
 

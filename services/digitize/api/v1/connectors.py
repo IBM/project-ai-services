@@ -14,6 +14,7 @@ Endpoints:
   DELETE /v1/connectors/{connector_id}/sync
 """
 
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -199,27 +200,28 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         404: http_error_responses[404],
-        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Detach and delete a connector",
     description=(
-        "Removes a connector and all its associated state. "
-        "Rejected with 409 if a sync tick is currently in progress. "
-        "Documents owned exclusively by this connector are deleted. "
-        "Staging directories are cleaned up best-effort."
+        "Non-blocking detachment. Always returns 204 immediately. "
+        "If a sync tick is running the connector is marked delete_pending and "
+        "the tick handles teardown; otherwise teardown runs as a background task."
     ),
-    response_description="No content on successful deletion",
+    response_description="No content — teardown proceeds in the background",
 )
 async def delete_connector(connector_id: str):
     """
-    DELETE stub for PR3 (no worker yet):
-    1. Check connector exists → 404 if not
-    2. Guard: check if sync is in progress (sync_status == 'syncing') → 409
-    3. Snapshot checksums owned by this connector
-    4. Remove ownership rows and delete documents when last owner
-    5. Delete the connector row
-    6. Best-effort staging dir cleanup
+    Fast, non-blocking DELETE:
+
+    Case A — sync_status == 'syncing':
+        Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
+        its next checkpoint, cancel itself, and dispatch teardown.
+        Return 204 immediately.
+
+    Case B — sync_status != 'syncing':
+        Mark DELETE_PENDING, dispatch asyncio.create_task(_run_teardown(...)),
+        return 204 immediately.
     """
     try:
         connector = db_ops.get_active_connector(connector_id)
@@ -229,18 +231,35 @@ async def delete_connector(connector_id: str):
                 f"Connector {connector_id!r} not found",
             )
 
-        # Guard: reject if a tick is currently running
-        if connector.sync_status == SyncStatus.SYNCING:
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "A sync tick is currently running for this connector. "
-                "Retry after the tick completes.",
-            )
+        db_ops.mark_sync_delete_pending(connector_id)
 
-        # Snapshot checksums owned by this connector
+        if connector.sync_status != SyncStatus.SYNCING:
+            # No tick running — kick off teardown ourselves.
+            asyncio.create_task(_run_teardown(connector_id))
+
+        return Response(status_code=204)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+
+
+async def _run_teardown(connector_id: str) -> None:
+    """
+    Background teardown task for connector deletion (Case B: no tick running).
+
+    Steps mirror the spec teardown flow:
+      C. Snapshot checksums owned by this connector
+      D. Remove ownership rows; delete documents when last owner
+      E. Delete the connector row (cascades to sync_logs)
+      F. Sweep residual batch staging directories
+    """
+    logger.info(f"Starting teardown for connector {connector_id!r}")
+    try:
+        # Step C+D: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-
-        # Remove ownership rows; delete documents when last owner
         for checksum in owned_checksums:
             try:
                 remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
@@ -253,7 +272,7 @@ async def delete_connector(connector_id: str):
                     exc_info=True,
                 )
 
-        # Delete the connector row (cascades to connector_sync_logs)
+        # Step E: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -261,20 +280,15 @@ async def delete_connector(connector_id: str):
                 "— row may have already been removed"
             )
 
-        # Best-effort sweep of any residual batch staging directories.
-        # Normal teardown: per-batch dirs are already gone (cleaned up in
-        # _process_new_files finally blocks). This glob catches anything left
-        # behind by a mid-tick crash: staging/connectors/<connector_id>-*
+        # Step F: sweep any residual batch staging directories
         _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
 
-        logger.info(f"Connector {connector_id!r} detached and deleted")
-        return Response(status_code=204)
-
-    except HTTPException:
-        raise
+        logger.info(f"Connector {connector_id!r} teardown complete")
     except Exception as exc:
-        logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        logger.error(
+            f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
 
 
 def _best_effort_delete_document(doc_id: str) -> None:
