@@ -860,7 +860,7 @@ func (kc *OpenshiftClient) DeleteNamespace(name string) error {
 	})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			logger.DebugfCtx(kc.Ctx, "Skipping deletion of '%s' namespace: no namespace found\n", name)
+			logger.DebugfCtx(kc.Ctx, "Ignoring '%s' namespace deletion error: no namespace found\n", name)
 
 			return nil
 		}
