@@ -3,5 +3,6 @@ export const ROUTES = {
   LOGOUT: "/logout",
   DIGITAL_ASSISTANTS: "/digital-assistants",
   SERVICES: "/services",
+  CONNECTORS: "/connectors",
   USE_CASE_REFERENCES: "/use-case-references",
 } as const;

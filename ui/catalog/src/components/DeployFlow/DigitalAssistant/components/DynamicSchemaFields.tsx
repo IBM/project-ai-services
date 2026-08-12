@@ -201,11 +201,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
         // Controlled textareas should span full width
         if (field.controlledBy) {
           return (
-            <div
-              key={fieldId}
-              className={styles.systemPromptTextArea}
-              style={{ gridColumn: "1 / -1" }}
-            >
+            <div key={fieldId} className={styles.systemPromptTextArea}>
               <TextArea
                 id={fieldId}
                 labelText={labelWithInfo}

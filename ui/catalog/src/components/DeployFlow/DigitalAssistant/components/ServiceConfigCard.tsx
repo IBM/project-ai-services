@@ -699,7 +699,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       return hasCredentialFields ? (
                         <>
                           <div />
-                          <div style={{ gridColumn: "1 / -1" }}>
+                          <div className={styles.fullWidth}>
                             <h4 className={styles.cloudCredentialsTitle}>
                               {(fieldValue || "")
                                 .toLowerCase()
@@ -767,7 +767,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
             {/* Render service-level schema fields in edit mode */}
             {serviceFields.length > 0 && serviceSchema && (
-              <div style={{ gridColumn: "1 / -1", width: "100%" }}>
+              <div className={styles.fullWidth}>
                 <DynamicSchemaFields
                   componentType={serviceId}
                   providerId={serviceId}
@@ -847,8 +847,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
                 return (
                   <div
-                    style={{ gridColumn: "1 / -1" }}
-                    className={styles.modelDescriptionSection}
+                    className={`${styles.modelDescriptionSection} ${styles.fullWidth}`}
                   >
                     <Accordion>
                       <AccordionItem title="What is this model good at?">

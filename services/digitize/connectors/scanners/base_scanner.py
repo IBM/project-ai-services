@@ -85,10 +85,16 @@ class BaseScanner(ABC):
         """
         Return (remote_path, checksum) for **all** files found on the source.
 
-        No dedup filtering is applied here.  The full list is returned so
-        the worker's _classify() can compare it against the known and global
-        checksum sets and decide which files to ingest, which to skip, and
-        which are orphans.
+        No cross-walk dedup filtering is applied here.  The full list is
+        returned so the worker's _classify() can compare it against the known
+        and global checksum sets and decide which files to ingest, which to
+        skip, and which are orphans.
+
+        Within-walk deduplication: if the same checksum appears more than
+        once during a single scan walk, only the first encountered
+        (remote_path, checksum) pair is kept.  Subsequent files that hash to
+        an already-seen checksum are silently discarded.  Implementations are
+        responsible for enforcing this guarantee.
 
         ``remote_path`` is the canonical address used to download the file
         (S3 object key, SFTP absolute path, etc.).
@@ -101,8 +107,9 @@ class BaseScanner(ABC):
         Returns
         -------
         list[tuple[str, str]]
-            Ordered list of (remote_path, checksum) pairs.  Empty list if
-            the remote source contains no supported documents.
+            Ordered list of (remote_path, checksum) pairs with no duplicate
+            checksums.  Empty list if the remote source contains no supported
+            documents.
         """
 
     @abstractmethod
