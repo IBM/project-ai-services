@@ -27,6 +27,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from digitize.connectors.models import SyncStatus
+
 import digitize.app as digitize_app
 import digitize.api.v1.documents as documents_router_module
 
@@ -74,7 +76,7 @@ def _make_connector(
     connector_id: str = CONNECTOR_ID,
     name: str = CONNECTOR_NAME,
     connector_type: str = CONNECTOR_TYPE,
-    sync_status: str = "up to date",
+    sync_status: str = SyncStatus.UP_TO_DATE,
 ) -> MagicMock:
     c = MagicMock()
     c.id = connector_id
@@ -101,7 +103,7 @@ def _make_sync_log(log_id: int = 1, seq: int = 1) -> MagicMock:
     log.total_files = 42
     log.new_files = 2
     log.removed_files = 0
-    log.status = "completed"
+    log.status = SyncStatus.COMPLETED
     log.error = ""
     return log
 
@@ -314,7 +316,7 @@ class TestDeleteConnector:
     def test_returns_409_when_sync_in_progress(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector(sync_status="syncing")),
+            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
         )
         response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 409

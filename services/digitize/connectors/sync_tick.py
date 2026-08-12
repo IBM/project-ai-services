@@ -26,6 +26,7 @@ from common.misc_utils import cleanup_staging_directory, get_logger
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
+from digitize.connectors.models import SyncStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
@@ -60,7 +61,7 @@ def _check_delete_pending(connector_id: str) -> None:
     running to completion.
     """
     status = get_connector_sync_status(connector_id)
-    if status in ("delete pending", "cancel pending"):
+    if status in (SyncStatus.DELETE_PENDING, SyncStatus.CANCEL_PENDING):
         raise asyncio.CancelledError(
             f"Connector {connector_id!r} sync cancelled (status={status!r})"
         )
@@ -307,7 +308,7 @@ def _complete_tick(sync_seq: int, connector_id: str) -> None:
     close_sync_log(
         connector_id=connector_id,
         seq=sync_seq,
-        status="completed",
+        status=SyncStatus.COMPLETED,
     )
     logger.info(f"Tick completed for {connector_id!r}")
 
@@ -318,7 +319,7 @@ def _cancel_tick(sync_seq: int, connector_id: str) -> None:
         close_sync_log(
             connector_id=connector_id,
             seq=sync_seq,
-            status="cancelled",
+            status=SyncStatus.CANCELLED,
         )
     except Exception as close_exc:
         logger.error(
@@ -332,7 +333,7 @@ def _fail_tick(sync_seq: int, connector_id: str, exc: Exception) -> None:
         close_sync_log(
             connector_id=connector_id,
             seq=sync_seq,
-            status="failed",
+            status=SyncStatus.FAILED,
             error=str(exc),
         )
     except Exception as close_exc:

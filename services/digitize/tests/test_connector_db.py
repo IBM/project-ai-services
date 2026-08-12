@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, Mock, call, patch
 import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from digitize.connectors.models import SyncStatus
+
 
 # ---------------------------------------------------------------------------
 # Helpers shared across test cases
@@ -158,7 +160,7 @@ class TestGetConnector:
         c.sync_interval_seconds = SYNC_INTERVAL
         c.attached_at = _NOW
         c.last_sync_at = None
-        c.sync_status = "up to date"
+        c.sync_status = SyncStatus.UP_TO_DATE
         c.last_sync_error = None
         c.total_files = 0
         return c
@@ -205,7 +207,7 @@ class TestListConnectors:
         c1.sync_interval_seconds = 300
         c1.attached_at = _NOW
         c1.last_sync_at = None
-        c1.sync_status = "up to date"
+        c1.sync_status = SyncStatus.UP_TO_DATE
         c1.last_sync_error = None
         c1.total_files = 0
 
@@ -519,7 +521,7 @@ class TestUpdateSyncLog:
         from digitize.utils.db import close_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             result = close_sync_log(
-                CONNECTOR_ID, seq=1, status="completed", total_files=10, new_files=2
+                CONNECTOR_ID, seq=1, status=SyncStatus.COMPLETED, total_files=10, new_files=2
             )
         assert result is True
         assert session.execute.call_count == 2
@@ -530,7 +532,7 @@ class TestUpdateSyncLog:
         session.execute.return_value = _execute_result(rowcount=0)
         from digitize.utils.db import close_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = close_sync_log(CONNECTOR_ID, seq=999, status="failed")
+            result = close_sync_log(CONNECTOR_ID, seq=999, status=SyncStatus.FAILED)
         assert result is False
         # Only one execute call: the failed log-row lookup; connectors must NOT be updated
         assert session.execute.call_count == 1
@@ -543,7 +545,7 @@ class TestUpdateSyncLog:
         session.execute.side_effect = [log_result, conn_result]
         from digitize.utils.db import close_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            close_sync_log(CONNECTOR_ID, seq=2, status="up to date")
+            close_sync_log(CONNECTOR_ID, seq=2, status=SyncStatus.UP_TO_DATE)
         assert session.execute.call_count == 2
 
     def test_optional_fields_omitted_when_none(self):
@@ -554,7 +556,7 @@ class TestUpdateSyncLog:
         session.execute.side_effect = [log_result, conn_result]
         from digitize.utils.db import close_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            close_sync_log(CONNECTOR_ID, seq=1, status="completed")
+            close_sync_log(CONNECTOR_ID, seq=1, status=SyncStatus.COMPLETED)
         assert session.execute.called
 
 
@@ -608,7 +610,7 @@ class TestListSyncLogs:
         log.total_files = 0
         log.new_files = 0
         log.removed_files = 0
-        log.status = "started"
+        log.status = SyncStatus.STARTED
         log.error = ""
         return log
 
@@ -681,9 +683,9 @@ class TestGetConnectorSyncStatus:
 
     def test_returns_status_string(self):
         session = MagicMock()
-        session.execute.return_value.one_or_none.return_value = ("syncing",)
+        session.execute.return_value.one_or_none.return_value = (SyncStatus.SYNCING,)
         result = self._call(session)
-        assert result == "syncing"
+        assert result == SyncStatus.SYNCING
 
     def test_returns_none_when_not_found(self):
         session = MagicMock()
@@ -693,9 +695,9 @@ class TestGetConnectorSyncStatus:
 
     def test_returns_delete_pending(self):
         session = MagicMock()
-        session.execute.return_value.one_or_none.return_value = ("delete pending",)
+        session.execute.return_value.one_or_none.return_value = (SyncStatus.DELETE_PENDING,)
         result = self._call(session)
-        assert result == "delete pending"
+        assert result == SyncStatus.DELETE_PENDING
 
     def test_returns_none_on_db_error(self):
         session = MagicMock()

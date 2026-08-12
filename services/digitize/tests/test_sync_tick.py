@@ -44,6 +44,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from digitize.connectors.models import SyncStatus
 from digitize.connectors.sync_tick import (
     _cancel_tick,
     _check_delete_pending,
@@ -187,7 +188,7 @@ class TestProcessNewFiles:
         stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
         # cancellation checkpoint must not fire in normal test runs
         stack.enter_context(
-            patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing")
+            patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING)
         )
         return stack
 
@@ -229,7 +230,7 @@ class TestProcessNewFiles:
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
             stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
             stack.enter_context(
-                patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing")
+                patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING)
             )
             # Force batch_size=1 so the two files land in separate batches
             stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
@@ -271,40 +272,39 @@ class TestDeleteOrphans:
     def test_deletes_doc_when_last_owner(self):
         with patch(f"{DB_MODULE}.remove_connector_checksum_entry", return_value=(0, "doc-1")) as mock_rm, \
              patch(_DELETE_DOC) as mock_del:
-            removed = asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
+            asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
-        assert removed == 1
         mock_rm.assert_called_once_with("c1", "ck_orphan")
         mock_del.assert_called_once_with("doc-1")
 
     def test_skips_doc_deletion_when_other_owners_remain(self):
         with patch(f"{DB_MODULE}.remove_connector_checksum_entry", return_value=(2, "doc-1")), \
              patch(_DELETE_DOC) as mock_del:
-            removed = asyncio.run(_delete_orphans("c1", {"ck_shared"}))
+            asyncio.run(_delete_orphans("c1", {"ck_shared"}))
 
-        assert removed == 1
         mock_del.assert_not_called()
 
-    def test_continues_after_remove_raises(self):
+    def test_raises_when_remove_raises(self):
         with patch(f"{DB_MODULE}.remove_connector_checksum_entry",
                    side_effect=RuntimeError("db gone")), \
              patch(_DELETE_DOC) as mock_del:
-            removed = asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
+            with pytest.raises(RuntimeError, match="db gone"):
+                asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
-        assert removed == 0
         mock_del.assert_not_called()
 
-    def test_returns_correct_removed_count_multiple(self):
+    def test_processes_multiple_checksums(self):
         side_effects = [(0, "doc-1"), (1, "doc-2")]
-        with patch(f"{DB_MODULE}.remove_connector_checksum_entry", side_effect=side_effects), \
+        with patch(f"{DB_MODULE}.remove_connector_checksum_entry", side_effect=side_effects) as mock_rm, \
              patch(_DELETE_DOC):
-            removed = asyncio.run(_delete_orphans("c1", {"ck1", "ck2"}))
+            asyncio.run(_delete_orphans("c1", {"ck1", "ck2"}))
 
-        assert removed == 2
+        assert mock_rm.call_count == 2
 
     def test_empty_orphan_set(self):
-        removed = asyncio.run(_delete_orphans("c1", set()))
-        assert removed == 0
+        with patch(f"{DB_MODULE}.remove_connector_checksum_entry") as mock_rm:
+            asyncio.run(_delete_orphans("c1", set()))
+        mock_rm.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ class TestTickFinalizers:
         mock_close.assert_called_once_with(
             connector_id="c1",
             seq=7,
-            status="completed",
+            status=SyncStatus.COMPLETED,
         )
 
     def test_fail_tick_calls_close_sync_log_with_error(self):
@@ -330,7 +330,7 @@ class TestTickFinalizers:
         mock_close.assert_called_once_with(
             connector_id="c1",
             seq=3,
-            status="failed",
+            status=SyncStatus.FAILED,
             error="disk full",
         )
 
@@ -370,7 +370,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
@@ -381,7 +381,7 @@ class TestRunTick:
 
         mock_open.assert_called_once_with("conn-1")
         mock_close.assert_called_once()
-        assert mock_close.call_args.kwargs["status"] == "completed"
+        assert mock_close.call_args.kwargs["status"] == SyncStatus.COMPLETED
 
     def test_scanner_connect_failure_calls_fail_tick(self):
         connector = _connector()
@@ -389,13 +389,13 @@ class TestRunTick:
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=2), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close:
             asyncio.run(run_tick("conn-1"))
 
         args = mock_close.call_args.kwargs
-        assert args["status"] == "failed"
+        assert args["status"] == SyncStatus.FAILED
         assert "refused" in args["error"]
 
     def test_scanner_close_always_called(self):
@@ -406,7 +406,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=3), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log"):
             asyncio.run(run_tick("conn-1"))
@@ -421,13 +421,13 @@ class TestRunTick:
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=4), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close:
             asyncio.run(run_tick("conn-1"))
 
         args = mock_close.call_args.kwargs
-        assert args["status"] == "failed"
+        assert args["status"] == SyncStatus.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -436,12 +436,12 @@ class TestRunTick:
 
 class TestCheckDeletePending:
     def test_raises_cancelled_error_when_delete_pending(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="delete pending"):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.DELETE_PENDING):
             with pytest.raises(asyncio.CancelledError):
                 _check_delete_pending("conn-1")
 
     def test_does_not_raise_when_syncing(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING):
             _check_delete_pending("conn-1")  # must not raise
 
     def test_does_not_raise_when_none(self):
@@ -449,12 +449,12 @@ class TestCheckDeletePending:
             _check_delete_pending("conn-1")  # must not raise
 
     def test_raises_cancelled_error_when_cancel_pending(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="cancel pending"):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.CANCEL_PENDING):
             with pytest.raises(asyncio.CancelledError):
                 _check_delete_pending("conn-1")
 
     def test_does_not_raise_when_up_to_date(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="up to date"):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.UP_TO_DATE):
             _check_delete_pending("conn-1")  # must not raise
 
 
@@ -469,7 +469,7 @@ class TestCancelTick:
         mock_close.assert_called_once_with(
             connector_id="conn-1",
             seq=5,
-            status="cancelled",
+            status=SyncStatus.CANCELLED,
         )
 
     def test_swallows_close_exception(self):
@@ -499,13 +499,13 @@ class TestRunTickCancellation:
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=10), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="delete pending"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.DELETE_PENDING), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close:
             with pytest.raises(asyncio.CancelledError):
                 asyncio.run(run_tick("conn-1"))
 
         args = mock_close.call_args.kwargs
-        assert args["status"] == "cancelled"
+        assert args["status"] == SyncStatus.CANCELLED
         mock_scanner.close.assert_called_once()
 
     def test_not_cancelled_when_not_delete_pending(self):
@@ -518,7 +518,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
@@ -527,7 +527,7 @@ class TestRunTickCancellation:
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1"))  # must not raise
 
-        assert mock_close.call_args.kwargs["status"] == "completed"
+        assert mock_close.call_args.kwargs["status"] == SyncStatus.COMPLETED
 
     def test_cancelled_mid_process_closes_log(self):
         """_check_delete_pending fires inside _process_new_files loop."""
@@ -554,5 +554,5 @@ class TestRunTickCancellation:
                 asyncio.run(run_tick("conn-1"))
 
         args = mock_close.call_args.kwargs
-        assert args["status"] == "cancelled"
+        assert args["status"] == SyncStatus.CANCELLED
         mock_scanner.close.assert_called_once()
