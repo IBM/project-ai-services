@@ -276,18 +276,13 @@ async def _process_new_files(
 # Phase 4b — orphan removal
 # ---------------------------------------------------------------------------
 
-async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> int:
-    """Remove orphaned checksum rows and delete documents that lose their last owner.
-
-    Returns the number of ownership rows removed.
-    """
+async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None:
+    """Remove orphaned checksum rows and delete documents that lose their last owner."""
     from digitize.api.v1.connectors import _best_effort_delete_document
 
-    removed = 0
     for checksum in orphan_checksums:
         try:
             remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
-            removed += 1
             if remaining == 0 and doc_id:
                 await asyncio.to_thread(_best_effort_delete_document, doc_id)
         except Exception as exc:
@@ -296,7 +291,7 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> int:
                 f"for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
-    return removed
+            raise
 
 
 # ---------------------------------------------------------------------------
