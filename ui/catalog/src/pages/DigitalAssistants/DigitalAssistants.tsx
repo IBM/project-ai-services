@@ -1,7 +1,7 @@
-import React, { useReducer, useEffect } from "react";
+import { Fragment, useReducer, useCallback, useRef } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import { useDeployOptions } from "@/components/DeployFlow/DigitalAssistant/hooks/useDeployOptions";
-import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
+import { PageHeader } from "@carbon/ibm-products";
 import {
   DataTable,
   Table,
@@ -11,41 +11,33 @@ import {
   TableBody,
   TableCell,
   TableContainer,
-  TableToolbar,
-  TableToolbarContent,
-  TableToolbarSearch,
   TableExpandHeader,
   TableExpandRow,
   Pagination,
   Button,
   Grid,
   Column,
-  Checkbox,
-  CheckboxGroup,
-  ActionableNotification,
-  Modal,
-  TextInput,
-  OverflowMenu,
+  DataTableSkeleton,
   Tabs,
   TabList,
   Tab,
   TabPanels,
   TabPanel,
-  DataTableSkeleton,
 } from "@carbon/react";
-import {
-  Export,
-  Column as ColumnIcon,
-  Deploy,
-  Reset,
-} from "@carbon/icons-react";
+import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
 import type { DigitalAssistantRow } from "./types";
-import { ACTION_TYPES, HEADERS, INITIAL_STATE, appReducer } from "./types";
+import {
+  ACTION_TYPES,
+  DEFAULT_VISIBLE_COLUMNS,
+  HEADERS,
+  INITIAL_STATE,
+  appReducer,
+} from "./types";
 import { CELL_RENDERERS, StatusCell } from "./CellRenderers";
-import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
+import type { SharedTableAction } from "@/components/Table/types";
 import { DeployFlow } from "@/components/DeployFlow/DigitalAssistant";
 import {
   fetchApplications,
@@ -54,13 +46,25 @@ import {
 } from "@/api/applications.api";
 import { AboutTab } from "./components/AboutTab";
 import DeploymentDetails from "@/components/DeploymentDetails";
+import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
+import DeleteModal from "@/components/Table/components/DeleteModal";
+import ExportModal from "@/components/Table/components/ExportModal";
+import TableToasts from "@/components/Table/components/TableToasts";
+import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
+import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
+import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
+import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
+import {
+  filterRowsBySearch,
+  getVisibleHeaders,
+} from "@/components/Table/utils/tableUtils";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {
   header: string;
   value: unknown;
   rowId: string;
-  dispatch: Dispatch<AppAction>;
+  dispatch: Dispatch<AppAction | SharedTableAction>;
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData?: DigitalAssistantRow;
@@ -112,111 +116,109 @@ const DigitalAssistantsPage = () => {
   );
 
   // Use architecture data or fallback to defaults
-  const pageTitle = selectedArchitecture?.name || "Digital assistants";
+  const pageTitle = selectedArchitecture?.name || "Digital Assistants";
   const pageSubtitle =
     selectedArchitecture?.description ||
     "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";
 
-  // Fetch applications from API
-  const loadApplications = async () => {
-    // Don't fetch if we don't have a catalog_id yet
-    if (!catalogId) {
-      return;
-    }
+  // Refs mirror state.page/pageSize and are updated inline on every render
 
-    dispatch({ type: ACTION_TYPES.FETCH_APPLICATIONS_START });
+  const pageRef = useRef(INITIAL_STATE.page);
+  const pageSizeRef = useRef(INITIAL_STATE.pageSize);
+  pageRef.current = state.page;
+  pageSizeRef.current = state.pageSize;
 
-    try {
-      const response = await fetchApplications({
-        page: state.page,
-        page_size: state.pageSize,
-        catalog_id: catalogId,
-      });
-
-      const rows = response.data.map(transformApplicationToRow);
-
-      // If the current page is beyond total_pages (e.g. last item on page N was deleted),
-      // jump back to the last valid page — the useEffect will re-fetch automatically.
-      const totalPages = response.pagination?.total_pages ?? 1;
-      if (state.page > totalPages && totalPages >= 1) {
-        dispatch({ type: ACTION_TYPES.SET_PAGE, payload: totalPages });
+  const loadApplications = useCallback(
+    async (page = pageRef.current, pageSize = pageSizeRef.current) => {
+      if (!catalogId) {
         return;
       }
 
-      dispatch({
-        type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
-        payload: {
-          rows,
-          pagination: response.pagination,
-        },
-      });
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to load applications";
-      dispatch({
-        type: ACTION_TYPES.FETCH_APPLICATIONS_ERROR,
-        payload: errorMessage,
-      });
-    }
-  };
+      dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
-  // Load applications on mount and when page/pageSize/catalogId changes
-  useEffect(() => {
-    loadApplications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.page, state.pageSize, catalogId]);
+      try {
+        const response = await fetchApplications({
+          page,
+          page_size: pageSize,
+          catalog_id: catalogId,
+        });
 
-  //auto-refresh every 2 minutes
-  useEffect(() => {
-    if (catalogId && state.rowsData.length > 0) {
-      const intervalId = setInterval(() => {
-        loadApplications();
-      }, 120000);
-      return () => clearInterval(intervalId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalogId, state.rowsData.length]);
+        const rows = response.data.map(transformApplicationToRow);
 
-  // Poll every 5 s while any row is in a transitional state
-  useEffect(() => {
-    const hasTransitional = state.rowsData.some(
-      (r) => r.status === "Deploying..." || r.status === "Deleting...",
-    );
-    if (!hasTransitional) return;
-    const id = setInterval(loadApplications, 5000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.rowsData]);
+        // If the current page is beyond total_pages (e.g. last item on page N
+        // was deleted), correct the page ref + state and immediately re-fetch
+        // the last valid page so the table doesn't show stale rows.
+        const totalPages = response.pagination?.total_pages ?? 1;
+        if (page > totalPages && totalPages >= 1) {
+          pageRef.current = totalPages;
+          dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
+          void loadApplications(totalPages, pageSize);
+          return;
+        }
+
+        dispatch({
+          type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
+          payload: {
+            rows,
+            pagination: response.pagination,
+          },
+        } as AppAction);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "Failed to load applications";
+        dispatch({ type: "SHARED_SET_LOADING", payload: false });
+        dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: errorMessage });
+      }
+    },
+    [catalogId],
+  );
+
+  // Mount fetch + 2-minute auto-refresh interval (shared hook).
+  // hasTransitionalRow activates the additional 5-second poll whenever any
+  // row is in a transitional state (Deploying / Deleting / Downloading).
+  const hasTransitionalRow = state.rowsData.some(
+    (row) =>
+      row.status === "Deploying" ||
+      row.status === "Deleting" ||
+      row.status === "Downloading",
+  );
+
+  useAutoRefresh({
+    fetchFn: loadApplications,
+    hasData: state.rowsData.length > 0,
+    isPaused: state.isDeleteDialogOpen || state.isDeleting,
+    hasTransitionalRow,
+  });
+
+  // Auto-dismiss success export toast after 5 seconds
+  useExportToastAutoDismiss({
+    exportToastOpen: state.exportToastOpen,
+    exportToastKind: state.exportToastKind,
+    onDismiss: () => dispatch({ type: "SHARED_HIDE_EXPORT_TOAST" }),
+  });
 
   const handleDeploySubmit = () => {
     loadApplications();
   };
 
-  // Auto-dismiss success toast after 5 seconds
-  useEffect(() => {
-    if (state.exportToastOpen && state.exportToastKind === "success") {
-      const timer = setTimeout(() => {
-        dispatch({ type: ACTION_TYPES.HIDE_EXPORT_TOAST });
-      }, 5000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [state.exportToastOpen, state.exportToastKind]);
-
   const handleDelete = async () => {
     if (!state.selectedRowId) {
       dispatch({
-        type: ACTION_TYPES.SHOW_ERROR,
+        type: "SHARED_SHOW_ERROR",
         payload: { message: "No digital assistant selected for deletion" },
       });
       return;
     }
 
-    dispatch({ type: ACTION_TYPES.SET_IS_DELETING, payload: true });
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
 
     try {
       await deleteApplication(state.selectedRowId);
-      dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+
       await loadApplications();
     } catch (err) {
       const msg =
@@ -226,38 +228,23 @@ const DigitalAssistantsPage = () => {
       const name =
         state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
       dispatch({
-        type: ACTION_TYPES.SHOW_ERROR,
+        type: "SHARED_SHOW_ERROR",
         payload: { message: msg, rowName: name },
       });
     } finally {
-      dispatch({ type: ACTION_TYPES.SET_IS_DELETING, payload: false });
+      dispatch({ type: "SHARED_SET_DELETING", payload: false });
     }
   };
 
-  const downloadCSV = async () => {
-    const name = state.csvFileName.trim();
-
-    if (!name) {
-      dispatch({
-        type: ACTION_TYPES.SET_EXPORT_ERROR,
-        payload: "Provide a valid file name",
-      });
-      return;
-    }
-
-    if (state.totalItems === 0) {
-      dispatch({
-        type: ACTION_TYPES.SET_EXPORT_ERROR,
-        payload: "No data available to export",
-      });
-      return;
-    }
-
-    // Show exporting state on modal button
-    dispatch({ type: ACTION_TYPES.SET_EXPORTING, payload: true });
-
-    try {
-      // Fetch all pages sequentially until has_next is false
+  // CSV export — shared hook handles multi-page fetch, filter, download
+  const { downloadCSV } = useCSVExport<Record<string, unknown>>({
+    csvFileName: state.csvFileName,
+    totalItems: state.totalItems,
+    search: state.search,
+    searchFields: ["name", "status", "uptime", "messages"],
+    visibleColumns: state.visibleColumns,
+    headers: HEADERS,
+    fetchAllRows: async () => {
       let currentPage = 1;
       let hasNext = true;
       const allData: import("@/types/api.types").Application[] = [];
@@ -273,56 +260,28 @@ const DigitalAssistantsPage = () => {
         currentPage++;
       }
 
-      const allRows = allData.map(transformApplicationToRow).filter((row) => {
-        if (!state.search) return true;
-        return [row.name, row.status, row.uptime, row.messages]
-          .join(" ")
-          .toLowerCase()
-          .includes(state.search.toLowerCase());
-      });
-
-      const visibleHeaders = HEADERS.filter(
-        (h) =>
-          h.key !== "actions" &&
-          state.visibleColumns[h.key as keyof typeof state.visibleColumns],
-      );
-
-      const result = downloadCSVWithChildren(allRows, visibleHeaders, name);
-
-      dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG });
-      dispatch({
-        type: ACTION_TYPES.SHOW_EXPORT_TOAST,
-        payload: {
-          message: result.message,
-          kind: result.success ? "success" : "error",
-        },
-      });
-    } catch {
-      dispatch({
-        type: ACTION_TYPES.SHOW_EXPORT_TOAST,
-        payload: {
-          message: "Failed to fetch data for export",
-          kind: "error",
-        },
-      });
-    } finally {
-      dispatch({ type: ACTION_TYPES.SET_EXPORTING, payload: false });
-    }
-  };
-
-  const filteredRows = state.rowsData.filter((row) => {
-    if (!state.search) return true;
-    const matchesSearch = [row.name, row.status, row.uptime, row.messages]
-      .join(" ")
-      .toLowerCase()
-      .includes(state.search.toLowerCase());
-    return matchesSearch;
+      return allData.map(transformApplicationToRow) as unknown as Record<
+        string,
+        unknown
+      >[];
+    },
+    dispatch,
   });
 
+  // Apply search filter with shared utility
+  const filteredRows = filterRowsBySearch<Record<string, unknown>>(
+    state.rowsData as unknown as Record<string, unknown>[],
+    state.search,
+    ["name", "status", "uptime", "messages"],
+  ) as unknown as DigitalAssistantRow[];
+
   const noApplications =
-    state.rowsData.length === 0 && !state.isLoadingApplications;
+    state.rowsData.length === 0 && !state.isLoading && !state.fetchError;
   const noSearchResults =
-    state.rowsData.length > 0 && filteredRows.length === 0;
+    state.rowsData.length > 0 && filteredRows.length === 0 && !state.fetchError;
+
+  // Visible headers for the DataTable (shared utility)
+  const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
   // Show DeploymentDetails if a deployment is selected
   if (state.showDeploymentDetails && state.selectedDeployment) {
@@ -330,7 +289,7 @@ const DigitalAssistantsPage = () => {
       <DeploymentDetails
         deployment={state.selectedDeployment}
         onBack={() => {
-          dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS });
+          dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS } as AppAction);
           loadApplications();
         }}
         deploymentSource="Digital assistants"
@@ -338,7 +297,7 @@ const DigitalAssistantsPage = () => {
           dispatch({
             type: ACTION_TYPES.UPDATE_DEPLOYMENT_NAME,
             payload: newName,
-          })
+          } as AppAction)
         }
       />
     );
@@ -346,47 +305,31 @@ const DigitalAssistantsPage = () => {
 
   return (
     <>
-      {state.toastOpen && (
-        <ActionableNotification
-          actionButtonLabel="Try again"
-          aria-label="close notification"
-          kind="error"
-          closeOnEscape
-          title={`Delete digital assistant ${state.deleteErrorRowName} failed`}
-          subtitle={state.deleteErrorMessage}
-          onCloseButtonClick={() => {
-            dispatch({ type: ACTION_TYPES.HIDE_ERROR });
-          }}
-          onActionButtonClick={async () => {
-            const currentRowId = state.selectedRowId;
-            dispatch({ type: ACTION_TYPES.HIDE_ERROR });
-            dispatch({
-              type: ACTION_TYPES.SET_SELECTED_ROW_ID,
-              payload: currentRowId,
-            });
-            await handleDelete();
-          }}
-          className={styles.customToast}
-        />
-      )}
-      {state.exportToastOpen && (
-        <ActionableNotification
-          aria-label="close notification"
-          kind={state.exportToastKind}
-          closeOnEscape
-          title={
-            state.exportToastKind === "success"
-              ? "Export successful"
-              : "Export failed"
-          }
-          subtitle={state.exportToastMessage}
-          onCloseButtonClick={() => {
-            dispatch({ type: ACTION_TYPES.HIDE_EXPORT_TOAST });
-          }}
-          className={styles.customToast}
-          hideCloseButton={false}
-        />
-      )}
+      <TableToasts
+        // Delete error toast
+        toastOpen={state.toastOpen}
+        deleteErrorRowName={state.deleteErrorRowName}
+        deleteErrorMessage={state.deleteErrorMessage}
+        entityLabel="digital assistant"
+        onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
+        onDeleteErrorRetry={async () => {
+          const currentRowId = state.selectedRowId;
+          dispatch({ type: "SHARED_HIDE_ERROR" });
+          dispatch({
+            type: "SHARED_SET_SELECTED_ROW_ID",
+            payload: currentRowId,
+          });
+          await handleDelete();
+        }}
+        // Export toast
+        exportToastOpen={state.exportToastOpen}
+        exportToastKind={state.exportToastKind}
+        exportToastMessage={state.exportToastMessage}
+        onExportToastClose={() =>
+          dispatch({ type: "SHARED_HIDE_EXPORT_TOAST" })
+        }
+      />
+
       <Tabs>
         <PageHeader
           title={{ text: pageTitle }}
@@ -405,7 +348,7 @@ const DigitalAssistantsPage = () => {
             <div className={styles.tableContent}>
               <Grid fullWidth>
                 <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-                  {state.isLoadingApplications ? (
+                  {state.isLoading ? (
                     <DataTableSkeleton
                       headers={HEADERS}
                       rowCount={state.pageSize}
@@ -414,13 +357,7 @@ const DigitalAssistantsPage = () => {
                   ) : (
                     <DataTable
                       rows={filteredRows}
-                      headers={HEADERS.filter(
-                        (h) =>
-                          h.key === "actions" ||
-                          state.visibleColumns[
-                            h.key as keyof typeof state.visibleColumns
-                          ],
-                      )}
+                      headers={visibleHeaders}
                       size="lg"
                     >
                       {({
@@ -434,108 +371,48 @@ const DigitalAssistantsPage = () => {
                       }) => (
                         <>
                           <TableContainer>
-                            <TableToolbar>
-                              <TableToolbarSearch
-                                placeholder="Search"
-                                persistent
-                                value={state.search}
-                                onChange={(e) => {
-                                  if (typeof e !== "string") {
-                                    dispatch({
-                                      type: ACTION_TYPES.SET_SEARCH,
-                                      payload: e.target.value,
-                                    });
-                                  }
-                                }}
-                              />
-
-                              <TableToolbarContent>
-                                <Button
-                                  hasIconOnly
-                                  kind="ghost"
-                                  renderIcon={Reset}
-                                  iconDescription="Refresh"
-                                  size="lg"
-                                  onClick={loadApplications}
-                                />
-                                <Button
-                                  hasIconOnly
-                                  kind="ghost"
-                                  renderIcon={Export}
-                                  iconDescription="Export"
-                                  size="lg"
-                                  onClick={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.OPEN_EXPORT_DIALOG,
-                                    })
-                                  }
-                                />
-                                <OverflowMenu
-                                  renderIcon={ColumnIcon}
-                                  iconDescription="Edit columns"
-                                  aria-label="Edit columns"
-                                  size="lg"
-                                  flipped
-                                >
-                                  <li
-                                    className={styles.overflowMenuContent}
-                                    role="none"
-                                  >
-                                    <h6 className={styles.overflowMenuHeading}>
-                                      Edit columns
-                                    </h6>
-                                    <CheckboxGroup legendText="">
-                                      {HEADERS.filter(
-                                        (h) => h.key !== "actions",
-                                      ).map((header) => (
-                                        <Checkbox
-                                          key={`column-${header.key}`}
-                                          labelText={String(header.header)}
-                                          id={`column-${header.key}`}
-                                          checked={
-                                            state.visibleColumns[
-                                              header.key as keyof typeof state.visibleColumns
-                                            ]
-                                          }
-                                          disabled={header.key === "name"}
-                                          onChange={() =>
-                                            dispatch({
-                                              type: ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY,
-                                              payload: header.key,
-                                            })
-                                          }
-                                        />
-                                      ))}
-                                    </CheckboxGroup>
-                                    <div className={styles.overflowMenuActions}>
-                                      <Button
-                                        kind="secondary"
-                                        size="sm"
-                                        onClick={() =>
-                                          dispatch({
-                                            type: ACTION_TYPES.RESET_COLUMN_VISIBILITY,
-                                          })
-                                        }
-                                      >
-                                        Reset
-                                      </Button>
-                                    </div>
-                                  </li>
-                                </OverflowMenu>
-                                <Button
-                                  kind="primary"
-                                  size="lg"
-                                  renderIcon={Deploy}
-                                  onClick={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.OPEN_DEPLOY_FLOW,
-                                    })
-                                  }
-                                >
-                                  Deploy
-                                </Button>
-                              </TableToolbarContent>
-                            </TableToolbar>
+                            <TableToolbarActions
+                              search={state.search}
+                              headers={HEADERS}
+                              visibleColumns={state.visibleColumns}
+                              onSearchChange={(value) =>
+                                dispatch({
+                                  type: "SHARED_SET_SEARCH",
+                                  payload: value,
+                                })
+                              }
+                              onRefresh={() => loadApplications()}
+                              onExport={() =>
+                                dispatch({
+                                  type: "SHARED_OPEN_EXPORT_DIALOG",
+                                })
+                              }
+                              onToggleColumn={(key) =>
+                                dispatch({
+                                  type: "SHARED_TOGGLE_COLUMN_VISIBILITY",
+                                  payload: key,
+                                })
+                              }
+                              onResetColumns={() =>
+                                dispatch({
+                                  type: "SHARED_RESET_COLUMN_VISIBILITY",
+                                  payload: DEFAULT_VISIBLE_COLUMNS,
+                                })
+                              }
+                            >
+                              <Button
+                                kind="primary"
+                                size="lg"
+                                renderIcon={Deploy}
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.OPEN_DEPLOY_FLOW,
+                                  } as AppAction)
+                                }
+                              >
+                                Deploy
+                              </Button>
+                            </TableToolbarActions>
 
                             <Table {...getTableProps()}>
                               <TableHead>
@@ -556,95 +433,90 @@ const DigitalAssistantsPage = () => {
                                   })}
                                 </TableRow>
                               </TableHead>
-                              {!noApplications && !noSearchResults && (
-                                <TableBody>
-                                  {rows.map((row) => {
-                                    const { key: rowKey, ...rowProps } =
-                                      getRowProps({
-                                        row,
-                                      });
-                                    const originalRow = filteredRows.find(
-                                      (r: DigitalAssistantRow) =>
-                                        r.id === row.id,
-                                    );
-                                    const hasChildren =
-                                      originalRow?.children &&
-                                      originalRow.children.length > 0;
+                              {!state.fetchError &&
+                                !noApplications &&
+                                !noSearchResults && (
+                                  <TableBody>
+                                    {rows.map((row) => {
+                                      const { key: rowKey, ...rowProps } =
+                                        getRowProps({
+                                          row,
+                                        });
+                                      const originalRow = filteredRows.find(
+                                        (r: DigitalAssistantRow) =>
+                                          r.id === row.id,
+                                      );
+                                      const hasChildren =
+                                        originalRow?.children &&
+                                        originalRow.children.length > 0;
 
-                                    return (
-                                      <React.Fragment key={rowKey}>
-                                        <TableExpandRow
-                                          {...rowProps}
-                                          isExpanded={row.isExpanded}
-                                        >
-                                          {row.cells.map((cell) => {
-                                            const {
-                                              key: cellKey,
-                                              ...cellProps
-                                            } = getCellProps({ cell });
+                                      return (
+                                        <Fragment key={rowKey}>
+                                          <TableExpandRow
+                                            {...rowProps}
+                                            isExpanded={row.isExpanded}
+                                          >
+                                            {row.cells.map((cell) => {
+                                              const {
+                                                key: cellKey,
+                                                ...cellProps
+                                              } = getCellProps({ cell });
 
-                                            return renderCell({
-                                              header: cell.info.header,
-                                              value: cell.value,
-                                              rowId: row.id as string,
-                                              dispatch,
-                                              cellKey,
-                                              cellProps,
-                                              rowData: originalRow,
-                                            });
-                                          })}
-                                        </TableExpandRow>
-                                        {hasChildren &&
-                                          row.isExpanded &&
-                                          originalRow.children?.map(
-                                            (child: DigitalAssistantRow) => (
-                                              <TableRow key={child.id}>
-                                                <TableCell />
-                                                <TableCell>
-                                                  {child.name}
-                                                </TableCell>
-                                                {state.visibleColumns
-                                                  .status && (
+                                              return renderCell({
+                                                header: cell.info.header,
+                                                value: cell.value,
+                                                rowId: row.id as string,
+                                                dispatch,
+                                                cellKey,
+                                                cellProps,
+                                                rowData: originalRow,
+                                              });
+                                            })}
+                                          </TableExpandRow>
+                                          {hasChildren &&
+                                            row.isExpanded &&
+                                            originalRow.children?.map(
+                                              (child: DigitalAssistantRow) => (
+                                                <TableRow key={child.id}>
+                                                  <TableCell />
                                                   <TableCell>
-                                                    <StatusCell
-                                                      value={child.status}
-                                                      rowId={child.id}
-                                                      dispatch={dispatch}
-                                                    />
+                                                    {child.name}
                                                   </TableCell>
-                                                )}
-                                                {state.visibleColumns
-                                                  .uptime && <TableCell />}
-                                                {state.visibleColumns
-                                                  .messages && <TableCell />}
-                                                <TableCell />
-                                              </TableRow>
-                                            ),
-                                          )}
-                                      </React.Fragment>
-                                    );
-                                  })}
-                                </TableBody>
-                              )}
+                                                  {state.visibleColumns
+                                                    .status && (
+                                                    <TableCell>
+                                                      <StatusCell
+                                                        value={child.status}
+                                                        rowId={child.id}
+                                                      />
+                                                    </TableCell>
+                                                  )}
+                                                  {state.visibleColumns
+                                                    .uptime && <TableCell />}
+                                                  {state.visibleColumns
+                                                    .messages && <TableCell />}
+                                                  <TableCell />
+                                                </TableRow>
+                                              ),
+                                            )}
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </TableBody>
+                                )}
                             </Table>
-                            {noApplications && (
-                              <NoDataEmptyState
-                                title="Start by adding a digital assistant"
-                                subtitle="To deploy a new digital assistant, click Deploy."
-                                className={styles.noDataContent}
-                              />
-                            )}
-                            {noSearchResults && (
-                              <NoDataEmptyState
-                                title="No data"
-                                subtitle="Try adjusting your search or filter."
-                                className={styles.noDataContent}
-                              />
-                            )}
+
+                            <TableEmptyStates
+                              fetchError={state.fetchError}
+                              noData={noApplications}
+                              noSearchResults={noSearchResults}
+                              entityName="digital assistant"
+                              className={styles.noDataContent}
+                            />
                           </TableContainer>
 
-                          {!state.isLoadingApplications &&
-                            state.totalItems > 20 &&
+                          {!state.isLoading &&
+                            state.totalItems > state.pageSize &&
                             filteredRows.length > 0 && (
                               <Pagination
                                 page={state.page}
@@ -652,14 +524,17 @@ const DigitalAssistantsPage = () => {
                                 pageSizes={[20, 30, 50]}
                                 totalItems={state.totalItems}
                                 onChange={({ page, pageSize }) => {
+                                  pageRef.current = page;
+                                  pageSizeRef.current = pageSize;
                                   dispatch({
-                                    type: ACTION_TYPES.SET_PAGE,
+                                    type: "SHARED_SET_PAGE",
                                     payload: page,
                                   });
                                   dispatch({
-                                    type: ACTION_TYPES.SET_PAGE_SIZE,
+                                    type: "SHARED_SET_PAGE_SIZE",
                                     payload: pageSize,
                                   });
+                                  void loadApplications(page, pageSize);
                                 }}
                               />
                             )}
@@ -668,90 +543,50 @@ const DigitalAssistantsPage = () => {
                     </DataTable>
                   )}
 
-                  <Modal
-                    open={state.isDeleteDialogOpen}
-                    size="sm"
+                  <DeleteModal
+                    isOpen={state.isDeleteDialogOpen}
+                    isDeleting={state.isDeleting}
+                    isConfirmed={state.isConfirmed}
+                    itemName={
+                      state.rowsData.find(
+                        (r: DigitalAssistantRow) =>
+                          r.id === state.selectedRowId,
+                      )?.name ?? ""
+                    }
                     modalLabel="Delete digital assistant deployment"
-                    modalHeading="Confirm delete"
-                    primaryButtonText={
-                      state.isDeleting ? "Deleting..." : "Delete"
+                    confirmLegend="Confirm digital assistant deployment to be deleted"
+                    warningText="Deleting a digital assistant deployment permanently deletes all associated components, including connected services, runtime metadata, and configurations will be permanently deleted, and it cannot be undone."
+                    onConfirm={() => handleDelete()}
+                    onClose={() =>
+                      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })
                     }
-                    secondaryButtonText="Cancel"
-                    danger
-                    primaryButtonDisabled={
-                      !state.isConfirmed || state.isDeleting
+                    onCheckboxChange={(checked) =>
+                      dispatch({
+                        type: "SHARED_SET_CONFIRMED",
+                        payload: checked,
+                      })
                     }
-                    onRequestClose={() => {
-                      if (!state.isDeleting) {
-                        dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
-                      }
-                    }}
-                    onRequestSubmit={handleDelete}
-                  >
-                    <p>
-                      Deleting a digital assistant deployment permanently
-                      deletes all associated components, including connected
-                      services, runtime metadata, and configurations will be
-                      permanently deleted, and it cannot be undone.
-                    </p>
-                    <div>
-                      <CheckboxGroup
-                        className={styles.deleteConfirmation}
-                        legendText="Confirm digital assistant deployment to be deleted"
-                      >
-                        <Checkbox
-                          id="checkbox-label-1"
-                          labelText={
-                            <strong>
-                              {state.selectedRowId
-                                ? state.rowsData.find(
-                                    (r: DigitalAssistantRow) =>
-                                      r.id === state.selectedRowId,
-                                  )?.name
-                                : ""}
-                            </strong>
-                          }
-                          checked={state.isConfirmed}
-                          onChange={(_, { checked }) =>
-                            dispatch({
-                              type: ACTION_TYPES.SET_CONFIRMED,
-                              payload: checked,
-                            })
-                          }
-                        />
-                      </CheckboxGroup>
-                    </div>
-                  </Modal>
-                  <Modal
-                    open={state.isExportDialogOpen}
-                    size="sm"
-                    modalHeading="Export as CSV"
-                    primaryButtonText={
-                      state.isExporting ? "Exporting..." : "Export"
+                  />
+
+                  <ExportModal
+                    isOpen={state.isExportDialogOpen}
+                    isExporting={state.isExporting}
+                    csvFileName={state.csvFileName}
+                    exportErrorMessage={state.exportErrorMessage}
+                    onConfirm={downloadCSV}
+                    onClose={() =>
+                      dispatch({ type: "SHARED_CLOSE_EXPORT_DIALOG" })
                     }
-                    primaryButtonDisabled={state.isExporting}
-                    secondaryButtonText="Cancel"
-                    onRequestSubmit={downloadCSV}
-                    onRequestClose={() => {
-                      if (!state.isExporting)
-                        dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG });
-                    }}
-                  >
-                    <TextInput
-                      id="csv-file-name"
-                      labelText="File name"
-                      value={state.csvFileName}
-                      invalid={!!state.exportErrorMessage}
-                      invalidText={state.exportErrorMessage}
-                      onChange={(e) => {
-                        dispatch({
-                          type: ACTION_TYPES.SET_CSV_FILENAME,
-                          payload: e.target.value,
-                        });
-                        dispatch({ type: ACTION_TYPES.CLEAR_EXPORT_ERROR });
-                      }}
-                    />
-                  </Modal>
+                    onFileNameChange={(value) =>
+                      dispatch({
+                        type: "SHARED_SET_CSV_FILENAME",
+                        payload: value,
+                      })
+                    }
+                    onClearError={() =>
+                      dispatch({ type: "SHARED_CLEAR_EXPORT_ERROR" })
+                    }
+                  />
                 </Column>
               </Grid>
             </div>
@@ -759,7 +594,7 @@ const DigitalAssistantsPage = () => {
           <TabPanel>
             <AboutTab
               onDeployClick={() =>
-                dispatch({ type: ACTION_TYPES.OPEN_DEPLOY_FLOW })
+                dispatch({ type: ACTION_TYPES.OPEN_DEPLOY_FLOW } as AppAction)
               }
             />
           </TabPanel>
@@ -767,7 +602,9 @@ const DigitalAssistantsPage = () => {
       </Tabs>
       <DeployFlow
         open={state.isDeployFlowOpen}
-        onClose={() => dispatch({ type: ACTION_TYPES.CLOSE_DEPLOY_FLOW })}
+        onClose={() =>
+          dispatch({ type: ACTION_TYPES.CLOSE_DEPLOY_FLOW } as AppAction)
+        }
         onSubmit={handleDeploySubmit}
       />
     </>
