@@ -47,12 +47,13 @@ import pytest
 from digitize.connectors.models import SyncStatus
 from digitize.connectors.sync_tick import (
     _cancel_tick,
-    _check_delete_pending,
+    _check_interrupt_call,
     _classify as _real_classify,
     _complete_tick,
     _delete_orphans,
     _fail_tick,
     _process_new_files,
+    InterruptType,
     run_tick,
 )
 
@@ -190,6 +191,9 @@ class TestProcessNewFiles:
         stack.enter_context(
             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING)
         )
+        stack.enter_context(
+            patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED)
+        )
         return stack
 
     def test_happy_path_completes_without_error(self):
@@ -231,6 +235,9 @@ class TestProcessNewFiles:
             stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING)
+            )
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED)
             )
             # Force batch_size=1 so the two files land in separate batches
             stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
@@ -371,6 +378,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
@@ -390,6 +398,7 @@ class TestRunTick:
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=2), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close:
             asyncio.run(run_tick("conn-1"))
@@ -407,6 +416,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log"):
             asyncio.run(run_tick("conn-1"))
@@ -422,6 +432,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close:
             asyncio.run(run_tick("conn-1"))
@@ -431,31 +442,48 @@ class TestRunTick:
 
 
 # ---------------------------------------------------------------------------
-# _check_delete_pending
+# _check_interrupt_call
 # ---------------------------------------------------------------------------
 
-class TestCheckDeletePending:
-    def test_raises_cancelled_error_when_delete_pending(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.DELETE_PENDING):
-            with pytest.raises(asyncio.CancelledError):
-                _check_delete_pending("conn-1")
+class TestCheckInterruptCall:
+    def test_returns_delete_connector_when_delete_pending(self):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.DELETE_PENDING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED):
+            result = _check_interrupt_call("conn-1", sync_seq=1)
+            assert result == InterruptType.DELETE_CONNECTOR
 
-    def test_does_not_raise_when_syncing(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING):
-            _check_delete_pending("conn-1")  # must not raise
+    def test_returns_sync_cancel_when_cancel_pending_on_log(self):
+        """CANCEL_PENDING is read from connector_sync_logs, not from connectors.sync_status."""
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.CANCEL_PENDING):
+            result = _check_interrupt_call("conn-1", sync_seq=5)
+            assert result == InterruptType.SYNC_CANCEL
 
-    def test_does_not_raise_when_none(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=None):
-            _check_delete_pending("conn-1")  # must not raise
+    def test_returns_none_when_syncing_and_log_started(self):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED):
+            result = _check_interrupt_call("conn-1", sync_seq=1)
+            assert result is None
 
-    def test_raises_cancelled_error_when_cancel_pending(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.CANCEL_PENDING):
-            with pytest.raises(asyncio.CancelledError):
-                _check_delete_pending("conn-1")
+    def test_returns_none_when_connector_status_is_none(self):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=None), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED):
+            result = _check_interrupt_call("conn-1", sync_seq=1)
+            assert result is None
 
-    def test_does_not_raise_when_up_to_date(self):
-        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.UP_TO_DATE):
-            _check_delete_pending("conn-1")  # must not raise
+    def test_returns_none_when_up_to_date(self):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.UP_TO_DATE), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED):
+            result = _check_interrupt_call("conn-1", sync_seq=1)
+            assert result is None
+
+    def test_delete_pending_short_circuits_before_log_check(self):
+        """DELETE_PENDING on the connector row is detected without querying the log."""
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.DELETE_PENDING) as mock_cs, \
+             patch(f"{DB_MODULE}.get_sync_log_status") as mock_ls:
+            result = _check_interrupt_call("conn-1", sync_seq=7)
+        assert result == InterruptType.DELETE_CONNECTOR
+        mock_ls.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +547,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=SyncStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncStatus.STARTED), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
@@ -530,24 +559,25 @@ class TestRunTickCancellation:
         assert mock_close.call_args.kwargs["status"] == SyncStatus.COMPLETED
 
     def test_cancelled_mid_process_closes_log(self):
-        """_check_delete_pending fires inside _process_new_files loop."""
+        """_check_interrupt_call fires inside _process_new_files loop."""
         connector = _connector()
         mock_scanner = self._make_scanner()
         mock_scanner.scan.return_value = [("file.pdf", "ck1")]
 
         call_count = {"n": 0}
 
-        def _maybe_cancel(connector_id):
+        def _maybe_cancel(connector_id, sync_seq):
             call_count["n"] += 1
             if call_count["n"] >= 2:  # second call = inside _process_new_files
-                raise asyncio.CancelledError("delete pending")
+                return InterruptType.SYNC_CANCEL
+            return None
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
              patch(f"{DB_MODULE}.open_new_sync_log", return_value=12), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.get_connector_sync_status", side_effect=_maybe_cancel), \
+             patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_maybe_cancel), \
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner):
             with pytest.raises(asyncio.CancelledError):

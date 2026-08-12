@@ -525,6 +525,26 @@ def build_scanner(config: ConnectorConfig) -> BaseScanner:
 - **Phase 4b (Orphan Removal):** Runs **strictly after Phase 4a completes**. Delete checksum rows for `orphan_checksums = known_checksums − scanned_checksums`. If remaining count is `0`, call `_best_effort_delete_document(doc_id)`.
 - **Phase 5 (Finalize):** Write terminal status (`'completed'`/`'failed'`/`'cancelled'`) and update `sync_status` on the connector row. Call `scanner.close()` in top-level `finally`.
 
+#### Interrupt Handling
+
+The tick implementation uses a generic `_check_interrupt_call()` function that checks for interrupt signals from **two distinct sources** and returns an `InterruptType` enum:
+
+1. **`connectors.sync_status = DELETE_PENDING`** → `InterruptType.DELETE_CONNECTOR`
+   - When a DELETE request is issued while a sync is running, the connector is marked for deletion.
+   - When the running tick detects this, it stops the sync, closes the sync log as cancelled, and proceeds to **full teardown**:
+     - Remove all checksum ownership rows; delete documents when they lose their last owner
+     - Delete the connector row (cascades to all sync_logs)
+     - Sweep residual batch staging directories
+
+2. **`connectors.sync_status = CANCEL_PENDING`** → `InterruptType.SYNC_CANCEL`
+   - When a DELETE /sync request is issued, only the current sync should be stopped.
+   - When detected, the tick stops, closes the sync log as cancelled, and:
+     - Sets connector to `OUT_OF_SYNC` status (automatic via `close_sync_log` when status='cancelled')
+     - Cleans up staging directories for this specific sync
+     - The connector remains in the database and will be re-synced on the next scheduler interval
+
+The `_check_interrupt_call()` is invoked at **three phase boundaries** (before scan, after download, after each batch) to catch interrupts promptly without leaving partial work behind.
+
 ---
 
 ### 6.2 Implementation Code
@@ -540,7 +560,12 @@ async def run_tick(connector_id: str) -> None:
     scanner = build_scanner(config)
 
     try:
-        _check_delete_pending(connector_id)  # Phase boundary: before scan
+        # Phase boundary: check for interrupt signals before any remote I/O starts
+        interrupt = _check_interrupt_call(connector_id)
+        if interrupt == InterruptType.DELETE_CONNECTOR:
+            raise asyncio.CancelledError(f"Connector {connector_id!r} marked for deletion")
+        elif interrupt == InterruptType.SYNC_CANCEL:
+            raise asyncio.CancelledError(f"Sync cancel requested for connector {connector_id!r}")
 
         await asyncio.to_thread(scanner.connect)
         scanned_files = await asyncio.to_thread(scanner.scan)
@@ -564,9 +589,10 @@ async def run_tick(connector_id: str) -> None:
         await _delete_orphans(connector_id, orphan_checksums)
         _complete_tick(sync_seq, connector_id)
 
-    except asyncio.CancelledError:
-        logger.info(f"Tick cancelled for connector {connector_id!r} (delete_pending)")
-        _cancel_tick(sync_seq, connector_id)
+    except asyncio.CancelledError as ce:
+        logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
+        interrupt = _check_interrupt_call(connector_id)
+        _handle_interrupt(sync_seq, connector_id, interrupt)
         raise
     except Exception as exc:
         logger.error(f"Tick failed for connector {connector_id!r}: {exc}", exc_info=True)
@@ -619,7 +645,12 @@ async def _process_new_files(
 
     for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
         batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
-        _check_delete_pending(connector_id)  # checkpoint: before each batch
+        # Checkpoint: check for interrupts before each batch
+        interrupt = _check_interrupt_call(connector_id)
+        if interrupt:
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         job_id = generate_uuid()
         batch_dir_name = f"{connector_id}-{sync_seq}-{batch_number}"
@@ -636,7 +667,12 @@ async def _process_new_files(
                 scanner.verify_integrity(local_checksum, checksum)
                 checksum_to_filename[checksum] = filename
 
-            _check_delete_pending(connector_id)  # checkpoint: after downloads
+            # Checkpoint: check for interrupts after downloads
+            interrupt = _check_interrupt_call(connector_id)
+            if interrupt:
+                raise asyncio.CancelledError(
+                    f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+                )
 
             filenames = list(checksum_to_filename.values())
             doc_id_dict = initialize_job_state(

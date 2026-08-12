@@ -20,7 +20,9 @@ acquired the sync lock via try_acquire_sync_lock().
 from __future__ import annotations
 
 import asyncio
+from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 from common.misc_utils import cleanup_staging_directory, get_logger
 from digitize.connectors.scanners.scanner_factory import build_scanner
@@ -33,6 +35,7 @@ from digitize.utils.db import (
     close_sync_log,
     get_active_connector,
     get_connector_sync_status,
+    get_sync_log_status,
     get_job,
     list_all_checksums,
     list_connector_checksums,
@@ -47,24 +50,45 @@ logger = get_logger("sync_tick")
 
 
 # ---------------------------------------------------------------------------
+# Interrupt handling enum
+# ---------------------------------------------------------------------------
+
+class InterruptType(Enum):
+    """Indicates the type of interrupt signal detected during sync execution."""
+    SYNC_CANCEL = "sync_cancel"      # CANCEL_PENDING in ConnectorSyncLog
+    DELETE_CONNECTOR = "delete_connector"  # DELETE_PENDING in Connectors table
+
+
+# ---------------------------------------------------------------------------
 # Cancellation helper
 # ---------------------------------------------------------------------------
 
-def _check_delete_pending(connector_id: str) -> None:
+def _check_interrupt_call(connector_id: str, sync_seq: int) -> Optional[InterruptType]:
     """
-    Raise asyncio.CancelledError if the connector is marked for deletion or
-    a stop-sync request has been issued.
+    Check for interrupt signals from both connectors and connector_sync_logs tables.
 
-    Performs a live DB query — no in-memory state.  Called at the three
-    phase boundaries inside run_tick / _process_new_files so that a DELETE
-    or DELETE /sync request is honoured promptly without leaving the tick
-    running to completion.
+    Checks two sources:
+    1. connectors.sync_status for DELETE_PENDING (delete entire connector)
+    2. connector_sync_logs.status for CANCEL_PENDING on the active seq row
+       (cancel only current sync)
+
+    Returns the appropriate InterruptType if a signal is detected, None otherwise.
+    Performs a live DB query — no in-memory state. Called at the three phase
+    boundaries inside run_tick / _process_new_files so that a DELETE or
+    CANCEL request is honoured promptly without leaving the tick running to
+    completion.
     """
-    status = get_connector_sync_status(connector_id)
-    if status in (SyncStatus.DELETE_PENDING, SyncStatus.CANCEL_PENDING):
-        raise asyncio.CancelledError(
-            f"Connector {connector_id!r} sync cancelled (status={status!r})"
-        )
+    # Check connectors table for DELETE_PENDING
+    connector_status = get_connector_sync_status(connector_id)
+    if connector_status == SyncStatus.DELETE_PENDING:
+        return InterruptType.DELETE_CONNECTOR
+
+    # Check the specific sync-log row for CANCEL_PENDING (not the connector row)
+    sync_log_status = get_sync_log_status(connector_id, sync_seq)
+    if sync_log_status == SyncStatus.CANCEL_PENDING:
+        return InterruptType.SYNC_CANCEL
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +112,16 @@ async def run_tick(connector_id: str) -> None:
     scanner = build_scanner(config)
 
     try:
-        # Phase boundary: check for DELETE_PENDING before any remote I/O starts.
-        _check_delete_pending(connector_id)
+        # Phase boundary: check for interrupt signals before any remote I/O starts.
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt == InterruptType.DELETE_CONNECTOR:
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} marked for deletion"
+            )
+        elif interrupt == InterruptType.SYNC_CANCEL:
+            raise asyncio.CancelledError(
+                f"Sync cancel requested for connector {connector_id!r}"
+            )
 
         await asyncio.to_thread(scanner.connect)
         scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
@@ -114,9 +146,10 @@ async def run_tick(connector_id: str) -> None:
 
         _complete_tick(sync_seq, connector_id)
 
-    except asyncio.CancelledError:
-        logger.info(f"Tick cancelled for connector {connector_id!r} (delete_pending)")
-        _cancel_tick(sync_seq, connector_id)
+    except asyncio.CancelledError as ce:
+        logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        _handle_interrupt(sync_seq, connector_id, interrupt)
         raise
 
     except Exception as exc:
@@ -184,11 +217,11 @@ _BATCH_SIZE = 10
 _JOB_POLL_INTERVAL = 10  # seconds between job-status polls while waiting for a batch
 
 
-async def _wait_for_job(job_id: str, connector_id: str) -> None:
+async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
     """Poll *job_id* until it reaches a terminal state.
 
     Sleeps *_JOB_POLL_INTERVAL* seconds between polls.  On every wake-up it
-    also calls ``_check_delete_pending`` so that a deletion/cancel request is
+    also calls ``_check_interrupt_call`` so that a deletion/cancel request is
     honoured promptly even while the batch is running.
 
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
@@ -197,7 +230,11 @@ async def _wait_for_job(job_id: str, connector_id: str) -> None:
     _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.FAILED.value}
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
-        _check_delete_pending(connector_id)
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt:
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
         job_data = get_job(job_id)
         status = (job_data or {}).get("status", "")
         logger.debug(f"Polling job {job_id!r} for connector {connector_id!r}: status={status!r}")
@@ -224,7 +261,11 @@ async def _process_new_files(
         batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
 
         # Cancellation checkpoint: bail before each batch starts.
-        _check_delete_pending(connector_id)
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt:
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         job_id = generate_uuid()
         batch_dir_name = f"{connector_id}-{sync_seq}-{batch_number}"
@@ -249,7 +290,11 @@ async def _process_new_files(
                 checksum_to_filename[checksum] = filename
 
             # Cancellation checkpoint: bail after each batch of downloads.
-            _check_delete_pending(connector_id)
+            interrupt = _check_interrupt_call(connector_id, sync_seq)
+            if interrupt:
+                raise asyncio.CancelledError(
+                    f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+                )
 
             filenames = list(checksum_to_filename.values())
             job_name = f"{connector_id} - {sync_seq} - {batch_number}"
@@ -266,7 +311,7 @@ async def _process_new_files(
 
             await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
-            await _wait_for_job(job_id, connector_id)
+            await _wait_for_job(job_id, connector_id, sync_seq)
 
         except Exception as exc:
             logger.warning(
@@ -298,6 +343,118 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
                 exc_info=True,
             )
             raise
+
+
+# ---------------------------------------------------------------------------
+# Interrupt handler — differentiated handling for cancel vs delete
+# ---------------------------------------------------------------------------
+
+def _handle_interrupt(
+    sync_seq: int,
+    connector_id: str,
+    interrupt_type: Optional[InterruptType],
+) -> None:
+    """
+    Handle cancellation based on interrupt type.
+
+    SYNC_CANCEL: Stop the current sync, set connector to OUT_OF_SYNC, cleanup staging.
+    DELETE_CONNECTOR: Stop sync + full teardown (remove checksums, docs, connector row).
+    """
+    if interrupt_type is None:
+        # Default cancel behavior — treat as sync cancel
+        _cancel_tick(sync_seq, connector_id)
+        return
+
+    if interrupt_type == InterruptType.SYNC_CANCEL:
+        logger.info(f"Handling sync cancel for connector {connector_id!r}")
+        _cancel_tick(sync_seq, connector_id)
+        # Note: close_sync_log() automatically sets connector to OUT_OF_SYNC when
+        # sync log status is CANCELLED. Cleanup staging directory for this sync.
+        _sweep_sync_staging(connector_id, sync_seq)
+
+    elif interrupt_type == InterruptType.DELETE_CONNECTOR:
+        logger.info(f"Handling delete connector for {connector_id!r}")
+        _cancel_tick(sync_seq, connector_id)
+        # Run full teardown: remove checksums, delete orphaned docs, delete connector row
+        _run_delete_teardown(connector_id)
+
+
+def _sweep_sync_staging(connector_id: str, sync_seq: int) -> None:
+    """Remove staging directories for a specific sync (pattern: {connector_id}-{sync_seq}-*)."""
+    from digitize.settings import settings
+    staging_base = settings.digitize.staging_dir / "connectors"
+    try:
+        if not staging_base.exists():
+            return
+        # Pattern: {connector_id}-{sync_seq}-* (matches all batch directories for this sync)
+        prefix = f"{connector_id}-{sync_seq}-"
+        for entry in staging_base.iterdir():
+            if entry.is_dir() and entry.name.startswith(prefix):
+                cleanup_staging_directory(entry.name, staging_base, ignore_errors=True)
+        logger.debug(f"Swept staging directories for sync {connector_id!r}:{sync_seq}")
+    except Exception as exc:
+        logger.warning(
+            f"Error sweeping staging directories for {connector_id!r}:{sync_seq}: {exc}",
+            exc_info=True,
+        )
+
+
+def _run_delete_teardown(connector_id: str) -> None:
+    """
+    Full teardown for connector deletion.
+
+    Steps:
+      1. Remove all checksum ownership rows; delete documents when last owner
+      2. Delete the connector row (cascades to sync_logs)
+      3. Sweep all residual batch staging directories
+    """
+    from digitize.utils.db import (
+        list_connector_checksums,
+        remove_connector_checksum_entry,
+        delete_active_connector,
+    )
+    from digitize.settings import settings
+    from digitize.api.v1.connectors import _sweep_connector_staging
+
+    logger.info(f"Running full teardown for connector {connector_id!r}")
+    try:
+        # Step 1: remove checksum ownership; delete orphaned documents
+        owned_checksums = list_connector_checksums(connector_id)
+        for checksum in owned_checksums:
+            try:
+                remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
+                if remaining == 0 and doc_id:
+                    _best_effort_delete_document(doc_id)
+            except Exception as exc:
+                logger.error(
+                    f"Error removing checksum {checksum!r} for connector "
+                    f"{connector_id!r}: {exc}",
+                    exc_info=True,
+                )
+
+        # Step 2: delete the connector row (cascades to connector_sync_logs)
+        deleted = delete_active_connector(connector_id)
+        if not deleted:
+            logger.warning(
+                f"delete_active_connector returned False for {connector_id!r} "
+                "— row may have already been removed"
+            )
+
+        # Step 3: sweep all residual batch staging directories for this connector
+        _sweep_connector_staging(connector_id, settings.digitize.staging_dir / "connectors")
+
+        logger.info(f"Connector {connector_id!r} full teardown complete")
+    except Exception as exc:
+        logger.error(
+            f"Unexpected error during full teardown for connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
+
+
+def _best_effort_delete_document(doc_id: str) -> None:
+    """Best-effort document deletion — log but don't raise on failure."""
+    from digitize.api.v1.connectors import _best_effort_delete_document as delete_doc
+    delete_doc(doc_id)
 
 
 # ---------------------------------------------------------------------------

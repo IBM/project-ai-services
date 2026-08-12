@@ -1283,6 +1283,31 @@ class DatabaseManager:
             return False
 
     @staticmethod
+    def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
+        """
+        Return the status of a specific sync-log row identified by (connector_id, seq).
+
+        Returns None if the row does not exist.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConnectorSyncLog.status)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
+                )
+                row = session.execute(stmt).one_or_none()
+                return row[0] if row else None
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_sync_log_status(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
     def get_sync_logs(
         connector_id: str,
         limit: int = 50,
