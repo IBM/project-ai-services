@@ -66,11 +66,11 @@ func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID
 	errorMessages = append(errorMessages, servingRuntimeErr...)
 
 	// Delete namespace of the application
-	if !keepData {
+	if !keepData && len(errorMessages) == 0 {
 		logger.InfofCtx(ctx, "Deleting '%s' namespace.", s.ns)
 		if err := s.rt.DeleteNamespace(s.ns); err != nil {
 			errMsg := fmt.Sprintf("failed to delete '%s' namespace: %v", s.ns, err)
-			logger.Errorf(errMsg)
+			logger.ErrorlnCtx(ctx, errMsg)
 			errorMessages = append(errorMessages, errMsg)
 		}
 	}
@@ -114,7 +114,7 @@ func (s *OpenshiftDeletion) deleteServices(ctx context.Context, ns string, appID
 			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("DB deletion failed: %v", err))
 		}
 
-		if !keepData {
+		if !keepData && len(errorMessages) == 0 {
 			if errMsg := s.deleteVolume(ctx, appID, svc.ID.String()); errMsg != "" {
 				errorMessages = append(errorMessages, errMsg)
 			}
@@ -156,7 +156,7 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, app
 			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, id, models.ComponentStatusError, fmt.Sprintf("DB deletion failed: %v", err))
 		}
 
-		if !keepData {
+		if !keepData && len(errorMessages) == 0 {
 			if errMsg := s.deleteVolume(ctx, appID, id.String()); errMsg != "" {
 				errorMessages = append(errorMessages, errMsg)
 			}
