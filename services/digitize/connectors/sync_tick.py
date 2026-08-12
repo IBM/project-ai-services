@@ -231,7 +231,7 @@ async def _process_new_files(
     for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
         batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
 
-        # Cancellation checkpoint: bail before each batch download starts.
+        # Cancellation checkpoint: bail before each batch starts.
         _check_delete_pending(connector_id)
 
         job_id = generate_uuid()
@@ -248,10 +248,11 @@ async def _process_new_files(
                 local_checksum = await asyncio.to_thread(
                     scanner.download_to, remote_path, batch_dir / filename
                 )
-                # Cancellation checkpoint: bail after each blocking download.
-                _check_delete_pending(connector_id)
                 scanner.verify_integrity(local_checksum, checksum)
                 checksum_to_filename[checksum] = filename
+
+            # Cancellation checkpoint: bail after each batch of downloads.
+            _check_delete_pending(connector_id)
 
             filenames = list(checksum_to_filename.values())
             job_name = f"{connector_id} - {sync_seq} - {batch_number}"
