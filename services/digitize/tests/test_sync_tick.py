@@ -180,6 +180,10 @@ class TestProcessNewFiles:
         stack.enter_context(
             patch(f"{DB_MODULE}.ingest", side_effect=ingest_raises)
         )
+        # _wait_for_job polls with asyncio.sleep(_JOB_POLL_INTERVAL=10s) until the
+        # job reaches a terminal state.  With get_job mocked to return None the
+        # status never becomes terminal → infinite sleep → test hangs.
+        stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
         stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
         # cancellation checkpoint must not fire in normal test runs
         stack.enter_context(
@@ -194,7 +198,9 @@ class TestProcessNewFiles:
             asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
 
     def test_failure_does_not_stop_loop(self):
-        """First file fails, second succeeds — both are processed."""
+        """First batch fails, second batch succeeds — both batches are attempted."""
+        # Force batch_size=1 so each file is its own batch; a failure in batch 0
+        # must not prevent batch 1 from running.
         call_count = {"n": 0}
 
         def _download(remote_path, local_path):
@@ -209,6 +215,7 @@ class TestProcessNewFiles:
 
         ingest_list = [("a.pdf", "ck1"), ("b.pdf", "ck2")]
 
+        import digitize.connectors.sync_tick as _st_mod
         from contextlib import ExitStack
         with ExitStack() as stack:
             mock_settings = stack.enter_context(patch(f"{DB_MODULE}.settings"))
@@ -219,10 +226,13 @@ class TestProcessNewFiles:
             )
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid"))
             stack.enter_context(patch(f"{DB_MODULE}.ingest"))
+            stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
             stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing")
             )
+            # Force batch_size=1 so the two files land in separate batches
+            stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
 
             asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
 
