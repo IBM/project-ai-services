@@ -34,9 +34,10 @@
     "allowed_extensions": {
       "type": "array",
       "title": "Allowed File Extensions",
-      "description": "Restrict ingestion to files whose name ends with one of these extensions (e.g. [\".pdf\", \".txt\"]).",
+      "description": "Restrict ingestion to files whose name ends with one of these extensions.",
       "items": {
-        "type": "string"
+        "type": "string",
+        "enum": [".pdf", ".docx"]
       }
     }
   },
