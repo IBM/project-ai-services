@@ -87,25 +87,9 @@ export async function fetchDigitalAssistantDeployOptions(): Promise<DeployOption
 }
 
 // Fetches configuration parameters schema for a specific service
-export async function fetchServiceParams(serviceId: string): Promise<{
-  properties?: Record<
-    string,
-    {
-      type?: string;
-      default?: unknown;
-      title?: string;
-      description?: string;
-      format?: string;
-      minLength?: number;
-      maxLength?: number;
-      "x-ui-only"?: boolean;
-      "x-ui-controls"?: string;
-      "x-ui-controlled-by"?: string;
-      [key: string]: unknown;
-    }
-  >;
-  required?: string[];
-}> {
+export async function fetchServiceParams(
+  serviceId: string,
+): Promise<ProviderSchema> {
   const response = await api.get(
     DIGITAL_ASSISTANTS_ENDPOINTS.SERVICE_PARAMS(serviceId),
   );

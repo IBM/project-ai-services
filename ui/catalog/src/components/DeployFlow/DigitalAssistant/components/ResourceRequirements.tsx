@@ -96,7 +96,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                     </Tooltip>
                   )}
                 </div>
-                <p className={styles.resourceValue}>
+                <div className={styles.resourceValue}>
                   <span className={styles.required}>{resource.required}</span>
                   {resource.available !== "N/A" && (
                     <span className={styles.unit}>
@@ -106,7 +106,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                   {resource.available === "N/A" && (
                     <span className={styles.unit}> {resource.unit}</span>
                   )}
-                </p>
+                </div>
               </Tile>
             );
           })}

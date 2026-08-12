@@ -6,6 +6,7 @@ import {
   ToggletipContent,
   InlineLoading,
   InlineNotification,
+  Tooltip,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
 import { fetchResources } from "@/api/applications.api";
@@ -175,8 +176,8 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
     });
 
     // Convert memory from bytes to GB for display
-    const memoryGB = Math.round(totalMemory / 1024 ** 3);
-    const storageGB = Math.round(totalStorage / 1024 ** 3);
+    const memoryGB = bytesToGB(totalMemory);
+    const storageGB = bytesToGB(totalStorage);
 
     return {
       cpu: totalCPU,
@@ -331,16 +332,27 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                 key={`${resource.label}-${resource.acceleratorType || ""}`}
                 className={styles.resourceItem}
               >
-                <p className={styles.resourceLabel}>
+                <div className={styles.resourceLabel}>
                   <span>{resource.label}</span>
                   {status === "sufficient" && (
                     <CheckmarkFilled size={16} className={styles.green} />
                   )}
                   {status === "insufficient" && (
-                    <WarningFilled size={16} className={styles.warning} />
+                    <Tooltip
+                      align="bottom"
+                      label="Insufficient resources available"
+                    >
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        aria-label="Insufficient resources available"
+                      >
+                        <WarningFilled size={16} className={styles.warning} />
+                      </button>
+                    </Tooltip>
                   )}
-                </p>
-                <p className={styles.resourceValue}>
+                </div>
+                <div className={styles.resourceValue}>
                   <span className={styles.required}>{resource.required}</span>
                   {resource.available !== "N/A" && (
                     <span className={styles.unit}>
@@ -350,7 +362,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                   {resource.available === "N/A" && (
                     <span className={styles.unit}> {resource.unit}</span>
                   )}
-                </p>
+                </div>
               </Tile>
             );
           })}

@@ -1,28 +1,4 @@
-/**
- * Schema Parser Utility
- * Parses JSON Schema to extract field definitions for dynamic form rendering
- */
-
-export interface SchemaProperty {
-  type: string;
-  title?: string;
-  description?: string;
-  default?: unknown;
-  format?: string;
-  enum?: string[];
-  oneOf?: Array<{ const: string; title: string; description?: string }>;
-  pattern?: string;
-  minLength?: number;
-  maxLength?: number;
-  minimum?: number;
-  maximum?: number;
-  "x-ui-only"?: boolean;
-  "x-ui-controls"?: string;
-  "x-ui-controlled-by"?: string;
-  properties?: Record<string, SchemaProperty>;
-  required?: string[];
-  [key: string]: unknown;
-}
+import type { JSONSchema, SchemaProperty } from "@/types/api.types";
 
 export interface ParsedField {
   key: string;
@@ -44,18 +20,7 @@ export interface ParsedField {
   controlledBy?: string;
 }
 
-export interface JSONSchema {
-  $schema?: string;
-  type: string;
-  properties?: Record<string, SchemaProperty>;
-  required?: string[];
-  [key: string]: unknown;
-}
-
-/**
- * Parses JSON Schema and extracts field definitions
- * Handles nested properties by flattening them
- */
+// Parses a JSON Schema into a flat list of field definitions, recursively handling nested objects
 export function parseSchema(schema: JSONSchema): ParsedField[] {
   if (!schema.properties) {
     return [];
@@ -65,12 +30,12 @@ export function parseSchema(schema: JSONSchema): ParsedField[] {
   const requiredFields = new Set(schema.required || []);
 
   for (const [key, property] of Object.entries(schema.properties)) {
-    // Check if this is a nested object with properties
+    if (property === undefined) continue;
     if (property.type === "object" && property.properties) {
       // Recursively parse nested properties
       const nestedSchema: JSONSchema = {
         type: "object",
-        properties: property.properties as Record<string, SchemaProperty>,
+        properties: property.properties,
         required: property.required as string[] | undefined,
       };
       const nestedFields = parseSchema(nestedSchema);
@@ -87,9 +52,7 @@ export function parseSchema(schema: JSONSchema): ParsedField[] {
   return fields;
 }
 
-/**
- * Parses a single schema property into a field definition
- */
+// Parses a single schema property into a field definition, returning null for unsupported types
 function parseSchemaProperty(
   key: string,
   property: SchemaProperty,
@@ -172,9 +135,7 @@ function parseSchemaProperty(
   };
 }
 
-/**
- * Formats a camelCase or snake_case key into a readable label
- */
+// Converts a camelCase or snake_case key into a human-readable label
 function formatLabel(key: string): string {
   return key
     .replace(/_/g, " ")
@@ -183,9 +144,7 @@ function formatLabel(key: string): string {
     .trim();
 }
 
-/**
- * Validates a value against a parsed field's validation rules
- */
+// Validates a value against a parsed field's validation rules, returning an error string or null
 export function validateField(
   value: unknown,
   field: ParsedField,
@@ -249,9 +208,7 @@ export function validateField(
   return null;
 }
 
-/**
- * Gets the default value for a field from schema
- */
+// Returns the default value for a field, falling back to type-appropriate defaults
 export function getFieldDefault(field: ParsedField): unknown {
   if (field.defaultValue !== undefined) {
     return field.defaultValue;

@@ -16,8 +16,8 @@ import styles from "../ServicesDeployFlow.module.scss";
 import type { StepProps } from "../types";
 import type { ServiceConfig } from "../../Shared/types";
 import { ResourceRequirements } from "../components/ResourceRequirements";
-import { DynamicSchemaFields } from "../components/DynamicSchemaFields";
-import { ServiceCredentialDisplay } from "../components/ServiceCredentialDisplay";
+import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
+import { ProviderCredentialDisplay } from "../../Shared/components/ProviderCredentialDisplay";
 import { getDisplayName } from "../../Shared/utils/displayHelpers";
 
 export const StepTwo: React.FC<StepProps> = ({
@@ -35,7 +35,6 @@ export const StepTwo: React.FC<StepProps> = ({
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -135,22 +134,52 @@ export const StepTwo: React.FC<StepProps> = ({
 
   // Set default LLM model if not already set and options are available
 
-  const handleEdit = () => {
+  // Validates LLM credential fields. TODO PR 8a: extend to reranker once eager schema fetching lands.
+  const validateAllFields = useCallback((): {
+    isValid: boolean;
+    errors: Record<string, string>;
+  } => {
+    if (!providerSchema || !tempConfig?.components?.llm) {
+      return { isValid: true, errors: {} };
+    }
+
+    const llmParams = tempConfig.components.llm.params || {};
+    const errors: Record<string, string> = {};
+
+    parseSchema(providerSchema).forEach((field) => {
+      if (field.key === "model") return;
+      const error = validateField(llmParams[field.key], field);
+      if (error) {
+        errors[field.key] = error;
+      }
+    });
+
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors,
+    };
+  }, [providerSchema, tempConfig]);
+
+  // Re-computed only when validation state, schema, or tempConfig change —
+  // not on every keystroke render.
+  const fieldErrors = useMemo(
+    () => (showValidationError ? validateAllFields().errors : {}),
+    [showValidationError, validateAllFields],
+  );
+
+  const handleEdit = useCallback(() => {
     if (selectedServiceConfig && selectedServiceId) {
       setTempConfig({ ...selectedServiceConfig });
       setEditingService(selectedServiceId);
       setShowValidationError(false);
-      setFieldErrors({});
       onEditingChange?.(true);
     }
-  };
+  }, [selectedServiceConfig, selectedServiceId, onEditingChange]);
 
-  const handleApply = () => {
-    // Validate all fields including pattern, minLength, maxLength
-    const { isValid, errors } = validateAllFields();
+  const handleApply = useCallback(() => {
+    const { isValid } = validateAllFields();
     if (!isValid) {
       setShowValidationError(true);
-      setFieldErrors(errors);
       return; // Stay in edit mode
     }
 
@@ -165,56 +194,31 @@ export const StepTwo: React.FC<StepProps> = ({
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
-    setFieldErrors({});
     onEditingChange?.(false);
-  };
+  }, [
+    validateAllFields,
+    tempConfig,
+    selectedServiceId,
+    onChange,
+    formData.services,
+    onEditingChange,
+  ]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setEditingService(null);
     setTempConfig(null);
     setShowValidationError(false);
-    setFieldErrors({});
     onEditingChange?.(false);
-  };
+  }, [onEditingChange]);
 
-  const updateTempConfig = (updates: Partial<ServiceConfig>) => {
-    if (tempConfig) {
-      setTempConfig({ ...tempConfig, ...updates });
-    }
-  };
-
-  // Helper function to validate all fields including pattern, minLength, maxLength
-  const validateAllFields = (): {
-    isValid: boolean;
-    errors: Record<string, string>;
-  } => {
-    if (!providerSchema || !tempConfig?.components?.llm) {
-      return { isValid: true, errors: {} }; // If no schema or no LLM component, allow proceeding
-    }
-
-    const llmParams = tempConfig.components.llm.params || {};
-    const errors: Record<string, string> = {};
-
-    // Parse schema to get all fields with their validation rules
-    const fields = parseSchema(
-      providerSchema as import("@/utils/schemaParser").JSONSchema,
-    );
-
-    // Validate each field
-    fields.forEach((field) => {
-      const value = llmParams[field.key];
-      const error = validateField(value, field);
-
-      if (error) {
-        errors[field.key] = error;
+  const updateTempConfig = useCallback(
+    (updates: Partial<ServiceConfig>) => {
+      if (tempConfig) {
+        setTempConfig({ ...tempConfig, ...updates });
       }
-    });
-
-    return {
-      isValid: Object.keys(errors).length === 0,
-      errors,
-    };
-  };
+    },
+    [tempConfig],
+  );
 
   // Helper function to get model description from provider schema
   const getModelDescription = (modelId: string | undefined) => {
@@ -469,11 +473,10 @@ export const StepTwo: React.FC<StepProps> = ({
 
             {/* Show cloud credentials dynamically based on provider schema */}
             {currentLlmProviderId && providerSchema && (
-              <ServiceCredentialDisplay
-                providerId={currentLlmProviderId}
+              <ProviderCredentialDisplay
+                contextId={selectedServiceId}
                 providerSchema={providerSchema}
                 values={selectedServiceConfig.components.llm?.params || {}}
-                serviceId={selectedServiceId}
                 className={styles.serviceConfigItem}
               />
             )}
