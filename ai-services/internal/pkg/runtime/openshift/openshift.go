@@ -849,7 +849,7 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 
 func (kc *OpenshiftClient) DeleteNamespace(name string) error {
 	gracePeriod := deleteNamespaceGracePeriod
-	propagation := metav1.DeletePropagationForeground
+	propagation := metav1.DeletePropagationBackground
 
 	ctx, cancel := context.WithTimeout(kc.Ctx, deleteNamespaceTimeout)
 	defer cancel()
