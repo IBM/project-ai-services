@@ -859,7 +859,13 @@ func (kc *OpenshiftClient) DeleteNamespace(name string) error {
 		PropagationPolicy:  &propagation,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to delete namespace %q: %w", name, err)
+		if k8serrors.IsNotFound(err) {
+			logger.DebugfCtx(kc.Ctx, "Skipping deletion of '%s' namespace: no namespace found\n", name)
+			
+			return nil
+		}
+
+		return fmt.Errorf("failed to delete namespace %s: %w", name, err)
 	}
 
 	return nil
