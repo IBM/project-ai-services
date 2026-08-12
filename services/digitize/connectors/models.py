@@ -9,6 +9,7 @@ Covers:
   GET  /v1/connectors/{connector_id}/syncs
 """
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -17,8 +18,11 @@ from pydantic import BaseModel, Field
 # Connector / sync-log status constants
 # ---------------------------------------------------------------------------
 
-class SyncStatus:
-    """String constants for connector sync_status and sync-log status columns.
+class SyncStatus(str, Enum):
+    """String enum for connector sync_status and sync-log status columns.
+
+    Inherits from str so values can be passed directly to SQLAlchemy and
+    compared with raw DB strings without calling .value.
 
     Connector.sync_status lifecycle:
         UP_TO_DATE    ──► SYNCING       ──► UP_TO_DATE    (tick completed cleanly)

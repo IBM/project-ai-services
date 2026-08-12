@@ -53,7 +53,7 @@ logger = get_logger("sync_tick")
 # Interrupt handling enum
 # ---------------------------------------------------------------------------
 
-class InterruptType(Enum):
+class InterruptType(str, Enum):
     """Indicates the type of interrupt signal detected during sync execution."""
     SYNC_CANCEL = "sync_cancel"      # CANCEL_PENDING in ConnectorSyncLog
     DELETE_CONNECTOR = "delete_connector"  # DELETE_PENDING in Connectors table
