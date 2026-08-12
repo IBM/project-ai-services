@@ -1,7 +1,8 @@
 import { useMemo, useEffect } from "react";
 import { TextInput, Dropdown, Grid, Column } from "@carbon/react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
-import type { StepProps, ComponentConfig } from "../types";
+import type { StepProps } from "../types";
+import type { ComponentConfig } from "../../Shared/types";
 import { useMultiTypeProviderParams } from "../hooks/useProviderParams";
 
 export const StepOne: React.FC<StepProps> = ({

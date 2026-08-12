@@ -88,7 +88,7 @@ type ApplicationServiceBase struct {
 	Provider              *catalog.CatalogProvider
 	DeploymentPlanner     *deployment.DeploymentPlanner
 	DeploymentExecutor    *deployment.DeploymentExecutor
-	DeletionService       *deletion.DeletionService
+	DeletionExecutor      *deletion.DeletionExecutor
 	Validator             *validators.ApplicationValidator
 }
 
@@ -1039,6 +1039,177 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 	}
 
 	return appPodList, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	if app.CreatedBy != user {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
+		return nil, err
+	}
+
+	orphanedComponentIDs, err := s.identifyOrphanedComponents(ctx, id, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application components: %w", err)
+	}
+
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+func (s *ApplicationServiceBase) executeDeletionAsync(
+	parentCtx context.Context,
+	appID uuid.UUID,
+	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
+	keepData bool,
+	runtimeType runtimeTypes.RuntimeType,
+) {
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorfCtx(ctx, "Panic recovered in deletion goroutine for application %s: %v", appID, r)
+
+			errMsg := fmt.Sprintf("Deletion panic: %v", r)
+			if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
+			}
+		}
+	}()
+
+	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, runtimeType)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
+
+		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
+		}
+
+		return
+	}
+
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deletion completed successfully for application id '%s'", appID.String()))
+}
+
+// identifyOrphanedComponents identifies components that will become orphaned after service deletion.
+func (s *ApplicationServiceBase) identifyOrphanedComponents(ctx context.Context, appID uuid.UUID, services []models.Service) ([]uuid.UUID, error) {
+	serviceIDs := s.buildServiceIDMap(services)
+
+	componentCandidates, err := s.collectComponentCandidates(ctx, appID, services)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.filterOrphanedComponents(ctx, componentCandidates, serviceIDs), nil
+}
+
+// buildServiceIDMap creates a map of service IDs for quick lookup.
+func (s *ApplicationServiceBase) buildServiceIDMap(services []models.Service) map[uuid.UUID]bool {
+	serviceIDs := make(map[uuid.UUID]bool, len(services))
+	for _, svc := range services {
+		serviceIDs[svc.ID] = true
+	}
+
+	return serviceIDs
+}
+
+func (s *ApplicationServiceBase) collectComponentCandidates(ctx context.Context, appID uuid.UUID, services []models.Service) (map[uuid.UUID]bool, error) {
+	componentCandidates := make(map[uuid.UUID]bool)
+
+	for _, svc := range services {
+		deps, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
+		if err != nil {
+			logger.ErrorfCtx(ctx, "failed to get dependencies for service %s: %s", svc.ID, err)
+			_ = catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID, models.ApplicationStatusError, "failed to get service dependencies")
+
+			return nil, err
+		}
+
+		for _, dep := range deps {
+			if dep.DependencyType == models.DependencyTypeComponent {
+				componentCandidates[dep.DependencyID] = true
+			}
+		}
+	}
+
+	return componentCandidates, nil
+}
+
+// filterOrphanedComponents checks which components are truly orphaned.
+func (s *ApplicationServiceBase) filterOrphanedComponents(ctx context.Context, componentCandidates map[uuid.UUID]bool, serviceIDs map[uuid.UUID]bool) []uuid.UUID {
+	var orphanedComponents []uuid.UUID
+
+	for componentID := range componentCandidates {
+		if s.isComponentOrphaned(ctx, componentID, serviceIDs) {
+			orphanedComponents = append(orphanedComponents, componentID)
+		}
+	}
+
+	return orphanedComponents
+}
+
+// isComponentOrphaned checks if a component has no remaining dependent services.
+func (s *ApplicationServiceBase) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
+	dependentServices, err := s.ServiceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "failed to check component %s orphan status: %s", componentID, err)
+
+		return false
+	}
+
+	for _, svcID := range dependentServices {
+		if !serviceIDs[svcID] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Made with Bob

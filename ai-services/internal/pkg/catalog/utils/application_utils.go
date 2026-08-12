@@ -32,7 +32,7 @@ func AppNamespace(appID uuid.UUID) string {
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
 // e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
 func HelmReleaseName(appID uuid.UUID, id string) string {
-	return id + "-" + appID.String()[:8]
+	return strings.ReplaceAll(id, "_", "-") + "-" + appID.String()[:8]
 }
 
 // DeployingStatusMessage returns the human-readable deploying status message.

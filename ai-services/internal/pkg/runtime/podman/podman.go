@@ -28,6 +28,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 const (
@@ -376,6 +377,18 @@ func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) ListCRD(_ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+
+	return nil, fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) DeleteNamespace(_ string) error {
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
 }
 
 func (pc *PodmanClient) DeletePVCs(appLabel string) error {

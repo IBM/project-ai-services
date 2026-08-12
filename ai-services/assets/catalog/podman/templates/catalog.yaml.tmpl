@@ -98,7 +98,7 @@ spec:
           export ADMIN_PASSWORD=$(cat /etc/secret/catalog-secret/admin-password)
           export DB_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
           export CONNECTOR_ENCRYPTION_KEY=$(cat /etc/secret/catalog-connector-secret/connector-encryption-key)
-          exec /usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}
+          exec /usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }} --workergateway-port={{ .Values.backend.workerGatewayPort }}
       env:
         - name: GIN_MODE
           value: "release"
@@ -124,8 +124,13 @@ spec:
           value: "{{ .Values.caddy.httpsPort }}"
         - name: DOMAIN_SUFFIX
           value: "{{ .DomainSuffix }}"
+        - name: WORKER_GATEWAY_PORT
+          value: "{{ .Values.backend.workerGatewayPort }}"
       ports:
         - containerPort: 8080
+          protocol: TCP
+        - containerPort: {{ .Values.backend.workerGatewayPort }}
+          hostPort: {{ .Values.backend.workerGatewayPort }}
           protocol: TCP
       livenessProbe:
         httpGet:
