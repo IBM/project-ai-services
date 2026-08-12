@@ -21,7 +21,6 @@ type AuthType string
 
 const (
 	AuthTypeAPIKey      AuthType = "api-key"
-	AuthTypeCLI         AuthType = "cli"
 	AuthTypeToken       AuthType = "token"
 	AuthTypeEnv         AuthType = "env"
 	AuthTypeOP          AuthType = "1password"
