@@ -1084,21 +1084,36 @@ class DatabaseManager:
     @staticmethod
     def mark_sync_cancel_pending(connector_id: str) -> bool:
         """
-        Atomically set sync_status='cancel pending' when sync_status='syncing'.
+        Signal a running tick to cancel by setting connector_sync_logs.status='cancel pending'.
 
-        Returns True if the update landed (a tick was running and is now
-        signalled to cancel), False if no tick was running or connector not found.
+        Only writes the signal when connectors.sync_status='syncing', which guarantees
+        an active tick exists.  The connectors row is left untouched — it stays 'syncing'
+        until the tick's close_sync_log() call transitions it to 'out of sync'.
+
+        Returns True if the signal was written (a tick was running), False if no tick
+        was running or the connector does not exist.
         """
         try:
             with get_db_session() as session:
-                result = session.execute(
-                    update(Connector)
+                # Verify a tick is currently running
+                connector_row = session.execute(
+                    select(Connector.id)
                     .where(
                         Connector.id == connector_id,
                         Connector.sync_status == SyncStatus.SYNCING,
                     )
-                    .values(sync_status=SyncStatus.CANCEL_PENDING)
-                    .returning(Connector.id)
+                ).one_or_none()
+                if connector_row is None:
+                    return False
+                # Write the cancel signal onto the active sync-log row
+                result = session.execute(
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.status == SyncStatus.STARTED,
+                    )
+                    .values(status=SyncStatus.CANCEL_PENDING)
+                    .returning(ConnectorSyncLog.seq)
                 ).one_or_none()
                 return result is not None
         except SQLAlchemyError as e:

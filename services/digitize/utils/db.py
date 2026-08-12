@@ -1269,8 +1269,10 @@ def mark_sync_cancel_pending(connector_id: str) -> bool:
     """
     Signal a running tick to cancel without deleting the connector.
 
-    Atomically sets sync_status='cancel pending' only when sync_status='syncing'.
-    Returns True if the signal was set (tick was running), False otherwise.
+    Sets connector_sync_logs.status='cancel pending' on the active sync-log row,
+    only when connectors.sync_status='syncing'.  The connector row itself stays
+    'syncing' until the tick's close_sync_log() transitions it to 'out of sync'.
+    Returns True if the signal was written (tick was running), False otherwise.
     """
     return db_manager.mark_sync_cancel_pending(connector_id)
 

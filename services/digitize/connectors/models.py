@@ -25,15 +25,23 @@ class SyncStatus(str, Enum):
     compared with raw DB strings without calling .value.
 
     Connector.sync_status lifecycle:
-        UP_TO_DATE    ──► SYNCING       ──► UP_TO_DATE    (tick completed cleanly)
-                            └──► OUT_OF_SYNC              (tick finished with errors)
-        UP_TO_DATE    ──► DELETE_PENDING                  (DELETE, no active sync)
-        SYNCING       ──► DELETE_PENDING                  (DELETE arrived mid-sync)
+        UP_TO_DATE ──► SYNCING       ──► UP_TO_DATE   (tick completed cleanly)
+                           └──► OUT_OF_SYNC            (tick finished with errors)
+        UP_TO_DATE ──► DELETE_PENDING                  (DELETE, no active sync)
+        SYNCING    ──► DELETE_PENDING                  (DELETE arrived mid-sync)
+        SYNCING    ──► OUT_OF_SYNC                     (cancel honoured; close_sync_log
+                                                        reverts connector after CANCELLED)
 
     ConnectorSyncLog.status lifecycle:
-        STARTED ──► COMPLETED  (all files processed successfully)
-                ├──► FAILED    (fatal tick error or partial failure)
-                └──► CANCELLED (tick was cancelled via DELETE_PENDING)
+        STARTED ──► CANCEL_PENDING ──► CANCELLED  (cancel-sync request received mid-tick;
+                │                                   close_sync_log sets connector OUT_OF_SYNC)
+                ├──► COMPLETED                    (all files processed successfully)
+                ├──► FAILED                       (fatal tick error or partial failure)
+                └──► CANCELLED                    (tick interrupted by DELETE_PENDING)
+
+    Note: CANCEL_PENDING is written to connector_sync_logs.status (not to connectors).
+    The connector stays SYNCING while the tick winds down; close_sync_log() transitions
+    it to OUT_OF_SYNC when it writes the terminal CANCELLED status.
     """
 
     # Connector.sync_status values
@@ -41,10 +49,10 @@ class SyncStatus(str, Enum):
     SYNCING = "syncing"
     OUT_OF_SYNC = "out of sync"
     DELETE_PENDING = "delete pending"
-    CANCEL_PENDING = "cancel pending"
 
     # ConnectorSyncLog.status values
     STARTED = "started"
+    CANCEL_PENDING = "cancel pending"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

@@ -70,13 +70,12 @@ def _check_interrupt_call(connector_id: str, sync_seq: int) -> Optional[Interrup
     Checks two sources:
     1. connectors.sync_status for DELETE_PENDING (delete entire connector)
     2. connector_sync_logs.status for CANCEL_PENDING on the active seq row
-       (cancel only current sync)
+       (cancel only the current sync; written by mark_sync_cancel_pending)
 
     Returns the appropriate InterruptType if a signal is detected, None otherwise.
-    Performs a live DB query — no in-memory state. Called at the three phase
-    boundaries inside run_tick / _process_new_files so that a DELETE or
-    CANCEL request is honoured promptly without leaving the tick running to
-    completion.
+    Performs a live DB query — no in-memory state. Called at phase boundaries
+    inside run_tick / _process_new_files so that a DELETE or CANCEL request is
+    honoured promptly without leaving the tick running to completion.
     """
     # Check connectors table for DELETE_PENDING
     connector_status = get_connector_sync_status(connector_id)
