@@ -93,10 +93,9 @@ func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceVal
 
 	var errorMessages []string
 
-	// Workload resources in the manifest imply how many pods/controllers we expect to exist.
-	if input.ActualPodCount < expectedCounts.Pods {
-		errorMessages = append(errorMessages,
-			fmt.Sprintf("Pod count mismatch: expected %d, found %d", expectedCounts.Pods, input.ActualPodCount))
+	// OpenShift workloads may be manually scaled, so require at least one pod when a workload exists.
+	if expectedCounts.Pods > 0 && input.ActualPodCount == 0 {
+		errorMessages = append(errorMessages, "No pods found for deployed workload")
 	}
 
 	// Reuse shared existence checks for secrets and PVC-backed volumes.
