@@ -23,6 +23,5 @@ const (
 	AuthTypeAPIKey      AuthType = "api-key"
 	AuthTypeToken       AuthType = "token"
 	AuthTypeEnv         AuthType = "env"
-	AuthTypeOP          AuthType = "1password"
 	AuthTypePassthrough AuthType = "passthrough"
 )
