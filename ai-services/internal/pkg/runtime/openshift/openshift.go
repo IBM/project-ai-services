@@ -60,7 +60,7 @@ const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
 
 	deleteNamespaceGracePeriod = int64(30)       // deleteNamespaceGracePeriod is the grace period in seconds for namespace deletion.
-	deleteNamespaceTimeout     = 5 * time.Minute // deleteNamespaceTimeout is the maximum time to wait for a namespace deletion to complete.
+	deleteNamespaceTimeout     = 3 * time.Minute // deleteNamespaceTimeout is the maximum time to wait for a namespace deletion to complete.
 )
 
 // OpenshiftClient implements the Runtime interface for Openshift.
