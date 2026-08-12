@@ -1255,6 +1255,15 @@ def get_connector_sync_status(connector_id: str) -> Optional[str]:
     return db_manager.get_connector_sync_status(connector_id)
 
 
+def get_active_sync_seq(connector_id: str) -> Optional[int]:
+    """
+    Return the seq of the currently-running sync-log row for connector_id.
+
+    Returns None if no active sync is in progress.
+    """
+    return db_manager.get_active_sync_seq(connector_id)
+
+
 def try_acquire_sync_lock(connector_id: str) -> bool:
     """
     Atomically acquire the sync lock for *connector_id*.

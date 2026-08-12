@@ -30,6 +30,7 @@ from digitize.connectors.models import (
     SyncLogItem,
     SyncLogResponse,
     SyncStatus,
+    SyncTriggerResponse,
 )
 from digitize.connectors.encryption import (
     encrypt_secrets,
@@ -429,6 +430,7 @@ async def get_connector(connector_id: str):
 @router.post(
     "/{connector_id}/sync",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=SyncTriggerResponse,
     responses={
         404: http_error_responses[404],
         500: http_error_responses[500],
@@ -439,7 +441,9 @@ async def get_connector(connector_id: str):
         "Safe and idempotent: if a tick is already running the request is "
         "accepted without starting a duplicate (no-op 202). "
         "The tick runs asynchronously; this endpoint returns as soon as the "
-        "task has been dispatched."
+        "task has been dispatched. "
+        "Always returns the sync_seq of the active sync — either the newly "
+        "dispatched one or the already-running one."
     ),
     response_description="Sync dispatched (or already in progress)",
 )
@@ -459,14 +463,44 @@ async def trigger_sync(connector_id: str):
         if acquired:
             asyncio.create_task(run_tick(connector_id))
             logger.info(f"Manual sync dispatched for connector {connector_id!r}")
-        
-        return Response(status_code=202)
+            # open_new_sync_log hasn't been called yet (that happens inside run_tick),
+            # so fetch the seq of the row that the background task will open shortly.
+            # Since we hold the lock we query for the highest existing seq + 1 via
+            # the active row that run_tick will create. Instead, we read it after a
+            # brief yield so the task can open the log first.
+            # Simpler and race-free: open_new_sync_log is the very first thing
+            # run_tick does — schedule a wait-for-seq helper.
+            sync_seq = await _wait_for_sync_seq(connector_id)
+        else:
+            sync_seq = db_ops.get_active_sync_seq(connector_id)
+            if sync_seq is None:
+                raise RuntimeError(
+                    f"Sync lock held but no active sync-log row found for connector {connector_id!r}"
+                )
+            logger.info(f"Sync already in progress for connector {connector_id!r}, seq={sync_seq}")
+
+        return SyncTriggerResponse(sync_seq=sync_seq)
 
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+
+
+async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: float = 0.1) -> int:
+    """Poll until run_tick's open_new_sync_log creates the active sync-log row.
+
+    Returns the seq as soon as it appears, or raises RuntimeError if it never does.
+    """
+    for _ in range(attempts):
+        await asyncio.sleep(interval)
+        seq = db_ops.get_active_sync_seq(connector_id)
+        if seq is not None:
+            return seq
+    raise RuntimeError(
+        f"Timed out waiting for sync-log row to appear for connector {connector_id!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

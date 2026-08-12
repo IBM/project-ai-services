@@ -142,4 +142,10 @@ class SyncLogResponse(BaseModel):
     offset: int
     items: List[SyncLogItem]
 
+
+class SyncTriggerResponse(BaseModel):
+    """Response body for POST /v1/connectors/{connector_id}/sync."""
+
+    sync_seq: int = Field(..., description="Sequence number of the active or newly-started sync")
+
 # Made with Bob

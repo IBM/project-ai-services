@@ -1058,6 +1058,32 @@ class DatabaseManager:
     # ========================================================================
 
     @staticmethod
+    def get_active_sync_seq(connector_id: str) -> Optional[int]:
+        """
+        Return the seq of the currently-running sync-log row for connector_id.
+
+        A row is considered active when its status is 'started' or 'cancel pending'.
+        Returns None if no active row exists.
+        """
+        try:
+            with get_db_session() as session:
+                row = session.execute(
+                    select(ConnectorSyncLog.seq)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.status.in_(
+                            [SyncStatus.STARTED, SyncStatus.CANCEL_PENDING]
+                        ),
+                    )
+                    .order_by(ConnectorSyncLog.seq.desc())
+                    .limit(1)
+                ).one_or_none()
+                return row[0] if row else None
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_active_sync_seq({connector_id!r}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
     def try_acquire_sync_lock(connector_id: str) -> bool:
         """
         Atomically set sync_status='syncing' if it is not already 'syncing'.

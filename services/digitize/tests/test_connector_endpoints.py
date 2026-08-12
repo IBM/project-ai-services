@@ -600,10 +600,10 @@ class TestDocumentListConnectorFilter:
 # ===========================================================================
 
 class TestTriggerSync:
-    def test_returns_202_and_dispatches_task_when_lock_acquired(
+    def test_returns_202_with_sync_seq_when_lock_acquired(
         self, connector_test_client, monkeypatch
     ):
-        """Lock acquired → create_task called, 202 returned."""
+        """Lock acquired → create_task called, 202 returned with sync_seq."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
@@ -612,16 +612,21 @@ class TestTriggerSync:
             "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
             Mock(return_value=True),
         )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=7),
+        )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
             response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
         assert response.status_code == 202
+        assert response.json()["sync_seq"] == 7
         task_mock.assert_called_once()
 
-    def test_returns_202_no_op_when_already_syncing(
+    def test_returns_202_no_op_with_existing_sync_seq_when_already_syncing(
         self, connector_test_client, monkeypatch
     ):
-        """Lock not acquired (already syncing) → 202, no task created."""
+        """Lock not acquired (already syncing) → 202, no task created, existing sync_seq returned."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
@@ -630,10 +635,15 @@ class TestTriggerSync:
             "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
             Mock(return_value=False),
         )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=3),
+        )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
             response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
         assert response.status_code == 202
+        assert response.json()["sync_seq"] == 3
         task_mock.assert_not_called()
 
     def test_returns_404_when_connector_not_found(
