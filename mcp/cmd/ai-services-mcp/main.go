@@ -18,7 +18,6 @@ var (
 	description     string
 	endpoint        string
 	authAPIKey      string
-	authCLI         bool
 	authToken       string
 	authPassthrough bool
 	queries         []string
@@ -41,8 +40,7 @@ This server loads OpenAPI specifications for AI Services and creates MCP tools t
 func init() {
 	rootCmd.Flags().StringVarP(&description, "description", "d", "", "The local OpenAPI description file path or remote URL to use (required)")
 	rootCmd.Flags().StringVarP(&endpoint, "endpoint", "e", "", "The service endpoint URL to use")
-	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "AI Services API key, environment variable ($VAR), or 1Password reference (op://...)")
-	rootCmd.Flags().BoolVarP(&authCLI, "auth-cli", "c", false, "Use the ibmcloud CLI to authenticate")
+	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "AI Services API key, environment variable ($VAR)")
 	rootCmd.Flags().StringVarP(&authToken, "auth-token", "a", "", "IAM token to use for authentication")
 	rootCmd.Flags().BoolVarP(&authPassthrough, "auth-passthrough", "P", false, "Use passthrough authentication mode")
 	rootCmd.Flags().StringSliceVarP(&queries, "query", "Q", nil, "Global query parameter in key=value format")
@@ -177,9 +175,6 @@ func validateEndpoint(endpoint string) error {
 
 func createAuthenticator() (authenticator.Authenticator, error) {
 	authCount := 0
-	if authCLI {
-		authCount++
-	}
 	if authAPIKey != "" {
 		authCount++
 	}
@@ -197,14 +192,8 @@ func createAuthenticator() (authenticator.Authenticator, error) {
 		return nil, errors.NewUsageError("Must not use more than one authentication option")
 	}
 
-	if authCLI {
-		return authenticator.NewCLIAuthenticator(), nil
-	}
-
 	if authAPIKey != "" {
-		if strings.HasPrefix(authAPIKey, "op://") {
-			return authenticator.NewOPAuthenticator(authAPIKey), nil
-		} else if strings.HasPrefix(authAPIKey, "$") {
+		if strings.HasPrefix(authAPIKey, "$") {
 			return authenticator.NewEnvAuthenticator(authAPIKey[1:])
 		} else {
 			return authenticator.NewAPIKeyAuthenticator(authAPIKey), nil
@@ -296,22 +285,14 @@ Flags:
   -e, --endpoint        <URL> The service endpoint to use.
   -k, --auth-api-key    <key> The AI Services API key with which to obtain
                               tokens to authenticate requests. Cannot be used
-                              with --auth-cli or --auth-token.
+                              with --auth-token.
                        $<VAR> As above, but read in the API key from an
                               environment variable. Note that this works
                               when a literal $-prefixed variable name is
                               passed in outside of a shell context. Cannot be
-                              used with --auth-cli or --auth-token.
-                        <URL> The 1Password reference containing an AI Services
-                              API key with which to obtain tokens to
-                              authenticate requests. Cannot be used with
-                              --auth-cli or --auth-token.
-  -c, --auth-cli              Use the ibmcloud CLI to authenticate. The CLI
-                              must have an active login. Cannot be used with
-                              --auth-api-key or --auth-token.
+                              used with --auth-token.
   -a, --auth-token     <token> The IAM token with which to authenticate
-                              requests. Cannot be used with --auth-cli or
-                              --auth-api-key.
+                              requests. Cannot be used with --auth-api-key.
   -P, --auth-passthrough      Use passthrough authentication mode where the
                               client provides the authorization header in each
                               request. Cannot be used with other auth options.

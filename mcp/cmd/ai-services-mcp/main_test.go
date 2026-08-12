@@ -74,14 +74,12 @@ func TestValidateEndpoint(t *testing.T) {
 
 func TestCreateAuthenticator(t *testing.T) {
 	// Save original values
-	origAuthCLI := authCLI
 	origAuthAPIKey := authAPIKey
 	origAuthToken := authToken
 	origAuthPassthrough := authPassthrough
 
 	defer func() {
 		// Restore original values
-		authCLI = origAuthCLI
 		authAPIKey = origAuthAPIKey
 		authToken = origAuthToken
 		authPassthrough = origAuthPassthrough
@@ -97,7 +95,6 @@ func TestCreateAuthenticator(t *testing.T) {
 		{
 			name: "no authentication provided",
 			setupFlags: func() {
-				authCLI = false
 				authAPIKey = ""
 				authToken = ""
 				authPassthrough = false
@@ -108,29 +105,16 @@ func TestCreateAuthenticator(t *testing.T) {
 		{
 			name: "multiple authentication options",
 			setupFlags: func() {
-				authCLI = true
 				authAPIKey = "test-key"
-				authToken = ""
+				authToken = "test-token"
 				authPassthrough = false
 			},
 			wantErr: true,
 			errMsg:  "Must not use more than one authentication option",
 		},
 		{
-			name: "CLI authentication",
-			setupFlags: func() {
-				authCLI = true
-				authAPIKey = ""
-				authToken = ""
-				authPassthrough = false
-			},
-			wantErr:      false,
-			expectedType: "cli",
-		},
-		{
 			name: "API key authentication",
 			setupFlags: func() {
-				authCLI = false
 				authAPIKey = "test-api-key"
 				authToken = ""
 				authPassthrough = false
@@ -141,7 +125,6 @@ func TestCreateAuthenticator(t *testing.T) {
 		{
 			name: "Environment variable authentication",
 			setupFlags: func() {
-				authCLI = false
 				authAPIKey = "$TEST_API_KEY"
 				authToken = ""
 				authPassthrough = false
@@ -150,20 +133,8 @@ func TestCreateAuthenticator(t *testing.T) {
 			errMsg:  "Environment variable TEST_API_KEY is not set or empty",
 		},
 		{
-			name: "1Password authentication",
-			setupFlags: func() {
-				authCLI = false
-				authAPIKey = "op://vault/item/field"
-				authToken = ""
-				authPassthrough = false
-			},
-			wantErr:      false,
-			expectedType: "1password",
-		},
-		{
 			name: "Token authentication",
 			setupFlags: func() {
-				authCLI = false
 				authAPIKey = ""
 				authToken = "test-token"
 				authPassthrough = false
@@ -174,7 +145,6 @@ func TestCreateAuthenticator(t *testing.T) {
 		{
 			name: "Passthrough authentication",
 			setupFlags: func() {
-				authCLI = false
 				authAPIKey = ""
 				authToken = ""
 				authPassthrough = true
@@ -425,7 +395,7 @@ func TestGetUsage(t *testing.T) {
 		"--description",
 		"--endpoint",
 		"--auth-api-key",
-		"--auth-cli",
+		"--auth-token",
 		"Transport Modes:",
 	}
 
