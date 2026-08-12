@@ -21,10 +21,10 @@ import (
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -618,88 +618,6 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	}, nil
 }
 
-// DeleteApplication cancels any in-flight deployment, marks the application as deleting,
-// and kicks off async deletion. It is the shared implementation for all runtimes.
-func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
-	app, err := s.AppRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
-	}
-
-	if app.CreatedBy != user {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
-	}
-
-	if app.Status == models.ApplicationStatusDeleting {
-		return nil, &ValidationError{
-			Code:    http.StatusConflict,
-			Message: ErrMsgApplicationAlreadyDeleting,
-		}
-	}
-
-	// Cancel any in-flight deployment before transitioning to Deleting.
-	// No-op when DeploymentRegistry is nil (e.g. OpenShift stub).
-	if s.DeploymentRegistry != nil {
-		s.DeploymentRegistry.Cancel(id)
-	}
-
-	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
-		return nil, err
-	}
-
-	var requestID string
-	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
-		requestID = reqID
-	}
-
-	deletionCtx := context.Background()
-	if requestID != "" {
-		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
-	}
-
-	runtimeType := vars.RuntimeFactory.GetRuntimeType()
-
-	go func() {
-		orphanedComponentIDs, err := s.identifyOrphanedComponents(deletionCtx, id, app.Services)
-		if err != nil {
-			logger.ErrorfCtx(deletionCtx, "Failed to identify orphaned components for application %s: %v", id, err)
-
-			if updateErr := catalogutils.UpdateApplicationStatus(deletionCtx, s.AppRepo, id, models.ApplicationStatusError, err.Error()); updateErr != nil {
-				logger.ErrorfCtx(deletionCtx, "Failed to update application status to Error: %v", updateErr)
-			}
-
-			return
-		}
-
-		if err := s.DeletionExecutor.Execute(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType); err != nil {
-			logger.ErrorfCtx(deletionCtx, "Deletion failed for application %s: %v", id, err)
-
-			if updateErr := catalogutils.UpdateApplicationStatus(deletionCtx, s.AppRepo, id, models.ApplicationStatusError, err.Error()); updateErr != nil {
-				logger.ErrorfCtx(deletionCtx, "Failed to update application status to Error: %v", updateErr)
-			}
-
-			return
-		}
-
-		logger.InfolnCtx(deletionCtx, fmt.Sprintf("Deletion completed successfully for application id '%s'", id))
-	}()
-
-	return &DeleteApplicationResponse{
-		ID:      id.String(),
-		Status:  string(models.ApplicationStatusDeleting),
-		Message: "Deletion initiated successfully",
-	}, nil
-}
-
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
 func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
@@ -1134,6 +1052,108 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 	}
 
 	return appPodList, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	if app.CreatedBy != user {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
+	}
+
+	// Cancel any in-flight deployment before transitioning to Deleting.
+	// No-op when DeploymentRegistry is nil (e.g. OpenShift stub).
+	if s.DeploymentRegistry != nil {
+		s.DeploymentRegistry.Cancel(id)
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
+		return nil, err
+	}
+
+	orphanedComponentIDs, err := s.identifyOrphanedComponents(ctx, id, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application components: %w", err)
+	}
+
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+func (s *ApplicationServiceBase) executeDeletionAsync(
+	parentCtx context.Context,
+	appID uuid.UUID,
+	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
+	keepData bool,
+	runtimeType runtimeTypes.RuntimeType,
+) {
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorfCtx(ctx, "Panic recovered in deletion goroutine for application %s: %v", appID, r)
+
+			errMsg := fmt.Sprintf("Deletion panic: %v", r)
+			if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
+			}
+		}
+	}()
+
+	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, runtimeType)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
+
+		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
+		}
+
+		return
+	}
+
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deletion completed successfully for application id '%s'", appID.String()))
 }
 
 // identifyOrphanedComponents identifies components that will become orphaned after service deletion.

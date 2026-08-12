@@ -24,6 +24,10 @@ func NewPodmanApplicationService(base ApplicationServiceBase) *PodmanApplication
 	return &PodmanApplicationService{ApplicationServiceBase: base}
 }
 
+func (s *PodmanApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
+	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData, runtimeTypes.RuntimeTypePodman)
+}
+
 // CreateApplication satisfies ApplicationServiceInterface by delegating to the base with
 // the Podman runtime type fixed.
 func (s *PodmanApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
