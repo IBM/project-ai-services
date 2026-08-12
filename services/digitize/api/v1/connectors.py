@@ -11,7 +11,7 @@ Endpoints:
   GET    /v1/connectors/{connector_id}
   GET    /v1/connectors/{connector_id}/syncs
   POST   /v1/connectors/{connector_id}/syncs
-  DELETE /v1/connectors/{connector_id}/syncs
+  POST   /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 """
 
 import asyncio
@@ -504,11 +504,11 @@ async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: fl
 
 
 # ---------------------------------------------------------------------------
-# DELETE /v1/connectors/{connector_id}/syncs
+# POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 # ---------------------------------------------------------------------------
 
-@router.delete(
-    "/{connector_id}/syncs",
+@router.post(
+    "/{connector_id}/syncs/{sync_seq}/stop",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         404: http_error_responses[404],
@@ -518,20 +518,29 @@ async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: fl
     summary="Stop a running sync",
     description=(
         "Signals the active sync tick to stop at its next cancellation checkpoint. "
+        "The caller must supply the sync_seq of the sync they intend to cancel. "
+        "Returns 409 if sync_seq does not match the currently-running sync "
+        "(stale seq) or if no sync is running at all. "
         "Returns 204 immediately; the tick exits asynchronously and the sync log "
         "is marked 'cancelled'. The connector remains and resumes its normal "
-        "schedule on the next interval. "
-        "Returns 409 if no sync is currently running."
+        "schedule on the next interval."
     ),
     response_description="Stop signal sent",
 )
-async def cancel_sync(connector_id: str):
+async def cancel_sync(connector_id: str, sync_seq: int):
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
+            )
+
+        active_seq = db_ops.get_active_sync_seq(connector_id)
+        if active_seq is None or active_seq != sync_seq:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"sync_seq {sync_seq} is not the active sync for this connector.",
             )
 
         signalled = db_ops.mark_sync_cancel_pending(connector_id)
@@ -541,7 +550,7 @@ async def cancel_sync(connector_id: str):
                 "No sync is currently running for this connector.",
             )
 
-        logger.info(f"Cancel-sync signal sent for connector {connector_id!r}")
+        logger.info(f"Cancel-sync signal sent for connector {connector_id!r} (seq={sync_seq})")
         return Response(status_code=204)
 
     except HTTPException:

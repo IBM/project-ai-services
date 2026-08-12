@@ -13,7 +13,7 @@ Coverage:
   - GET    /v1/connectors/{id}                            (200, 404)
   - GET    /v1/connectors/{id}/syncs                      (200, 404)
   - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
-  - DELETE /v1/connectors/{id}/sync                       (204 signalled, 409 not running, 404)
+  - POST   /v1/connectors/{id}/syncs/{sync_seq}/stop      (204 signalled, 409 stale seq, 409 not running, 404)
   - GET    /v1/documents — excludes connector-sourced docs
   - GET    /v1/documents/{doc_id} — 404 for connector-sourced
   - DELETE /v1/documents/{doc_id} — 404 for connector-sourced
@@ -657,38 +657,71 @@ class TestTriggerSync:
         assert response.status_code == 404
 
 # ===========================================================================
-# DELETE /v1/connectors/{connector_id}/sync
+# POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 # ===========================================================================
+
+_ACTIVE_SEQ = 7
 
 class TestStopSync:
     def test_returns_204_when_sync_signalled(
         self, connector_test_client, monkeypatch
     ):
-        """mark_sync_stop_pending returns True → 204 returned."""
+        """Correct sync_seq + mark_sync_cancel_pending True → 204."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=_ACTIVE_SEQ),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.mark_sync_cancel_pending",
             Mock(return_value=True),
         )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
         assert response.status_code == 204
 
-    def test_returns_409_when_no_sync_running(
+    def test_returns_409_when_stale_sync_seq(
         self, connector_test_client, monkeypatch
     ):
-        """mark_sync_stop_pending returns False (not syncing) → 409."""
+        """sync_seq older than the active one → 409 without calling mark_sync_cancel_pending."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.mark_sync_cancel_pending",
-            Mock(return_value=False),
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=_ACTIVE_SEQ),
         )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        cancel_mock = Mock()
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.mark_sync_cancel_pending",
+            cancel_mock,
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ - 1}/stop"
+        )
+        assert response.status_code == 409
+        cancel_mock.assert_not_called()
+
+    def test_returns_409_when_no_sync_running(
+        self, connector_test_client, monkeypatch
+    ):
+        """get_active_sync_seq returns None (not syncing) → 409."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
         assert response.status_code == 409
 
     def test_returns_404_when_connector_not_found(
@@ -698,7 +731,9 @@ class TestStopSync:
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=None),
         )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
         assert response.status_code == 404
 
 # Made with Bob
