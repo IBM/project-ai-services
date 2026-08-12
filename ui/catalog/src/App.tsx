@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
+import Connectors from "./pages/Connectors";
 import UseCaseReferences from "./pages/UseCaseReferences";
 import { AuthRoute } from "@/components";
 import SessionManager from "@/components/SessionManager";
@@ -29,6 +30,7 @@ function App() {
                 element={<DigitalAssistantsPage />}
               />
               <Route path={ROUTES.SERVICES} element={<Services />} />
+              <Route path={ROUTES.CONNECTORS} element={<Connectors />} />
               <Route
                 path={ROUTES.USE_CASE_REFERENCES}
                 element={<UseCaseReferences />}
