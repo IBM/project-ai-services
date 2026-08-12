@@ -23,14 +23,15 @@ from pathlib import Path
 
 from common.misc_utils import cleanup_staging_directory, get_logger
 from digitize.connectors.scanners.scanner_factory import build_scanner
-from digitize.models import OutputFormat, OperationType
 from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
+from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
     close_sync_log,
     get_active_connector,
     get_connector_sync_status,
+    get_job,
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
@@ -185,6 +186,28 @@ def _classify(
 # ---------------------------------------------------------------------------
 
 _BATCH_SIZE = 10
+_JOB_POLL_INTERVAL = 10  # seconds between job-status polls while waiting for a batch
+
+
+async def _wait_for_job(job_id: str, connector_id: str) -> None:
+    """Poll *job_id* until it reaches a terminal state.
+
+    Sleeps *_JOB_POLL_INTERVAL* seconds between polls.  On every wake-up it
+    also calls ``_check_delete_pending`` so that a deletion/cancel request is
+    honoured promptly even while the batch is running.
+
+    Raises ``asyncio.CancelledError`` if the connector is marked for deletion
+    or a stop-sync request is issued during the wait.
+    """
+    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.FAILED.value}
+    while True:
+        await asyncio.sleep(_JOB_POLL_INTERVAL)
+        _check_delete_pending(connector_id)
+        job_data = get_job(job_id)
+        status = (job_data or {}).get("status", "")
+        logger.debug(f"Polling job {job_id!r} for connector {connector_id!r}: status={status!r}")
+        if status in _TERMINAL:
+            break
 
 
 async def _process_new_files(
@@ -244,6 +267,8 @@ async def _process_new_files(
                 add_connector_checksum_entry(connector_id, checksum, doc_id_dict[filename])
 
             await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
+
+            await _wait_for_job(job_id, connector_id)
 
             new_count += len(batch)
             update_sync_log(sync_seq, new_files=new_count)
