@@ -239,7 +239,12 @@ async def _process_new_files(
                 local_checksum = await asyncio.to_thread(
                     scanner.download_to, remote_path, batch_dir / filename
                 )
-                scanner.verify_integrity(local_checksum, checksum)
+                if not scanner.verify_integrity(local_checksum, checksum):
+                    logger.warning(
+                        f"Integrity check failed for {remote_path!r} in connector "
+                        f"{connector_id!r}; skipping file"
+                    )
+                    continue
                 checksum_to_filename[checksum] = filename
 
             # Cancellation checkpoint: bail after each batch of downloads.
