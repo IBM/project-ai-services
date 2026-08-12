@@ -151,3 +151,63 @@ func TestGetUserByToken_UserHrefIDExtraction(t *testing.T) {
 	assert.Equal(t, "99", info.ExternalID)
 	assert.Equal(t, "testuser", info.UserName)
 }
+
+func TestGetUserByToken_4xxError_ReturnsManageIQError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		message    string
+	}{
+		{"forbidden", http.StatusForbidden, "user does not have access"},
+		{"not found", http.StatusNotFound, "resource not found"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newStub(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.statusCode)
+				json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"kind":    "bad_request",
+						"message": tc.message,
+					},
+				})
+			})
+
+			client := miq.NewHTTPClient(stub.URL, false)
+			info, err := client.GetUserByToken(context.Background(), "token")
+
+			assert.Nil(t, info)
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, miq.ErrUnauthorized)
+
+			var miqErr *miq.ManageIQError
+			require.ErrorAs(t, err, &miqErr)
+			assert.Equal(t, tc.statusCode, miqErr.StatusCode)
+			assert.Equal(t, tc.message, miqErr.Message)
+		})
+	}
+}
+
+func TestGetUserByToken_MissingUserHref_ReturnsError(t *testing.T) {
+	// ManageIQ returns a valid userid but omits user_href — ExternalID cannot be resolved.
+	stub := newStub(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"identity": map[string]any{
+				"userid": "admin",
+				"name":   "Administrator",
+				// user_href intentionally absent
+			},
+		})
+	})
+
+	client := miq.NewHTTPClient(stub.URL, false)
+	info, err := client.GetUserByToken(context.Background(), "token")
+
+	assert.Nil(t, info)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, miq.ErrUnauthorized)
+	assert.Contains(t, err.Error(), "user_href")
+}

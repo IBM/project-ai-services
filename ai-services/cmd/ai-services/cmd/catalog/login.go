@@ -51,7 +51,7 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
   ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
 
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return validateLoginFlags(runtimeType, serverURL, username, miqToken)
+			return validateLoginFlags(runtimeType, serverURL, username, miqToken, passwordStdin)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if miqToken != "" {
@@ -65,7 +65,7 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
 	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog backend endpoint (required)")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
-	cmd.Flags().StringVar(&miqToken, "miq-token", "", "ManageIQ token for token passthrough login (Flow B / IBM Power Mission Control)")
+	cmd.Flags().StringVar(&miqToken, "miq-token", "", "ManageIQ token for token passthrough login")
 	_ = cmd.Flags().MarkHidden("miq-token")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 	common.ConfigureRuntimeFlag(cmd, &runtimeType)
@@ -145,7 +145,7 @@ func promptPassword(passwordStdin bool) (string, error) {
 }
 
 // validateLoginFlags validates all PreRunE checks for the login command.
-func validateLoginFlags(runtimeType, serverURL, username, miqToken string) error {
+func validateLoginFlags(runtimeType, serverURL, username, miqToken string, passwordStdin bool) error {
 	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
@@ -156,8 +156,8 @@ func validateLoginFlags(runtimeType, serverURL, username, miqToken string) error
 	if miqToken == "" && username == "" {
 		return fmt.Errorf("one of --username or --miq-token is required")
 	}
-	if miqToken != "" && username != "" {
-		return fmt.Errorf("--username and --miq-token are mutually exclusive")
+	if miqToken != "" && (username != "" || passwordStdin) {
+		return fmt.Errorf("--miq-token cannot be used with --username or --password-stdin")
 	}
 
 	return nil

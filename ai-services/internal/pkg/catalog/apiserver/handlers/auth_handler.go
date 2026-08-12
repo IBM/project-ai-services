@@ -168,11 +168,14 @@ func (h *AuthHandler) Me(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Success		200	{object}	map[string]interface{}	"Returns access_token, refresh_token, and token_type"
 //	@Failure		401	{object}	map[string]interface{}	"Invalid or expired ManageIQ token"
-//	@Failure		503	{object}	map[string]interface{}	"ManageIQ client not configured"
+//	@Failure		403	{object}	map[string]interface{}	"ManageIQ token does not have required permissions"
+//	@Failure		404	{object}	map[string]interface{}	"ManageIQ resource not found"
+//	@Failure		503	{object}	map[string]interface{}	"ManageIQ unavailable or returned an unexpected server error"
 //	@Router			/auth/token [post]
 func (h *AuthHandler) TokenLogin(c *gin.Context) {
-	raw := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-	if raw == "" {
+	authHeader := c.GetHeader("Authorization")
+	raw := strings.TrimPrefix(authHeader, "Bearer ")
+	if !strings.HasPrefix(authHeader, "Bearer ") || raw == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing ManageIQ token in Authorization header"})
 
 		return
@@ -182,6 +185,12 @@ func (h *AuthHandler) TokenLogin(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, miq.ErrUnauthorized) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired ManageIQ token"})
+
+			return
+		}
+		var manageIQErr *miq.ManageIQError
+		if errors.As(err, &manageIQErr) && manageIQErr.StatusCode >= 400 && manageIQErr.StatusCode < 500 {
+			c.JSON(manageIQErr.StatusCode, gin.H{"error": manageIQErr.Message})
 
 			return
 		}

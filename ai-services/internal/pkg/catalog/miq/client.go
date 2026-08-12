@@ -14,6 +14,18 @@ import (
 // ErrUnauthorized is returned when ManageIQ rejects the token with a 401.
 var ErrUnauthorized = errors.New("unauthorized: invalid or expired ManageIQ token")
 
+// ManageIQError is returned when ManageIQ responds with a non-2xx status other
+// than 401. StatusCode carries the original HTTP status from ManageIQ so
+// callers can distinguish 4xx client errors from 5xx server errors.
+type ManageIQError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *ManageIQError) Error() string {
+	return fmt.Sprintf("miq: status %d: %s", e.StatusCode, e.Message)
+}
+
 // Client defines the ManageIQ operations needed by the Catalog API.
 type Client interface {
 	// GetUserByToken validates miqToken against ManageIQ and returns the
@@ -62,13 +74,17 @@ func (c *HTTPClient) GetUserByToken(ctx context.Context, miqToken string) (*User
 		return nil, ErrUnauthorized
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("miq: unexpected status %d: %s", resp.StatusCode(), errResp.Error.Message)
+		return nil, &ManageIQError{StatusCode: resp.StatusCode(), Message: errResp.Error.Message}
 	}
 	if result.Identity.UserID == "" {
 		return nil, ErrUnauthorized
 	}
 
 	// Extract numeric user ID from user_href, e.g. ".../api/users/1" → "1".
+	if result.Identity.UserHref == "" {
+		return nil, fmt.Errorf("miq: identity missing user_href for user %q", result.Identity.UserID)
+	}
+
 	externalID := path.Base(result.Identity.UserHref)
 
 	return &UserInfo{
