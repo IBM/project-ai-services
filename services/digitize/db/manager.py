@@ -1155,7 +1155,6 @@ class DatabaseManager:
         total_files: Optional[int] = None,
         new_files: Optional[int] = None,
         removed_files: Optional[int] = None,
-        failed_files: Optional[int] = None,
         error: Optional[str] = None,
     ) -> bool:
         """
@@ -1176,8 +1175,6 @@ class DatabaseManager:
                     log_values["new_files"] = new_files
                 if removed_files is not None:
                     log_values["removed_files"] = removed_files
-                if failed_files is not None:
-                    log_values["failed_files"] = failed_files
                 if error is not None:
                     log_values["error"] = error
                 log_stmt = (
@@ -1222,7 +1219,6 @@ class DatabaseManager:
         total_files: Optional[int] = None,
         new_files: Optional[int] = None,
         removed_files: Optional[int] = None,
-        failed_files: Optional[int] = None,
     ) -> bool:
         """
         Write live progress counters into an in-progress sync-log row.
@@ -1239,8 +1235,6 @@ class DatabaseManager:
                     values["new_files"] = new_files
                 if removed_files is not None:
                     values["removed_files"] = removed_files
-                if failed_files is not None:
-                    values["failed_files"] = failed_files
                 if not values:
                     return True
                 stmt = (
@@ -1290,7 +1284,7 @@ class DatabaseManager:
                         row.id, row.connector_id, row.seq,
                         row.started_at, row.finished_at,
                         row.total_files, row.new_files, row.removed_files,
-                        row.failed_files, row.status, row.error,
+                        row.status, row.error,
                     )
                     session.expunge(row)
                 logger.debug(

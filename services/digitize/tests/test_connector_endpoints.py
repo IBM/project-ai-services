@@ -101,7 +101,6 @@ def _make_sync_log(log_id: int = 1, seq: int = 1) -> MagicMock:
     log.total_files = 42
     log.new_files = 2
     log.removed_files = 0
-    log.failed_files = 1
     log.status = "completed"
     log.error = ""
     return log

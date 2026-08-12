@@ -118,7 +118,6 @@ class SyncLogItem(BaseModel):
     total_files: int
     new_files: int
     removed_files: int
-    failed_files: int
     status: str
     error: str
 

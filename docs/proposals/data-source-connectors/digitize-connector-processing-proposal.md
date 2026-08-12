@@ -77,7 +77,6 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
-    failed_files     INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
     PRIMARY KEY (connector_id, seq),
@@ -132,7 +131,6 @@ class ConnectorSyncLog(Base):
     total_files = Column(Integer, nullable=False, default=0)
     new_files = Column(Integer, nullable=False, default=0)
     removed_files = Column(Integer, nullable=False, default=0)
-    failed_files = Column(Integer, nullable=False, default=default=0)
     status = Column(String, nullable=False, default="started")
     error = Column(String, nullable=False, default="")
 
@@ -353,10 +351,10 @@ DELETE /v1/connectors/{connector_id}/sync
 | `get_connector_sync_status(connector_id)` | `SELECT sync_status FROM connectors WHERE id = :id`. Returns the current status string or `None` if not found. Used by `_check_delete_pending`. |
 | `try_acquire_sync_lock(connector_id)` | Atomic `UPDATE connectors SET sync_status='syncing' WHERE id=:id AND sync_status!='syncing' RETURNING id`. |
 | `open_sync_log(connector_id)` | Create tick log row with `seq = COALESCE(MAX(seq), 0) + 1` and status `'started'`. |
-| `close_sync_log(connector_id, seq, status, error, counters, update_connector_status)` | Finalize log row. When `update_connector_status=True` (default), also updates connector `last_sync_at` / `sync_status`. Pass `update_connector_status=False` when closing a log with `'cancelled'` so that `connectors.sync_status` stays `'delete_pending'`. |
+| `update_sync_log(seq, total_files, new_files, removed_files)` | Write all three file counts in a single DB update immediately after `_classify()` returns. All counts are derived from classify output and known before any I/O begins. |
+| `close_sync_log(connector_id, seq, status, error)` | Finalize log row with terminal status and `finished_at`. Also updates connector `last_sync_at` / `sync_status`. Does **not** carry file counts — those are already persisted by `update_sync_log`. |
 | `get_last_sync_log(connector_id)` | `SELECT ... FROM connector_sync_logs WHERE connector_id = :id ORDER BY seq DESC LIMIT 1`. Returns the most-recent log row or `None`. Used by `_run_teardown` to detect open logs. |
 | `reset_stale_syncing_connectors()` | On startup: `UPDATE connectors SET sync_status='out of sync' WHERE sync_status='syncing'`. Returns the list of affected `connector_id` values. Used by `recover_connector_sync_state()`. |
-| `update_sync_log_progress()` | Increment progress counters during execution. |
 | `get_sync_logs(connector_id, limit, offset)` | Paginated log history query. |
 
 ---
@@ -518,47 +516,63 @@ def build_scanner(config: ConnectorConfig) -> BaseScanner:
 - **Phase 1 (Log):** Open tick row (`open_sync_log`).
 - **Phase 2 (Scan & State):** Query owned `known_checksums` and `all_checksums`. Offload blocking network calls (`connect`, `scan`) to thread pool via `run_in_executor(None, ...)`.
 - **Phase 3 (Classify):** `_classify()` separates `scanned_files` into `skip_list`, `ingest_list`, and cross-connector duplicates. Cross-connector duplicates execute `insert_connector_checksum` inline using existing `doc_id`.
+- **Phase 3b (Count Commit):** All three counters (`total_files`, `new_files`, `removed_files`) are fully determined from classify output. A single `update_sync_log()` call persists them before any I/O-heavy work begins. No further counter writes happen during batch processing.
 - **Phase 4a (Ingest New Files):** Sequentially download files in `ingest_list`:
-  - Dedicated per-file staging directory: `staging/connectors/{connector_id}-{job_id}-{batch_number}`.
-  - Offload download to executor thread (`run_in_executor(None, scanner.download_to, ...)`).
-  - Call `create_job()` → obtain `doc_id`, insert checksum row, write `documents.metadata`.
-  - Cleanup staging directory immediately in `finally` block before downloading next file.
-- **Phase 4b (Orphan Removal):** Runs **strictly after Phase 4a completes**. Delete checksum rows for `orphan_checksums = known_checksums − scanned_checksums`. If remaining count is `0`, call `DELETE /v1/documents/{doc_id}`.
-- **Phase 5 (Finalize):** Finalize logs and update `sync_status` to `'completed'` or `'out of sync'`. Call `scanner.close()` in top-level `finally`.
+  - Dedicated per-batch staging directory: `staging/connectors/{connector_id}-{seq}-{batch_number}`.
+  - Offload download to executor thread (`asyncio.to_thread(scanner.download_to, ...)`).
+  - Call `initialize_job_state()` → obtain `doc_id` map, insert checksum rows, call `ingest()`.
+  - Cleanup staging directory immediately in `finally` block.
+- **Phase 4b (Orphan Removal):** Runs **strictly after Phase 4a completes**. Delete checksum rows for `orphan_checksums = known_checksums − scanned_checksums`. If remaining count is `0`, call `_best_effort_delete_document(doc_id)`.
+- **Phase 5 (Finalize):** Write terminal status (`'completed'`/`'failed'`/`'cancelled'`) and update `sync_status` on the connector row. Call `scanner.close()` in top-level `finally`.
 
 ---
 
 ### 6.2 Implementation Code
 
 ```python
-async def _run_tick(connector_id: str) -> None:
-    loop = asyncio.get_running_loop()
-    config = get_connector_by_id(connector_id)
-    sync_seq = open_sync_log(connector_id)
+async def run_tick(connector_id: str) -> None:
+    config = get_active_connector(connector_id)
+    if config is None:
+        logger.error(f"Connector {connector_id!r} not found; tick aborted")
+        return
+
+    sync_seq = open_new_sync_log(connector_id)
     scanner = build_scanner(config)
+
     try:
         _check_delete_pending(connector_id)  # Phase boundary: before scan
-        await loop.run_in_executor(None, scanner.connect)
-        scanned_files: list[tuple[str, str]] = await loop.run_in_executor(None, scanner.scan)
 
-        _check_delete_pending(connector_id)  # Phase boundary: after scan, before classify
-        known_checksums = set(get_connector_checksums(connector_id))
-        all_checksums = set(get_all_connector_checksums())
+        await asyncio.to_thread(scanner.connect)
+        scanned_files = await asyncio.to_thread(scanner.scan)
 
-        ingest_list, orphan_checksums = _classify(connector_id, scanned_files, known_checksums, all_checksums)
+        known_checksums = set(list_connector_checksums(connector_id))
+        all_checksums = set(list_all_checksums())
+
+        ingest_list, orphan_checksums = _classify(
+            connector_id, scanned_files, known_checksums, all_checksums
+        )
+
+        # Phase 3b: all counts known — single DB write before any I/O begins.
+        update_sync_log(
+            sync_seq,
+            total_files=len(scanned_files),
+            new_files=len(ingest_list),
+            removed_files=len(orphan_checksums),
+        )
 
         await _process_new_files(sync_seq, connector_id, scanner, ingest_list)
         await _delete_orphans(connector_id, orphan_checksums)
         _complete_tick(sync_seq, connector_id)
+
     except asyncio.CancelledError:
-        _cancel_tick(sync_seq, connector_id)  # status='cancelled', sync_status='delete_pending'
-        asyncio.create_task(_run_teardown(connector_id))  # hand off to teardown
+        logger.info(f"Tick cancelled for connector {connector_id!r} (delete_pending)")
+        _cancel_tick(sync_seq, connector_id)
         raise
     except Exception as exc:
         logger.error(f"Tick failed for connector {connector_id!r}: {exc}", exc_info=True)
-        _fail_tick(sync_seq, connector_id, exc)  # status='failed', sync_status='out of sync'
+        _fail_tick(sync_seq, connector_id, exc)
     finally:
-        scanner.close()
+        await asyncio.to_thread(scanner.close)
 
 
 def _classify(
@@ -578,8 +592,9 @@ def _classify(
         elif checksum in all_checksums:
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
-                doc_id = find_connector_doc_by_checksum(checksum)
-                insert_connector_checksum(connector_id, checksum, doc_id)
+                existing_doc_id = lookup_connector_content_by_checksum(checksum)
+                if existing_doc_id:
+                    add_connector_checksum_entry(connector_id, checksum, existing_doc_id)
         else:
             if checksum not in seen_this_tick:
                 seen_this_tick.add(checksum)
@@ -589,27 +604,61 @@ def _classify(
     return ingest_list, orphan_checksums
 
 
-async def _process_new_files(sync_seq: int, connector_id: str, scanner: BaseScanner, ingest_list: list[tuple[str, str]]) -> None:
-    loop = asyncio.get_running_loop()
+async def _process_new_files(
+    sync_seq: int,
+    connector_id: str,
+    scanner,
+    ingest_list: list[tuple[str, str]],
+) -> None:
+    """Download and ingest ingest_list in batches of up to 10 files.
+
+    Counts are not tracked here; they were already written by update_sync_log
+    immediately after _classify().
+    """
     staging_base = settings.digitize.staging_dir / "connectors"
-    for batch_number, (remote_path, checksum) in enumerate(ingest_list):
-        _check_delete_pending(connector_id)  # checkpoint: before starting each download
-        job_id = generate_job_id()
-        batch_dir = staging_base / f"{connector_id}-{job_id}-{batch_number}"
+
+    for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
+        batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
+        _check_delete_pending(connector_id)  # checkpoint: before each batch
+
+        job_id = generate_uuid()
+        batch_dir_name = f"{connector_id}-{sync_seq}-{batch_number}"
+        batch_dir = staging_base / batch_dir_name
         batch_dir.mkdir(parents=True, exist_ok=True)
+        checksum_to_filename: dict[str, str] = {}
+
         try:
-            local_path = batch_dir / Path(remote_path).name
-            await loop.run_in_executor(None, scanner.download_to, remote_path, local_path)
-            _check_delete_pending(connector_id)  # checkpoint: after download returns, before job creation
-            doc_id = await create_job(connector_id, checksum, staging_dir=batch_dir)
-            insert_connector_checksum(connector_id, checksum, doc_id)
-        except asyncio.CancelledError:
-            raise  # propagates to _run_tick's except block → _cancel_tick + _run_teardown
+            for remote_path, checksum in batch:
+                filename = Path(remote_path).name
+                local_checksum = await asyncio.to_thread(
+                    scanner.download_to, remote_path, batch_dir / filename
+                )
+                scanner.verify_integrity(local_checksum, checksum)
+                checksum_to_filename[checksum] = filename
+
+            _check_delete_pending(connector_id)  # checkpoint: after downloads
+
+            filenames = list(checksum_to_filename.values())
+            doc_id_dict = initialize_job_state(
+                job_id=job_id,
+                operation=OperationType.INGESTION,
+                output_format=OutputFormat.JSON,
+                documents_info=filenames,
+                job_name=f"{connector_id} - {sync_seq} - {batch_number}",
+            )
+            for checksum, filename in checksum_to_filename.items():
+                add_connector_checksum_entry(connector_id, checksum, doc_id_dict[filename])
+
+            await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
+            await _wait_for_job(job_id, connector_id)
+
         except Exception as exc:
-            logger.warning(f"Failed to ingest {remote_path!r}: {exc}")
-            increment_failed_files(sync_seq)
+            logger.warning(
+                f"Failed to ingest batch {batch_number!r} for connector {connector_id!r}: {exc}",
+                exc_info=True,
+            )
         finally:
-            cleanup_staging_directory(batch_dir.name, staging_base, ignore_errors=True)
+            cleanup_staging_directory(batch_dir_name, staging_base, ignore_errors=True)
 ```
 
 ---

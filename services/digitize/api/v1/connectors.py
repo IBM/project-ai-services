@@ -534,7 +534,6 @@ async def get_sync_history(
                 total_files=log.total_files,
                 new_files=log.new_files,
                 removed_files=log.removed_files,
-                failed_files=log.failed_files,
                 status=log.status,
                 error=log.error or "",
             )

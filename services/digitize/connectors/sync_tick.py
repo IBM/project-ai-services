@@ -7,9 +7,10 @@ Phases
 2.  load known/all checksums + scanner.scan()
 3.  _classify()              → ingest_list, orphan_checksums
                                cross-connector dups registered inline
+3b. update_sync_log()        → single DB write of total/new/removed counts (all known post-classify)
 4a. _process_new_files()     → download → create job/doc → add checksum row
 4b. _delete_orphans()        → remove checksum rows; delete docs with no owners
-5.  close_sync_log()         → finalize tick row + reset sync_status
+5.  close_sync_log()         → finalize tick row with terminal status + reset sync_status
 
 Called by the APScheduler job (_run_tick_wrapped in scheduler.py, PR7) and
 directly by POST /v1/connectors/{id}/sync after the caller has already
@@ -85,10 +86,6 @@ async def run_tick(connector_id: str) -> None:
     sync_seq: int = open_new_sync_log(connector_id)
     scanner = build_scanner(config)
 
-    failed: int = 0
-    new: int = 0
-    removed: int = 0
-
     try:
         # Phase boundary: check for DELETE_PENDING before any remote I/O starts.
         _check_delete_pending(connector_id)
@@ -103,21 +100,18 @@ async def run_tick(connector_id: str) -> None:
             connector_id, scanned_files, known_checksums, all_checksums
         )
 
-        update_sync_log(sync_seq, total_files=len(scanned_files))
-
-        new, failed = await _process_new_files(
-            sync_seq, connector_id, scanner, ingest_list
-        )
-
-        removed = await _delete_orphans(connector_id, orphan_checksums)
-
-        _complete_tick(
-            sync_seq, connector_id,
+        update_sync_log(
+            sync_seq,
             total_files=len(scanned_files),
-            new_files=new,
-            removed_files=removed,
-            failed_files=failed,
+            new_files=len(ingest_list),
+            removed_files=len(orphan_checksums),
         )
+
+        await _process_new_files(sync_seq, connector_id, scanner, ingest_list)
+
+        await _delete_orphans(connector_id, orphan_checksums)
+
+        _complete_tick(sync_seq, connector_id)
 
     except asyncio.CancelledError:
         logger.info(f"Tick cancelled for connector {connector_id!r} (delete_pending)")
@@ -215,18 +209,15 @@ async def _process_new_files(
     connector_id: str,
     scanner,
     ingest_list: list[tuple[str, str]],
-) -> tuple[int, int]:
+) -> None:
     """Download and ingest *ingest_list* in batches of up to 10 files.
 
     Each batch of up to 10 files is downloaded into a single staging directory,
     registered as a single job, and passed to ``ingest()`` together.
 
-    Returns (new_count, failed_count).  Staging directories are removed after
-    each batch regardless of success.
+    Staging directories are removed after each batch regardless of success.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
-    new_count = 0
-    failed_count = 0
 
     for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
         batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
@@ -271,21 +262,14 @@ async def _process_new_files(
 
             await _wait_for_job(job_id, connector_id)
 
-            new_count += len(batch)
-            update_sync_log(sync_seq, new_files=new_count)
-
         except Exception as exc:
             logger.warning(
                 f"Failed to ingest batch {batch_number!r} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
-            failed_count += len(batch)
-            update_sync_log(sync_seq, failed_files=failed_count)
 
         finally:
             cleanup_staging_directory(batch_dir_name, staging_base, ignore_errors=True)
-
-    return new_count, failed_count
 
 
 # ---------------------------------------------------------------------------
@@ -319,27 +303,13 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> int:
 # Phase 5 helpers
 # ---------------------------------------------------------------------------
 
-def _complete_tick(
-    sync_seq: int,
-    connector_id: str,
-    total_files: int,
-    new_files: int,
-    removed_files: int,
-    failed_files: int,
-) -> None:
+def _complete_tick(sync_seq: int, connector_id: str) -> None:
     close_sync_log(
         connector_id=connector_id,
         seq=sync_seq,
         status="completed",
-        total_files=total_files,
-        new_files=new_files,
-        removed_files=removed_files,
-        failed_files=failed_files,
     )
-    logger.info(
-        f"Tick completed for {connector_id!r} — "
-        f"total={total_files} new={new_files} removed={removed_files} failed={failed_files}"
-    )
+    logger.info(f"Tick completed for {connector_id!r}")
 
 
 def _cancel_tick(sync_seq: int, connector_id: str) -> None:

@@ -267,7 +267,6 @@ class ConnectorSyncLog(Base):
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     new_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     removed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    failed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncStatus.STARTED)
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
 

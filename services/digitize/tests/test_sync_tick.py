@@ -15,9 +15,8 @@ _classify
 
 _process_new_files
   - happy path: download → initialize_job_state → add_connector_checksum_entry → ingest called
-  - per-file failure: exception increments failed counter, staging cleaned up, loop continues
+  - per-file failure: exception logged, staging cleaned up, loop continues
   - staging directory is removed after each file (success and failure)
-  - returns (new_count, failed_count) correctly
 
 _delete_orphans
   - removes checksum row and deletes doc when remaining == 0
@@ -174,7 +173,6 @@ class TestProcessNewFiles:
         mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
 
         stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
-        stack.enter_context(patch(f"{DB_MODULE}.update_sync_log"))
         stack.enter_context(
             patch(f"{DB_MODULE}.initialize_job_state", return_value={"report.pdf": "doc-1"})
         )
@@ -189,21 +187,11 @@ class TestProcessNewFiles:
         )
         return stack
 
-    def test_happy_path_returns_new_count(self):
+    def test_happy_path_completes_without_error(self):
         scanner = self._make_scanner()
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches():
-            new, failed = asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
-        assert new == 1
-        assert failed == 0
-
-    def test_per_file_failure_increments_failed(self):
-        scanner = self._make_scanner(download_raises=RuntimeError("network down"))
-        ingest_list = [("docs/a.pdf", "ck1"), ("docs/b.pdf", "ck2")]
-        with self._patches():
-            new, failed = asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
-        assert new == 0
-        assert failed == 2
+            asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
 
     def test_failure_does_not_stop_loop(self):
         """First file fails, second succeeds — both are processed."""
@@ -226,7 +214,6 @@ class TestProcessNewFiles:
             mock_settings = stack.enter_context(patch(f"{DB_MODULE}.settings"))
             mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
             stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
-            stack.enter_context(patch(f"{DB_MODULE}.update_sync_log"))
             stack.enter_context(
                 patch(f"{DB_MODULE}.initialize_job_state", return_value={"b.pdf": "doc-2"})
             )
@@ -237,11 +224,9 @@ class TestProcessNewFiles:
                 patch(f"{DB_MODULE}.get_connector_sync_status", return_value="syncing")
             )
 
-            new, failed = asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+            asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
 
         assert call_count["n"] == 2
-        assert new == 1
-        assert failed == 1
 
     def test_staging_dir_cleaned_on_success(self):
         scanner = self._make_scanner()
@@ -254,8 +239,7 @@ class TestProcessNewFiles:
         scanner = self._make_scanner(download_raises=RuntimeError("fail"))
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches():
-            new, failed = asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
-        assert failed == 1
+            asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
 
     def test_add_checksum_entry_called_on_success(self):
         scanner = self._make_scanner()
@@ -320,16 +304,12 @@ class TestDeleteOrphans:
 class TestTickFinalizers:
     def test_complete_tick_calls_close_sync_log(self):
         with patch(f"{DB_MODULE}.close_sync_log") as mock_close:
-            _complete_tick(7, "c1", total_files=10, new_files=3, removed_files=1, failed_files=0)
+            _complete_tick(7, "c1")
 
         mock_close.assert_called_once_with(
             connector_id="c1",
             seq=7,
             status="completed",
-            total_files=10,
-            new_files=3,
-            removed_files=1,
-            failed_files=0,
         )
 
     def test_fail_tick_calls_close_sync_log_with_error(self):
@@ -384,7 +364,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=(0, 0)), \
+                   new_callable=AsyncMock, return_value=None), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1"))
@@ -532,7 +512,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.close_sync_log") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=(0, 0)), \
+                   new_callable=AsyncMock, return_value=None), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1"))  # must not raise

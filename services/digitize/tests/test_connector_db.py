@@ -608,7 +608,6 @@ class TestListSyncLogs:
         log.total_files = 0
         log.new_files = 0
         log.removed_files = 0
-        log.failed_files = 0
         log.status = "started"
         log.error = ""
         return log

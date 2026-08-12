@@ -1357,7 +1357,6 @@ def close_sync_log(
     total_files: Optional[int] = None,
     new_files: Optional[int] = None,
     removed_files: Optional[int] = None,
-    failed_files: Optional[int] = None,
     error: Optional[str] = None,
 ) -> bool:
     """
@@ -1373,7 +1372,6 @@ def close_sync_log(
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,
-        failed_files=failed_files,
         error=error,
     )
 
@@ -1383,7 +1381,6 @@ def update_sync_log(
     total_files: Optional[int] = None,
     new_files: Optional[int] = None,
     removed_files: Optional[int] = None,
-    failed_files: Optional[int] = None,
 ) -> bool:
     """
     Write live progress counters into an in-progress sync-log row.
@@ -1395,7 +1392,6 @@ def update_sync_log(
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,
-        failed_files=failed_files,
     )
 
 
