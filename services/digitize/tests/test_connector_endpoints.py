@@ -618,7 +618,7 @@ class TestTriggerSync:
         )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
-            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
+            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
         assert response.status_code == 202
         assert response.json()["sync_seq"] == 7
         task_mock.assert_called_once()
@@ -641,7 +641,7 @@ class TestTriggerSync:
         )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
-            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
+            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
         assert response.status_code == 202
         assert response.json()["sync_seq"] == 3
         task_mock.assert_not_called()
