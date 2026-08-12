@@ -10,8 +10,8 @@ Endpoints:
   GET    /v1/connectors
   GET    /v1/connectors/{connector_id}
   GET    /v1/connectors/{connector_id}/syncs
-  POST   /v1/connectors/{connector_id}/sync
-  DELETE /v1/connectors/{connector_id}/sync
+  POST   /v1/connectors/{connector_id}/syncs
+  DELETE /v1/connectors/{connector_id}/syncs
 """
 
 import asyncio
@@ -424,11 +424,11 @@ async def get_connector(connector_id: str):
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/connectors/{connector_id}/sync
+# POST /v1/connectors/{connector_id}/syncs
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/{connector_id}/sync",
+    "/{connector_id}/syncs",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=SyncTriggerResponse,
     responses={
@@ -504,11 +504,11 @@ async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: fl
 
 
 # ---------------------------------------------------------------------------
-# DELETE /v1/connectors/{connector_id}/sync
+# DELETE /v1/connectors/{connector_id}/syncs
 # ---------------------------------------------------------------------------
 
 @router.delete(
-    "/{connector_id}/sync",
+    "/{connector_id}/syncs",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         404: http_error_responses[404],
