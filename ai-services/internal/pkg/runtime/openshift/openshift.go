@@ -186,6 +186,20 @@ func (kc *OpenshiftClient) PullImage(image string) error {
 	return nil
 }
 
+// NamespaceExists reports whether the configured namespace exists.
+func (kc *OpenshiftClient) NamespaceExists() (bool, error) {
+	_, err := kc.KubeClient.CoreV1().Namespaces().Get(kc.Ctx, kc.Namespace, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	return true, nil
+}
+
 // ListPods lists pods with optional filters.
 func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
 	labels := client.MatchingLabels{}

@@ -491,6 +491,12 @@ func (pc *PodmanClient) UpdateSecret(name, deploymentName string, data map[strin
 	return fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) NamespaceExists() (bool, error) {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return false, fmt.Errorf("unsupported method")
+}
+
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman
