@@ -1255,6 +1255,16 @@ def get_connector_sync_status(connector_id: str) -> Optional[str]:
     return db_manager.get_connector_sync_status(connector_id)
 
 
+def try_acquire_sync_lock(connector_id: str) -> bool:
+    """
+    Atomically acquire the sync lock for *connector_id*.
+
+    Sets sync_status='syncing' only when it is not already 'syncing'.
+    Returns True if the lock was acquired, False if already held (or not found).
+    """
+    return db_manager.try_acquire_sync_lock(connector_id)
+
+
 def list_connectors() -> List[Connector]:
     """Return all connectors ordered by attached_at descending."""
     return db_manager.get_all_connectors()

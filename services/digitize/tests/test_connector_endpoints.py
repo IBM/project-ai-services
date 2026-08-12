@@ -12,6 +12,7 @@ Coverage:
   - GET    /v1/connectors                                 (200)
   - GET    /v1/connectors/{id}                            (200, 404)
   - GET    /v1/connectors/{id}/syncs                      (200, 404)
+  - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
   - GET    /v1/documents — excludes connector-sourced docs
   - GET    /v1/documents/{doc_id} — 404 for connector-sourced
   - DELETE /v1/documents/{doc_id} — 404 for connector-sourced
@@ -568,6 +569,57 @@ class TestDocumentListConnectorFilter:
             Mock(return_value=True),
         )
         response = connector_test_client.delete("/v1/documents/connector-owned-doc")
+        assert response.status_code == 404
+
+# ===========================================================================
+# POST /v1/connectors/{connector_id}/sync
+# ===========================================================================
+
+class TestTriggerSync:
+    def test_returns_202_and_dispatches_task_when_lock_acquired(
+        self, connector_test_client, monkeypatch
+    ):
+        """Lock acquired → create_task called, 202 returned."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+            Mock(return_value=True),
+        )
+        task_mock = Mock(side_effect=lambda coro: coro.close())
+        with patch("asyncio.create_task", task_mock):
+            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        assert response.status_code == 202
+        task_mock.assert_called_once()
+
+    def test_returns_202_no_op_when_already_syncing(
+        self, connector_test_client, monkeypatch
+    ):
+        """Lock not acquired (already syncing) → 202, no task created."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+            Mock(return_value=False),
+        )
+        task_mock = Mock(side_effect=lambda coro: coro.close())
+        with patch("asyncio.create_task", task_mock):
+            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        assert response.status_code == 202
+        task_mock.assert_not_called()
+
+    def test_returns_404_when_connector_not_found(
+        self, connector_test_client, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
         assert response.status_code == 404
 
 # Made with Bob

@@ -10,6 +10,7 @@ Endpoints:
   GET    /v1/connectors
   GET    /v1/connectors/{connector_id}
   GET    /v1/connectors/{connector_id}/syncs
+  POST   /v1/connectors/{connector_id}/sync
 """
 
 from typing import List, Optional
@@ -396,6 +397,53 @@ async def get_connector(connector_id: str):
         raise
     except Exception as exc:
         logger.error(f"Unexpected error fetching connector {connector_id}: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/connectors/{connector_id}/sync
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/{connector_id}/sync",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: http_error_responses[404],
+        500: http_error_responses[500],
+    },
+    summary="Trigger an immediate manual sync",
+    description=(
+        "Dispatches a sync tick for the connector immediately. "
+        "Safe and idempotent: if a tick is already running the request is "
+        "accepted without starting a duplicate (no-op 202). "
+        "The tick runs asynchronously; this endpoint returns as soon as the "
+        "task has been dispatched."
+    ),
+    response_description="Sync dispatched (or already in progress)",
+)
+async def trigger_sync(connector_id: str):
+    import asyncio
+    from digitize.connectors.sync_tick import run_tick
+
+    try:
+        connector = db_ops.get_active_connector(connector_id)
+        if connector is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Connector {connector_id!r} not found",
+            )
+
+        acquired = db_ops.try_acquire_sync_lock(connector_id)
+        if acquired:
+            asyncio.create_task(run_tick(connector_id))
+            logger.info(f"Manual sync dispatched for connector {connector_id!r}")
+        
+        return Response(status_code=202)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
 
 

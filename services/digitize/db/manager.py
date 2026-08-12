@@ -1058,6 +1058,30 @@ class DatabaseManager:
     # ========================================================================
 
     @staticmethod
+    def try_acquire_sync_lock(connector_id: str) -> bool:
+        """
+        Atomically set sync_status='syncing' if it is not already 'syncing'.
+
+        Returns True if the lock was acquired, False if another tick already
+        holds it (or the connector row does not exist).
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(Connector)
+                    .where(
+                        Connector.id == connector_id,
+                        Connector.sync_status != SyncStatus.SYNCING,
+                    )
+                    .values(sync_status=SyncStatus.SYNCING)
+                    .returning(Connector.id)
+                ).one_or_none()
+                return result is not None
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in try_acquire_sync_lock({connector_id}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
     def open_sync_log(
         connector_id: str,
         started_at: Optional[datetime] = None,
