@@ -37,6 +37,7 @@ class SyncStatus:
     SYNCING = "syncing"
     OUT_OF_SYNC = "out of sync"
     DELETE_PENDING = "delete pending"
+    CANCEL_PENDING = "cancel pending"
 
     # ConnectorSyncLog.status values
     STARTED = "started"

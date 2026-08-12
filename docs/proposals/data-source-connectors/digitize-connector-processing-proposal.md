@@ -274,7 +274,7 @@ _run_teardown(connector_id) (Background asyncio.Task)
 
 ---
 
-### 3.5 `GET` & `POST /v1/connectors/{connector_id}/sync`
+### 3.5 `GET`, `POST` & `DELETE /v1/connectors/{connector_id}/sync`
 
 - `GET`: Returns paginated execution history items from `connector_sync_logs` (`limit` default 50, max 200).
 - `POST`: Triggers an immediate manual sync tick.
@@ -292,6 +292,25 @@ POST /v1/connectors/{connector_id}/sync
   ├─ 3. open_new_sync_log(connector_id) → sync_seq
   ├─ 4. asyncio.create_task(_run_tick(connector_id))
   └─ 5. Return 202 Accepted
+```
+- `DELETE`: Stops the currently running sync tick without deleting the connector. The connector remains and resumes its normal schedule on the next interval.
+  - Returns `409 Conflict` if no tick is currently running (`sync_status != 'syncing'`).
+  - If running: atomically sets `sync_status = 'cancel pending'` via `mark_sync_cancel_pending()`, returns `204 No Content` immediately.
+  - The tick hits `_check_delete_pending` at its next checkpoint, raises `CancelledError`, and `_cancel_tick` closes the sync log with `status = 'cancelled'`.
+  - `close_sync_log` resets `connectors.sync_status` to `'out of sync'` (not `'cancelled'`) so the scheduler can acquire the lock on the next interval.
+
+```text
+DELETE /v1/connectors/{connector_id}/sync
+  │
+  ├─ 1. Check existence → 404 if not found
+  ├─ 2. mark_sync_cancel_pending(connector_id)
+  │      (atomic UPDATE WHERE sync_status='syncing' SET sync_status='cancel pending')
+  │      ├─ No rows updated (not syncing) → return 409 Conflict
+  │      └─ Updated → proceed
+  └─ 3. Return 204 No Content immediately
+           └─ Running tick hits _check_delete_pending checkpoint →
+              raises CancelledError → _cancel_tick writes sync log
+              status='cancelled', connector sync_status resets to 'out of sync'
 ```
 
 ---

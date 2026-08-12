@@ -1082,6 +1082,30 @@ class DatabaseManager:
             raise
 
     @staticmethod
+    def mark_sync_cancel_pending(connector_id: str) -> bool:
+        """
+        Atomically set sync_status='cancel pending' when sync_status='syncing'.
+
+        Returns True if the update landed (a tick was running and is now
+        signalled to cancel), False if no tick was running or connector not found.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(Connector)
+                    .where(
+                        Connector.id == connector_id,
+                        Connector.sync_status == SyncStatus.SYNCING,
+                    )
+                    .values(sync_status=SyncStatus.CANCEL_PENDING)
+                    .returning(Connector.id)
+                ).one_or_none()
+                return result is not None
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in mark_sync_cancel_pending({connector_id!r}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
     def open_sync_log(
         connector_id: str,
         started_at: Optional[datetime] = None,
@@ -1170,10 +1194,19 @@ class DatabaseManager:
                         f"Sync log connector={connector_id!r} seq={seq} not found for update"
                     )
                     return False
+                # When a tick is cancelled (stop-sync request) the connector
+                # should revert to 'out of sync' so the scheduler can run the
+                # next tick normally.  All other terminal statuses are written
+                # through verbatim (completed → 'completed', failed → 'failed').
+                connector_sync_status = (
+                    SyncStatus.OUT_OF_SYNC
+                    if status == SyncStatus.CANCELLED
+                    else status
+                )
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(last_sync_at=now, sync_status=status)
+                    .values(last_sync_at=now, sync_status=connector_sync_status)
                 )
                 return True
         except SQLAlchemyError as e:

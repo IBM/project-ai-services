@@ -1265,6 +1265,16 @@ def try_acquire_sync_lock(connector_id: str) -> bool:
     return db_manager.try_acquire_sync_lock(connector_id)
 
 
+def mark_sync_cancel_pending(connector_id: str) -> bool:
+    """
+    Signal a running tick to cancel without deleting the connector.
+
+    Atomically sets sync_status='cancel pending' only when sync_status='syncing'.
+    Returns True if the signal was set (tick was running), False otherwise.
+    """
+    return db_manager.mark_sync_cancel_pending(connector_id)
+
+
 def list_connectors() -> List[Connector]:
     """Return all connectors ordered by attached_at descending."""
     return db_manager.get_all_connectors()

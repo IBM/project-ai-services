@@ -11,6 +11,7 @@ Endpoints:
   GET    /v1/connectors/{connector_id}
   GET    /v1/connectors/{connector_id}/syncs
   POST   /v1/connectors/{connector_id}/sync
+  DELETE /v1/connectors/{connector_id}/sync
 """
 
 from typing import List, Optional
@@ -444,6 +445,54 @@ async def trigger_sync(connector_id: str):
         raise
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# DELETE /v1/connectors/{connector_id}/sync
+# ---------------------------------------------------------------------------
+
+@router.delete(
+    "/{connector_id}/sync",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: http_error_responses[404],
+        409: http_error_responses[409],
+        500: http_error_responses[500],
+    },
+    summary="Stop a running sync",
+    description=(
+        "Signals the active sync tick to stop at its next cancellation checkpoint. "
+        "Returns 204 immediately; the tick exits asynchronously and the sync log "
+        "is marked 'cancelled'. The connector remains and resumes its normal "
+        "schedule on the next interval. "
+        "Returns 409 if no sync is currently running."
+    ),
+    response_description="Stop signal sent",
+)
+async def cancel_sync(connector_id: str):
+    try:
+        connector = db_ops.get_active_connector(connector_id)
+        if connector is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Connector {connector_id!r} not found",
+            )
+
+        signalled = db_ops.mark_sync_cancel_pending(connector_id)
+        if not signalled:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "No sync is currently running for this connector.",
+            )
+
+        logger.info(f"Cancel-sync signal sent for connector {connector_id!r}")
+        return Response(status_code=204)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error cancelling sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
 
 

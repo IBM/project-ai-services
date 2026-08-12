@@ -49,16 +49,18 @@ logger = get_logger("sync_tick")
 
 def _check_delete_pending(connector_id: str) -> None:
     """
-    Raise asyncio.CancelledError if the connector is marked for deletion.
+    Raise asyncio.CancelledError if the connector is marked for deletion or
+    a stop-sync request has been issued.
 
     Performs a live DB query — no in-memory state.  Called at the three
     phase boundaries inside run_tick / _process_new_files so that a DELETE
-    request is honoured promptly without leaving the tick running to completion.
+    or DELETE /sync request is honoured promptly without leaving the tick
+    running to completion.
     """
     status = get_connector_sync_status(connector_id)
-    if status == "delete pending":
+    if status in ("delete pending", "cancel pending"):
         raise asyncio.CancelledError(
-            f"Connector {connector_id!r} marked delete_pending — tick cancelled"
+            f"Connector {connector_id!r} sync cancelled (status={status!r})"
         )
 
 

@@ -458,6 +458,11 @@ class TestCheckDeletePending:
         with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=None):
             _check_delete_pending("conn-1")  # must not raise
 
+    def test_raises_cancelled_error_when_cancel_pending(self):
+        with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="cancel pending"):
+            with pytest.raises(asyncio.CancelledError):
+                _check_delete_pending("conn-1")
+
     def test_does_not_raise_when_up_to_date(self):
         with patch(f"{DB_MODULE}.get_connector_sync_status", return_value="up to date"):
             _check_delete_pending("conn-1")  # must not raise
