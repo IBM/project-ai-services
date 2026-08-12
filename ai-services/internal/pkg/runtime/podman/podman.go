@@ -380,13 +380,13 @@ func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 }
 
 func (pc *PodmanClient) ListCRD(_ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
-	logger.Errorf("unsupported method called!")
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
 }
 
 func (pc *PodmanClient) DeleteNamespace(_ string) error {
-	logger.Errorf("unsupported method called!")
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
 }
