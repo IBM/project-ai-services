@@ -5,3 +5,4 @@ version: "1.0.0"
 resources:
   cpu: 1 # 50m (UI) + 1 (Backend) = ~1 core
   memory: 1610612736 # 512Mi (UI) + 1Gi (Backend) = 1.5Gi in bytes
+  storage: 0 # No persistent storage required

@@ -38,7 +38,7 @@ async def _run_digitize(
     job_id: str,
     doc_id_dict: dict,
     output_format: models.OutputFormat,
-    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ) -> None:
     """Run the digitization pipeline and release the semaphore slot."""
     status_mgr = get_status_manager(job_id)
@@ -66,7 +66,7 @@ async def _run_ingest(
     job_id: str,
     filenames: List[str],
     doc_id_dict: dict,
-    file_checksum_dict: Optional[dict] = None,  # filename -> "sha256:..."
+    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ) -> None:
     """Run the ingestion pipeline and release the semaphore slot."""
     status_mgr = get_status_manager(job_id)
@@ -230,7 +230,7 @@ async def create_job(
         # is found. Failed / in-progress records are NOT considered to already exist.
 
         already_exists_files: list[models.AlreadyExistsFile] = []
-        file_checksum_dict: dict[str, str] = {}  # filename -> "sha256:..." (novel files only)
+        file_checksum_dict: dict[str, str] = {}  # filename -> md5 hex (novel files only)
 
         novel_filenames: list[str] = []
         novel_contents:  list[bytes] = []

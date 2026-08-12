@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Button } from "@carbon/react";
 import { View, ViewOff } from "@carbon/icons-react";
 import type { ProviderSchema } from "@/types/api.types";
-import styles from "../ServicesDeployFlow.module.scss";
+import styles from "../../Shared/DeployFlow.shared.module.scss";
 
 interface ServiceCredentialDisplayProps {
   providerId: string;
@@ -54,12 +54,12 @@ export const ServiceCredentialDisplay: React.FC<
             <span className={styles.serviceConfigItemLabel}>
               {field.title}
               {field.required && !fieldValue && (
-                <span style={{ color: "#da1e28", marginLeft: "4px" }}>*</span>
+                <span className={styles.requiredIndicator}>*</span>
               )}
             </span>
             <span className={styles.serviceConfigItemValue}>
               {!fieldValue ? (
-                <span style={{ color: "#da1e28", fontStyle: "italic" }}>
+                <span className={styles.requiredMessage}>
                   Required - Click Edit to add
                 </span>
               ) : isPasswordField ? (
