@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
-from digitize.connectors.models import SyncStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 import digitize.app as digitize_app
 import digitize.api.v1.documents as documents_router_module
@@ -77,7 +77,7 @@ def _make_connector(
     connector_id: str = CONNECTOR_ID,
     name: str = CONNECTOR_NAME,
     connector_type: str = CONNECTOR_TYPE,
-    sync_status: str = SyncStatus.UP_TO_DATE,
+    sync_status: str = ConnectorStatus.UP_TO_DATE,
 ) -> MagicMock:
     c = MagicMock()
     c.id = connector_id
@@ -103,7 +103,7 @@ def _make_sync_log(seq: int = 1) -> MagicMock:
     log.total_files = 42
     log.new_files = 2
     log.removed_files = 0
-    log.status = SyncStatus.COMPLETED
+    log.status = SyncLogStatus.COMPLETED
     log.error = ""
     return log
 
@@ -326,7 +326,7 @@ class TestDeleteConnector:
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
             response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
@@ -557,7 +557,7 @@ class TestGetSync:
         assert response.status_code == 200
         data = response.json()
         assert data["seq"] == 3
-        assert data["status"] == SyncStatus.COMPLETED
+        assert data["status"] == SyncLogStatus.COMPLETED
         assert data["total_files"] == 42
 
     def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
@@ -722,7 +722,7 @@ class TestStopSync:
         """Correct sync_seq + mark_sync_cancel_pending True → 204."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_sync_seq",

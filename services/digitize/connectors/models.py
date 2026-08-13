@@ -20,21 +20,34 @@ from pydantic import BaseModel, Field, field_validator
 # Connector / sync-log status constants
 # ---------------------------------------------------------------------------
 
-class SyncStatus(str, Enum):
-    """String enum for connector sync_status and sync-log status columns.
+class ConnectorStatus(str, Enum):
+    """String enum for the Connector.sync_status column.
 
     Inherits from str so values can be passed directly to SQLAlchemy and
     compared with raw DB strings without calling .value.
 
-    Connector.sync_status lifecycle:
+    Lifecycle:
         UP_TO_DATE ──► SYNCING       ──► UP_TO_DATE   (tick completed cleanly)
                            └──► OUT_OF_SYNC            (tick finished with errors)
         UP_TO_DATE ──► DELETE_PENDING                  (DELETE, no active sync)
         SYNCING    ──► DELETE_PENDING                  (DELETE arrived mid-sync)
         SYNCING    ──► OUT_OF_SYNC                     (cancel honoured; close_sync_log
                                                         reverts connector after CANCELLED)
+    """
 
-    ConnectorSyncLog.status lifecycle:
+    UP_TO_DATE = "up to date"
+    SYNCING = "syncing"
+    OUT_OF_SYNC = "out of sync"
+    DELETE_PENDING = "delete pending"
+
+
+class SyncLogStatus(str, Enum):
+    """String enum for the ConnectorSyncLog.status column.
+
+    Inherits from str so values can be passed directly to SQLAlchemy and
+    compared with raw DB strings without calling .value.
+
+    Lifecycle:
         STARTED ──► CANCEL_PENDING ──► CANCELLED  (cancel-sync request received mid-tick;
                 │                                   close_sync_log sets connector OUT_OF_SYNC)
                 ├──► COMPLETED                    (all files processed successfully)
@@ -46,13 +59,6 @@ class SyncStatus(str, Enum):
     it to OUT_OF_SYNC when it writes the terminal CANCELLED status.
     """
 
-    # Connector.sync_status values
-    UP_TO_DATE = "up to date"
-    SYNCING = "syncing"
-    OUT_OF_SYNC = "out of sync"
-    DELETE_PENDING = "delete pending"
-
-    # ConnectorSyncLog.status values
     STARTED = "started"
     CANCEL_PENDING = "cancel pending"
     COMPLETED = "completed"

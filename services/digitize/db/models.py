@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from digitize.connectors.models import SyncStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 
 class Base(DeclarativeBase):
@@ -202,7 +202,7 @@ class Connector(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncStatus.UP_TO_DATE)
+    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
     last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -267,7 +267,7 @@ class ConnectorSyncLog(Base):
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     new_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     removed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncStatus.STARTED)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # Relationships

@@ -15,7 +15,7 @@ from common.misc_utils import get_logger
 from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
-from digitize.connectors.models import SyncStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 logger = get_logger("db_repository")
 
@@ -775,7 +775,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status=SyncStatus.UP_TO_DATE,
+                        sync_status=ConnectorStatus.UP_TO_DATE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
@@ -1072,7 +1072,7 @@ class DatabaseManager:
                     .where(
                         ConnectorSyncLog.connector_id == connector_id,
                         ConnectorSyncLog.status.in_(
-                            [SyncStatus.STARTED, SyncStatus.CANCEL_PENDING]
+                            [SyncLogStatus.STARTED, SyncLogStatus.CANCEL_PENDING]
                         ),
                     )
                     .order_by(ConnectorSyncLog.seq.desc())
@@ -1097,9 +1097,9 @@ class DatabaseManager:
                     update(Connector)
                     .where(
                         Connector.id == connector_id,
-                        Connector.sync_status != SyncStatus.SYNCING,
+                        Connector.sync_status != ConnectorStatus.SYNCING,
                     )
-                    .values(sync_status=SyncStatus.SYNCING)
+                    .values(sync_status=ConnectorStatus.SYNCING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1120,9 +1120,9 @@ class DatabaseManager:
                     update(ConnectorSyncLog)
                     .where(
                         ConnectorSyncLog.connector_id == connector_id,
-                        ConnectorSyncLog.status == SyncStatus.STARTED,
+                        ConnectorSyncLog.status == SyncLogStatus.STARTED,
                     )
-                    .values(status=SyncStatus.CANCEL_PENDING)
+                    .values(status=SyncLogStatus.CANCEL_PENDING)
                     .returning(ConnectorSyncLog.seq)
                 ).one_or_none()
                 return result is not None
@@ -1149,9 +1149,9 @@ class DatabaseManager:
                     update(Connector)
                     .where(
                         Connector.id == connector_id,
-                        Connector.sync_status == SyncStatus.SYNCING,
+                        Connector.sync_status == ConnectorStatus.SYNCING,
                     )
-                    .values(sync_status=SyncStatus.DELETE_PENDING)
+                    .values(sync_status=ConnectorStatus.DELETE_PENDING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1183,7 +1183,7 @@ class DatabaseManager:
                         connector_id=connector_id,
                         seq=seq_subquery,
                         started_at=started_at or datetime.now(timezone.utc),
-                        status=SyncStatus.STARTED,
+                        status=SyncLogStatus.STARTED,
                         error="",
                     )
                     .returning(ConnectorSyncLog.seq)
@@ -1192,7 +1192,7 @@ class DatabaseManager:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_status=SyncStatus.SYNCING)
+                    .values(sync_status=ConnectorStatus.SYNCING)
                 )
                 logger.debug(f"open_sync_log: connector={connector_id!r} seq={seq}")
                 return seq
@@ -1248,8 +1248,8 @@ class DatabaseManager:
                 # Cancelled and failed ticks both leave the connector OUT_OF_SYNC
                 # so the scheduler can retry.  Only COMPLETED writes through verbatim.
                 connector_sync_status = (
-                    SyncStatus.OUT_OF_SYNC
-                    if status in (SyncStatus.CANCELLED, SyncStatus.FAILED)
+                    ConnectorStatus.OUT_OF_SYNC
+                    if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
                     else status
                 )
                 session.execute(

@@ -32,7 +32,8 @@ from digitize.connectors.models import (
     SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
-    SyncStatus,
+    ConnectorStatus,
+    SyncLogStatus,
     SyncTriggerResponse,
 )
 from digitize.connectors.encryption import (
@@ -242,7 +243,7 @@ async def delete_connector(connector_id: str):
 
         db_ops.mark_sync_delete_pending(connector_id)
 
-        if connector.sync_status != SyncStatus.SYNCING:
+        if connector.sync_status != ConnectorStatus.SYNCING:
             # No tick running — kick off teardown ourselves.
             asyncio.create_task(_run_teardown(connector_id))
 
@@ -274,7 +275,7 @@ async def _run_teardown(connector_id: str) -> None:
     try:
         # Step 1: guard — verify the latest sync-log is terminal before
         # proceeding.  If it is still 'started' (stuck), cancel it now.
-        _TERMINAL_STATUSES = {SyncStatus.CANCELLED, SyncStatus.FAILED, SyncStatus.COMPLETED}
+        _TERMINAL_STATUSES = {SyncLogStatus.CANCELLED, SyncLogStatus.FAILED, SyncLogStatus.COMPLETED}
         logs, _ = db_ops.list_sync_logs(connector_id, limit=1)
         if logs:
             latest_log = logs[0]
@@ -287,7 +288,7 @@ async def _run_teardown(connector_id: str) -> None:
                 db_ops.close_sync_log(
                     connector_id=connector_id,
                     seq=latest_log.seq,
-                    status=SyncStatus.CANCELLED,
+                    status=SyncLogStatus.CANCELLED,
                     error="Cancelled by connector deletion",
                 )
 
@@ -567,7 +568,7 @@ async def cancel_sync(connector_id: str, sync_seq: int):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
-        if connector.sync_status != SyncStatus.SYNCING:
+        if connector.sync_status != ConnectorStatus.SYNCING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "No sync is currently running for this connector.",
