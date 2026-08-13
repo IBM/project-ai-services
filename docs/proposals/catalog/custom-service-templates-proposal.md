@@ -546,6 +546,7 @@ The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it i
       "name":         "My Custom Service",
       "status":       "active",
       "created_at":  "2026-05-12T09:14:02Z",
+      "updated_at":  "2026-05-14T10:00:00Z",
       "size_bytes":   286720,
       "catalog_type": "service",
       "catalog_id":   "my-service",
@@ -557,6 +558,7 @@ The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it i
       "name":         "My Custom LLM Provider",
       "status":       "active",
       "created_at":  "2026-05-13T11:30:00Z",
+      "updated_at":  "2026-05-13T11:30:00Z",
       "size_bytes":   196608,
       "catalog_type": "component",
       "catalog_id":   "llm--my-provider",
@@ -719,6 +721,8 @@ The on-disk directory path is **derived at runtime** from `catalog_id` and `vers
 
 The `status` column tracks lifecycle using only `processing`, `active`, `failed`, and `deleting`: **POST** inserts a new row as `processing`, reloads the catalog, then activates it with a single `Activate` UPDATE. **PUT** marks the existing row `processing`, extracts the replacement, reloads the catalog, re-activates the row in-place, and removes the old directory only at the end. **DELETE** marks the row `deleting`, removes the directory, reloads the catalog, and then deletes the row. If any post-transition step fails during POST, PUT, or DELETE, the row is marked `failed` and the error message is stored. **Only one `active` row per `(catalog_type, catalog_id)` is permitted** — enforced by a partial composite unique index.
 
+`updated_at` is maintained automatically by the `set_updated_at` trigger — it fires `BEFORE UPDATE` on every row change, so the application never writes it explicitly. This means it is always accurate regardless of which code path mutates the row, and new mutations added in future require no extra consideration. On a freshly created bundle that has never been replaced, `updated_at` equals `created_at`.
+
 ```sql
 -- +goose Up
 -- +goose StatementBegin
@@ -756,7 +760,8 @@ CREATE TABLE catalog_bundles (
 
     error            TEXT,
     created_by       VARCHAR(100),
-    created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+    created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );
 
 -- Enforce at most one active bundle per (catalog_type, catalog_id) pair.
@@ -1196,7 +1201,7 @@ The `ai-services catalog bundle` subcommand group is implemented in [`cmd/ai-ser
 
 ```
 ai-services catalog bundle
-├── upload    --file <path>
+├── create    --file <path>
 ├── update    <bundle_id>  --file <path>
 ├── delete    <bundle_id>
 ├── list
@@ -1206,12 +1211,12 @@ ai-services catalog bundle
 
 The `bundle` parent command requires an authenticated session (`ai-services catalog login` must have been run first). All subcommands call `client.New()` to load stored credentials — no `--server` or `--username` flags are needed.
 
-#### `bundle upload` — create a new bundle
+#### `bundle create` — create a new bundle
 
 Creates a bundle from a `.tar.gz` archive and blocks until the server returns `201 Created` (the POST endpoint is synchronous). `catalog_id`, `catalog_type`, and `version` are all read from `metadata.yaml` inside the archive — no additional flags needed.
 
 ```
-ai-services catalog bundle upload --file <path-to-bundle.tar.gz>
+ai-services catalog bundle create --file <path-to-bundle.tar.gz>
 ```
 
 **Flags:**
@@ -1256,7 +1261,7 @@ Creating bundle from my-provider-bundle.tar.gz...
 
 #### `bundle update` — replace an existing bundle
 
-Sends a synchronous `PUT` request (`200 OK`) that extracts, validates, activates, and reloads the catalog all in one go — no polling needed. The positional `<bundle_id>` is the internal UUID from `bundle list` or `bundle upload` output.
+Sends a synchronous `PUT` request (`200 OK`) that extracts, validates, activates, and reloads the catalog all in one go — no polling needed. The positional `<bundle_id>` is the internal UUID from `bundle list` or `bundle create` output.
 
 ```
 ai-services catalog bundle update <bundle_id> --file <path-to-bundle.tar.gz>
@@ -1266,7 +1271,7 @@ ai-services catalog bundle update <bundle_id> --file <path-to-bundle.tar.gz>
 
 | Argument | Required | Description |
 |---|---|---|
-| `<bundle_id>` | yes | Internal bundle UUID (from `bundle list` or a prior `bundle upload`) |
+| `<bundle_id>` | yes | Internal bundle UUID (from `bundle list` or a prior `bundle create`) |
 
 **Flags:**
 
@@ -1286,7 +1291,7 @@ Updating bundle 550e8400-e29b-41d4-a716-446655440000 from my-bundle-v2.tar.gz...
 
 | Exit | Condition |
 |---|---|
-| `1` | `404 Not Found` — no bundle with that ID; use `bundle upload` to create one |
+| `1` | `404 Not Found` — no bundle with that ID; use `bundle create` to create one |
 | `1` | `422` — `catalog_id` or `catalog_type` in the archive doesn't match the existing record, or validation failed |
 
 #### `bundle delete` — delete a bundle
@@ -1356,7 +1361,7 @@ Created at:   2026-05-12 09:14:02
 
 #### `bundle validate` — validate a bundle without creating it
 
-Calls `POST /api/v1/catalog/bundles/validate`. No DB row is written and `CatalogProvider` is not reloaded. Use before `bundle upload` to verify the archive in CI/CD pipelines.
+Calls `POST /api/v1/catalog/bundles/validate`. No DB row is written and `CatalogProvider` is not reloaded. Use before `bundle create` to verify the archive in CI/CD pipelines.
 
 ```
 ai-services catalog bundle validate --file <path-to-bundle.tar.gz>
@@ -1956,7 +1961,7 @@ ai-services catalog login --server https://catalog-api.<domain> --username admin
 COPYFILE_DISABLE=1 tar -czf my-bundle.tar.gz my-service/
 
 # Create Bundle — synchronous; prints status once the bundle is active
-ai-services catalog bundle upload --file my-bundle.tar.gz
+ai-services catalog bundle create --file my-bundle.tar.gz
 # ✓ Bundle created successfully
 #   ID:           550e8400-e29b-41d4-a716-446655440000
 #   Catalog type: service
@@ -2009,7 +2014,7 @@ Component bundles follow the same Create Bundle API. The `component_type` field 
 COPYFILE_DISABLE=1 tar -czf my-provider-bundle.tar.gz my-provider/
 
 # Create Bundle — on success, catalog_id is "llm--my-provider", dir is llm--my-provider-1.0.0
-ai-services catalog bundle upload --file my-provider-bundle.tar.gz
+ai-services catalog bundle create --file my-provider-bundle.tar.gz
 # ✓ Bundle created successfully
 #   ID:             c3d4e5f6-...
 #   Catalog type:   component
@@ -2020,7 +2025,7 @@ ai-services catalog bundle upload --file my-provider-bundle.tar.gz
 # Create the same id under a different component_type — independent bundle
 # metadata.yaml must declare: type: component, component_type: embedding
 COPYFILE_DISABLE=1 tar -czf my-provider-embedding-bundle.tar.gz my-provider/
-ai-services catalog bundle upload --file my-provider-embedding-bundle.tar.gz
+ai-services catalog bundle create --file my-provider-embedding-bundle.tar.gz
 # ✓ Bundle created successfully
 #   Catalog ID:     embedding--my-provider   ← entirely separate from the llm bundle
 ```
