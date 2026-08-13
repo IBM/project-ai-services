@@ -31,11 +31,6 @@ func newOpenShiftSync() *openShiftSync {
 
 // FetchPodStatuses fetches all pods labelled with the given templateID using the OpenShift runtime.
 func (s *openShiftSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	_, err := rt.GetNamespace()
-	if err != nil {
-		return nil, err
-	}
-
 	filteredPods, err := common.FetchFilteredPods(rt, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pods: %w", err)
