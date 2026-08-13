@@ -194,7 +194,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 
 	logger.InfofCtx(ctx, "Syncing application: %s (ID: %s)", app.Name, app.ID)
 
-	// Fail early if the namespace does not exist (OpenShift only — podman has no namespace concept).
+	// Fail early if the namespace does not exist
 	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
 		if _, err := rt.GetNamespace(); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
 			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
