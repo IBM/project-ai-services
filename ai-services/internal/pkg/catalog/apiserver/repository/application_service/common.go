@@ -649,23 +649,32 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
 	}
 
-	// Phase 5: async deployment
-	go s.executeDeploymentAsync(ctx, plan, req, runtimeType)
+	// Phase 5: async deployment.
+	// Build the deployment context here, before launching the goroutine, so that
+	// Register is called synchronously. This closes the race where a concurrent
+	// DeleteApplication could call Cancel before the goroutine has had a chance
+	// to call Register, causing cancellation to be silently missed.
+	deployCtx := context.Background()
+	if id, ok := ctx.Value(logger.RequestIDKey).(string); ok && id != "" {
+		deployCtx = context.WithValue(deployCtx, logger.RequestIDKey, id)
+	}
+
+	if s.DeploymentRegistry != nil {
+		deployCtx = s.DeploymentRegistry.Register(deployCtx, plan.ApplicationID)
+	}
+
+	go s.executeDeploymentAsync(deployCtx, plan, req, runtimeType)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
 }
 
 // executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
-func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
-	ctx := context.Background()
-	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok && id != "" {
-		ctx = context.WithValue(ctx, logger.RequestIDKey, id)
-	}
+// deployCtx is already derived and registered with the DeploymentRegistry by the caller.
+func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
+	ctx := deployCtx
 
-	// Register with the DeploymentRegistry so a concurrent delete can cancel this
-	// goroutine. Deregister on any exit path — success, error, or panic.
+	// Deregister on any exit path — success, error, or panic.
 	if s.DeploymentRegistry != nil {
-		ctx = s.DeploymentRegistry.Register(ctx, plan.ApplicationID)
 		defer s.DeploymentRegistry.Deregister(plan.ApplicationID)
 	}
 

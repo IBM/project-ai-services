@@ -208,7 +208,6 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 }
 
 // CreatePod creates a pod from YAML manifest.
-// TODO(OCP): propagate ctx through the OCP deployment path once implemented.
 func (kc *OpenshiftClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	logger.Warningln("Not implemented")
 

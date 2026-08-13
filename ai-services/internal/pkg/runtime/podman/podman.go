@@ -122,22 +122,18 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 // The Podman bindings SDK stores its connection handle under an unexported key in
 // pc.Context, so we cannot simply pass callerCtx to kube.PlayWithBody — it would
 // have no connection value. Instead we derive from pc.Context (preserving the
-// connection) and mirror cancellation from the caller via a short-lived goroutine.
-// The goroutine exits as soon as either context is done, so there is no leak.
+// connection) and use context.AfterFunc to mirror cancellation without spawning a
+// long-lived goroutine that could leak if the Podman socket hangs indefinitely.
 func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, context.CancelFunc) {
 	// Child of pc.Context so the podman connection value is present.
 	ctx, cancel := context.WithCancel(pc.Context)
 
-	go func() {
-		select {
-		case <-callerCtx.Done():
-			cancel()
-		case <-ctx.Done():
-			// CreatePod returned (defer cancel() fired) — nothing to do.
-		}
-	}()
+	// AfterFunc arranges for cancel to be called in its own goroutine when
+	// callerCtx is done. The returned stop function unregisters the hook when
+	// CreatePod returns normally, preventing a dangling AfterFunc.
+	stop := context.AfterFunc(callerCtx, cancel)
 
-	return ctx, cancel
+	return ctx, func() { stop(); cancel() }
 }
 
 func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {

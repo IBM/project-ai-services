@@ -48,10 +48,17 @@ func (r *DeploymentRegistry) Cancel(appID uuid.UUID) {
 	}
 }
 
-// Deregister removes a completed deployment from the registry without
-// cancelling it. Called by the goroutine when deployment finishes normally.
+// Deregister removes a completed deployment from the registry and calls
+// cancel() to release the child context node from the parent's tree.
+// Not calling cancel() would leak the context until the parent (context.Background)
+// is itself cancelled — which never happens.
 func (r *DeploymentRegistry) Deregister(appID uuid.UUID) {
 	r.mu.Lock()
+	cancel, ok := r.entries[appID]
 	delete(r.entries, appID)
 	r.mu.Unlock()
+
+	if ok {
+		cancel()
+	}
 }

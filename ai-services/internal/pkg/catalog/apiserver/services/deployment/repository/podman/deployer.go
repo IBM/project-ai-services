@@ -154,9 +154,12 @@ func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *Deployment
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
-	// Transition status to Deploying before pod creation begins
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, catalogutils.DeployingStatusMessage(plan.IsArchitecture)); err != nil {
-		logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
+	// Transition status to Deploying before pod creation begins.
+	// Skip if the context was cancelled — deletion is now in charge of the status.
+	if ctx.Err() == nil {
+		if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, catalogutils.DeployingStatusMessage(plan.IsArchitecture)); err != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Deploying: %v\n", err)
+		}
 	}
 
 	return nil
