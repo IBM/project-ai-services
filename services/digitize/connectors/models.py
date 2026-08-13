@@ -10,9 +10,10 @@ Covers:
   GET  /v1/connectors/{connector_id}/syncs/{sync_seq}
 """
 
+import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -66,11 +67,28 @@ class SyncStatus(str, Enum):
 class ConnectorCreateRequest(BaseModel):
     """Body accepted by POST /v1/connectors."""
 
-    connector_id: str = Field(..., description="Stable catalog UUID for this connector")
+    connector_id: Optional[str] = Field(
+        None,
+        description=(
+            "Stable catalog UUID for this connector. "
+            "If omitted, a UUID v4 is generated automatically."
+        ),
+    )
     connector_name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
     type: str = Field(..., description="Connector transport type: 'ssh' or 's3'")
     allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
+
+    @field_validator("connector_id", mode="before")
+    @classmethod
+    def validate_connector_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        try:
+            uuid.UUID(str(v))
+        except ValueError:
+            raise ValueError(f"connector_id must be a valid UUID, got {v!r}")
+        return str(v)
 
 
 class ConnectorUpdateRequest(BaseModel):

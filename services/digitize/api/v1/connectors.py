@@ -16,6 +16,7 @@ Endpoints:
 """
 
 import asyncio
+import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -78,6 +79,7 @@ def _get_key_path() -> str:
     response_description="Connector created; worker start scheduled",
 )
 async def create_connector(body: ConnectorCreateRequest):
+    connector_id = body.connector_id or str(uuid.uuid4())
     try:
         key_path = _get_key_path()
         encrypted_details = encrypt_secrets(body.type, body.connection_details, key_path)
@@ -85,7 +87,7 @@ async def create_connector(body: ConnectorCreateRequest):
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
         db_ops.insert_connector(
-            connector_id=body.connector_id,
+            connector_id=connector_id,
             name=body.connector_name,
             connector_type=body.type,
             connection_details=encrypted_details,
@@ -94,18 +96,22 @@ async def create_connector(body: ConnectorCreateRequest):
         )
 
         logger.info(
-            f"Connector {body.connector_id!r} ({body.connector_name!r}) attached "
+            f"Connector {connector_id!r} ({body.connector_name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
         # Worker start is a no-op stub in PR3 — the worker manager (PR7) will hook
         # in here once implemented.
-        return Response(status_code=201)
+        return Response(
+            content=f'{{"connector_id": "{connector_id}"}}',
+            status_code=201,
+            media_type="application/json",
+        )
 
     except IntegrityError:
         # id or name already exists
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector {body.connector_id!r} or name {body.connector_name!r} already exists",
+            f"Connector {connector_id!r} or name {body.connector_name!r} already exists",
         )
     except RuntimeError as exc:
         # encryption key not found
