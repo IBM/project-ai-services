@@ -1112,26 +1112,10 @@ class DatabaseManager:
         """
         Signal a running tick to cancel by setting connector_sync_logs.status='cancel pending'.
 
-        Only writes the signal when connectors.sync_status='syncing', which guarantees
-        an active tick exists.  The connectors row is left untouched — it stays 'syncing'
-        until the tick's close_sync_log() call transitions it to 'out of sync'.
-
-        Returns True if the signal was written (a tick was running), False if no tick
-        was running or the connector does not exist.
+        Returns True if the signal was written, False if no started sync-log row exists.
         """
         try:
             with get_db_session() as session:
-                # Verify a tick is currently running
-                connector_row = session.execute(
-                    select(Connector.id)
-                    .where(
-                        Connector.id == connector_id,
-                        Connector.sync_status == SyncStatus.SYNCING,
-                    )
-                ).one_or_none()
-                if connector_row is None:
-                    return False
-                # Write the cancel signal onto the active sync-log row
                 result = session.execute(
                     update(ConnectorSyncLog)
                     .where(

@@ -559,6 +559,11 @@ async def cancel_sync(connector_id: str, sync_seq: int):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
+        if connector.sync_status != SyncStatus.SYNCING:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "No sync is currently running for this connector.",
+            )
 
         active_seq = db_ops.get_active_sync_seq(connector_id)
         if active_seq is None or active_seq != sync_seq:
