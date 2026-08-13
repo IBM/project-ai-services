@@ -72,7 +72,7 @@ func NewConnectorRepository(pool *pgxpool.Pool) ConnectorRepository {
 
 // connectorPublicCols are the columns that are safe to return in API responses.
 var connectorPublicCols = []string{
-	"id", "name", "type", "provider", "status", "message", "created_at", "updated_at",
+	"id", "name", "type", "provider", "status", "message", "created_by", "created_at", "updated_at",
 }
 
 // connectorSensitiveCols are the credential columns that must never appear in API responses.
@@ -95,7 +95,7 @@ func scanConnector(rows pgx.Rows) (*models.Connector, error) {
 
 	if err := rows.Scan(
 		&c.ID, &c.Name, &c.Type, &c.Provider, &c.Status,
-		&message, &c.CreatedAt, &c.UpdatedAt,
+		&message, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan connector: %w", err)
 	}
@@ -117,7 +117,7 @@ func scanConnectorWithCreds(rows pgx.Rows) (*models.Connector, error) {
 	// Column order must match allColumns: public cols first, then metadata.
 	if err := rows.Scan(
 		&c.ID, &c.Name, &c.Type, &c.Provider, &c.Status,
-		&message, &c.CreatedAt, &c.UpdatedAt, &metadataJSON,
+		&message, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &metadataJSON,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan connector: %w", err)
 	}
@@ -149,8 +149,8 @@ func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector)
 	}
 
 	query := `
-		INSERT INTO connectors (id, name, type, provider, status, message, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO connectors (id, name, type, provider, status, message, metadata, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING created_at, updated_at
 	`
 
@@ -163,6 +163,7 @@ func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector)
 		connector.Status,
 		sql.NullString{String: connector.Message, Valid: connector.Message != ""},
 		metadataJSON,
+		connector.CreatedBy,
 	).Scan(&connector.CreatedAt, &connector.UpdatedAt)
 
 	if err != nil {

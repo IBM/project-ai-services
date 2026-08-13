@@ -24,6 +24,7 @@ type Connector struct {
 	Status    ConnectorStatus `json:"status"`
 	Message   string          `json:"message,omitempty"`
 	Metadata  map[string]any  `json:"-"` // never serialised to API responses; contains sensitive credential fields
+	CreatedBy string          `json:"created_by"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
 }
