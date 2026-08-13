@@ -28,6 +28,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 const (
@@ -115,7 +116,27 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 	return toPodsList(podList), nil
 }
 
-func (pc *PodmanClient) CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error) {
+// podmanCtx derives a child of pc.Context (which carries the podman connection) that
+// is cancelled when the caller's ctx is cancelled.
+//
+// The Podman bindings SDK stores its connection handle under an unexported key in
+// pc.Context, so we cannot simply pass callerCtx to kube.PlayWithBody — it would
+// have no connection value. Instead we derive from pc.Context (preserving the
+// connection) and use context.AfterFunc to mirror cancellation without spawning a
+// long-lived goroutine that could leak if the Podman socket hangs indefinitely.
+func (pc *PodmanClient) podmanCtx(callerCtx context.Context) (context.Context, context.CancelFunc) {
+	// Child of pc.Context so the podman connection value is present.
+	ctx, cancel := context.WithCancel(pc.Context)
+
+	// AfterFunc arranges for cancel to be called in its own goroutine when
+	// callerCtx is done. The returned stop function unregisters the hook when
+	// CreatePod returns normally, preventing a dangling AfterFunc.
+	stop := context.AfterFunc(callerCtx, cancel)
+
+	return ctx, func() { stop(); cancel() }
+}
+
+func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	options := &kube.PlayOptions{}
 
 	// Handle start option
@@ -148,7 +169,12 @@ func (pc *PodmanClient) CreatePod(body io.Reader, opts map[string]string) ([]typ
 		}
 	}
 
-	kubeReport, err := kube.PlayWithBody(pc.Context, body, options)
+	// Use a context that carries the podman connection (from pc.Context) but is
+	// cancelled when the caller's ctx is cancelled.
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	kubeReport, err := kube.PlayWithBody(podCtx, body, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute podman kube play: %w", err)
 	}
@@ -348,8 +374,11 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 }
 
 // RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
+// ctx is used to interrupt the wait: if cancelled, the container is stopped and ctx.Err() is
+// returned so callers can distinguish a cancellation from a real container failure.
+// pc.Context (the Podman connection context) is still used for all Podman API calls.
 // Returns the exit code of the container.
-func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, error) {
+func (pc *PodmanClient) RunContainerWithSpec(ctx context.Context, s *specgen.SpecGenerator) (int32, error) {
 	// Create container
 	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
 	if err != nil {
@@ -363,19 +392,46 @@ func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, e
 		return -1, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Wait for container to complete
-	exitCode, err := containers.Wait(pc.Context, containerID, nil)
-	if err != nil {
-		return -1, fmt.Errorf("failed to wait for container: %w", err)
+	// Wait in a goroutine so we can react to ctx cancellation while the container runs.
+	type waitResult struct {
+		exitCode int32
+		err      error
 	}
+	done := make(chan waitResult, 1)
 
-	return exitCode, nil
+	go func() {
+		code, err := containers.Wait(pc.Context, containerID, nil)
+		done <- waitResult{code, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Caller cancelled (e.g. mid-deployment delete) — stop the container so it is
+		// cleaned up immediately. The spec has Remove=true so it auto-removes on stop.
+		_ = containers.Stop(pc.Context, containerID, nil)
+
+		return -1, ctx.Err()
+	case r := <-done:
+		return r.exitCode, r.err
+	}
 }
 
 func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) ListCRD(_ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+
+	return nil, fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) DeleteNamespace(_ string) error {
+	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
 }
 
 func (pc *PodmanClient) DeletePVCs(appLabel string) error {
@@ -501,7 +557,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 	availableCards, err := spyre.FindFreeCards(ctx)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Could not find available Spyre cards: %v", err)
-		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+		accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 			Total:     totalCount,
 			Available: 0,
 		}
@@ -511,7 +567,7 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 
 	availableCount := len(availableCards)
 
-	accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+	accelerators[constants.SpyreResourceName] = &models.AcceleratorInfo{
 		Total:     totalCount,
 		Available: availableCount,
 	}
@@ -595,24 +651,11 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 
 // collectSpyreCards extracts Spyre card PCI addresses from container environment variables.
 func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
-	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
-		for _, env := range containerInspect.Config.Env {
-			pciAddressPrefix := string(constants.PCIAddressKey) + "="
-			if strings.HasPrefix(env, pciAddressPrefix) {
-				// Extract the value after "AIU_PCIE_IDS="
-				pciAddresses := strings.TrimPrefix(env, pciAddressPrefix)
-				// Split by spaces and filter out empty strings
-				addresses := strings.Fields(pciAddresses)
-				for _, addr := range addresses {
-					if addr != "" {
-						*spyreCards = append(*spyreCards, addr)
-					}
-				}
-
-				return
-			}
-		}
+	if containerInspect.Config == nil || containerInspect.Config.Env == nil {
+		return
 	}
+	addrs := spyre.ParseEnvVarAddresses(containerInspect.Config.Env, string(constants.PCIAddressKey), " ")
+	*spyreCards = append(*spyreCards, addrs...)
 }
 
 // ExecInContainer executes a command in a container using podman exec command.
@@ -752,4 +795,11 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 
 	// Execute the provided function with the sidecar
 	return executor(pc.Context, containerID)
+}
+
+// ExecInContainerWithCmd is not implemented for the Podman runtime.
+func (pc *PodmanClient) ExecInContainerWithCmd(_, _ string, _ []string) (string, error) {
+	logger.Errorf("unsupported method called!")
+
+	return "", fmt.Errorf("unsupported method")
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -778,23 +779,43 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string
 	return runCLI(ctx, cfg, "application templates command run", "application", "templates", "--runtime", appRuntime)
 }
 
-// CatalogConfigure deploys or ensures the catalog service is running.
-// Uses a PTY so the password prompt on first run can be satisfied non-interactively.
-func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+// catalogConfigureRunPTY runs 'catalog configure' via PTY with password prompts; shared by all configure variants.
+func catalogConfigureRunPTY(ctx context.Context, cfg *config.Config, errLabel string, args []string) (string, error) {
 	password := bootstrap.GetCatalogAdminPassword()
 	if password == "" {
 		return "", fmt.Errorf("CATALOG_PASSWORD environment variable is not set")
 	}
 
-	args := []string{"catalog", "configure", "--runtime", appRuntime}
-	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+	if err := catalogRegistryLogin(); err != nil {
+		logger.Warningf("[CLI] registry login warning (non-fatal): %v", err)
+	}
 
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, password+"\n"+password+"\n")
 	if err != nil {
-		return output, fmt.Errorf("catalog configure failed: %w\n%s", err, output)
+		return output, fmt.Errorf("%s failed: %w\n%s", errLabel, err, output)
 	}
 
 	return output, nil
+}
+
+// CatalogConfigure runs 'catalog configure' with default settings via PTY.
+func CatalogConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure",
+		[]string{"catalog", "configure", "--runtime", appRuntime},
+	)
+}
+
+// catalogRegistryLogin logs podman into the registry using CI-injected REGISTRY_URL/REGISTRY_USER_NAME/REGISTRY_PASSWORD.
+func catalogRegistryLogin() error {
+	if url, uname, pswd := bootstrap.GetPodManCreds(); url != "" && uname != "" && pswd != "" {
+		logger.Infof("[CLI] Logging podman into registry %s", url)
+		if err := bootstrap.PodmanRegistryLogin(url, uname, pswd); err != nil {
+			return fmt.Errorf("registry login failed for %s: %w", url, err)
+		}
+	}
+
+	return nil
 }
 
 // runWithPTY starts cmd in a PTY, writes input to the master, and returns all output.
@@ -999,8 +1020,7 @@ func ExtractURLsFromOutput(output string) []string {
 	return urls
 }
 
-// CatalogApiServerHelp runs 'catalog apiserver --help' and returns the output.
-// The real apiserver requires a live database; we only verify its help text in e2e.
+// CatalogApiServerHelp runs 'catalog apiserver --help'; the real apiserver requires a live DB so only help is tested.
 func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	return runCLI(ctx, cfg, "catalog apiserver help", "catalog", "apiserver", "--help", "--runtime", appRuntime)
 }
@@ -1030,8 +1050,247 @@ func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (
 	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout", "--runtime", appRuntime)
 }
 
-// CatalogDbMigrateHelp runs 'catalog dbmigrate --help' and returns the output.
-// The full dbmigrate subcommands require a live database; we verify help text in e2e.
+// CatalogDbMigrateHelp runs 'catalog dbmigrate --help'; full dbmigrate requires a live DB so only help is tested.
 func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, error) {
 	return runCLI(ctx, cfg, "catalog dbmigrate help", "catalog", "dbmigrate", "--help")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog failure runner helpers
+//
+// These functions are used exclusively by catalog_failure_test.go.  They wrap
+// raw exec.CommandContext calls (not runCLI) so that the combined output is
+// always returned to the caller even when the command exits non-zero — a
+// requirement for failure-test assertions that need to inspect the error text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogLoginMissingServer invokes `catalog login` without the required
+// --server flag.  cobra enforces required flags before RunE is called, so this
+// must fail with a "required flag(s) not set" message before touching the
+// network or any credentials.
+//
+// Returns combined stdout+stderr (always populated for flag errors) and the
+// exec error.
+func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		// --server is intentionally omitted.
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--server intentionally omitted)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (missing --server): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogLoginInvalidURL invokes `catalog login` with a --server value whose
+// URL scheme is neither http nor https.  validateServerURL() in login.go must
+// reject it in PreRunE before any network call is made.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "login",
+		"--server", badURL,
+		"--username", "admin",
+		"--password-stdin",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (bad URL %q expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), badURL,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	cmd.Stdin = bytes.NewBufferString("somepassword\n")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog login (invalid URL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogWhoamiWithoutLogin invokes `catalog whoami` in a subprocess whose
+// HOME and XDG_CONFIG_HOME point to an empty temp directory, so no stored
+// credentials exist.  client.New() (called inside whoami's RunE) must fail.
+//
+// homeDir must be an existing, empty directory that the calling test owns.
+// Returns combined stdout+stderr and the exec error.
+func CatalogWhoamiWithoutLogin(ctx context.Context, cfg *config.Config, homeDir, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "whoami",
+		"--runtime", appRuntime,
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (HOME=%s — no credentials expected)",
+		cfg.AIServiceBin, strings.Join(args, " "), homeDir,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	// Redirect the user config directory so no real credentials are found.
+	// os.UserConfigDir() reads $HOME (Linux/macOS) and $XDG_CONFIG_HOME.
+	cmd.Env = filteredProcessEnv("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME")
+	cmd.Env = append(cmd.Env,
+		"HOME="+homeDir,
+		"XDG_CONFIG_HOME="+homeDir,
+	)
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog whoami (no credentials): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureUnpairedSSL invokes `catalog configure` with --ssl-cert but
+// without --ssl-key.  checkSSLFlagsPaired() in configure.go must reject it in
+// PreRunE before any state is modified.
+//
+// certPath can be any non-empty string — the flag validator only checks that
+// both flags are provided together; it does not read the file at this point.
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureUnpairedSSL(ctx context.Context, cfg *config.Config, certPath, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--ssl-cert", certPath,
+		// --ssl-key intentionally omitted to trigger the pairing check.
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (--ssl-key omitted, pairing check expected)",
+		cfg.AIServiceBin, strings.Join(args, " "),
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (unpaired SSL): %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// CatalogConfigureInvalidPort invokes `catalog configure` with an --https-port
+// value outside the valid 1–65535 range.  validateConfigureFlags() in
+// configure.go must reject it in PreRunE before any deployment action runs.
+//
+// Returns combined stdout+stderr and the exec error.
+func CatalogConfigureInvalidPort(ctx context.Context, cfg *config.Config, port int, appRuntime string) (string, error) {
+	args := []string{
+		"catalog", "configure",
+		"--runtime", appRuntime,
+		"--https-port", fmt.Sprintf("%d", port),
+	}
+
+	logger.Infof(
+		"[CLI][FAILURE-TEST] Running: %s %s  (port %d expected to be rejected)",
+		cfg.AIServiceBin, strings.Join(args, " "), port,
+	)
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("catalog configure (invalid port %d): %w\n%s", port, err, output)
+	}
+
+	return output, nil
+}
+
+// filteredProcessEnv returns the current process environment (os.Environ) with
+// the named keys removed.  Used to strip HOME / XDG_CONFIG_HOME before
+// injecting test-isolated values into a subprocess.
+func filteredProcessEnv(excludeKeys ...string) []string {
+	exclude := make(map[string]struct{}, len(excludeKeys))
+	for _, k := range excludeKeys {
+		exclude[k] = struct{}{}
+	}
+
+	all := os.Environ()
+	filtered := make([]string, 0, len(all))
+
+	for _, pair := range all {
+		key := pair
+		if idx := strings.IndexByte(pair, '='); idx >= 0 {
+			key = pair[:idx]
+		}
+
+		if _, skip := exclude[key]; !skip {
+			filtered = append(filtered, pair)
+		}
+	}
+
+	return filtered
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog configure runner helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CatalogConfigureWithBasedir runs 'catalog configure --basedir <path>' via PTY.
+func CatalogConfigureWithBasedir(ctx context.Context, cfg *config.Config, basedir string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --basedir",
+		[]string{"catalog", "configure", "--basedir", basedir, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureWithSSL runs 'catalog configure --ssl-cert <cert> --ssl-key <key>' via PTY.
+func CatalogConfigureWithSSL(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return catalogConfigureRunPTY(ctx, cfg, "catalog configure --ssl-cert/--ssl-key",
+		[]string{"catalog", "configure", "--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime},
+	)
+}
+
+// CatalogConfigureResetCert runs 'catalog configure --reset-certificate --ssl-cert <cert> --ssl-key <key>'.
+func CatalogConfigureResetCert(ctx context.Context, cfg *config.Config, certPath, keyPath string, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-certificate",
+		"catalog", "configure", "--reset-certificate",
+		"--ssl-cert", certPath, "--ssl-key", keyPath, "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureResetAuth runs 'catalog configure --reset-podman-auth'.
+func CatalogConfigureResetAuth(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	return runCLI(ctx, cfg, "catalog configure --reset-podman-auth",
+		"catalog", "configure", "--reset-podman-auth", "--runtime", appRuntime,
+	)
+}
+
+// CatalogConfigureWithArgs runs 'catalog configure' with arbitrary extra args for negative / flag-combo tests.
+func CatalogConfigureWithArgs(ctx context.Context, cfg *config.Config, appRuntime string, extraArgs ...string) (string, error) {
+	args := append([]string{"catalog", "configure", "--runtime", appRuntime}, extraArgs...)
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	return output, err
 }

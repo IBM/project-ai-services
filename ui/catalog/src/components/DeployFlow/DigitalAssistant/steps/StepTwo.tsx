@@ -1,7 +1,7 @@
 import { useReducer, useMemo, useEffect, useState } from "react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
-import type { StepProps, ServiceConfig, ComponentConfig } from "../types";
-import { getAcceleratorLabel } from "../utils/StepTwo.utils";
+import type { StepProps, ServiceConfig } from "../types";
+import type { ComponentConfig, DeployFormData } from "../../Shared/types";
 import { getResourceStatus, bytesToGB } from "../../Shared/utils/resources";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
@@ -62,7 +62,14 @@ const stepTwoReducer = (
   }
 };
 
-export const StepTwo: React.FC<StepProps> = ({
+// StepProps narrowed so services carry the DA-extended ServiceConfig.
+type DAStepProps = Omit<StepProps, "formData"> & {
+  formData: Omit<DeployFormData, "services"> & {
+    services: Record<string, ServiceConfig>;
+  };
+};
+
+export const StepTwo: React.FC<DAStepProps> = ({
   title,
   formData,
   onChange,
@@ -82,17 +89,27 @@ export const StepTwo: React.FC<StepProps> = ({
   const [resourcesError, setResourcesError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     fetchResources()
       .then((data) => {
-        setResources(data);
-        setResourcesLoading(false);
+        if (!cancelled) {
+          setResources(data);
+          setResourcesLoading(false);
+        }
       })
       .catch((err) => {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to load resources";
-        setResourcesError(errorMessage);
-        setResourcesLoading(false);
+        if (!cancelled) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Failed to load resources";
+          setResourcesError(errorMessage);
+          setResourcesLoading(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Calculate required resources based on selected services and providers
@@ -286,12 +303,11 @@ export const StepTwo: React.FC<StepProps> = ({
       // Handle each accelerator type separately
       acceleratorKeys.forEach((acceleratorKey) => {
         const acceleratorData = resources.accelerators[acceleratorKey];
-        const acceleratorLabel = getAcceleratorLabel(acceleratorKey);
         const requiredCount =
           calculateRequiredResources.accelerators[acceleratorKey] || 0;
 
         resourceItems.push({
-          label: acceleratorLabel,
+          label: "Accelerators",
           required: requiredCount.toString(),
           available: acceleratorData.available.toString(),
           unit: "Cards",
@@ -376,11 +392,8 @@ export const StepTwo: React.FC<StepProps> = ({
 
   // Fetch provider parameters for all component types dynamically
   // This single hook call handles all component types, respecting Rules of Hooks
-  const {
-    paramsByType,
-    isLoading: _paramsLoading,
-    errorsByType,
-  } = useMultiTypeProviderParams(allProviderIds);
+  const { paramsByType, errorsByType } =
+    useMultiTypeProviderParams(allProviderIds);
 
   // Transform to match the interface expected by the rest of the component
   const providerParamsByType = useMemo(() => {

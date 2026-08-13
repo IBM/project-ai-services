@@ -1,4 +1,4 @@
-package deletion
+package podman
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/common"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -14,25 +15,27 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// DeletionService handles application deletion operations.
-type DeletionService struct {
+// PodmanDeletion handles application deletion operations.
+type PodmanDeletion struct {
+	rt                    runtime.Runtime
 	appRepo               dbrepo.ApplicationRepository
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
 }
 
-// NewDeletionService creates a new deletion service instance.
-func NewDeletionService(
+// NewPodmanDeletion creates a new deletion service instance.
+func NewPodmanDeletion(
+	rt runtime.Runtime,
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
 	componentRepo dbrepo.ComponentRepository,
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
-) *DeletionService {
-	return &DeletionService{
+) *PodmanDeletion {
+	return &PodmanDeletion{
+		rt:                    rt,
 		appRepo:               appRepo,
 		serviceRepo:           serviceRepo,
 		componentRepo:         componentRepo,
@@ -43,50 +46,32 @@ func NewDeletionService(
 // PerformDeletion carries out the async cascade deletion for an application.
 // When keepData is true, preserves underlying data (pods, volumes, orphaned components).
 // When keepData is false, deletes all data including application data directory.
-func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, keepData bool) {
-	// Identify orphaned components before deletion
-	orphanedComponents, err := s.identifyOrphanedComponents(ctx, appID, services)
-	if err != nil {
-		return // Error already logged and status updated
-	}
-
-	// Initialize runtime client
-	rt, err := vars.RuntimeFactory.Create("")
-	if err != nil {
-		logger.ErrorfCtx(ctx, "failed to init runtime client for app %s: %s", appID, err)
-		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to init runtime client")
-
-		return
-	}
-
+func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
 	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
-		logger.ErrorfCtx(ctx, "failed to get Caddy proxy manager for app %s: %s", appID, err)
-		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
+		common.HandleStepError(ctx, s.appRepo, appID, "failed to get Caddy proxy manager for app", err)
 
 		return
 	}
 
 	// Delete services and track errors
-	errorMessages := s.deleteServices(ctx, rt, services, keepData, proxyManager)
+	errorMessages := s.deleteServices(ctx, services, keepData, proxyManager)
 
 	// Delete orphaned components and track errors
-	componentErrors := s.deleteOrphanedComponents(ctx, rt, orphanedComponents, keepData)
+	componentErrors := s.deleteOrphanedComponents(ctx, orphanedComponentIDs, keepData)
 	errorMessages = append(errorMessages, componentErrors...)
 
 	// Check if any errors occurred during deletion
 	if len(errorMessages) > 0 {
-		s.handleDeletionFailure(ctx, appID, errorMessages)
+		common.HandleDeletionFailure(ctx, s.appRepo, appID, errorMessages)
 
 		return
 	}
 
 	// Delete application from DB only if no errors occurred
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		errMsg := fmt.Sprintf("failed to delete application: %s", err)
-		logger.ErrorfCtx(ctx, "application %s: %s", appID, errMsg)
-		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
+		common.HandleStepError(ctx, s.appRepo, appID, "application DB deletion failed", err)
 
 		return
 	}
@@ -94,85 +79,9 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	logger.InfofCtx(ctx, "Application %s deleted successfully", appID)
 }
 
-// identifyOrphanedComponents identifies components that will become orphaned after service deletion.
-func (s *DeletionService) identifyOrphanedComponents(ctx context.Context, appID uuid.UUID, services []models.Service) ([]uuid.UUID, error) {
-	serviceIDs := s.buildServiceIDMap(services)
-
-	componentCandidates, err := s.collectComponentCandidates(ctx, appID, services)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.filterOrphanedComponents(ctx, componentCandidates, serviceIDs), nil
-}
-
-// buildServiceIDMap creates a map of service IDs for quick lookup.
-func (s *DeletionService) buildServiceIDMap(services []models.Service) map[uuid.UUID]bool {
-	serviceIDs := make(map[uuid.UUID]bool, len(services))
-	for _, svc := range services {
-		serviceIDs[svc.ID] = true
-	}
-
-	return serviceIDs
-}
-
-// collectComponentCandidates gathers all components used by services being deleted.
-func (s *DeletionService) collectComponentCandidates(ctx context.Context, appID uuid.UUID, services []models.Service) (map[uuid.UUID]bool, error) {
-	componentCandidates := make(map[uuid.UUID]bool)
-
-	for _, svc := range services {
-		deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
-		if err != nil {
-			logger.ErrorfCtx(ctx, "failed to get dependencies for service %s: %s", svc.ID, err)
-			_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to get service dependencies")
-
-			return nil, err
-		}
-
-		for _, dep := range deps {
-			if dep.DependencyType == models.DependencyTypeComponent {
-				componentCandidates[dep.DependencyID] = true
-			}
-		}
-	}
-
-	return componentCandidates, nil
-}
-
-// filterOrphanedComponents checks which components are truly orphaned.
-func (s *DeletionService) filterOrphanedComponents(ctx context.Context, componentCandidates map[uuid.UUID]bool, serviceIDs map[uuid.UUID]bool) []uuid.UUID {
-	var orphanedComponents []uuid.UUID
-
-	for componentID := range componentCandidates {
-		if s.isComponentOrphaned(ctx, componentID, serviceIDs) {
-			orphanedComponents = append(orphanedComponents, componentID)
-		}
-	}
-
-	return orphanedComponents
-}
-
-// isComponentOrphaned checks if a component has no remaining dependent services.
-func (s *DeletionService) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
-	dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
-	if err != nil {
-		logger.ErrorfCtx(ctx, "failed to check component %s orphan status: %s", componentID, err)
-
-		return false
-	}
-
-	for _, svcID := range dependentServices {
-		if !serviceIDs[svcID] {
-			return false
-		}
-	}
-
-	return true
-}
-
 // unregisterServiceRoutes performs best-effort route cleanup for a service.
 // Updates DB status if route unregistration fails, but does not block deletion.
-func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyManager proxy.ProxyManager, svc models.Service) error {
+func (s *PodmanDeletion) unregisterServiceRoutes(ctx context.Context, proxyManager proxy.ProxyManager, svc models.Service) error {
 	if len(svc.Endpoints) == 0 || proxyManager == nil {
 		return nil
 	}
@@ -197,13 +106,13 @@ func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyMana
 // deleteServices deletes all services (pods + DB records) and returns any error messages.
 //
 //nolint:cyclop // Function complexity is acceptable for deletion orchestration
-func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime, services []models.Service, keepData bool, proxyManager proxy.ProxyManager) []string {
+func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.Service, keepData bool, proxyManager proxy.ProxyManager) []string {
 	var errorMessages []string
 	forceDelete := true
 
 	for _, svc := range services {
 		// List service pods
-		pods, err := rt.ListPods(map[string][]string{
+		pods, err := s.rt.ListPods(map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
 		})
 		if err != nil {
@@ -222,13 +131,13 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 		}
 
 		// Delete service secrets
-		secretErrors := s.deleteSecretsFromPods(ctx, rt, pods, keepData, "service", svc.ID)
+		secretErrors := s.deleteSecretsFromPods(ctx, pods, keepData, "service", svc.ID)
 		if len(secretErrors) > 0 {
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
 		// Delete service pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(ctx, rt, pods, forceDelete)
+		podErrors := s.deletePods(ctx, pods, forceDelete)
 		hasDeletionErrors := false
 		if len(podErrors) > 0 {
 			hasDeletionErrors = true
@@ -239,7 +148,7 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 
 		// Delete volumes only after pods are deleted and only when keepData is false.
 		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(ctx, rt, pods, "service", svc.ID)
+			volumeErrors := s.deleteVolumesFromPods(ctx, pods, "service", svc.ID)
 			if len(volumeErrors) > 0 {
 				hasDeletionErrors = true
 				errorMessages = append(errorMessages, volumeErrors...)
@@ -262,10 +171,10 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 }
 
 // deletePods deletes all pods and returns any error messages.
-func (s *DeletionService) deletePods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, forceDelete bool) []string {
+func (s *PodmanDeletion) deletePods(ctx context.Context, pods []runtimeTypes.Pod, forceDelete bool) []string {
 	var podErrors []string
 	for _, pod := range pods {
-		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+		if err := s.rt.DeletePod(pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
@@ -283,13 +192,13 @@ func (s *DeletionService) deletePods(ctx context.Context, rt runtime.Runtime, po
 // deleteOrphanedComponents deletes orphaned components (pods + DB records) and returns any error messages.
 //
 //nolint:cyclop // Function complexity is acceptable for deletion orchestration
-func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runtime.Runtime, componentIDs []uuid.UUID, keepData bool) []string {
+func (s *PodmanDeletion) deleteOrphanedComponents(ctx context.Context, componentIDs []uuid.UUID, keepData bool) []string {
 	var errorMessages []string
 	forceDelete := true
 
 	for _, componentID := range componentIDs {
 		// List component pods
-		pods, err := rt.ListPods(map[string][]string{
+		pods, err := s.rt.ListPods(map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
 		})
 		if err != nil {
@@ -301,13 +210,13 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 		}
 
 		// Delete component secrets
-		secretErrors := s.deleteSecretsFromPods(ctx, rt, pods, keepData, "component", componentID)
+		secretErrors := s.deleteSecretsFromPods(ctx, pods, keepData, "component", componentID)
 		if len(secretErrors) > 0 {
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
 		// Delete component pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(ctx, rt, pods, forceDelete)
+		podErrors := s.deletePods(ctx, pods, forceDelete)
 		hasDeletionErrors := false
 		if len(podErrors) > 0 {
 			hasDeletionErrors = true
@@ -318,7 +227,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 
 		// Delete component volumes only after pods are deleted and only when keepData is false.
 		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(ctx, rt, pods, "component", componentID)
+			volumeErrors := s.deleteVolumesFromPods(ctx, pods, "component", componentID)
 			if len(volumeErrors) > 0 {
 				hasDeletionErrors = true
 				errorMessages = append(errorMessages, volumeErrors...)
@@ -340,18 +249,11 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 	return errorMessages
 }
 
-// handleDeletionFailure updates application status when deletion fails.
-func (s *DeletionService) handleDeletionFailure(ctx context.Context, appID uuid.UUID, errorMessages []string) {
-	errMsg := fmt.Sprintf("Application deletion failed with %d error(s), application not deleted", len(errorMessages))
-	logger.ErrorfCtx(ctx, "application %s: %s", appID, errMsg)
-	_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
-}
-
 // deleteVolumesFromPods extracts volume names from pod labels and deletes them using the runtime client.
 // Volumes are always deleted when keepData=false. This method is only called when keepData=false.
 //
 // Returns a list of error messages for any volumes that failed to delete.
-func (s *DeletionService) deleteVolumesFromPods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
+func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
 	var errorMessages []string
 	volumesToDelete := make(map[string]bool) // Use map to avoid duplicates
 
@@ -378,7 +280,7 @@ func (s *DeletionService) deleteVolumesFromPods(ctx context.Context, rt runtime.
 
 	// Delete each unique volume using the runtime client
 	for volumeName := range volumesToDelete {
-		if err := rt.DeleteVolume(volumeName); err != nil {
+		if err := s.rt.DeleteVolume(volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
@@ -404,7 +306,7 @@ func (s *DeletionService) deleteVolumesFromPods(ctx context.Context, rt runtime.
 //     Preserve secrets WITH skip-cleanup="true" (e.g., DB credentials)
 //
 // Returns a list of error messages for any secrets that failed to delete.
-func (s *DeletionService) deleteSecretsFromPods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
+func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
 	var errorMessages []string
 	secretsToDelete := make(map[string]bool) // Use map to avoid duplicates
 
@@ -432,7 +334,7 @@ func (s *DeletionService) deleteSecretsFromPods(ctx context.Context, rt runtime.
 
 	// Delete each unique secret
 	for secretName := range secretsToDelete {
-		if err := rt.DeleteSecret(secretName); err != nil {
+		if err := s.rt.DeleteSecret(secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)

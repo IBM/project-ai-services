@@ -45,18 +45,16 @@ func NewApplicationService(
 		Provider:              provider,
 		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
-		DeletionService:       deletion.NewDeletionService(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
+		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validators.NewApplicationValidator(provider),
 	}
 
 	switch runtimeType {
 	case runtimeTypes.RuntimeTypePodman:
-		return &appservice.PodmanApplicationService{ApplicationServiceBase: base}
+		return appservice.NewPodmanApplicationService(base)
 	case runtimeTypes.RuntimeTypeOpenShift:
-		return &appservice.OpenShiftApplicationService{ApplicationServiceBase: base}
+		return appservice.NewOpenShiftApplicationService(base)
 	default:
 		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
 	}
 }
-
-// Made with Bob

@@ -18,7 +18,7 @@ from extract.settings import settings
 
 logger = get_logger("job_utils")
 
-ALLOWED_EXTENSIONS = {".txt", ".pdf"}
+ALLOWED_EXTENSIONS = {".txt", ".md"}
 
 
 # ---------------------------------------------------------------------------

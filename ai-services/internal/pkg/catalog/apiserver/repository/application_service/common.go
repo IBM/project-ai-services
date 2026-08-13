@@ -3,7 +3,9 @@ package applicationservice
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -16,8 +18,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -36,6 +43,15 @@ type DeleteApplicationResponse struct {
 	ID      string `json:"id"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
+}
+
+// resourceTotals holds aggregated resource information.
+type resourceTotals struct {
+	allocatedCPU    int
+	allocatedMemory int
+	usedCPU         float64
+	usedMemory      uint64
+	spyreCards      map[string]bool
 }
 
 // ValidatePaginationParams validates and returns pagination parameters with defaults.
@@ -72,8 +88,12 @@ type ApplicationServiceBase struct {
 	Provider              *catalog.CatalogProvider
 	DeploymentPlanner     *deployment.DeploymentPlanner
 	DeploymentExecutor    *deployment.DeploymentExecutor
-	DeletionService       *deletion.DeletionService
+	DeletionExecutor      *deletion.DeletionExecutor
 	Validator             *validators.ApplicationValidator
+
+	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
+	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
+	DeploymentRegistry *DeploymentRegistry
 }
 
 // ListApplications retrieves a paginated list of applications with filters.
@@ -629,22 +649,33 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
 	}
 
-	// Phase 5: async deployment
-	go s.executeDeploymentAsync(ctx, plan, req, runtimeType)
+	// Phase 5: async deployment.
+	// Build the deployment context here, before launching the goroutine, so that
+	// Register is called synchronously. This closes the race where a concurrent
+	// DeleteApplication could call Cancel before the goroutine has had a chance
+	// to call Register, causing cancellation to be silently missed.
+	deployCtx := context.Background()
+	if id, ok := ctx.Value(logger.RequestIDKey).(string); ok && id != "" {
+		deployCtx = context.WithValue(deployCtx, logger.RequestIDKey, id)
+	}
+
+	if s.DeploymentRegistry != nil {
+		deployCtx = s.DeploymentRegistry.Register(deployCtx, plan.ApplicationID)
+	}
+
+	go s.executeDeploymentAsync(deployCtx, plan, req, runtimeType)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
 }
 
 // executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
-func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
-	var requestID string
-	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
-		requestID = id
-	}
+// deployCtx is already derived and registered with the DeploymentRegistry by the caller.
+func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
+	ctx := deployCtx
 
-	ctx := context.Background()
-	if requestID != "" {
-		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	// Deregister on any exit path — success, error, or panic.
+	if s.DeploymentRegistry != nil {
+		defer s.DeploymentRegistry.Deregister(plan.ApplicationID)
 	}
 
 	defer func() {
@@ -660,6 +691,13 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 
 	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
 	if err != nil {
+		// Context cancelled — deletion is in charge of status, exit silently.
+		if ctx.Err() != nil {
+			logger.InfofCtx(ctx, "Deployment cancelled for application %s (deletion in progress)", plan.ApplicationName)
+
+			return
+		}
+
 		logger.ErrorfCtx(ctx, "Deployment failed for application %s: %v", plan.ApplicationName, err)
 
 		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
@@ -670,6 +708,536 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(parentCtx context.Contex
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+}
+
+// GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
+// namespace is the runtime namespace to query: empty string for Podman, AppNamespace(app.ID) for OpenShift.
+func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID, namespace string) (*types.ApplicationResourcesResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	runtimeClient, err := vars.RuntimeFactory.Create(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runtime client: %w", err)
+	}
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect application resources: %w", err)
+	}
+
+	return buildResourcesResponse(resourceTotals), nil
+}
+
+func (s *ApplicationServiceBase) collectResources(
+	ctx context.Context,
+	app *models.Application,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+) (*resourceTotals, error) {
+	totals := &resourceTotals{spyreCards: make(map[string]bool)}
+	countedComponents := make(map[uuid.UUID]bool)
+
+	for _, service := range app.Services {
+		if err := s.processServiceResources(ctx, service, runtimeClient, catalogProvider, totals, countedComponents); err != nil {
+			return nil, fmt.Errorf("failed to process service %s resources: %w", service.ID, err)
+		}
+	}
+
+	return totals, nil
+}
+
+func (s *ApplicationServiceBase) processServiceResources(
+	ctx context.Context,
+	service models.Service,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	if err := s.addServiceResources(service, catalogProvider, runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service allocated resources: %w", err)
+	}
+
+	if err := s.addComponentResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
+		return fmt.Errorf("failed to get component allocated resources: %w", err)
+	}
+
+	return nil
+}
+
+func addAllocatedResources(runtimeMetadata *clitemplates.AppMetadata, totals *resourceTotals) {
+	if runtimeMetadata.Resources != nil {
+		totals.allocatedCPU += runtimeMetadata.Resources.CPU
+		totals.allocatedMemory += runtimeMetadata.Resources.Memory
+	}
+}
+
+func (s *ApplicationServiceBase) addServiceResources(
+	service models.Service,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service used resources: %w", err)
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) addComponentResources(
+	ctx context.Context,
+	serviceID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	dependencies, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get dependencies for service %s: %w", serviceID, err)
+	}
+
+	for _, dep := range dependencies {
+		if dep.DependencyType != models.DependencyTypeComponent || countedComponents[dep.DependencyID] {
+			continue
+		}
+
+		if err := s.processComponentResources(ctx, dep.DependencyID, catalogProvider, runtimeClient, totals); err != nil {
+			return err
+		}
+
+		countedComponents[dep.DependencyID] = true
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) processComponentResources(
+	ctx context.Context,
+	componentID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	component, err := s.ComponentRepo.GetByID(ctx, componentID)
+	if err != nil {
+		return fmt.Errorf("failed to get component %s: %w", componentID, err)
+	}
+
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+	}
+
+	return nil
+}
+
+func addUsedResourcesByTemplateID(templateID string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+	filters := map[string][]string{
+		"label": {fmt.Sprintf("%s=%s", consts.ApplicationTemplateKey, templateID)},
+	}
+
+	pods, err := runtimeClient.ListPods(filters)
+	if err != nil {
+		return fmt.Errorf("failed to list pods for template %s: %w", templateID, err)
+	}
+
+	for _, pod := range pods {
+		if err := collectPodResources(pod.Name, runtimeClient, totals); err != nil {
+			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func collectPodResources(podName string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+	resources, err := runtimeClient.GetPodResources(podName)
+	if err != nil {
+		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
+	}
+
+	for _, card := range resources.SpyreCards {
+		totals.spyreCards[card] = true
+	}
+
+	totals.usedCPU += resources.CPU
+	totals.usedMemory += resources.MemUsage
+
+	return nil
+}
+
+func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesResponse {
+	totalSpyreCards := make([]string, 0, len(totals.spyreCards))
+	for card := range totals.spyreCards {
+		totalSpyreCards = append(totalSpyreCards, card)
+	}
+
+	accelerators := make(map[string][]string)
+	if len(totalSpyreCards) > 0 {
+		accelerators[consts.SpyreResourceName] = totalSpyreCards
+	}
+
+	return &types.ApplicationResourcesResponse{
+		CPU: types.ApplicationCPUInfo{
+			Total: float64(totals.allocatedCPU),
+			Used:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
+		},
+		Memory: types.ApplicationMemInfo{
+			TotalBytes: int64(totals.allocatedMemory),
+			UsedBytes:  int64(totals.usedMemory),
+		},
+		Accelerators: accelerators,
+	}
+}
+
+// ApplicationsPs returns runtime pod/container status for an application by querying the configured runtime.
+func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID, namespace string) (*types.ApplicationPSResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	rt, err := vars.RuntimeFactory.Create(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init runtime client: %w", err)
+	}
+
+	servicePods, err := s.collectServicePods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect service pods: %w", err)
+	}
+
+	componentPods, err := s.collectComponentPods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect component pods: %w", err)
+	}
+
+	return &types.ApplicationPSResponse{
+		ID:         app.ID.String(),
+		Name:       app.Name,
+		Services:   servicePods,
+		Components: componentPods,
+	}, nil
+}
+
+func (s *ApplicationServiceBase) collectServicePods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	servicePods := make([]types.Pod, 0, len(services))
+
+	for _, service := range services {
+		pod, err := loadApplicationPods(rt, service.ID.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load service pod for service %s: %w", service.ID, err)
+		}
+		servicePods = append(servicePods, pod...)
+	}
+
+	logger.InfofCtx(ctx, "Successfully collected %d service pods", len(servicePods))
+
+	return servicePods, nil
+}
+
+func (s *ApplicationServiceBase) collectComponentPods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	componentMap := make(map[string][]types.Pod)
+
+	for _, service := range services {
+		serviceDependencies, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get dependencies for service %s: %w", service.ID, err)
+		}
+
+		for _, dependency := range serviceDependencies {
+			if dependency.DependencyType != models.DependencyTypeComponent {
+				continue
+			}
+
+			componentID := dependency.DependencyID.String()
+
+			if _, exists := componentMap[componentID]; exists {
+				continue
+			}
+
+			componentPod, err := loadApplicationPods(rt, componentID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load component pod %s: %w", componentID, err)
+			}
+
+			componentMap[componentID] = componentPod
+		}
+	}
+
+	componentPods := make([]types.Pod, 0, len(componentMap))
+	for _, podDetails := range componentMap {
+		componentPods = append(componentPods, podDetails...)
+	}
+
+	logger.InfofCtx(ctx, "Successfully collected %d unique component pods", len(componentPods))
+
+	return componentPods, nil
+}
+
+func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) {
+	filteredPod, err := common.FetchFilteredPods(rt, appID)
+	if err != nil {
+		return nil, err
+	}
+	if len(filteredPod) == 0 {
+		return nil, fmt.Errorf("no pod found with given id")
+	}
+
+	appPodList := make([]types.Pod, 0, len(filteredPod))
+
+	for _, pod := range filteredPod {
+		processedPod, err := common.ProcessPod(rt, pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process pod: %w", err)
+		}
+		// ProcessPod returns (nil, nil) when InspectPod fails, so we should skip that pod
+		if processedPod == nil {
+			continue
+		}
+
+		containers := make([]types.PodContainer, 0, len(pod.Containers))
+		for _, container := range processedPod.Containers {
+			containers = append(containers, types.PodContainer{
+				Name:    container.Name,
+				Status:  types.Status(strings.ToLower(processedPod.Status)),
+				Healthy: strings.ToLower(container.Health) == string(consts.Ready),
+			})
+		}
+
+		appPod := types.Pod{
+			PodID:      processedPod.ID,
+			PodName:    processedPod.Name,
+			Status:     types.Status(strings.ToLower(processedPod.Status)),
+			Healthy:    processedPod.Health == string(consts.Ready),
+			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+			Containers: containers,
+		}
+
+		appPodList = append(appPodList, appPod)
+	}
+
+	return appPodList, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+	app, err := s.AppRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
+	}
+
+	if app.CreatedBy != user {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
+	}
+
+	// Cancel any in-flight deployment before transitioning to Deleting.
+	// No-op when DeploymentRegistry is nil (e.g. OpenShift stub).
+	if s.DeploymentRegistry != nil {
+		s.DeploymentRegistry.Cancel(id)
+	}
+
+	if err := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, id, models.ApplicationStatusDeleting, "Deleting deployment..."); err != nil {
+		return nil, err
+	}
+
+	orphanedComponentIDs, err := s.identifyOrphanedComponents(ctx, id, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application components: %w", err)
+	}
+
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+func (s *ApplicationServiceBase) executeDeletionAsync(
+	parentCtx context.Context,
+	appID uuid.UUID,
+	services []models.Service,
+	orphanedComponentIDs []uuid.UUID,
+	keepData bool,
+	runtimeType runtimeTypes.RuntimeType,
+) {
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorfCtx(ctx, "Panic recovered in deletion goroutine for application %s: %v", appID, r)
+
+			errMsg := fmt.Sprintf("Deletion panic: %v", r)
+			if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
+			}
+		}
+	}()
+
+	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, runtimeType)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
+
+		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
+		}
+
+		return
+	}
+
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deletion completed successfully for application id '%s'", appID.String()))
+}
+
+// identifyOrphanedComponents identifies components that will become orphaned after service deletion.
+func (s *ApplicationServiceBase) identifyOrphanedComponents(ctx context.Context, appID uuid.UUID, services []models.Service) ([]uuid.UUID, error) {
+	serviceIDs := s.buildServiceIDMap(services)
+
+	componentCandidates, err := s.collectComponentCandidates(ctx, appID, services)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.filterOrphanedComponents(ctx, componentCandidates, serviceIDs), nil
+}
+
+// buildServiceIDMap creates a map of service IDs for quick lookup.
+func (s *ApplicationServiceBase) buildServiceIDMap(services []models.Service) map[uuid.UUID]bool {
+	serviceIDs := make(map[uuid.UUID]bool, len(services))
+	for _, svc := range services {
+		serviceIDs[svc.ID] = true
+	}
+
+	return serviceIDs
+}
+
+func (s *ApplicationServiceBase) collectComponentCandidates(ctx context.Context, appID uuid.UUID, services []models.Service) (map[uuid.UUID]bool, error) {
+	componentCandidates := make(map[uuid.UUID]bool)
+
+	for _, svc := range services {
+		deps, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
+		if err != nil {
+			logger.ErrorfCtx(ctx, "failed to get dependencies for service %s: %s", svc.ID, err)
+			_ = catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID, models.ApplicationStatusError, "failed to get service dependencies")
+
+			return nil, err
+		}
+
+		for _, dep := range deps {
+			if dep.DependencyType == models.DependencyTypeComponent {
+				componentCandidates[dep.DependencyID] = true
+			}
+		}
+	}
+
+	return componentCandidates, nil
+}
+
+// filterOrphanedComponents checks which components are truly orphaned.
+func (s *ApplicationServiceBase) filterOrphanedComponents(ctx context.Context, componentCandidates map[uuid.UUID]bool, serviceIDs map[uuid.UUID]bool) []uuid.UUID {
+	var orphanedComponents []uuid.UUID
+
+	for componentID := range componentCandidates {
+		if s.isComponentOrphaned(ctx, componentID, serviceIDs) {
+			orphanedComponents = append(orphanedComponents, componentID)
+		}
+	}
+
+	return orphanedComponents
+}
+
+// isComponentOrphaned checks if a component has no remaining dependent services.
+func (s *ApplicationServiceBase) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
+	dependentServices, err := s.ServiceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "failed to check component %s orphan status: %s", componentID, err)
+
+		return false
+	}
+
+	for _, svcID := range dependentServices {
+		if !serviceIDs[svcID] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Made with Bob

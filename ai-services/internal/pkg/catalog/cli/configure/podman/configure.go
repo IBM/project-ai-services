@@ -74,7 +74,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	if !isDeployed {
 		// Prepare deployment with domain suffix computation and create Caddy context
-		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort)
+		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort, opts.WorkerGatewayPort)
 		if err != nil {
 			s.Fail("failed to load param values")
 
@@ -135,12 +135,12 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 	return nil
 }
 
-// prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort int) error {
+// loadCatalogParamValues prepares all necessary data for deployment including domain suffix computation.
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort, workerGatewayPort int) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, httpsPort)
+	argParams, err := generateArgParams(passwordHash, httpsPort, workerGatewayPort)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -155,7 +155,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash string, httpsPort int) (map[string]string, error) {
+func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (map[string]string, error) {
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
@@ -202,6 +202,7 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
 
 	return argParams, nil
 }

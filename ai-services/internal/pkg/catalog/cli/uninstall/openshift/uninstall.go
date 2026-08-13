@@ -3,36 +3,22 @@ package openshift
 import (
 	"context"
 	"fmt"
-	"time"
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 )
 
-const defaultUninstallTimeout = 5 * time.Minute
-
-// UninstallCatalog removes the catalog helm release and optionally cleans up PVCs.
+// UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
 func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	catalog := catalogConstants.CatalogAppName
 	namespace := catalog
-
-	// Create a new Helm client
-	helmClient, err := helm.NewHelm(namespace)
-	if err != nil {
-		return fmt.Errorf("failed to create helm client: %w", err)
-	}
-
-	// Check if the catalog release exists
-	if installed, err := clicommon.IsCatalogInstalled(ctx, helmClient, catalog, namespace); err != nil || !installed {
-		return err
-	}
 
 	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
 	if err != nil {
@@ -46,18 +32,34 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 
 	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
 
-	s := spinner.New("Uninstalling catalog '" + catalog + "'...")
+	s := spinner.New("Uninstalling catalog service...")
 	s.Start(ctx)
 
-	if err := helmClient.Uninstall(catalog, &helm.UninstallOpts{Timeout: defaultUninstallTimeout}); err != nil {
+	if err := catalogutils.HelmUninstall(ctx, namespace, catalog); err != nil {
 		s.Fail("failed to uninstall catalog")
 
 		return fmt.Errorf("failed to uninstall catalog: %w", err)
 	}
 
-	s.Stop("Catalog '" + catalog + "' uninstalled successfully")
+	if !opts.SkipCleanup {
+		logger.DebuglnCtx(ctx, "Delete catalog PVCs...")
 
-	return cleanupPVCs(ctx, rt, opts.SkipCleanup, catalog)
+		if err := rt.DeletePVCs(fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
+			s.Fail("failed to delete catalog pvc")
+
+			return fmt.Errorf("failed to delete PVCs: %w", err)
+		}
+
+		if err := rt.DeleteNamespace(namespace); err != nil {
+			s.Fail("failed to delete catalog namespace")
+
+			return fmt.Errorf("failed to delete '%s' namespace: %w", namespace, err)
+		}
+	}
+
+	s.Stop("Catalog service uninstalled successfully")
+
+	return nil
 }
 
 func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (bool, error) {
@@ -71,20 +73,6 @@ func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (boo
 	}
 
 	return utils.ConfirmDeletion(ctx, pods)
-}
-
-func cleanupPVCs(ctx context.Context, rt runtime.Runtime, skipCleanup bool, catalog string) error {
-	if skipCleanup {
-		return nil
-	}
-
-	logger.DebuglnCtx(ctx, "Cleaning up Persistent Volume Claims...")
-
-	if err := rt.DeletePVCs(fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
-		return fmt.Errorf("failed to cleanup PVCs: %w", err)
-	}
-
-	return nil
 }
 
 // Made with Bob

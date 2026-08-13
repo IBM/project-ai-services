@@ -39,6 +39,8 @@ var (
 	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
+	// WorkerGateway port — always active, defaults to 9090.
+	workerGatewayPort int
 	// Reset podman auth secret for catalog configure command.
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
@@ -49,7 +51,8 @@ var (
 )
 
 const (
-	defaultHTTPSPort = 443
+	defaultHTTPSPort         = 443
+	defaultWorkerGatewayPort = 9090
 )
 
 var configureCmd = &cobra.Command{
@@ -62,13 +65,19 @@ This command performs the following operations:
   - Creates an admin user (if not already present)
   - Initializes directory structure for applications and models
 
+Use --workergateway-port to set the gRPC port that worker agents connect to (default 9090).
+The worker gateway is always started; only the port number is configurable.
+
 Additional configuration options include base directory customization, domain name setup,
 SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
-	Example: `  # Configure catalog service for podman
-  ai-services catalog configure --runtime podman
+	Example: `  # Configure catalog service for podman (worker gateway on default port 9090)
+	 ai-services catalog configure --runtime podman
 
-  # Configure with custom HTTPS port
-  ai-services catalog configure --runtime podman --https-port 8443`,
+	 # Configure with a custom worker gateway port
+	 ai-services catalog configure --runtime podman --workergateway-port 9191
+
+	 # Configure with custom HTTPS port
+	 ai-services catalog configure --runtime podman --https-port 8443`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
@@ -136,11 +145,12 @@ func runConfigure() error {
 		}
 
 		opts := catalogUtils.PodmanConfigureOptions{
-			BaseDir:     aiServicesDir,
-			DomainName:  domainName,
-			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
-			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
-			HttpsPort:   httpsPort,
+			BaseDir:           aiServicesDir,
+			DomainName:        domainName,
+			SSLCertPath:       catalogUtils.SanitizeFilePath(sslCertPath),
+			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
+			HttpsPort:         httpsPort,
+			WorkerGatewayPort: workerGatewayPort,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
@@ -199,6 +209,11 @@ func validateConfigureFlags() error {
 		// Validate HTTPS port range
 		if httpsPort < 1 || httpsPort > 65535 {
 			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+		}
+
+		// Validate workergateway-port is a valid port number
+		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
+			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
 		}
 	}
 
@@ -327,6 +342,15 @@ func initConfigurePodmanDeployFlags() {
 			"Example: --https-port 8443\n",
 	)
 
+	configureCmd.Flags().IntVar(
+		&workerGatewayPort,
+		"workergateway-port",
+		defaultWorkerGatewayPort,
+		"Port for the gRPC worker gateway that worker agents connect to (always active).\n"+
+			"Note: Supported for podman runtime only.\n"+
+			"Example: --workergateway-port 9090\n",
+	)
+
 	configureCmd.Flags().StringVar(
 		&domainName,
 		"domain-name",
@@ -393,6 +417,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	builder.
 		AddPodmanFlag("basedir", nil).
 		AddPodmanFlag("https-port", nil).
+		AddPodmanFlag("workergateway-port", nil).
 		AddPodmanFlag("domain-name", nil).
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).

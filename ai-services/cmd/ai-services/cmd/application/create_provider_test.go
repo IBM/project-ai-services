@@ -148,7 +148,7 @@ func TestExtractComponentParamsForService_OnlyFalse_DefaultApplies(t *testing.T)
 	}
 }
 
-func TestFindUserSpecifiedProvider_SingleProvider(t *testing.T) {
+func TestSelectProviderFromDeployOptions_UserSelection(t *testing.T) {
 	compDeployOpt := catalogTypes.DeployOptionsComponent{
 		Type: "llm",
 		Providers: []catalogTypes.DeployOptionsProvider{
@@ -160,7 +160,7 @@ func TestFindUserSpecifiedProvider_SingleProvider(t *testing.T) {
 		"vllm-cpu": {},
 	}
 
-	providerID, params, err := findUserSpecifiedProvider(compDeployOpt, providerParams)
+	providerID, params, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestFindUserSpecifiedProvider_SingleProvider(t *testing.T) {
 	}
 }
 
-func TestFindUserSpecifiedProvider_MultipleProviders_ReturnsError(t *testing.T) {
+func TestSelectProviderFromDeployOptions_MultipleSelections_ReturnsError(t *testing.T) {
 	compDeployOpt := catalogTypes.DeployOptionsComponent{
 		Type: "llm",
 		Providers: []catalogTypes.DeployOptionsProvider{
@@ -187,35 +187,34 @@ func TestFindUserSpecifiedProvider_MultipleProviders_ReturnsError(t *testing.T) 
 		"vllm-spyre": {},
 	}
 
-	_, _, err := findUserSpecifiedProvider(compDeployOpt, providerParams)
+	_, _, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
 	if err == nil {
-		t.Fatal("expected error when multiple providers specified, got nil")
+		t.Fatal("expected error when multiple providers selected, got nil")
 	}
 }
 
-func TestFindUserSpecifiedProvider_NoMatchingProvider(t *testing.T) {
+func TestSelectProviderFromDeployOptions_NoUserSelection_FallsBackToDefault(t *testing.T) {
 	compDeployOpt := catalogTypes.DeployOptionsComponent{
-		Type: "llm",
+		Type: "embedding",
 		Providers: []catalogTypes.DeployOptionsProvider{
 			{ID: "vllm-cpu"},
-			{ID: "vllm-spyre"},
+			{ID: "tei", Default: true},
 		},
 	}
-	providerParams := map[string]map[string]string{
-		"watsonx": {"model": "ibm/granite"},
-	}
+	// No user selection — should pick the default-marked provider.
+	providerParams := map[string]map[string]string{}
 
-	providerID, _, err := findUserSpecifiedProvider(compDeployOpt, providerParams)
+	providerID, _, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if providerID != "" {
-		t.Errorf("expected empty provider ID for non-matching provider, got '%s'", providerID)
+	if providerID != "tei" {
+		t.Errorf("expected 'tei' as default provider, got '%s'", providerID)
 	}
 }
 
-func TestSelectProviderFromDeployOptions_FallsBackToSpyre(t *testing.T) {
+func TestSelectProviderFromDeployOptions_NoUserSelectionNoDefault_PrefersSpyre(t *testing.T) {
 	compDeployOpt := catalogTypes.DeployOptionsComponent{
 		Type: "llm",
 		Providers: []catalogTypes.DeployOptionsProvider{
@@ -223,7 +222,6 @@ func TestSelectProviderFromDeployOptions_FallsBackToSpyre(t *testing.T) {
 			{ID: "vllm-spyre"},
 		},
 	}
-	// Empty providerParams — no user selection.
 	providerParams := map[string]map[string]string{}
 
 	providerID, _, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
@@ -232,16 +230,16 @@ func TestSelectProviderFromDeployOptions_FallsBackToSpyre(t *testing.T) {
 	}
 
 	if providerID != "vllm-spyre" {
-		t.Errorf("expected 'vllm-spyre' as default, got '%s'", providerID)
+		t.Errorf("expected 'vllm-spyre' to be preferred, got '%s'", providerID)
 	}
 }
 
-func TestSelectProviderFromDeployOptions_FallsBackToDefault(t *testing.T) {
+func TestSelectProviderFromDeployOptions_NoUserSelectionNoDefaultNoSpyre_FallsBackToFirst(t *testing.T) {
 	compDeployOpt := catalogTypes.DeployOptionsComponent{
 		Type: "embedding",
 		Providers: []catalogTypes.DeployOptionsProvider{
-			{ID: "vllm-cpu"},
-			{ID: "tei", Default: true},
+			{ID: "tei"},
+			{ID: "bge"},
 		},
 	}
 	providerParams := map[string]map[string]string{}
@@ -252,6 +250,29 @@ func TestSelectProviderFromDeployOptions_FallsBackToDefault(t *testing.T) {
 	}
 
 	if providerID != "tei" {
-		t.Errorf("expected 'tei' as default provider, got '%s'", providerID)
+		t.Errorf("expected 'tei' as first provider, got '%s'", providerID)
+	}
+}
+
+func TestSelectProviderFromDeployOptions_UnknownProviderFallsBackToDefault(t *testing.T) {
+	compDeployOpt := catalogTypes.DeployOptionsComponent{
+		Type: "llm",
+		Providers: []catalogTypes.DeployOptionsProvider{
+			{ID: "vllm-cpu"},
+			{ID: "tei", Default: true},
+		},
+	}
+	// User specified a provider not in deploy options — should fall back to default.
+	providerParams := map[string]map[string]string{
+		"watsonx": {"model": "ibm/granite"},
+	}
+
+	providerID, _, err := selectProviderFromDeployOptions(compDeployOpt, providerParams)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if providerID != "tei" {
+		t.Errorf("expected 'tei' as default provider for unknown selection, got '%s'", providerID)
 	}
 }

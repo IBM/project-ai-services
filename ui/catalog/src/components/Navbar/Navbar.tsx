@@ -48,6 +48,10 @@ const Navbar = (props: NavbarProps) => {
             Services
           </SideNavMenuItem>
 
+          <SideNavMenuItem as={NavLink} to={ROUTES.CONNECTORS}>
+            Connectors
+          </SideNavMenuItem>
+
           <SideNavDivider />
 
           <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>

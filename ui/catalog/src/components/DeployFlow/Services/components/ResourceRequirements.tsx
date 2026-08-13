@@ -15,7 +15,7 @@ import type {
 } from "@/types/api.types";
 import type { ResourceItem } from "../../Shared/types";
 import { bytesToGB, getResourceStatus } from "../../Shared/utils/resources";
-import type { DeployFormData } from "../types";
+import type { DeployFormData } from "../../Shared/types";
 import styles from "../ServicesDeployFlow.module.scss";
 
 interface ResourceRequirementsProps {
@@ -37,53 +37,56 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
 
   // Fetch available resources from API on mount
   useEffect(() => {
+    let cancelled = false;
+
     const loadResources = async () => {
       try {
         setResourcesLoading(true);
         setResourcesError(null);
 
         const data = await fetchResources();
-        setResourceData(data);
+        if (!cancelled) {
+          setResourceData(data);
+        }
       } catch (error) {
         console.error("Failed to fetch resources:", error);
 
-        if (error instanceof Error) {
-          if (
-            error.message.includes("401") ||
-            error.message.includes("Authentication")
-          ) {
-            setResourcesError("Authentication failed. Please log in again.");
-          } else if (
-            error.message.includes("Network") ||
-            error.message.includes("network")
-          ) {
-            setResourcesError("Network error. Please check your connection.");
+        if (!cancelled) {
+          if (error instanceof Error) {
+            if (
+              error.message.includes("401") ||
+              error.message.includes("Authentication")
+            ) {
+              setResourcesError("Authentication failed. Please log in again.");
+            } else if (
+              error.message.includes("Network") ||
+              error.message.includes("network")
+            ) {
+              setResourcesError("Network error. Please check your connection.");
+            } else {
+              setResourcesError(error.message);
+            }
           } else {
-            setResourcesError(error.message);
+            setResourcesError(
+              "An unexpected error occurred while fetching resource data.",
+            );
           }
-        } else {
-          setResourcesError(
-            "An unexpected error occurred while fetching resource data.",
-          );
-        }
 
-        setResourceData(null);
+          setResourceData(null);
+        }
       } finally {
-        setResourcesLoading(false);
+        if (!cancelled) {
+          setResourcesLoading(false);
+        }
       }
     };
 
     loadResources();
-  }, []);
 
-  // Helper function to get accelerator label
-  const getAcceleratorLabel = (acceleratorKey: string): string => {
-    const labelMap: Record<string, string> = {
-      "ibm.com/spyre_pf": "Accelerators",
+    return () => {
+      cancelled = true;
     };
-
-    return labelMap[acceleratorKey] || `Accelerators (${acceleratorKey})`;
-  };
+  }, []);
 
   // Calculate required resources based on selected services and providers
   const calculateRequiredResources = useMemo(() => {
@@ -219,7 +222,7 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
       // Handle each accelerator type separately
       acceleratorKeys.forEach((acceleratorKey) => {
         const acceleratorData = resourceData.accelerators[acceleratorKey];
-        const acceleratorLabel = getAcceleratorLabel(acceleratorKey);
+        const acceleratorLabel = "Accelerators";
         const requiredCount =
           calculateRequiredResources.accelerators[acceleratorKey] || 0;
 
