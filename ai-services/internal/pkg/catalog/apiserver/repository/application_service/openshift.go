@@ -12,10 +12,16 @@ import (
 
 // OpenShiftApplicationService implements ApplicationServiceInterface for the OpenShift runtime.
 // It embeds ApplicationServiceBase for all shared DB operations.
-//
-// TODO(OCP): set base.DeploymentRegistry = NewDeploymentRegistry() in the OpenShift constructor when CreateApplication is implemented.
 type OpenShiftApplicationService struct {
 	ApplicationServiceBase
+}
+
+// NewOpenShiftApplicationService creates a new OpenShiftApplicationService with a fresh DeploymentRegistry
+// wired into the base. This makes in-flight deployments cancellable by a concurrent DeleteApplication.
+func NewOpenShiftApplicationService(base ApplicationServiceBase) *OpenShiftApplicationService {
+	base.DeploymentRegistry = NewDeploymentRegistry()
+
+	return &OpenShiftApplicationService{ApplicationServiceBase: base}
 }
 
 func (s *OpenShiftApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
