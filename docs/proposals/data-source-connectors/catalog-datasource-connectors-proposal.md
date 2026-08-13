@@ -133,6 +133,7 @@ CREATE TABLE connectors (
     status     VARCHAR(50)  NOT NULL DEFAULT 'Offline',
     message    TEXT         NOT NULL DEFAULT '',
     metadata   JSONB        NOT NULL DEFAULT '{}',
+    created_by VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -153,6 +154,7 @@ A datasource record in the `connectors` table looks like:
 | `status`     | `"Connected"` / `"Offline"`                                                           |
 | `message`    | `""` / `"Permission denied on bucket"`                                                |
 | `metadata`   | `{"bucket": "my-docs", "access_key_id": "AK...", "secret_access_key": "<encrypted>"}` |
+| `created_by` | `"admin@example.com"`                                                                 |
 | `created_at` | timestamp                                                                             |
 | `updated_at` | timestamp                                                                             |
 
@@ -1021,6 +1023,7 @@ name: "Amazon S3"
 description: "Amazon S3 bucket or IBM Cloud Object Storage bucket via HMAC credentials"
 
 connector_type: datasource
+connector_name: "Data Source"
 
 # Fields whose values must never be returned in API responses
 sensitive_fields:
@@ -1036,6 +1039,7 @@ name: "Remote SSH"
 description: "Remote server accessible via SSH private key"
 
 connector_type: datasource
+connector_name: "Data Source"
 
 sensitive_fields:
   - private_key
@@ -1129,6 +1133,7 @@ type ConnectorProvider struct {
     Name            string   `yaml:"name"`
     Description     string   `yaml:"description"`
     ConnectorType   string   `yaml:"connector_type"`   // e.g. "datasource"
+    ConnectorName   string   `yaml:"connector_name"`   // human-readable category label, e.g. "Data Source"
     SensitiveFields []string `yaml:"sensitive_fields"` // never returned in API responses
 }
 ```
