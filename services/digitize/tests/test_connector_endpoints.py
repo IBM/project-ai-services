@@ -351,6 +351,10 @@ class TestRunTeardown:
         """remaining_owner_count == 0 → document is deleted."""
         doc_delete_mock = Mock()
         monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.list_sync_logs",
+            Mock(return_value=([], 0)),
+        )
+        monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
             Mock(return_value=["abc123"]),
         )
@@ -371,6 +375,10 @@ class TestRunTeardown:
     async def test_does_not_delete_doc_when_other_owners_remain(self, monkeypatch):
         """remaining_owner_count > 0 → doc must NOT be deleted."""
         doc_delete_mock = Mock()
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.list_sync_logs",
+            Mock(return_value=([], 0)),
+        )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
             Mock(return_value=["abc123"]),
@@ -669,7 +677,7 @@ class TestStopSync:
         """Correct sync_seq + mark_sync_cancel_pending True → 204."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
+            Mock(return_value=_make_connector(sync_status=SyncStatus.SYNCING)),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
