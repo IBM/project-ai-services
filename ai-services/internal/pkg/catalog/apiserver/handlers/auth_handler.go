@@ -160,7 +160,8 @@ func (h *AuthHandler) Me(c *gin.Context) {
 // TokenLogin godoc
 //
 //	@Summary		Exchange a ManageIQ token for a Catalog API JWT
-//	@Description	IBM Power Mission Control and other ManageIQ-integrated products use this
+//	@Description	**Experimental** — This endpoint is under active development and may change without notice.
+//	@Description	IBM Power Mission Control use this
 //	@Description	endpoint to exchange a pre-existing ManageIQ token for an internal JWT
 //	@Description	without supplying username/password credentials.
 //	@Tags			Authentication

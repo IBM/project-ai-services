@@ -107,7 +107,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		miqClient := miq.NewHTTPClient(manageiqURL, manageiqInsecure)
 		authSvc = auth.NewAuthServiceWithMIQ(userRepo, tokenMgr, blacklist, miqClient)
 	} else {
-		logger.Infoln("ManageIQ integration disabled: using local admin credentials")
+		logger.Infoln("Using the default auth service")
 		authSvc = auth.NewAuthService(userRepo, tokenMgr, blacklist)
 	}
 
@@ -167,8 +167,9 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 
 func NewAPIServerCmd() *cobra.Command {
 	var (
-		port                   = 8080
-		defaultAccessTokenTTL  = time.Minute * 9  // kept below ManageIQ default token_ttl of 600s
+		port = 8080
+		// TODO: ManageIQ sessions default to a 600s token TTL; the defaultAccessTokenTTL may need to be aligned when ManageIQ support is formalised.
+		defaultAccessTokenTTL  = time.Minute * 15
 		defaultRefreshTokenTTL = time.Hour * 24 * 1
 		adminUserName          string
 		adminPasswordHash      string
