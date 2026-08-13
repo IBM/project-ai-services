@@ -129,6 +129,7 @@ async def run_tick(connector_id: str) -> None:
         )
 
         update_sync_log(
+            connector_id,
             sync_seq,
             total_files=len(scanned_files),
             new_files=len(ingest_list),

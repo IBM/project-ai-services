@@ -124,7 +124,7 @@ class ConnectorDetailResponse(BaseModel):
 class SyncLogItem(BaseModel):
     """One tick entry in GET /v1/connectors/{connector_id}/syncs."""
 
-    id: int
+    seq: int
     started_at: str
     finished_at: Optional[str]
     total_files: int

@@ -1267,7 +1267,8 @@ class DatabaseManager:
 
     @staticmethod
     def update_sync_log_progress(
-        log_id: int,
+        connector_id: str,
+        seq: int,
         total_files: Optional[int] = None,
         new_files: Optional[int] = None,
         removed_files: Optional[int] = None,
@@ -1291,17 +1292,23 @@ class DatabaseManager:
                     return True
                 stmt = (
                     update(ConnectorSyncLog)
-                    .where(ConnectorSyncLog.id == log_id)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
                     .values(**values)
                 )
                 result = session.execute(stmt)
                 updated = result.rowcount > 0
                 if not updated:
-                    logger.warning(f"Sync log id={log_id} not found for progress update")
+                    logger.warning(
+                        f"Sync log connector={connector_id!r} seq={seq} not found for progress update"
+                    )
                 return updated
         except SQLAlchemyError as e:
             logger.error(
-                f"DB error in update_sync_log_progress(id={log_id}): {e}", exc_info=True
+                f"DB error in update_sync_log_progress(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
             )
             return False
 

@@ -93,9 +93,8 @@ def _make_connector(
     return c
 
 
-def _make_sync_log(log_id: int = 1, seq: int = 1) -> MagicMock:
+def _make_sync_log(seq: int = 1) -> MagicMock:
     log = MagicMock()
-    log.id = log_id
     log.connector_id = CONNECTOR_ID
     log.seq = seq
     log.started_at = _NOW
@@ -495,7 +494,7 @@ class TestGetConnector:
 
 class TestSyncLog:
     def test_returns_paginated_history(self, connector_test_client, monkeypatch):
-        logs = [_make_sync_log(log_id=3, seq=3), _make_sync_log(log_id=2, seq=2)]
+        logs = [_make_sync_log(seq=3), _make_sync_log(seq=2)]
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),

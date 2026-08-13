@@ -570,7 +570,7 @@ class TestUpdateSyncLogFilesSyncing:
         session.execute.return_value = _execute_result(rowcount=1)
         from digitize.utils.db import update_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = update_sync_log(42, total_files=5, new_files=3)
+            result = update_sync_log(CONNECTOR_ID, 1, total_files=5, new_files=3)
         assert result is True
 
     def test_returns_true_when_nothing_to_update(self):
@@ -578,7 +578,7 @@ class TestUpdateSyncLogFilesSyncing:
         session = MagicMock()
         from digitize.utils.db import update_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = update_sync_log(42)
+            result = update_sync_log(CONNECTOR_ID, 1)
         assert result is True
         session.execute.assert_not_called()
 
@@ -600,9 +600,8 @@ class TestUpdateSyncLogFilesSyncing:
 # ===========================================================================
 
 class TestListSyncLogs:
-    def _make_log(self, log_id: int, seq: int) -> MagicMock:
+    def _make_log(self, seq: int) -> MagicMock:
         log = MagicMock()
-        log.id = log_id
         log.connector_id = CONNECTOR_ID
         log.seq = seq
         log.started_at = _NOW
@@ -615,7 +614,7 @@ class TestListSyncLogs:
         return log
 
     def test_returns_items_and_total(self):
-        log = self._make_log(1, 1)
+        log = self._make_log(1)
         session = MagicMock()
         # First execute: COUNT query → total=1
         count_result = MagicMock()

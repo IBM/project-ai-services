@@ -1398,7 +1398,8 @@ def close_sync_log(
 
 
 def update_sync_log(
-    log_id: int,
+    connector_id: str,
+    seq: int,
     total_files: Optional[int] = None,
     new_files: Optional[int] = None,
     removed_files: Optional[int] = None,
@@ -1409,7 +1410,8 @@ def update_sync_log(
     Returns True on success, False if the row was not found.
     """
     return db_manager.update_sync_log_progress(
-        log_id=log_id,
+        connector_id=connector_id,
+        seq=seq,
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,

@@ -255,13 +255,13 @@ class ConnectorSyncLog(Base):
     """
     __tablename__ = "connector_sync_logs"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     connector_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("connectors.id", ondelete="CASCADE"),
         nullable=False,
+        primary_key=True,
     )
-    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, primary_key=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -277,10 +277,9 @@ class ConnectorSyncLog(Base):
 
     __table_args__ = (
         Index("idx_csl_connector_started", "connector_id", desc("started_at")),
-        UniqueConstraint("connector_id", "seq", name="uq_csh_connector_seq"),
     )
 
     def __repr__(self) -> str:
-        return f"<ConnectorSyncLog(id={self.id}, connector_id='{self.connector_id}', seq={self.seq})>"
+        return f"<ConnectorSyncLog(connector_id='{self.connector_id}', seq={self.seq})>"
 
 # Made with Bob

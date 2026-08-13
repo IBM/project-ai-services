@@ -621,7 +621,7 @@ async def get_sync_history(
 
         items = [
             SyncLogItem(
-                id=log.id,
+                seq=log.seq,
                 started_at=get_utc_timestamp(log.started_at) or "",
                 finished_at=get_utc_timestamp(log.finished_at),
                 total_files=log.total_files,
