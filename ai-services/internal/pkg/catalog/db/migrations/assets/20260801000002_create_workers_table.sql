@@ -15,7 +15,7 @@ CREATE TYPE worker_status AS ENUM (
 );
 
 -- ── workers ────────────────────────────────────────────────────────────────────
--- One row per registered worker agent.
+-- One row per registered worker.
 --
 -- runtime_type:   execution environment the worker runs on (podman | openshift).
 -- status:         lifecycle state of the worker (pending | ready | disconnected).

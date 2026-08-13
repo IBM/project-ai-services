@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
@@ -19,6 +20,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerregistry "github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +65,58 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
+// buildAPIServerOptions wires all service dependencies and returns the options
+// needed to start the API server. pool.Close() and the returned cleanup func
+// must be called by the caller.
+func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int) (apiserver.APIServerOptions, func(), error) {
+	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
+	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
+	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
+
+	// Initialize repositories
+	appRepo := repository.NewApplicationRepository(pool)
+	svcRepo := repository.NewServiceRepository(pool)
+	compRepo := repository.NewComponentRepository(pool)
+	svcDepRepo := repository.NewServiceDependencyRepository(pool)
+
+	// Initialize sync service for background DB-Pod synchronization
+	// TODO: implement sync service on remote machines
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval)
+	if err != nil {
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		syncService.Stop(ctx)
+
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
+	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
+	workerRepo := repository.NewWorkerRepository(pool)
+	workerReg := workerregistry.New(workerRepo)
+
+	opts := apiserver.APIServerOptions{
+		Port:               0, // set by caller
+		AuthService:        auth.NewAuthService(userRepo, tokenMgr, blacklist),
+		TokenManager:       tokenMgr,
+		Blacklist:          blacklist,
+		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
+		WorkerGatewayPort:  workerGatewayPort,
+		WorkerRegistry:     workerReg,
+		WorkerTokenStore:   workerregistry.NewTokenStore(),
+		WorkerRepository:   workerRepo,
+	}
+	cleanup := func() {
+		blacklist.Stop()
+		syncService.Stop(ctx)
+	}
+
+	return opts, cleanup, nil
+}
+
 // runAPIServer initializes and starts the API server with the provided configuration.
 func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int) error {
 	secretKey, err := getOrGenerateSecretKey()
@@ -81,53 +135,17 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer pool.Close()
-
 	logger.Infoln("Connected to database successfully")
 
-	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
-	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
-	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
-	defer blacklist.Stop()
-
-	// Initialize repositories
-	applicationRepo := repository.NewApplicationRepository(pool)
-	serviceRepo := repository.NewServiceRepository(pool)
-	componentRepo := repository.NewComponentRepository(pool)
-	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
-
-	// Initialize sync service for background DB-Pod synchronization
-	// TODO: implement sync service on remote machines
-	syncService, err := sync.NewSyncService(
-		applicationRepo,
-		serviceRepo,
-		componentRepo,
-		serviceDependencyRepo,
-		sync.DefaultSyncInterval,
-	)
+	opts, cleanup, err := buildAPIServerOptions(ctx, pool, secretKey, adminUser, adminPassHash, accessTTL, refreshTTL, workerGatewayPort)
 	if err != nil {
-		return fmt.Errorf("failed to initialize sync service: %w", err)
+		return err
 	}
-	syncService.Start(ctx)
-	defer syncService.Stop(ctx)
+	defer cleanup()
 
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		return fmt.Errorf("failed to initialize catalog provider: %w", err)
-	}
+	opts.Port = port
 
-	// Initialize application service with all required repositories
-	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
-
-	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
-	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
-
-	return apiserver.NewAPIserver(apiserver.APIServerOptions{
-		Port:               port,
-		AuthService:        authSvc,
-		TokenManager:       tokenMgr,
-		Blacklist:          blacklist,
-		ApplicationService: applicationService,
-	}).Start()
+	return apiserver.NewAPIserver(opts).Start()
 }
 
 func NewAPIServerCmd() *cobra.Command {
