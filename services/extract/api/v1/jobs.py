@@ -438,16 +438,311 @@ async def create_extract_job(
 
 
 async def _process_extract_job(job_id: str) -> None:
-    """
-    Background worker stub.
-
-    A full worker (tokenization, vLLM call, schema validation) will be added
-    in a follow-up iteration.  For now it acquires the job_limiter slot so
-    semaphore accounting is correct and immediately releases it.
+    """Background worker: tokenize → guard → extract → validate → persist.
     """
     from extract import state
+
     async with state.job_limiter:
-        logger.info(f"Background worker invoked for job {job_id} (stub — no processing yet)")
+        t_start = time.monotonic()
+        logger.info(f"Worker started for job {job_id}")
+
+        # ------------------------------------------------------------------
+        # 1. Mark in_progress
+        # ------------------------------------------------------------------
+        db_repo.update_job(job_id=job_id, status="in_progress")
+
+        llm_model_dict = get_llm_endpoint()
+        llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
+        llm_model: str = llm_model_dict.get("llm_model", "")
+        max_model_len: int = llm_model_dict.get("max_model_len")
+
+        # Fetch the job row so we know the schema_id and document name.
+        job_row = db_repo.get_job_by_id(job_id)
+        if job_row is None:
+            logger.error(f"Job {job_id} not found in DB at worker start; aborting.")
+            return
+
+        try:
+            schema_row = _resolve_schema(job_row.schema_id)
+        except ExtractException as exc:
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error=exc.code,
+                completed_at=datetime.now(timezone.utc),
+                metadata={"error_details": exc.details},
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        # ------------------------------------------------------------------
+        # 2. Read staged file
+        # ------------------------------------------------------------------
+        job_dir = settings.extract.staging_dir / job_id
+        staged_files = list(job_dir.iterdir()) if job_dir.exists() else []
+        if not staged_files:
+            logger.error(f"No staged file found for job {job_id}")
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error="STAGED_FILE_MISSING",
+                completed_at=datetime.now(timezone.utc),
+            )
+            return
+
+        staged_path = staged_files[0]
+        try:
+            text = staged_path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            logger.error(f"UTF-8 decode failed for job {job_id}: {exc}")
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error="FILE_DECODE_ERROR",
+                completed_at=datetime.now(timezone.utc),
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        input_word_count = len(text.split())
+
+        # ------------------------------------------------------------------
+        # 3. Tokenize + context-window guard
+        # ------------------------------------------------------------------
+        try:
+            input_tokens: int = await asyncio.to_thread(
+                _tokenize, text, llm_endpoint
+            )
+        except Exception as exc:
+            logger.error(f"Tokenization failed for job {job_id}: {exc}", exc_info=True)
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error="TOKENIZATION_ERROR",
+                completed_at=datetime.now(timezone.utc),
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        try:
+            reserved_output = check_extraction_budget(
+                input_tokens=input_tokens,
+                schema_tokens=schema_row.schema_tokens,
+                examples_tokens=schema_row.examples_tokens,
+                custom_prompt_tokens=schema_row.custom_prompt_tokens,
+                max_model_len=max_model_len,
+            )
+        except ExtractException as exc:
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error=exc.code,
+                completed_at=datetime.now(timezone.utc),
+                metadata={"error_details": exc.details},
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        # ------------------------------------------------------------------
+        # 4. phase=extracting — build prompt, call vLLM
+        # ------------------------------------------------------------------
+        db_repo.update_job(job_id=job_id, metadata={"phase": "extracting"})
+
+        few_shot_block = render_few_shot_block(schema_row.examples)
+        messages = build_messages(
+            normalized_schema=schema_row.json_schema,
+            few_shot_block=few_shot_block,
+            input_text=text,
+            custom_prompt=schema_row.custom_prompt,
+        )
+
+        t_extract_start = time.monotonic()
+        try:
+            async with concurrency_limiter:
+                vllm_resp = await call_vllm_safe(
+                    messages, reserved_output, schema_row.json_schema, llm_endpoint, llm_model
+                )
+        except ExtractException as exc:
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error=exc.code,
+                completed_at=datetime.now(timezone.utc),
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        choices = vllm_resp.get("choices", [])
+        if not choices:
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error="LLM_ERROR",
+                completed_at=datetime.now(timezone.utc),
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        choice = choices[0]
+        finish_reason: str = choice.get("finish_reason", "")
+
+        # ------------------------------------------------------------------
+        # 5. finish_reason=length → retry once with 1.5× output_token_factor
+        # ------------------------------------------------------------------
+        if finish_reason == "length":
+            boosted_reserved_output = compute_reserved_output(
+                schema_row.schema_tokens,
+                output_token_factor=1.5 * settings.extract.output_token_factor,
+            )
+            logger.warning(
+                "finish_reason=length for job %s; retrying with boosted "
+                "reserved_output=%d (was %d)",
+                job_id, boosted_reserved_output, reserved_output,
+            )
+            try:
+                async with concurrency_limiter:
+                    vllm_resp = await call_vllm_safe(
+                        messages, boosted_reserved_output, schema_row.json_schema,
+                        llm_endpoint, llm_model,
+                    )
+            except ExtractException as exc:
+                db_repo.update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error=exc.code,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                cleanup_staging_directory(job_id, settings.extract.staging_dir)
+                return
+
+            choices = vllm_resp.get("choices", [])
+            if not choices:
+                db_repo.update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error="LLM_ERROR",
+                    completed_at=datetime.now(timezone.utc),
+                )
+                cleanup_staging_directory(job_id, settings.extract.staging_dir)
+                return
+
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason", "")
+            if finish_reason == "length":
+                db_repo.update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error="OUTPUT_BUDGET_EXCEEDED",
+                    completed_at=datetime.now(timezone.utc),
+                    metadata={
+                        "error_details": {
+                            "reserved_output_tokens": boosted_reserved_output,
+                            "finish_reason": "length",
+                        }
+                    },
+                )
+                cleanup_staging_directory(job_id, settings.extract.staging_dir)
+                return
+
+            reserved_output = boosted_reserved_output
+
+        t_extract_secs = time.monotonic() - t_extract_start
+
+        raw_output: str = choice.get("message", {}).get("content", "") or ""
+        usage = vllm_resp.get("usage", {})
+        total_prompt_tokens: int = usage.get("prompt_tokens", 0)
+        total_completion_tokens: int = usage.get("completion_tokens", 0)
+
+        # ------------------------------------------------------------------
+        # 6. phase=validating — validate + one bounded retry
+        # ------------------------------------------------------------------
+        db_repo.update_job(job_id=job_id, metadata={"phase": "validating"})
+
+        t_validate_start = time.monotonic()
+        try:
+            parsed_output, validation_attempts, extra_pt, extra_ct = (
+                await validate_with_retry(
+                    raw_output, messages, reserved_output,
+                    schema_row.json_schema, llm_endpoint, llm_model,
+                )
+            )
+        except ExtractException as exc:
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error=exc.code,
+                completed_at=datetime.now(timezone.utc),
+                metadata={"error_details": exc.details},
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        t_validate_secs = time.monotonic() - t_validate_start
+        total_prompt_tokens += extra_pt
+        total_completion_tokens += extra_ct
+
+        # ------------------------------------------------------------------
+        # 7. Write result file
+        # ------------------------------------------------------------------
+        processing_time_ms = int((time.monotonic() - t_start) * 1000)
+
+        result_payload = {
+            "data": {
+                "extraction": parsed_output,
+                "schema_id": job_row.schema_id,
+                "source": {
+                    "input_type": "file",
+                    "document_name": job_row.document_name,
+                    "input_words": input_word_count,
+                    "input_tokens": input_tokens,
+                },
+            },
+            "status": "completed",
+            "meta": {
+                "model": llm_model,
+                "processing_time_ms": processing_time_ms,
+                "validation_attempts": validation_attempts,
+                "timing_in_secs": {
+                    "extracting": round(t_extract_secs, 3),
+                    "validating": round(t_validate_secs, 3),
+                },
+            },
+            "usage": {
+                "input_tokens": total_prompt_tokens,
+                "output_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens,
+            },
+        }
+
+        result_path = settings.extract.results_dir / f"{job_id}_result.json"
+        try:
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(json.dumps(result_payload), encoding="utf-8")
+        except Exception as exc:
+            logger.error(f"Failed to write result file for job {job_id}: {exc}", exc_info=True)
+            db_repo.update_job(
+                job_id=job_id,
+                status="failed",
+                error="RESULT_WRITE_ERROR",
+                completed_at=datetime.now(timezone.utc),
+            )
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
+            return
+
+        # ------------------------------------------------------------------
+        # 8. Mark completed
+        # ------------------------------------------------------------------
+        db_repo.update_job(
+            job_id=job_id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+        )
+        logger.info(f"Job {job_id} completed in {processing_time_ms} ms")
+
+        # ------------------------------------------------------------------
+        # 9. Delete staging directory  (job_limiter released by context manager)
+        # ------------------------------------------------------------------
+        cleanup_staging_directory(job_id, settings.extract.staging_dir)
 
 
 # ---------------------------------------------------------------------------
