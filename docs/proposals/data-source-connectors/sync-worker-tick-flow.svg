@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1060" width="800" height="1060" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="11">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1180" width="800" height="1180" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="11">
   <defs>
     <marker id="sw-arr"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
     <marker id="sw-arrg" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2d9a5f"/></marker>
@@ -6,112 +6,115 @@
     <marker id="sw-arry" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>
   </defs>
 
-  <!-- Entry point — dispatched by APScheduler or POST /sync -->
+  <!-- Entry point -->
   <rect x="80" y="10" width="640" height="36" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.5"/>
-  <text x="400" y="25" text-anchor="middle" font-weight="700" fill="#1e40af">_run_tick(connector_id)  &#x2014; async coroutine</text>
-  <text x="400" y="40" text-anchor="middle" font-size="10" fill="#57606a">dispatched by APScheduler IntervalTrigger  OR  POST /v1/connectors/{id}/sync</text>
+  <text x="400" y="25" text-anchor="middle" font-weight="700" fill="#1e40af">run_tick(connector_id)  — async coroutine</text>
+  <text x="400" y="40" text-anchor="middle" font-size="10" fill="#57606a">dispatched by APScheduler IntervalTrigger  OR  POST /v1/connectors/{id}/syncs</text>
   <line x1="400" y1="46" x2="400" y2="66" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ① open tick -->
-  <rect x="80" y="66" width="640" height="48" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
-  <text x="400" y="82" text-anchor="middle" fill="#1e40af" font-weight="600">&#x2460; Phase 1 &#x2014; open tick record</text>
-  <text x="400" y="96" text-anchor="middle" fill="#57606a" font-size="10">INSERT connector_sync_logs  (seq, started_at, status=&#x27;started&#x27;)</text>
-  <text x="400" y="108" text-anchor="middle" fill="#57606a" font-size="10">sync_status already &#x27;syncing&#x27;  (set by lock-acquisition before dispatch)</text>
-  <line x1="400" y1="114" x2="400" y2="134" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- Phase 0 note: lock acquired BEFORE calling run_tick -->
+  <rect x="100" y="66" width="600" height="20" rx="3" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="400" y="79" text-anchor="middle" fill="#166534" font-size="10">Phase 0 (lock): try_acquire_sync_lock() already called by caller (scheduler or POST /syncs handler)</text>
+  <line x1="400" y1="86" x2="400" y2="106" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- Phase boundary before scan -->
-  <rect x="100" y="134" width="600" height="24" rx="3" fill="#fff3e0" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="400" y="147" text-anchor="middle" fill="#ca8a04" font-size="9" font-weight="600">PHASE BOUNDARY: _check_delete_pending() &#x2014; live DB SELECT; raises CancelledError if status=&#x27;delete_pending&#x27;</text>
-  <line x1="400" y1="158" x2="400" y2="178" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ① Phase 1: open tick record -->
+  <rect x="80" y="106" width="640" height="48" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="400" y="122" text-anchor="middle" fill="#1e40af" font-weight="600">① Phase 1 — open tick record</text>
+  <text x="400" y="136" text-anchor="middle" fill="#57606a" font-size="10">sync_seq = open_new_sync_log(connector_id)</text>
+  <text x="400" y="148" text-anchor="middle" fill="#57606a" font-size="10">INSERT connector_sync_logs (seq, started_at, status='started')</text>
+  <line x1="400" y1="154" x2="400" y2="174" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+
+  <!-- Phase boundary 1b: _check_interrupt_call -->
+  <rect x="100" y="174" width="600" height="24" rx="3" fill="#fff3e0" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="400" y="188" text-anchor="middle" fill="#ca8a04" font-size="9" font-weight="600">CHECKPOINT 1: _check_interrupt_call(connector_id, sync_seq) — checks connectors.sync_status AND connector_sync_logs.status</text>
+  <line x1="400" y1="198" x2="400" y2="218" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
   <!-- ② Phase 2 — load known state -->
-  <rect x="80" y="178" width="640" height="36" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
-  <text x="400" y="194" text-anchor="middle" fill="#1e40af" font-weight="600">&#x2461; Phase 2 &#x2014; load known state</text>
-  <text x="400" y="208" text-anchor="middle" fill="#57606a" font-size="10">SELECT known_checksums; SELECT all_checksums (for cross-connector dedup)</text>
-  <line x1="400" y1="214" x2="400" y2="234" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <rect x="80" y="218" width="640" height="36" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="400" y="234" text-anchor="middle" fill="#1e40af" font-weight="600">② Phase 2 — load known state</text>
+  <text x="400" y="248" text-anchor="middle" fill="#57606a" font-size="10">list_connector_checksums(connector_id); list_all_checksums()</text>
+  <line x1="400" y1="254" x2="400" y2="274" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ③ Phase 3a: scanner.connect (executor) -->
-  <rect x="80" y="234" width="640" height="60" rx="4" fill="#e0e7ff" stroke="#3b82d4" stroke-width="1" stroke-dasharray="2,2"/>
-  <text x="400" y="250" text-anchor="middle" fill="#1e40af" font-weight="600">&#x2462; Phase 3a &#x2014; scanner.connect()</text>
-  <text x="400" y="264" text-anchor="middle" fill="#57606a" font-size="10">await loop.run_in_executor(None, scanner.connect)  [BLOCKING &#x2192; ThreadPoolExecutor]</text>
-  <text x="400" y="276" text-anchor="middle" fill="#f59e0b" font-size="9" font-weight="500">Executor: SFTP handshake or boto3 head_bucket</text>
-  <text x="400" y="288" text-anchor="middle" fill="#57606a" font-size="9">Event loop responsive; CancelledError can land at this await</text>
-  <line x1="400" y1="294" x2="400" y2="314" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ③a Phase 3a: scanner.connect (asyncio.to_thread) -->
+  <rect x="80" y="274" width="640" height="48" rx="4" fill="#e0e7ff" stroke="#3b82d4" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="400" y="290" text-anchor="middle" fill="#1e40af" font-weight="600">③ Phase 3a — scanner.connect() + scanner.scan()</text>
+  <text x="400" y="304" text-anchor="middle" fill="#57606a" font-size="10">await asyncio.to_thread(scanner.connect)  [BLOCKING → ThreadPoolExecutor]</text>
+  <text x="400" y="316" text-anchor="middle" fill="#f59e0b" font-size="9" font-weight="500">await asyncio.to_thread(scanner.scan)  →  list[(remote_path, checksum)]</text>
+  <line x1="400" y1="322" x2="400" y2="342" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ③b Phase 3b: scanner.scan (executor) -->
-  <rect x="80" y="314" width="640" height="72" rx="4" fill="#e0e7ff" stroke="#3b82d4" stroke-width="1" stroke-dasharray="2,2"/>
-  <text x="400" y="330" text-anchor="middle" fill="#1e40af" font-weight="600">&#x2462; Phase 3b &#x2014; scanned_files = await scanner.scan()</text>
-  <text x="400" y="344" text-anchor="middle" fill="#57606a" font-size="10">await loop.run_in_executor(None, scanner.scan)  [BLOCKING &#x2192; ThreadPoolExecutor]</text>
-  <text x="400" y="356" text-anchor="middle" fill="#f59e0b" font-size="9" font-weight="500">Executor: SFTP directory walk + md5sum  OR  S3 list_objects_v2 paginator</text>
-  <text x="400" y="368" text-anchor="middle" fill="#57606a" font-size="9">Can take minutes; event loop remains responsive; thread sleeps in kernel</text>
-  <text x="400" y="380" text-anchor="middle" fill="#57606a" font-size="9">Yields: (remote_path, checksum) for ALL files &#x2014; no dedup filtering here</text>
-  <line x1="400" y1="386" x2="400" y2="406" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ④ Phase 3c: _classify -->
+  <rect x="80" y="342" width="640" height="72" rx="4" fill="#e0f2fe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="400" y="358" text-anchor="middle" fill="#0369a1" font-weight="600">④ Phase 3 — _classify(connector_id, scanned_files, known_checksums, all_checksums)</text>
+  <text x="400" y="372" text-anchor="middle" fill="#57606a" font-size="10">For each (path, checksum) in scanned_files:</text>
+  <text x="400" y="384" text-anchor="middle" fill="#57606a" font-size="10">  • in known_checksums → skip (already owned)  |  • in all_checksums → add_connector_checksum_entry inline (cross-connector dup)</text>
+  <text x="400" y="396" text-anchor="middle" fill="#57606a" font-size="10">  • neither → append to ingest_list  |  orphan_checksums = known_checksums − scanned_checksums</text>
+  <text x="400" y="408" text-anchor="middle" fill="#57606a" font-size="9">Phase 3b: update_sync_log(sync_seq, total_files, new_files, removed_files) — single write, all counts known</text>
+  <line x1="400" y1="414" x2="400" y2="434" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- Phase boundary after scan -->
-  <rect x="100" y="406" width="600" height="24" rx="3" fill="#fff3e0" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="400" y="419" text-anchor="middle" fill="#ca8a04" font-size="9" font-weight="600">PHASE BOUNDARY: _check_delete_pending() &#x2014; live DB SELECT; raises CancelledError if status=&#x27;delete_pending&#x27;</text>
-  <line x1="400" y1="430" x2="400" y2="450" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ⑤ Phase 4a: _process_new_files batches -->
+  <rect x="80" y="434" width="640" height="120" rx="4" fill="#e0f2fe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="400" y="450" text-anchor="middle" fill="#0369a1" font-weight="600">⑤ Phase 4a — _process_new_files(ingest_list)  [BATCH_SIZE=10]</text>
+  <text x="400" y="464" text-anchor="middle" fill="#57606a" font-size="10">For each batch (up to 10 files):</text>
+  <text x="400" y="478" text-anchor="middle" fill="#57606a" font-size="10">  CHECKPOINT 2: _check_interrupt_call before batch starts</text>
+  <text x="400" y="492" text-anchor="middle" fill="#57606a" font-size="10">  await asyncio.to_thread(scanner.download_to, ...)  per file</text>
+  <text x="400" y="506" text-anchor="middle" fill="#57606a" font-size="10">  verify_integrity() → if failed: skip file (warning log, not fatal)</text>
+  <text x="400" y="520" text-anchor="middle" fill="#57606a" font-size="10">  CHECKPOINT 3: _check_interrupt_call after downloads</text>
+  <text x="400" y="534" text-anchor="middle" fill="#57606a" font-size="10">  initialize_job_state → add_connector_checksum_entry → ingest() → _wait_for_job(sync_seq)  [CHECKPOINT 4: polls + interrupt]</text>
+  <text x="400" y="546" text-anchor="middle" fill="#57606a" font-size="9">  batch exception → batch_failed=True (continues); finally: cleanup staging dir per batch</text>
+  <text x="400" y="558" text-anchor="middle" fill="#57606a" font-size="9">  After all batches: if batch_failed → raise RuntimeError → _fail_tick → OUT_OF_SYNC</text>
+  <line x1="400" y1="554" x2="400" y2="574" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ④ Phase 4a: classify + ingest -->
-  <rect x="80" y="450" width="640" height="108" rx="4" fill="#e0f2fe" stroke="#3b82d4" stroke-width="1"/>
-  <text x="400" y="466" text-anchor="middle" fill="#0369a1" font-weight="600">&#x2463; Phase 4a &#x2014; _classify() + _process_new_files(ingest_list)</text>
-  <text x="400" y="480" text-anchor="middle" fill="#57606a" font-size="10">_classify(): separates scanned_files into skip_list, ingest_list, cross-connector dups</text>
-  <text x="400" y="492" text-anchor="middle" fill="#57606a" font-size="10">Cross-connector dups: insert_connector_checksum(connector_id, checksum, existing_doc_id) inline</text>
-  <text x="400" y="506" text-anchor="middle" fill="#57606a" font-size="10">For each in ingest_list (sequentially, one at a time):</text>
-  <text x="400" y="518" text-anchor="middle" fill="#57606a" font-size="10">  CHECKPOINT: _check_delete_pending() before download starts</text>
-  <text x="400" y="530" text-anchor="middle" fill="#57606a" font-size="10">  await loop.run_in_executor(None, scanner.download_to, ...)  [BLOCKING]</text>
-  <text x="400" y="542" text-anchor="middle" fill="#57606a" font-size="9">  CHECKPOINT: _check_delete_pending() after download · create_job() &#x2192; doc_id · finally: cleanup staging dir</text>
-  <line x1="400" y1="558" x2="400" y2="578" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ⑥ Phase 4b: delete orphans -->
+  <rect x="80" y="574" width="640" height="72" rx="4" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
+  <text x="400" y="590" text-anchor="middle" fill="#854d0e" font-weight="600">⑥ Phase 4b — _delete_orphans(orphan_checksums)</text>
+  <text x="400" y="604" text-anchor="middle" fill="#57606a" font-size="10">Runs AFTER all Phase 4a batches complete</text>
+  <text x="400" y="616" text-anchor="middle" fill="#57606a" font-size="10">orphan_checksums = known_checksums − {scanned checksums}</text>
+  <text x="400" y="628" text-anchor="middle" fill="#57606a" font-size="10">For each: remove_connector_checksum_entry() → if remaining == 0: _best_effort_delete_document(doc_id)</text>
+  <text x="400" y="640" text-anchor="middle" fill="#57606a" font-size="9">Errors re-raised (not swallowed)</text>
+  <line x1="400" y1="646" x2="400" y2="666" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ⑤ Phase 4b: delete orphans -->
-  <rect x="80" y="578" width="640" height="72" rx="4" fill="#fef3c7" stroke="#ca8a04" stroke-width="1"/>
-  <text x="400" y="594" text-anchor="middle" fill="#854d0e" font-weight="600">&#x2464; Phase 4b &#x2014; await _delete_orphans(orphan_checksums)</text>
-  <text x="400" y="608" text-anchor="middle" fill="#57606a" font-size="10">Runs AFTER all Phase 4a writes complete</text>
-  <text x="400" y="620" text-anchor="middle" fill="#57606a" font-size="10">orphan_checksums = known_checksums &#x2212; {scanned checksums}</text>
-  <text x="400" y="632" text-anchor="middle" fill="#57606a" font-size="10">For each: remove_connector_checksum_entry() &#x2192; if remaining == 0: delete_document_internal(doc_id)</text>
-  <text x="400" y="644" text-anchor="middle" fill="#57606a" font-size="9">Best-effort deletion; errors logged and skipped</text>
-  <line x1="400" y1="650" x2="400" y2="670" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
+  <!-- ⑦ Phase 5: finalize tick -->
+  <rect x="80" y="666" width="640" height="60" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="400" y="682" text-anchor="middle" fill="#166534" font-weight="600">⑦ Phase 5 — _complete_tick()</text>
+  <text x="400" y="696" text-anchor="middle" fill="#57606a" font-size="10">close_sync_log(seq, status=COMPLETED) → connector sync_status='completed' → 'up to date'</text>
+  <text x="400" y="708" text-anchor="middle" fill="#57606a" font-size="10">UPDATE connectors SET last_sync_at=now, sync_status='completed'  [single transaction]</text>
+  <text x="400" y="720" text-anchor="middle" fill="#57606a" font-size="9">APScheduler will fire next tick at next interval</text>
+  <line x1="400" y1="726" x2="400" y2="746" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
 
-  <!-- ⑥ Phase 5: finalize tick -->
-  <rect x="80" y="670" width="640" height="60" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
-  <text x="400" y="686" text-anchor="middle" fill="#166534" font-weight="600">&#x2465; Phase 5 &#x2014; _complete_tick()</text>
-  <text x="400" y="700" text-anchor="middle" fill="#57606a" font-size="10">UPDATE connector_sync_logs (finished_at, counters, status=&#x27;completed&#x27;)</text>
-  <text x="400" y="712" text-anchor="middle" fill="#57606a" font-size="10">UPDATE connectors (last_sync_at, sync_status=&#x27;up to date&#x27;)  [single transaction]</text>
-  <text x="400" y="724" text-anchor="middle" fill="#57606a" font-size="9">APScheduler will fire next tick at next interval</text>
-  <line x1="400" y1="730" x2="400" y2="750" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sw-arr)"/>
-
-  <!-- ⑦ finally: scanner.close() -->
-  <rect x="80" y="750" width="640" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1"/>
-  <text x="400" y="766" text-anchor="middle" fill="#57606a" font-weight="600">&#x2466; finally:  scanner.close()</text>
-  <text x="400" y="780" text-anchor="middle" fill="#57606a" font-size="9">Always runs &#x2014; SFTP close, boto3 cleanup, etc.; coroutine exits</text>
+  <!-- ⑧ finally: scanner.close() -->
+  <rect x="80" y="746" width="640" height="36" rx="4" fill="#f7f8fa" stroke="#57606a" stroke-width="1"/>
+  <text x="400" y="762" text-anchor="middle" fill="#57606a" font-weight="600">⑧ finally:  scanner.close()</text>
+  <text x="400" y="778" text-anchor="middle" fill="#57606a" font-size="9">Always runs — SFTP close, boto3 cleanup, etc.; coroutine exits</text>
 
   <!-- exception side-rail: CancelledError path -->
-  <line x1="718" y1="540" x2="748" y2="540" stroke="#c0392b" stroke-width="1.5"/>
-  <line x1="748" y1="540" x2="748" y2="826" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <line x1="748" y1="826" x2="722" y2="826" stroke="#c0392b" stroke-width="1.5" marker-end="url(#sw-arrr)"/>
-  <text x="758" y="700" font-size="10" fill="#c0392b" font-weight="500" transform="rotate(-90,758,700)">CancelledError &#x2192; _cancel_tick() + _run_teardown</text>
+  <line x1="718" y1="550" x2="748" y2="550" stroke="#c0392b" stroke-width="1.5"/>
+  <line x1="748" y1="550" x2="748" y2="836" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <line x1="748" y1="836" x2="722" y2="836" stroke="#c0392b" stroke-width="1.5" marker-end="url(#sw-arrr)"/>
+  <text x="758" y="720" font-size="10" fill="#c0392b" font-weight="500" transform="rotate(-90,758,720)">CancelledError → _handle_interrupt</text>
 
   <!-- exception side-rail: other Exception path -->
-  <line x1="718" y1="614" x2="736" y2="614" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,2"/>
-  <line x1="736" y1="614" x2="736" y2="846" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <line x1="736" y1="846" x2="722" y2="846" stroke="#c0392b" stroke-width="1.5" marker-end="url(#sw-arrr)"/>
-  <text x="742" y="740" font-size="10" fill="#c0392b" font-weight="500" transform="rotate(-90,742,740)">Exception &#x2192; _fail_tick()</text>
+  <line x1="718" y1="630" x2="736" y2="630" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <line x1="736" y1="630" x2="736" y2="856" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <line x1="736" y1="856" x2="722" y2="856" stroke="#c0392b" stroke-width="1.5" marker-end="url(#sw-arrr)"/>
+  <text x="742" y="760" font-size="10" fill="#c0392b" font-weight="500" transform="rotate(-90,742,760)">Exception → _fail_tick</text>
 
   <!-- exception box -->
-  <rect x="80" y="810" width="640" height="72" rx="4" fill="#fee2e2" stroke="#c0392b" stroke-width="1"/>
-  <text x="400" y="826" text-anchor="middle" fill="#991b1b" font-weight="600">Exception handling</text>
-  <text x="400" y="840" text-anchor="middle" fill="#57606a" font-size="10">CancelledError: _cancel_tick() (log status=&#x27;cancelled&#x27;, sync_status=&#x27;delete_pending&#x27;)</text>
-  <text x="400" y="852" text-anchor="middle" fill="#57606a" font-size="10">&#x2192; asyncio.create_task(_run_teardown(connector_id))  &#x2022;  CancelledError is re-raised</text>
-  <text x="400" y="864" text-anchor="middle" fill="#57606a" font-size="9">Other Exception: _fail_tick() (log status=&#x27;failed&#x27;, sync_status=&#x27;out of sync&#x27;)  &#x2022;  error logged</text>
-  <text x="400" y="876" text-anchor="middle" fill="#57606a" font-size="9">finally: scanner.close() always runs; APScheduler fires next tick regardless</text>
+  <rect x="80" y="820" width="640" height="90" rx="4" fill="#fee2e2" stroke="#c0392b" stroke-width="1"/>
+  <text x="400" y="836" text-anchor="middle" fill="#991b1b" font-weight="600">Exception handling</text>
+  <text x="400" y="850" text-anchor="middle" fill="#57606a" font-size="10">CancelledError: _check_interrupt_call(connector_id, sync_seq) → identify type</text>
+  <text x="400" y="864" text-anchor="middle" fill="#57606a" font-size="10">  SYNC_CANCEL → _cancel_tick (log→'cancelled', connector→'out of sync') + sweep staging (sync_seq only)</text>
+  <text x="400" y="878" text-anchor="middle" fill="#57606a" font-size="10">  DELETE_CONNECTOR → _cancel_tick + _run_delete_teardown (inline) • CancelledError re-raised</text>
+  <text x="400" y="892" text-anchor="middle" fill="#57606a" font-size="9">Other Exception: _fail_tick (log→'failed', connector→'out of sync') • error logged • no re-raise</text>
+  <text x="400" y="904" text-anchor="middle" fill="#57606a" font-size="9">finally: scanner.close() always runs; APScheduler fires next tick regardless</text>
 
   <!-- Legend -->
-  <rect x="80" y="900" width="640" height="80" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1" stroke-dasharray="2,2"/>
-  <text x="90" y="917" font-weight="600" fill="#166534">Legend:</text>
-  <rect x="100" y="923" width="8" height="8" fill="#e0e7ff" stroke="#3b82d4"/>
-  <text x="115" y="931" font-size="10" fill="#1f2328">Executor (async &#x2192; executor thread): blocking I/O offloaded to ThreadPoolExecutor</text>
-  <text x="115" y="944" font-size="10" fill="#1f2328">Event loop remains responsive; CancelledError can be injected at each await</text>
-  <text x="115" y="957" font-size="10" fill="#1f2328">Thread continues its blocking call naturally if cancelled (cannot be forcibly stopped)</text>
+  <rect x="80" y="928" width="640" height="100" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="90" y="945" font-weight="600" fill="#166534">Legend:</text>
+  <rect x="100" y="951" width="8" height="8" fill="#e0e7ff" stroke="#3b82d4"/>
+  <text x="115" y="959" font-size="10" fill="#1f2328">Executor (asyncio.to_thread): blocking I/O offloaded to ThreadPoolExecutor — event loop stays responsive</text>
   <rect x="100" y="969" width="8" height="8" fill="#fff3e0" stroke="#f59e0b"/>
-  <text x="115" y="977" font-size="10" fill="#1f2328">Phase boundary: _check_delete_pending() does live DB SELECT; raises CancelledError if &#x27;delete_pending&#x27;</text>
+  <text x="115" y="977" font-size="10" fill="#1f2328">Checkpoint: _check_interrupt_call(connector_id, sync_seq) — reads connectors.sync_status AND connector_sync_logs.status</text>
+  <text x="115" y="990" font-size="10" fill="#1f2328">  → DELETE_PENDING → InterruptType.DELETE_CONNECTOR  |  CANCEL_PENDING → InterruptType.SYNC_CANCEL</text>
+  <text x="115" y="1003" font-size="10" fill="#1f2328">  Called at 4 points: after open_log, before batch, after downloads, inside _wait_for_job poll loop</text>
+  <text x="115" y="1016" font-size="10" fill="#1f2328">  CancelledError is raised in the coroutine; a thread already in flight runs to natural completion</text>
 </svg>
