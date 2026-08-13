@@ -450,13 +450,13 @@ class TestExtractSyncEndpoint:
     def test_413_context_limit_exceeded(self, extract_test_client, monkeypatch):
         schema_row = _mock_schema_row(schema_tokens=500, examples_tokens=300)
 
-        # check_extraction_budget raises SchemaValidationError; the endpoint
-        # re-raises it as ExtractException — the ExtractException handler fires.
-        from extract.utils.schema import SchemaValidationError
-        context_err = SchemaValidationError(
+        # check_extraction_budget raises ExtractException(413); the endpoint
+        # re-raises it — the ExtractException handler fires.
+        from extract.utils.exceptions import ExtractException as _ExtractException
+        context_err = _ExtractException(
+            413,
             "CONTEXT_LIMIT_EXCEEDED",
             "Input does not fit in the model context window.",
-            status=413,
             details={
                 "max_model_len": 32768,
                 "input_tokens": 30000,
@@ -491,8 +491,8 @@ class TestExtractSyncEndpoint:
 
     # ── 413 Output budget exceeded (finish_reason=length) ─────────────────
 
-    def test_413_output_budget_exceeded_no_retry(self, extract_test_client, monkeypatch):
-        """finish_reason=length must fail fast — call_vllm must not be called twice."""
+    def test_413_output_budget_exceeded_retries_then_fails(self, extract_test_client, monkeypatch):
+        """finish_reason=length triggers one retry with boosted budget; 413 if retry also truncates."""
         schema_row = _mock_schema_row()
         length_resp = _vllm_response("partial output...", finish_reason="length")
         vllm_calls = {"n": 0}
@@ -505,6 +505,7 @@ class TestExtractSyncEndpoint:
              _patch_concurrency_free(), \
              _patch_to_thread(), \
              patch("extract.api.v1.jobs.check_extraction_budget", return_value=512), \
+             patch("extract.api.v1.jobs.compute_reserved_output", return_value=768), \
              patch("extract.utils.vllm.call_vllm", side_effect=_fake_call_vllm):
             resp = extract_test_client.post(
                 "/v1/extract",
@@ -515,23 +516,52 @@ class TestExtractSyncEndpoint:
         body = resp.json()["error"]
         assert body["code"] == "OUTPUT_BUDGET_EXCEEDED"
         assert body["details"]["finish_reason"] == "length"
-        assert vllm_calls["n"] == 1  # no retry burned
+        assert vllm_calls["n"] == 2  # initial + one boosted retry
 
-    def test_413_output_budget_has_reserved_tokens_in_details(self, extract_test_client, monkeypatch):
+    def test_413_output_budget_has_boosted_reserved_tokens_in_details(self, extract_test_client, monkeypatch):
+        """The reserved_output_tokens in the 413 details reflects the boosted retry budget."""
         schema_row = _mock_schema_row()
         length_resp = _vllm_response("truncated...", finish_reason="length")
 
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
              _patch_concurrency_free(), \
              _patch_to_thread(), \
-             patch("extract.api.v1.jobs.check_extraction_budget", return_value=1024), \
+             patch("extract.api.v1.jobs.check_extraction_budget", return_value=512), \
+             patch("extract.api.v1.jobs.compute_reserved_output", return_value=768), \
              patch("extract.utils.vllm.call_vllm", return_value=length_resp):
             resp = extract_test_client.post(
                 "/v1/extract",
                 json={"text": "x", "schema_id": "schema-001"},
             )
 
-        assert resp.json()["error"]["details"]["reserved_output_tokens"] == 1024
+        assert resp.json()["error"]["details"]["reserved_output_tokens"] == 768
+
+    def test_200_output_budget_length_then_success(self, extract_test_client, monkeypatch):
+        """First call returns finish_reason=length; boosted retry succeeds → 200."""
+        schema_row = _mock_schema_row()
+        valid_json = json.dumps(VALID_EXTRACTION)
+        calls = {"n": 0}
+
+        def _fake_call_vllm(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _vllm_response("truncated...", finish_reason="length")
+            return _vllm_response(valid_json)
+
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
+             _patch_concurrency_free(), \
+             _patch_to_thread(), \
+             patch("extract.api.v1.jobs.check_extraction_budget", return_value=512), \
+             patch("extract.api.v1.jobs.compute_reserved_output", return_value=768), \
+             patch("extract.utils.vllm.call_vllm", side_effect=_fake_call_vllm):
+            resp = extract_test_client.post(
+                "/v1/extract",
+                json={"text": "some text", "schema_id": "schema-001"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["extraction"] == VALID_EXTRACTION
+        assert calls["n"] == 2
 
     # ── 422 Validation failed ─────────────────────────────────────────────
 

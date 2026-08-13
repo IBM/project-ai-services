@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from extract.utils.exceptions import ExtractException
 from extract.utils.schema import (
     SchemaValidationError,
     check_extraction_budget,
@@ -503,10 +504,10 @@ class TestCheckExtractionBudget:
     def test_exceeds_budget_raises(self, monkeypatch):
         self._patch_settings(monkeypatch)
         # total = 30000 + 1000 + 500 + 100 + 150 + 2000 = 33750 > 32768
-        with pytest.raises(SchemaValidationError) as exc_info:
+        with pytest.raises(ExtractException) as exc_info:
             check_extraction_budget(30000, 1000, 500, 100, 32768)
         assert exc_info.value.code == "CONTEXT_LIMIT_EXCEEDED"
-        assert exc_info.value.status == 413
+        assert exc_info.value.status_code == 413
         assert "excess_tokens" in exc_info.value.details
         assert exc_info.value.details["input_tokens"] == 30000
 

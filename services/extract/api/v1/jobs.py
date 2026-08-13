@@ -32,7 +32,7 @@ from extract.models import (
     JobsListResponse,
     PaginationInfo,
 )
-from extract.state import concurrency_limiter, job_limiter
+from extract.state import concurrency_limiter
 from extract.settings import settings
 from extract.utils.exceptions import ExtractException
 from extract.utils.request import check_request_body_size
@@ -50,9 +50,9 @@ from extract.utils.job import (
     validate_file_extension,
 )
 from extract.utils.schema import (
-    SchemaValidationError,
     _tokenize,
     check_extraction_budget,
+    compute_reserved_output,
     fmt_dt,
 )
 
@@ -73,23 +73,6 @@ logger = get_logger("jobs_router")
     description=(
         "Extract structured data from plain text against a registered schema in a "
         "single blocking call.  Returns validated, schema-conformant JSON.\n\n"
-        "**Processing steps:**\n"
-        "1. Enforce request-body size limit (413 `REQUEST_TOO_LARGE`) before tokenization.\n"
-        "2. Validate `schema_id` (404) and `text` non-empty (400).\n"
-        "3. Acquire the global vLLM concurrency slot (429 if saturated).\n"
-        "4. Tokenise `text` via vLLM `/tokenize` (exact count).\n"
-        "5. Hard context-window guard — 413 `CONTEXT_LIMIT_EXCEEDED` with full token "
-        "diagnostics (`input_tokens`, `schema_tokens`, `examples_tokens`, "
-        "`custom_prompt_tokens`, `prompt_overhead_tokens`, `reserved_output_tokens`) "
-        "on breach.\n"
-        "6. Build prompt: system prompt + `{custom_prompt}` + schema + few-shot block + text.\n"
-        "7. Call vLLM with `guided_json` (when `GUIDED_DECODING_ENABLED=true`) and "
-        "`temperature=0.0`. `finish_reason=length` → 413 `OUTPUT_BUDGET_EXCEEDED` "
-        "(no validation retry burned).\n"
-        "8. Server-side `jsonschema` validation; one bounded retry on failure (validation "
-        "errors appended to prompt). 422 `EXTRACTION_VALIDATION_FAILED` if retry also fails.\n"
-        "9. Return extraction + token usage + timing.\n\n"
-        "The semaphore slot is held across both the initial call and the retry."
     ),
     responses={
         400: http_error_responses[400],
@@ -138,7 +121,7 @@ async def extract_sync(request: Request) -> JSONResponse:
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
     llm_model: str = llm_model_dict.get("llm_model", "")
-    max_model_len: int = settings.common.llm.max_model_len
+    max_model_len: int = llm_model_dict.get('max_model_len')
 
     # ------------------------------------------------------------------
     # 3–8. Core extraction
@@ -161,8 +144,7 @@ async def extract_sync(request: Request) -> JSONResponse:
         )
 
     # ── 4. Hard context-window guard ─────────────────────────────────
-    #       check_extraction_budget raises SchemaValidationError(413)
-    #       with full diagnostics — catch and re-raise as ExtractException.
+    #       check_extraction_budget raises ExtractException.
     try:
         reserved_output = check_extraction_budget(
             input_tokens=input_tokens,
@@ -203,17 +185,37 @@ async def extract_sync(request: Request) -> JSONResponse:
         choice = choices[0]
         finish_reason: str = choice.get("finish_reason", "")
 
-        # ── 7. Output-budget exceeded — fail fast, do NOT burn the retry ─
+        # ── 7. Output-budget exceeded — retry once with 1.5× output_token_factor ─
         if finish_reason == "length":
-            raise ExtractException(
-                413, "OUTPUT_BUDGET_EXCEEDED",
-                "The model output was truncated because it reached the reserved "
-                "output token limit.",
-                details={
-                    "reserved_output_tokens": reserved_output,
-                    "finish_reason": "length",
-                },
+            boosted_reserved_output = compute_reserved_output(
+                schema_row.schema_tokens,
+                output_token_factor=1.5 * settings.extract.output_token_factor,
             )
+            logger.warning(
+                "finish_reason=length on first call; retrying with boosted "
+                "reserved_output=%d (was %d)",
+                boosted_reserved_output,
+                reserved_output,
+            )
+            vllm_resp = await call_vllm_safe(
+                messages, boosted_reserved_output, schema_row.json_schema, llm_endpoint, llm_model
+            )
+            choices = vllm_resp.get("choices", [])
+            if not choices:
+                raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list.")
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason", "")
+            if finish_reason == "length":
+                raise ExtractException(
+                    413, "OUTPUT_BUDGET_EXCEEDED",
+                    "The model output was truncated because it reached the reserved "
+                    "output token limit.",
+                    details={
+                        "reserved_output_tokens": boosted_reserved_output,
+                        "finish_reason": "length",
+                    },
+                )
+            reserved_output = boosted_reserved_output
 
         raw_output: str = choice.get("message", {}).get("content", "") or ""
         usage = vllm_resp.get("usage", {})
@@ -264,7 +266,8 @@ async def extract_sync(request: Request) -> JSONResponse:
 
 def _check_job_admission() -> None:
     """Raise 429 if the concurrency slot is exhausted."""
-    if job_limiter.locked():
+    from extract import state
+    if state.job_limiter.locked():
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
             "Job concurrency limit reached. Please try again later.",
@@ -451,7 +454,8 @@ async def _process_extract_job(job_id: str) -> None:
     in a follow-up iteration.  For now it acquires the job_limiter slot so
     semaphore accounting is correct and immediately releases it.
     """
-    async with job_limiter:
+    from extract import state
+    async with state.job_limiter:
         logger.info(f"Background worker invoked for job {job_id} (stub — no processing yet)")
 
 
