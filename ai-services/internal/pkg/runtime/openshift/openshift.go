@@ -208,7 +208,7 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 }
 
 // CreatePod creates a pod from YAML manifest.
-func (kc *OpenshiftClient) CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
+func (kc *OpenshiftClient) CreatePod(_ context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	logger.Warningln("Not implemented")
 
 	return nil, nil
