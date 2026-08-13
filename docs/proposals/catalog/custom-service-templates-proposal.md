@@ -17,14 +17,14 @@
     - 4.3 [Custom service assets (proposed)](#43-custom-service-assets-proposed)
     - 4.4 [Custom component assets (proposed)](#44-custom-component-assets-proposed)
 5. [CatalogProvider Integration](#5-catalogprovider-integration)
-6. [API Upload](#6-api-upload)
+6. [API Create Bundle](#6-api-create-bundle)
     - 6.1 [Design goals](#61-design-goals)
     - 6.2 [New API endpoints](#62-new-api-endpoints)
     - 6.3 [Bundle format](#63-bundle-format)
     - 6.4 [Server-side processing pipeline](#64-server-side-processing-pipeline)
     - 6.5 [New database migration](#65-new-database-migration)
     - 6.6 [Storage per runtime](#66-storage-per-runtime)
-    - 6.7 [Upload flow diagrams](#67-upload-flow-diagrams)
+    - 6.7 [Create Bundle flow diagrams](#67-create-bundle-flow-diagrams)
     - 6.8 [Handler and service (Go)](#68-handler-and-service-go--as-implemented)
     - 6.9 [CLI bundle commands](#69-cli-bundle-commands)
 7. [Custom Template Directory Structure](#7-custom-template-directory-structure)
@@ -34,12 +34,12 @@
     - 9.2 [Services](#92-services)
     - 9.3 [Components](#93-components)
 10. [Usage Examples](#10-usage-examples)
-    - 10.1 [Upload a custom service bundle](#101-upload-a-custom-service-bundle)
-    - 10.2 [Upload a custom component bundle](#102-upload-a-custom-component-bundle)
+    - 10.1 [Create a custom service bundle](#101-create-a-custom-service-bundle)
+    - 10.2 [Create a custom component bundle](#102-create-a-custom-component-bundle)
     - 10.3 [Attempt to use a reserved built-in ID (rejected)](#103-attempt-to-use-a-reserved-built-in-id-rejected)
     - 10.4 [Create an application from the custom service](#104-create-an-application-from-the-custom-service)
     - 10.5 [List custom services via the catalog API](#105-list-custom-services-via-the-catalog-api)
-    - 10.6 [Validate a bundle before uploading](#106-validate-a-bundle-before-uploading)
+    - 10.6 [Validate a bundle before creating it](#106-validate-a-bundle-before-creating-it)
 11. [Future Enhancements](#11-future-enhancements)
 
 ---
@@ -48,20 +48,20 @@
 
 Enterprise customers deploying AI Services on their own infrastructure often bring proprietary workloads, domain-specific models, and internal service patterns that are not represented in the platform's built-in catalog. Today there is no supported path for customers to introduce their own services into a running deployment without modifying the platform binary itself — a process that is impractical at scale and incompatible with air-gapped or regulated environments.
 
-This proposal introduces **Custom Service Templates** — a first-class mechanism for customers to onboard their own AI service assets into the catalog at runtime. A customer packages their service definition as a `.tar.gz` bundle and uploads it to the running catalog backend over HTTPS. The platform validates, registers, and hot-reloads the new service immediately — with no pod restart, no host filesystem access, and no changes to the platform binary required. The mechanism is identical on Podman single-VM deployments and OpenShift clusters.
+This proposal introduces **Custom Service Templates** — a first-class mechanism for customers to onboard their own AI service assets into the catalog at runtime. A customer packages their service definition as a `.tar.gz` bundle and creates it through the running catalog backend over HTTPS. The platform validates, registers, and hot-reloads the new service immediately — with no pod restart, no host filesystem access, and no changes to the platform binary required. The mechanism is identical on Podman single-VM deployments and OpenShift clusters.
 
 Built-in platform services are protected: a bundle whose `id` conflicts with an embedded service is rejected at validation time, ensuring the integrity of the core catalog is never compromised.
 
 | Property | Detail |
 |---|---|
 | **Use case** | Onboard customer-authored **service and component** assets into a live catalog deployment |
-| **Delivery** | `POST /api/v1/catalog/bundles` — `.tar.gz` archive uploaded over HTTPS to the running catalog |
+| **Delivery** | `POST /api/v1/catalog/bundles` — `.tar.gz` archive sent over HTTPS to create a bundle in the running catalog |
 | **Bundle types** | `catalog_type: service` — custom services; `catalog_type: component` — custom LLM / embedding / reranker / vector_db providers |
-| **Naming** | Services: `<id>-<version>` on disk; components: `<component_type>-<id>-<version>` (e.g. `llm-my-provider-1.0.0`) |
+| **Naming** | Both types: `<catalog_id>-<version>` on disk (e.g. `my-service-1.0.0`, `llm--my-provider-1.0.0`); path derived at runtime, not stored in DB |
 | **Podman** | ✅ — bundle stored in dedicated named volume `catalog-bundles` |
 | **OpenShift** | ✅ — bundle stored in dedicated PVC `catalog-bundles` |
 | **Live reload** | Automatic — `CatalogProvider` hot-reloads after successful extraction, no pod restart |
-| **Audit trail** | `catalog_bundles` table in PostgreSQL — every upload is recorded with uploader identity and timestamp |
+| **Audit trail** | `catalog_bundles` table in PostgreSQL — every bundle creation is recorded with creator identity and timestamp |
 | **Best for** | Enterprise customers, air-gapped deployments, regulated environments, CI/CD-driven asset promotion |
 
 ---
@@ -89,14 +89,14 @@ Enterprise customers operate AI Services in environments where the built-in serv
 - **CI/CD asset promotion** — teams need to promote service definitions through staging and production deployments programmatically, without manual intervention on each host.
 - **Partner and ISV onboarding** — system integrators and technology partners need a supported path to register their own service assets alongside IBM-certified ones.
 
-Currently, there is no supported mechanism to extend the catalog at runtime. Custom assets are delivered by uploading a `.tar.gz` bundle to the running catalog API over HTTPS. The apiserver reads `id`, `type`, and `version` from `metadata.yaml` inside the archive, extracts it to isolated storage, validates it, and hot-reloads `CatalogProvider` — no pod restart, no CLI host access required, and no changes to the platform binary needed.
+Currently, there is no supported mechanism to extend the catalog at runtime. Custom assets are delivered by creating a bundle from a `.tar.gz` archive through the running catalog API over HTTPS. The apiserver reads `id`, `type`, and `version` from `metadata.yaml` inside the archive, extracts it to isolated storage, validates it, and hot-reloads `CatalogProvider` — no pod restart, no CLI host access required, and no changes to the platform binary needed.
 
 ### 2.3 Goals
 
 1. Provide a secure, authenticated API endpoint (`POST /api/v1/catalog/bundles`) through which customers can register new **service and component** assets into a live deployment without platform downtime.
-2. At apiserver startup, load customer-uploaded bundles alongside the embedded `CatalogFS`: `CatalogProvider` queries all `status='active'` bundle rows from the DB and mounts each one via `os.DirFS` rooted at the bundle's on-disk directory, presenting a unified catalog that includes both platform and customer items.
-3. Protect the integrity of built-in platform items — the embedded catalog is loaded first and is immutable at runtime. Custom bundles are loaded on top; a reserved-ID check to reject conflicting uploads (§11.1) is planned.
-4. Maintain full backward compatibility — in the absence of any uploaded bundles, behaviour is identical to the current release.
+2. At apiserver startup, load customer-created bundles alongside the embedded `CatalogFS`: `CatalogProvider` queries all `status='active'` bundle rows from the DB and mounts each one via `os.DirFS` rooted at the bundle's on-disk directory, presenting a unified catalog that includes both platform and customer items.
+3. Protect the integrity of built-in platform items — the embedded catalog is loaded first and is immutable at runtime. Custom bundles are loaded on top; a reserved-ID check to reject conflicting Create Bundle requests (§11.1) is planned.
+4. Maintain full backward compatibility — in the absence of any created bundles, behaviour is identical to the current release.
 
 ---
 
@@ -154,7 +154,7 @@ flowchart TD
 
 The catalog backend's `CatalogProvider` runs **inside the `ai-services--catalog` container**, not on the CLI host. `assets.CatalogFS` is baked into the binary at build time (via `go:embed`). For custom templates to be visible at runtime they must reach the container and be overlaid onto the embedded FS.
 
-Custom assets are delivered via the running catalog API: the client POSTs a `.tar.gz` bundle over HTTPS, and the apiserver writes the extracted contents to a dedicated named volume (`catalog-bundles` on both Podman and OpenShift) that it already owns. Both runtimes mount the volume at the well-known path `/data/catalog-bundles` inside the container. Bundles are stored under `<catalog_type>/<dir_name>/` where `dir_name` is `meta.DirName()` — for services `<id>-<version>` (e.g. `service/my-service-1.0.0/`), for components `<component_type>-<id>-<version>` (e.g. `component/llm-my-provider-1.0.0/`). **At most one bundle per `(catalog_type, catalog_id)` pair is active at any time** — uploading a new version via `PUT` replaces the existing one. At startup, `CatalogProvider` queries the DB for all `status = 'active'` rows, resolves each to its on-disk directory via the `dir_name` column, and loads it alongside the embedded assets using `os.DirFS`. Hot-reload happens in-process after every successful upload; no pod restart is needed.
+Custom assets are delivered via the running catalog API: the client POSTs a `.tar.gz` bundle over HTTPS, and the apiserver writes the extracted contents to a dedicated named volume (`catalog-bundles` on both Podman and OpenShift) that it already owns. Both runtimes mount the volume at the well-known path `/data/catalog-bundles` inside the container. Bundles are stored under `<catalog_type>/<catalog_id>-<version>/` — for services e.g. `service/my-service-1.0.0/`, for components e.g. `component/llm--my-provider-1.0.0/`. The directory path is derived at runtime from the DB `catalog_id` and `version` columns — it is never stored in the DB. **At most one bundle per `(catalog_type, catalog_id)` pair is active at any time** — updating to a new version via `PUT` replaces the existing one. At startup, `CatalogProvider` queries the DB for all `status = 'active'` rows, derives each on-disk path as `<catalog_id>-<version>`, and loads it alongside the embedded assets using `os.DirFS`. Hot-reload happens in-process after every successful bundle creation; no pod restart is needed.
 
 ### 3.3 OpenShift path
 
@@ -229,7 +229,7 @@ A user-supplied service bundle is a `.tar.gz` archive. Two layouts are accepted:
 - **Wrapped** — one top-level directory at the archive root; `metadata.yaml` sits inside it (e.g. `my-service/metadata.yaml`). The top-level directory name is **irrelevant** and is stripped during extraction.
 - **Flat** — no top-level directory; `metadata.yaml` sits at the archive root (e.g. produced by `tar -czf bundle.tar.gz -C my-service/ .`).
 
-In both cases the server writes extracted contents into the directory determined by `meta.DirName()` (i.e. `<id>-<version>`). Identity comes entirely from the `metadata.yaml` inside the archive.
+In both cases the server writes extracted contents into the directory `<catalog_id>-<version>`. Identity comes entirely from the `metadata.yaml` inside the archive.
 
 ```
 my-bundle.tar.gz
@@ -247,7 +247,7 @@ my-bundle.tar.gz
 
 ### 4.4 Custom component assets (proposed)
 
-Component bundles follow the same archive format but require the additional `component_type` field in `metadata.yaml`. The on-disk directory name is `<component_type>-<id>-<version>` (e.g. `llm-my-provider-1.0.0`) — encoding the component type prevents name collisions when the same `id` is used under different component types (e.g. `llm:my-provider` and `embedding:my-provider` are independent).
+Component bundles follow the same archive format but require the additional `component_type` field in `metadata.yaml`. The `catalog_id` is the composite `<component_type>--<id>` (e.g. `llm--my-provider`), making the on-disk directory `llm--my-provider-1.0.0`. This prevents collisions when the same bare `id` is used under different component types — `llm--my-provider` and `embedding--my-provider` are entirely independent.
 
 ```yaml
 # metadata.yaml inside the archive (component example)
@@ -270,23 +270,23 @@ my-component-bundle.tar.gz
             └── my-provider.yaml.tmpl
 ```
 
-Extracted on-disk as `component/llm-my-provider-1.0.0/` (i.e. `component/<component_type>-<id>-<version>/`). This naming scheme (`<component_type>-<catalog_id>-<version>`) is the canonical form used in both the `dir_name` DB column and the on-disk path.
+Extracted on-disk as `component/llm--my-provider-1.0.0/` — directory name is `<catalog_id>-<version>` (e.g. `llm--my-provider-1.0.0`), derived at runtime from the DB `catalog_id` and `version` columns.
 
 **Component type values** recognised by the server:
 
-| `component_type` | `DirName()` prefix | DB `catalog_id` |
-|---|---|---|
-| `llm` | `llm-` | `llm:<id>` |
-| `embedding` | `embedding-` | `embedding:<id>` |
-| `reranker` | `reranker-` | `reranker:<id>` |
-| `vector_db` | `vector_db-` | `vector_db:<id>` |
+| `component_type` | DB `catalog_id` format | example `catalog_id` | example on-disk dir |
+|---|---|---|---|
+| `llm` | `llm--<id>` | `llm--my-provider` | `llm--my-provider-1.0.0` |
+| `embedding` | `embedding--<id>` | `embedding--my-provider` | `embedding--my-provider-1.0.0` |
+| `reranker` | `reranker--<id>` | `reranker--my-provider` | `reranker--my-provider-1.0.0` |
+| `vector_db` | `vector_db--<id>` | `vector_db--my-provider` | `vector_db--my-provider-1.0.0` |
 
 Two component bundles with the same bare `id` but different `component_type` values are stored as entirely independent DB rows and on-disk directories:
 
 ```
 /data/catalog-bundles/component/
-├── llm-my-provider-1.0.0/          ← catalog_id: "llm:my-provider"
-└── embedding-my-provider-1.0.0/    ← catalog_id: "embedding:my-provider"  (independent)
+├── llm--my-provider-1.0.0/         ← catalog_id: "llm--my-provider"
+└── embedding--my-provider-1.0.0/   ← catalog_id: "embedding--my-provider"  (independent)
 ```
 
 The `component_type` field is required. Missing or unrecognised values are rejected with `422`.
@@ -309,8 +309,8 @@ func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]
     // ...
     for _, b := range bundles {
         if b.Status != "active" { continue }
-        // /data/catalog-bundles/<catalog_type>/<dir_name>/
-        bundleDir := filepath.Join(bundleStorageRoot, b.CatalogType, b.DirName)
+        // /data/catalog-bundles/<catalog_type>/<catalog_id>-<version>/
+        bundleDir := filepath.Join(bundleStorageRoot, b.CatalogType, b.CatalogID+"-"+b.Version)
         bundleFS  := os.DirFS(bundleDir)
         metaPath  := "metadata.yaml"
         data, _   := fs.ReadFile(bundleFS, metaPath)
@@ -327,7 +327,7 @@ func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]
 | Priority | Source | Condition |
 |---|---|---|
 | 1 | Embedded `assets.CatalogFS` | Always loaded first |
-| 2..N | `os.DirFS` per active bundle | DB has `status = 'active'` rows; paths are `/data/catalog-bundles/<catalog_type>/<dir_name>/` |
+| 2..N | `os.DirFS` per active bundle | DB has `status = 'active'` rows; paths are `/data/catalog-bundles/<catalog_type>/<catalog_id>-<version>/` |
 
 Bundle items are written into the same `items` map as embedded items. Services are keyed by bare `id`; components by `<component_type>:<id>`. If a bundle's `meta.CatalogID()` matches a built-in item of the same type, validation rejects it before insertion (`422`).
 
@@ -335,7 +335,7 @@ Bundle items are written into the same `items` map as embedded items. Services a
 
 ```go
 // NewCatalogProvider creates a CatalogProvider, loading all embedded items and any
-// active customer-uploaded bundles from the DB (bundleRepo may be nil for CLI paths).
+// active customer-created bundles from the DB (bundleRepo may be nil for CLI paths).
 func NewCatalogProvider(bundleRepo dbrepo.BundleRepository) (*CatalogProvider, error)
 ```
 
@@ -343,22 +343,22 @@ When `bundleRepo` is `nil` (CLI / test paths), only embedded items are loaded.
 
 ### 5.4 Hot-reload
 
-`CatalogProvider.Reload(ctx)` rebuilds the items map from scratch under a `sync.RWMutex` — re-walking the embedded FS and re-querying all active bundles from the DB. It is called synchronously at the end of every successful `ProcessBundle` / `DeleteBundle`, and asynchronously at the end of `runReplaceAsync` for PUT updates.
+`CatalogProvider.Reload(ctx)` rebuilds the items map from scratch under a `sync.RWMutex` — re-walking the embedded FS and re-querying all active bundles from the DB. It is called synchronously at the end of every successful `ProcessBundle`, `ReplaceBundle`, and `DeleteBundle` operation.
 
 ---
 
-## 6. API Upload
+## 6. API Create Bundle
 
-Custom catalog assets are delivered by uploading a `.tar.gz` bundle to the running catalog backend over its existing HTTPS endpoint. The archive must contain exactly one top-level directory (the service directory) with a `metadata.yaml` at its root declaring `id`, `type`, and `version`. The archive is extracted, validated, written to the bundle volume, and hot-reloaded into `CatalogProvider` — with no pod restart required for either Podman or OpenShift.
+Custom catalog assets are delivered by creating a bundle from a `.tar.gz` archive through the running catalog backend over its existing HTTPS endpoint. The archive must contain exactly one top-level directory (the service directory) with a `metadata.yaml` at its root declaring `id`, `type`, and `version`. The archive is extracted, validated, written to the bundle volume, and hot-reloaded into `CatalogProvider` — with no pod restart required for either Podman or OpenShift.
 
 ### 6.1 Design goals
 
 | Goal | Detail |
 |---|---|
-| No restart required | `CatalogProvider` reloads the custom layer in-process after a successful upload |
+| No restart required | `CatalogProvider` reloads the custom layer in-process after successful bundle creation |
 | Conflict-safe POST | `POST` raises `409 Conflict` if a bundle with the same `catalog_id` is already registered — use `PUT` to update |
 | Explicit update via PUT | `PUT /api/v1/catalog/bundles/:bundle_id` replaces the existing bundle; `catalog_id`, `catalog_type`, and `version` are all resolved from the archive and the existing DB record — not form fields |
-| Independent bundles | Each uploaded bundle exists separately; multiple bundles for different `catalog_id` values are all active simultaneously |
+| Independent bundles | Each created bundle exists separately; multiple bundles for different `catalog_id` values are all active simultaneously |
 | Authenticated | Uses the existing JWT `BearerAuth` middleware; only admin-role tokens are accepted |
 | Consistent across runtimes | Same API endpoint works for Podman and OpenShift; only the storage backend differs |
 | Bounded size | Configurable `MAX_BUNDLE_SIZE` (default 50 MB); enforced at the HTTP layer before extraction |
@@ -371,12 +371,12 @@ Six bundle endpoints are added to the existing router in [`apiserver/router.go`]
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/catalog/bundles` | Upload a **new** bundle (`.tar.gz`). Returns `409 Conflict` if a bundle with the same `catalog_id` already exists. |
+| `POST` | `/api/v1/catalog/bundles` | Create a **new** bundle (`.tar.gz`). Returns `409 Conflict` if a bundle with the same `catalog_id` already exists. |
 | `POST` | `/api/v1/catalog/bundles/validate` | Validate a bundle archive without storing it. No DB record is written; `CatalogProvider` is not reloaded. |
 | `PUT` | `/api/v1/catalog/bundles/:bundle_id` | Replace an existing bundle identified by its internal record ID. Returns `404` if no bundle with that ID exists. `catalog_id` and `catalog_type` are resolved from the DB record. |
 | `DELETE` | `/api/v1/catalog/bundles/:bundle_id` | Delete a bundle by its internal record ID. Removes the on-disk directory and the DB record. Returns `404` if no bundle with that ID exists. |
-| `GET` | `/api/v1/catalog/bundles` | List all uploaded bundles (id, status, uploaded_at, size). |
-| `GET` | `/api/v1/catalog/bundles/:bundle_id` | Get the status and metadata for a specific bundle by ID. Used to poll after a `202 Accepted` PUT response. |
+| `GET` | `/api/v1/catalog/bundles` | List all created bundles (id, status, created_at, size). |
+| `GET` | `/api/v1/catalog/bundles/:bundle_id` | Get the status and metadata for a specific bundle by ID. |
 
 Five additional catalog-read endpoints are added under the authenticated `v1` catalog group for CLI and client use:
 
@@ -388,13 +388,17 @@ Five additional catalog-read endpoints are added under the authenticated `v1` ca
 | `GET` | `/api/v1/architectures/:id/images` | Return image metadata for an architecture. |
 | `GET` | `/api/v1/architectures/:id/models` | Return model metadata for an architecture. |
 
-#### 6.2.1 Upload bundle — `POST /api/v1/catalog/bundles`
+#### 6.2.1 Create Bundle — `POST /api/v1/catalog/bundles`
 
 The request uses `multipart/form-data` with a single field: `file` (required). **`id`, `type`, and `version` are not form fields** — they are all read from `metadata.yaml` inside the archive. This removes the possibility of a mismatch between declared metadata and archive contents.
 
-The upload is **fully synchronous**: the handler reads the archive, peeks `metadata.yaml`, checks for a conflict, extracts to the permanent directory, validates structure, inserts a DB row as `active`, and reloads `CatalogProvider` — all before returning. On success the response is `201 Created` (not `202 Accepted`); no polling is needed.
+The Create Bundle operation is **fully synchronous**: the handler reads the archive, peeks the minimal identity fields from root `metadata.yaml`, checks for a conflict, validates the bundle directly from the uploaded archive, extracts to the permanent directory, inserts a DB row as `processing`, reloads `CatalogProvider`, and then marks the row `active` — all before returning. On success the response is `201 Created` (not `202 Accepted`); no polling is needed.
 
-To validate a bundle before uploading use `POST /api/v1/catalog/bundles/validate` (see §6.2.5).
+Conflict detection happens immediately after the minimal metadata peek, before the deeper validation pass, so an already-existing active bundle is rejected with `409 Conflict` without paying the cost of full semantic validation.
+
+Validation is then performed from the archive contents themselves before persistence. This includes archive structure checks, root and runtime `metadata.yaml` parsing, `values.yaml` and schema/metadata consistency checks, template file parsing, service label and annotation checks, `steps.md` inspection, and line-by-line scanning of relevant bundle files.
+
+To validate a bundle before creating it use `POST /api/v1/catalog/bundles/validate` (see [`§6.2.5`](proposal.md:2105)).
 
 ```
 POST /api/v1/catalog/bundles
@@ -418,7 +422,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 
 | Status | Meaning |
 |---|---|
-| `201 Created` | Bundle validated, extracted, inserted into the DB as `active`, and catalog reloaded — all synchronously. A `Location` header points to the new record. |
+| `201 Created` | Bundle validated, extracted, inserted into the DB as `processing`, catalog reloaded, and then marked `active` — all synchronously. A `Location` header points to the new record. |
 | `400 Bad Request` | Missing or unreadable `file` field; wrong content-type; archive exceeds size limit; or `metadata.yaml` is missing/malformed. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
@@ -437,14 +441,13 @@ Location: /api/v1/catalog/bundles/550e8400-e29b-41d4-a716-446655440000
 {
   "id":           "550e8400-e29b-41d4-a716-446655440000",
   "name":         "My Custom Service",
-  "dir_name":     "my-service-1.0.0",
   "status":       "active",
-  "uploaded_at":  "2026-05-12T09:14:02Z",
+  "created_at":   "2026-05-12T09:14:02Z",
   "size_bytes":   286720,
   "catalog_type": "service",
   "catalog_id":   "my-service",
   "version":      "1.0.0",
-  "uploaded_by":  "admin"
+  "created_by":   "admin"
 }
 ```
 
@@ -453,6 +456,8 @@ Location: /api/v1/catalog/bundles/550e8400-e29b-41d4-a716-446655440000
 Use `PUT` to replace an existing bundle identified by its internal record ID (`bundle_id`). The server looks up the record by `bundle_id` and derives `id`, `type`, and for components `component_type` from it — none are form fields. The only form field is `file`.
 
 **Version is not a form field.** The version of the replacement bundle is read from `metadata.yaml` inside the archive. If the metadata carries a new version the on-disk directory is named accordingly. The `id`, `type`, and (for components) `component_type` values inside the archive metadata must match the existing DB record — attempts to change them are rejected with `422`.
+
+Like `POST`, `PUT` performs validation directly from the uploaded archive before any state transition. The server validates archive structure, parses root and runtime metadata, checks `values.yaml` and schema/metadata consistency, parses template files, verifies service labels and annotations, reads `steps.md`, and scans relevant files line-by-line before proceeding with the replacement.
 
 Returns `404` if no bundle with that `bundle_id` exists.
 
@@ -469,7 +474,7 @@ Form fields:
   file        (required)  — .tar.gz archive containing the replacement assets
 ```
 
-> `id`, `type`, `component_type` (for components), and `version` are **not** form fields for `PUT`. `id`, `type`, and `component_type` are resolved from the DB record (`catalog_id` decodes the composite for components) and validated against the archive metadata — mismatches are rejected with `422`. `version` is read from the archive's `metadata.yaml` and used to derive the on-disk directory name via `meta.DirName()`.
+> `id`, `type`, `component_type` (for components), and `version` are **not** form fields for `PUT`. `id`, `type`, and `component_type` are resolved from the DB record (`catalog_id` decodes the composite for components) and validated against the archive metadata — mismatches are rejected with `422`. `version` is read from the archive's `metadata.yaml` and used to derive the on-disk directory name as `<catalog_id>-<version>`.
 
 **Example (curl):**
 ```bash
@@ -482,20 +487,20 @@ curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8V
 
 | Status | Meaning |
 |---|---|
-| `202 Accepted` | Archive validated; the **existing DB row** is updated in-place by the async goroutine. Poll `GET /api/v1/catalog/bundles/:bundle_id` (same ID) until `status` is `active`. |
+| `200 OK` | Archive validated, existing bundle marked `processing`, replacement extracted into a staging directory, current final directory replaced by renaming the staging directory into place, bundle marked `active`, catalog reloaded, and old bundle directory removed at the end when different — all synchronously. The response body contains the updated bundle record with `status: active`. |
 | `400 Bad Request` | Missing `file` field; archive top-level directory does not match the resolved `id`; wrong content-type; or archive exceeds size limit. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
 | `404 Not Found` | No bundle with the given `bundle_id` exists. Use `POST` to create a new bundle first. |
-| `422 Unprocessable Entity` | Validation of the archive's `metadata.yaml` failed; or `id`, `type`, or `component_type` (for components) differs from the existing record. The DB row is not modified; the existing bundle remains active. |
+| `422 Unprocessable Entity` | Validation of the archive's `metadata.yaml` failed; or `id`, `type`, or `component_type` (for components) differs from the existing record. The replacement is rejected before any status transition. |
 
-The `202` response returns the **same bundle ID** the client already holds — no new ID is issued. The existing row is updated in-place by the async goroutine (`status=active`, `version`, `dir_name`, `name`, `size_bytes` set in a single UPDATE). The old on-disk directory is deleted only after the row is successfully updated. If extraction fails, the DB row is left unchanged — the existing bundle remains active and serving.
+The `200` response returns the updated bundle record with `status: active`, `version`, `name`, and `size_bytes` populated from the newly activated bundle. The existing row is first moved to `processing`, then the replacement is extracted into a staging directory (`<catalog_id>-<version>-new`), the current final directory is removed, and the staging directory is renamed into place before the row is updated in-place to `active`. The old on-disk directory is deleted only at the very end when it differs from the new final path. This keeps the replace flow simple and avoids stale files even when replacing a bundle with the same `catalog_id` and `version`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error message is stored in the `error` column.
 
 ---
 
 #### 6.2.3 Delete bundle — `DELETE /api/v1/catalog/bundles/:bundle_id`
 
-Permanently removes a bundle: deletes the on-disk directory (`<catalog_type>/<dir_name>/`) from the bundle volume, removes the DB row, and triggers a `CatalogProvider.Reload()` so the item is no longer served. Any application that was deployed using this bundle's `catalog_id` is **not** affected — existing deployed resources are independent of the catalog once launched.
+Permanently removes a bundle: marks the row `deleting`, deletes the on-disk directory (`<catalog_type>/<catalog_id>-<version>/`) from the bundle volume, triggers a `CatalogProvider.Reload()` so the item is no longer served, and then removes the DB row. Any application that was deployed using this bundle's `catalog_id` is **not** affected — existing deployed resources are independent of the catalog once launched.
 
 ```
 DELETE /api/v1/catalog/bundles/:bundle_id
@@ -516,12 +521,12 @@ curl -X DELETE https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2
 
 | Status | Meaning |
 |---|---|
-| `204 No Content` | Bundle deleted; on-disk directory removed and `CatalogProvider` reloaded. |
+| `204 No Content` | Bundle marked `deleting`, on-disk directory removed, `CatalogProvider` reloaded, and DB row deleted. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
 | `404 Not Found` | No bundle with the given `bundle_id` exists. |
 
-> Deletion is **synchronous** — the directory removal and `CatalogProvider.Reload()` happen in-process before the `204` is returned. There is no async processing step and no polling needed.
+> Deletion is **synchronous** — the row is marked `deleting`, then the directory removal, `CatalogProvider.Reload()`, and DB delete happen in-process before the `204` is returned. There is no async processing step and no polling needed. If any of those steps fails before the final DB delete, the row is marked `failed`.
 
 ---
 
@@ -529,9 +534,9 @@ curl -X DELETE https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2
 
 Each bundle record carries `catalog_type` and `catalog_id` (derived from the archive's `id` and `type` fields). Multiple bundles for different items are all active simultaneously and each is listed independently.
 
-Two name-related fields appear in every response:
-- **`name`** — the human-readable display label from `metadata.yaml` `name:` field (e.g. `"My Custom LLM Provider"`). May be `null` if omitted from the archive.
-- **`dir_name`** — the server-determined on-disk directory name. Services: `<id>-<version>`; components: `<component_type>-<catalog_id>-<version>`.
+The `name` field is the human-readable display label from `metadata.yaml` `name:` field (e.g. `"My Custom LLM Provider"`). Omitted from the response if blank.
+
+The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it is **not** stored in the DB. For components, `catalog_id` uses `--` as separator (e.g. `llm--my-provider`), giving a directory name of `llm--my-provider-1.0.0`.
 
 ```json
 {
@@ -539,26 +544,24 @@ Two name-related fields appear in every response:
     {
       "id":           "550e8400-e29b-41d4-a716-446655440000",
       "name":         "My Custom Service",
-      "dir_name":     "my-service-1.0.0",
       "status":       "active",
-      "uploaded_at":  "2026-05-12T09:14:02Z",
+      "created_at":  "2026-05-12T09:14:02Z",
       "size_bytes":   286720,
       "catalog_type": "service",
       "catalog_id":   "my-service",
       "version":      "1.0.0",
-      "uploaded_by":  "admin"
+      "created_by":  "admin"
     },
     {
       "id":           "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name":         "My Custom LLM Provider",
-      "dir_name":     "llm-my-provider-1.0.0",
       "status":       "active",
-      "uploaded_at":  "2026-05-13T11:30:00Z",
+      "created_at":  "2026-05-13T11:30:00Z",
       "size_bytes":   196608,
       "catalog_type": "component",
-      "catalog_id":   "llm:my-provider",
+      "catalog_id":   "llm--my-provider",
       "version":      "1.0.0",
-      "uploaded_by":  "admin"
+      "created_by":  "admin"
     }
   ]
 }
@@ -568,7 +571,7 @@ Two name-related fields appear in every response:
 
 ### 6.3 Bundle format
 
-A bundle is scoped to **one catalog item**. The archive must be a gzip-compressed tar (`.tar.gz`). The identity of a bundle comes entirely from `metadata.yaml` content — **the archive top-level directory name is irrelevant and is not validated**. The server strips it during extraction and writes into the server-determined destination directory (`meta.DirName()`).
+A bundle is scoped to **one catalog item**. The archive must be a gzip-compressed tar (`.tar.gz`). The identity of a bundle comes entirely from `metadata.yaml` content — **the archive top-level directory name is irrelevant and is not validated**. The server strips it during extraction and writes into the server-determined destination directory (`<catalog_id>-<version>`).
 
 For **both POST and PUT**, `id`, `type`, `version` (and `component_type` for components) are read from `metadata.yaml` inside the archive — they are not form fields. For **PUT**, `meta.CatalogID()` and `meta.CatalogType()` must also match the existing DB record (immutable); a mismatch is rejected with `422`.
 
@@ -593,7 +596,7 @@ my-bundle.tar.gz
             └── my-service.yaml.tmpl
 ```
 
-Extracted on-disk as `service/my-service-1.0.0/` — `meta.DirName()` is the authoritative destination.
+Extracted on-disk as `service/my-service-1.0.0/` — directory is `<catalog_id>-<version>`.
 
 #### Component bundle
 
@@ -617,7 +620,7 @@ my-component-bundle.tar.gz
             └── my-provider.yaml.tmpl
 ```
 
-Extracted on-disk as `component/llm-my-provider-1.0.0/` — `meta.DirName()` is the authoritative destination.
+Extracted on-disk as `component/llm--my-provider-1.0.0/` — directory is `<catalog_id>-<version>`.
 
 **Rules (both types):**
 - Paths containing `..` or absolute paths are rejected immediately (path-traversal guard).
@@ -626,10 +629,12 @@ Extracted on-disk as `component/llm-my-provider-1.0.0/` — `meta.DirName()` is 
 - Total uncompressed size must not exceed 200 MB.
 - `meta.CatalogID()` must not match any built-in item already present in `assets.CatalogFS` — if it does, validation returns `422` and the extracted directory is deleted.
 - All `metadata.yaml` files must pass validation for the declared `type` before the bundle is marked `active`.
+- Validation is performed directly from the archive and covers archive structure, root and runtime metadata parsing, `values.yaml` and schema/metadata consistency checks, template parsing, service label checks, annotation checks, `steps.md` inspection, and line-by-line scanning of relevant files.
+- Lifecycle statuses are limited to `processing`, `active`, `failed`, and `deleting`.
 
 **Rules (component bundles only):**
 - `component_type` is required. Missing or unrecognised values are rejected with `422`.
-- Within a given `component_type`, no two active bundles may share the same `id`. The DB unique index on `(catalog_type, catalog_id) WHERE status='active'` enforces this since `"llm:my-provider"` is distinct from `"embedding:my-provider"`.
+- Within a given `component_type`, no two active bundles may share the same `id`. The DB unique index on `(catalog_type, catalog_id) WHERE status='active'` enforces this since `"llm--my-provider"` is distinct from `"embedding--my-provider"`.
 
 ---
 
@@ -641,25 +646,24 @@ Extracted on-disk as `component/llm-my-provider-1.0.0/` — `meta.DirName()` is 
 flowchart TD
     REQ["POST /api/v1/catalog/bundles<br/>multipart/form-data — file"]
     AUTH["AuthMiddleware<br/>JWT + admin role check"]
-    PEEK["Peek metadata.yaml<br/>read id, type, version + component_type for components<br/>→ 422 if missing/invalid"]
+    PEEK["Peek root metadata.yaml<br/>read id, type, version + component_type for components<br/>→ 422 if missing/invalid"]
     CONFLICT["Check catalog_bundles table<br/>active row for meta.CatalogID()?"]
+    VALIDATE["Validate directly from uploaded archive<br/>• archive structure + path checks<br/>• root/runtime metadata parsing<br/>• values.yaml + schema consistency<br/>• template parsing, labels, annotations<br/>• steps.md + line-by-line file scanning<br/>→ 422 if invalid<br/>(no extraction to disk)"]
     CONFLICT_RESP["409 Conflict<br/>use PUT /catalog/bundles/:bundle_id to update"]
-    SIZE["Size guard — 200 MB uncompressed"]
-    EXTRACT["Extract to meta.DirName()/ inside bundle volume<br/>(top-level dir stripped regardless of its name)"]
+    EXTRACT["Extract to &lt;catalog_id&gt;-&lt;version&gt;/ inside bundle volume<br/>(top-level dir stripped regardless of its name)"]
     PATHGUARD["Path-traversal guard<br/>reject .. and absolute paths"]
-    VALIDATE["validateBundleStructure<br/>metadata.yaml present at bundle root"]
     DBINSERT["Insert bundle record (status=processing)<br/>id generated by DB via gen_random_uuid()"]
-    ACTIVATE["Activate: status=active, size_bytes, version, dir_name<br/>single UPDATE"]
     RELOAD["CatalogProvider.Reload()"]
+    ACTIVATE["Activate: status=active, size_bytes, version, name<br/>single UPDATE"]
     RESP["201 Created — BundleResponse (re-fetched from DB)<br/>status: active, size_bytes populated<br/>Location: /api/v1/catalog/bundles/:uuid"]
-    FAIL["Delete meta.DirName()/ directory + DB row<br/>return 422/400"]
+    FAIL["Return 422/400 before persistence;<br/>or clean extracted dir and mark DB row failed if a later step fails"]
 
-    REQ --> AUTH --> PEEK
-    PEEK --> CONFLICT
+    REQ --> AUTH --> PEEK --> CONFLICT
     CONFLICT -->|"exists"| CONFLICT_RESP
-    CONFLICT -->|"new"| SIZE --> EXTRACT --> PATHGUARD --> VALIDATE
-    VALIDATE -->|"valid"| DBINSERT --> ACTIVATE --> RELOAD --> RESP
+    CONFLICT -->|"new"| VALIDATE
     VALIDATE -->|"invalid"| FAIL
+    VALIDATE -->|"valid"| EXTRACT --> PATHGUARD --> DBINSERT --> RELOAD --> ACTIVATE --> RESP
+    PATHGUARD -->|"invalid path"| FAIL
 ```
 
 #### PUT — replace existing bundle
@@ -669,58 +673,51 @@ flowchart TD
     REQ["PUT /api/v1/catalog/bundles/:bundle_id<br/>multipart/form-data — file"]
     AUTH["AuthMiddleware<br/>JWT + admin role check"]
     LOOKUP["Look up bundle_id in catalog_bundles → 404 if missing"]
-    PEEK["Peek metadata.yaml<br/>validate meta.CatalogID() + meta.CatalogType() unchanged<br/>→ 422 on mismatch"]
-    RESP["202 Accepted immediately<br/>same bundle_id, status: active (current)<br/>Location: /api/v1/catalog/bundles/:bundle_id"]
+    PEEK["Peek root metadata.yaml<br/>validate meta.CatalogID() + meta.CatalogType() unchanged<br/>→ 422 on mismatch"]
+    VALIDATE["Validate directly from uploaded archive<br/>• archive structure + path checks<br/>• root/runtime metadata parsing<br/>• values.yaml + schema consistency<br/>• template parsing, labels, annotations<br/>• steps.md + line-by-line file scanning<br/>→ 422 if invalid<br/>(no extraction to disk)"]
+    MARKPROC["Mark existing row processing<br/>clear prior error"]
+    EXTRACT["extractAndMeasure: extract to staging dir &lt;catalog_id&gt;-&lt;version&gt;-new<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 200 MB size guard"]
+    SWAP["Remove current final dir if present<br/>rename staging dir into final &lt;catalog_id&gt;-&lt;version&gt;/ path"]
+    DBUPDATE["UPDATE existing row in-place<br/>status=active, version, name, size_bytes<br/>single UPDATE — no unique index conflict"]
+    RELOAD["CatalogProvider.Reload()"]
+    RMOLDDIR["Delete old directory at the end when different"]
+    RESP["200 OK<br/>updated bundle record, status: active<br/>Location: /api/v1/catalog/bundles/:bundle_id"]
+    FAIL["Return 422 before state transition;<br/>or clean staging/new dir and mark DB row failed if a later step fails"]
 
-    subgraph ASYNC["Goroutine — async after 202"]
-        EXTRACT["extractAndMeasure: extract to meta.DirName()/ inside bundle volume<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 200 MB size guard"]
-        VALIDATE["validateBundleStructure"]
-
-        subgraph ACTIVATE["Activate — success path"]
-            direction LR
-            DBUPDATE["UPDATE existing row in-place<br/>status=active, version, dir_name, name, size_bytes<br/>single UPDATE — no unique index conflict"]
-            RMOLDDIR["Delete old directory<br/>(only if dir_name changed)"]
-            RELOAD["CatalogProvider.Reload()"]
-            DBUPDATE --> RMOLDDIR --> RELOAD
-        end
-
-        FAIL["Delete new meta.DirName()/ directory<br/>DB row left unchanged — existing bundle still active"]
-
-        EXTRACT --> VALIDATE
-        VALIDATE -->|"valid"| ACTIVATE
-        VALIDATE -->|"invalid"| FAIL
-    end
-
-    REQ --> AUTH --> LOOKUP --> PEEK --> RESP
-    RESP -.-> ASYNC
+    REQ --> AUTH --> LOOKUP --> PEEK
+    PEEK -->|"match"| VALIDATE
+    PEEK -->|"mismatch"| FAIL
+    VALIDATE -->|"invalid"| FAIL
+    VALIDATE -->|"valid"| MARKPROC --> EXTRACT --> SWAP --> DBUPDATE --> RELOAD --> RMOLDDIR --> RESP
 ```
 
 **Key implementation notes:**
 
-- **POST is fully synchronous.** Returns `201 Created` only after extraction, validation, DB activate, and `CatalogProvider.Reload()` all succeed. Response is re-fetched from DB — `status`, `size_bytes`, and `uploaded_at` are authoritative.
-- **PUT sync phase** validates the archive and immutable fields only. Returns `202 Accepted` immediately with the **same bundle ID** — no new row is inserted.
-- **PUT async phase** extracts, validates, then UPDATEs the existing row in-place (`status=active`, `version`, `dir_name`, `size_bytes` — single statement). No unique index conflict is possible since only one row ever exists for this `(catalog_type, catalog_id)`. If extraction fails the DB row is left unchanged — the existing bundle stays active. **Directory behaviour:** same version → overwritten in-place; new version → new `meta.DirName()/` directory created, old one deleted after activation.
+- **Validation from archive first.** All three entry points (`POST`, `PUT`, and the validate API) validate directly from the uploaded archive before any extraction to disk. This ensures fast failure with no disk overhead for invalid bundles. Validation covers archive structure, root and runtime `metadata.yaml` parsing, `values.yaml` and schema/metadata consistency checks, template file parsing, label checks, annotation checks, `steps.md` inspection, and line-by-line scanning of relevant files. The `validateBundleStructureFromArchive` function reads the tar.gz stream and checks that `metadata.yaml` exists in the archive root (supporting both wrapped and flat archive layouts).
+- **POST is fully synchronous.** Returns `201 Created` only after archive validation, metadata checks, conflict check, extraction, DB insert as `processing`, `CatalogProvider.Reload()`, and final activation all succeed. Response is re-fetched from DB — `status`, `size_bytes`, and `created_at` are authoritative.
+- **PUT is fully synchronous.** Validates archive and immutable fields, marks the existing row `processing`, extracts the replacement into a staging directory, removes the current final directory, renames the staging directory into the final bundle path, UPDATEs the existing row in-place back to `active` (`version`, `name`, `size_bytes` — single statement), reloads `CatalogProvider`, and only then removes the old directory when it differs before returning `200 OK` with the updated bundle record. No unique index conflict is possible since only one row ever exists for this `(catalog_type, catalog_id)`. The staging step avoids stale files even when replacing a bundle with the same `catalog_id` and `version`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error is returned.
 - `id` (bundle UUID) is **generated by the DB** via `gen_random_uuid()` — the server never supplies it.
 - `id`, `type`, `version` (and `component_type` for components) are **never form fields** — all are read from `metadata.yaml` inside the archive by `peekMetadata()`. The **archive top-level directory name is never validated** — it is stripped blindly.
 - `peekMetadata()` infers the top-level directory from the first entry containing a `/` solely to locate `<topDir>/metadata.yaml`. The directory name itself is not compared against any metadata field.
-- `extractAndMeasure` takes no `catalogID` parameter — it strips the archive top-level directory and writes into the caller-supplied `destDir` (`bundleDirPath(meta.CatalogType(), meta.DirName())`).
-- On-disk layout:
-  - Services: `/data/catalog-bundles/service/<id>-<version>/` e.g. `/data/catalog-bundles/service/my-service-1.0.0/`
-  - Components: `/data/catalog-bundles/component/<component_type>-<id>-<version>/` e.g. `/data/catalog-bundles/component/llm-my-provider-1.0.0/`
+- `extractAndMeasure` strips the archive top-level directory and writes into the caller-supplied `destDir` (`bundleDirPath(meta.CatalogType(), meta.CatalogID(), meta.Version())`).
+- **On-disk layout** — directory name is always `<catalog_id>-<version>` (derived at runtime, never stored in DB):
+  - Services: `/data/catalog-bundles/service/my-service-1.0.0/`
+  - Components: `/data/catalog-bundles/component/llm--my-provider-1.0.0/`  (`catalog_id` uses `--` as separator)
 - **PUT** immutability check: `meta.CatalogID()` and `meta.CatalogType()` from the archive must match the existing DB record. `version` may differ. Mismatch → `422`, no extraction attempted.
 - `CatalogProvider.Reload()` re-queries the DB and rebuilds the in-memory catalog under `sync.RWMutex`.
 - Bundle files are stored in the **dedicated `catalog-bundles` volume** — isolated from `$BASE_DIR`.
+- The validate-only API uses the same archive-based validation approach as `POST` and `PUT`, but stops before any extraction to the permanent bundle directory, DB write, or catalog reload.
 - The `catalog_bundles` table is added via a Goose migration (`20260430094507_create_catalog_bundles_table.sql`).
 
 ---
 
 ### 6.5 New database migration
 
-Each row in `catalog_bundles` represents one uploaded bundle. The `id` is a UUID generated by the DB via `gen_random_uuid()` — the server never supplies it. Two name-related columns are stored:
-- **`name`** — the human-readable display label from `metadata.yaml` `name:` field (e.g. `"My Custom LLM Provider"`). Not unique — the same display name may appear across different component types.
-- **`dir_name`** — the server-determined on-disk directory name (`meta.DirName()`), used for routing to the bundle volume. Always unique per active `(catalog_type, catalog_id)`.
+Each row in `catalog_bundles` represents one created bundle. The `id` is a UUID generated by the DB via `gen_random_uuid()` — the server never supplies it.
 
-The `status` column tracks lifecycle: **POST** inserts a new row as `processing` then activates it with a single `Activate` UPDATE. **PUT** updates the existing row in-place — no new row is ever inserted. **Only one `active` row per `(catalog_type, catalog_id)` is permitted** — enforced by a partial composite unique index.
+The on-disk directory path is **derived at runtime** from `catalog_id` and `version` as `<catalog_id>-<version>` — it is **not stored** in the DB. No `dir_name` column exists in the table.
+
+The `status` column tracks lifecycle using only `processing`, `active`, `failed`, and `deleting`: **POST** inserts a new row as `processing`, reloads the catalog, then activates it with a single `Activate` UPDATE. **PUT** marks the existing row `processing`, extracts the replacement, reloads the catalog, re-activates the row in-place, and removes the old directory only at the end. **DELETE** marks the row `deleting`, removes the directory, reloads the catalog, and then deletes the row. If any post-transition step fails during POST, PUT, or DELETE, the row is marked `failed` and the error message is stored. **Only one `active` row per `(catalog_type, catalog_id)` is permitted** — enforced by a partial composite unique index.
 
 ```sql
 -- +goose Up
@@ -728,7 +725,8 @@ The `status` column tracks lifecycle: **POST** inserts a new row as `processing`
 CREATE TYPE bundle_status AS ENUM (
     'processing',
     'active',
-    'failed'
+    'failed',
+    'deleting'
 );
 
 CREATE TABLE catalog_bundles (
@@ -740,37 +738,32 @@ CREATE TABLE catalog_bundles (
     -- Not required to be unique — the same label may appear for different catalog_ids.
     name             VARCHAR(255),
 
-    -- Server-determined on-disk directory name: meta.DirName().
-    -- Services:   <id>-<version>                       e.g. "my-service-1.0.0"
-    -- Components: <component_type>-<id>-<version>       e.g. "llm-my-provider-1.0.0"
-    dir_name         VARCHAR(200)   NOT NULL,
-
     status           bundle_status  NOT NULL DEFAULT 'processing',
     -- Uncompressed on-disk size in bytes, populated after extraction completes.
-    -- NULL until the bundle reaches 'active' or 'failed'.
+    -- NULL until the bundle reaches 'active', 'failed', or 'deleting'.
     size_bytes       BIGINT,
 
     -- The catalog item type: "service" or "component".
     catalog_type     VARCHAR(50)    NOT NULL,
 
     -- Unique identity of the catalog item within its type.
-    -- Services:   bare id                              e.g. "my-service"
-    -- Components: composite <component_type>:<id>      e.g. "llm:my-provider"
+    -- Services:   bare id                               e.g. "my-service"
+    -- Components: composite <component_type>--<id>      e.g. "llm--my-provider"
     catalog_id       VARCHAR(200)   NOT NULL,
 
     -- Semantic version of this bundle: e.g. "1.0.0", "2.1.0"
     version          VARCHAR(50)    NOT NULL DEFAULT '',
 
     error            TEXT,
-    uploaded_by      VARCHAR(100),
-    uploaded_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+    created_by       VARCHAR(100),
+    created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );
 
 -- Enforce at most one active bundle per (catalog_type, catalog_id) pair.
 -- Using the composite key makes the constraint explicit and future-proof:
 -- a new catalog_type with the same catalog_id string as an existing one
 -- is correctly treated as a distinct item.
--- 'processing' and 'failed' rows are exempt so a replacement in-flight
+-- 'processing', 'failed', and 'deleting' rows are exempt so a replacement in-flight
 -- does not block itself.
 CREATE UNIQUE INDEX uq_catalog_bundles_active
     ON catalog_bundles (catalog_type, catalog_id)
@@ -789,33 +782,33 @@ DROP TYPE   IF EXISTS bundle_status;
 
 ### 6.6 Storage per runtime
 
-Bundle storage is **intentionally isolated** from `$AI_SERVICES_BASE_DIR`. This prevents a `catalog delete` or application-data wipe from destroying uploaded bundles, and makes the storage unit independently snapshotable.
+Bundle storage is **intentionally isolated** from `$AI_SERVICES_BASE_DIR`. This prevents a `catalog delete` or application-data wipe from destroying created bundles, and makes the storage unit independently snapshotable.
 
 #### Volume directory layout
 
-The volume is organised as `<catalog_type>/<dir_name>/` where `dir_name` is `meta.DirName()`. At most **one versioned directory per `(catalog_type, catalog_id)` pair** exists on disk at any time — a `PUT` replaces the old directory with the new one once the replacement is marked `active`. Bundles for different `catalog_id` values (within or across types) coexist independently.
+The volume is organised as `<catalog_type>/<catalog_id>-<version>/`. The directory name is derived at runtime — it is never stored in the DB. At most **one versioned directory per `(catalog_type, catalog_id)` pair** exists on disk at any time — a `PUT` with a new version creates a new directory and deletes the old one after activation. Bundles for different `catalog_id` values (within or across types) coexist independently.
 
 ```
 /data/catalog-bundles/
 ├── service/
-│   ├── my-service-1.0.0/        ← dir_name: "my-service-1.0.0"  name: "My Custom Service"
+│   ├── my-service-1.0.0/          ← catalog_id: "my-service"  version: "1.0.0"
 │   │   ├── metadata.yaml
 │   │   └── podman/...
-│   └── my-service-2.0.0/        ← would replace the above on PUT
+│   └── my-service-2.0.0/          ← would replace the above on PUT with new version
 └── component/
-    ├── llm-my-provider-1.0.0/   ← dir_name: "llm-my-provider-1.0.0"  name: "My Custom LLM Provider"
+    ├── llm--my-provider-1.0.0/    ← catalog_id: "llm--my-provider"  version: "1.0.0"
     │   ├── metadata.yaml
     │   └── podman/...
-    └── embedding-my-provider-1.0.0/  ← same display name permitted, different catalog_id
+    └── embedding--my-provider-1.0.0/  ← same bare id, different component_type
         ├── metadata.yaml
         └── podman/...
 ```
 
 The `CatalogProvider` resolves each active item's path as:
 ```
-/data/catalog-bundles/<catalog_type>/<dir_name>/
+/data/catalog-bundles/<catalog_type>/<catalog_id>-<version>/
 ```
-where `dir_name` is taken directly from the DB `dir_name` column.
+derived from the DB `catalog_id` and `version` columns.
 
 #### Podman — named volume `catalog-bundles`
 
@@ -866,9 +859,9 @@ spec:
 
 ---
 
-### 6.7 Upload flow diagrams
+### 6.7 Create Bundle flow diagrams
 
-#### Podman — upload flow
+#### Podman — Create Bundle flow
 
 ```mermaid
 flowchart TD
@@ -880,7 +873,7 @@ flowchart TD
 
     subgraph CAT_POD["ai-services--catalog pod"]
         BE["backend container :8080"]
-        HANDLER["BundleHandler.UploadBundle()"]
+        HANDLER["BundleHandler.CreateBundle()"]
         PIPELINE["Dispatch → Validate → Swap"]
         CP["CatalogProvider.Reload()"]
     end
@@ -900,7 +893,7 @@ flowchart TD
     CP -- "reads templates from" --> BUNDLES
 ```
 
-#### OpenShift — upload flow
+#### OpenShift — Create Bundle flow
 
 ```mermaid
 flowchart TD
@@ -913,7 +906,7 @@ flowchart TD
             SVC["catalog-backend Service :8080"]
             DEP["catalog-backend Deployment"]
             BE["backend container"]
-            HANDLER["BundleHandler.UploadBundle()"]
+            HANDLER["BundleHandler.CreateBundle()"]
             PIPELINE["Dispatch → Validate → Swap"]
             CP["CatalogProvider.Reload()"]
             PVC["PVC: catalog-bundles<br/>dedicated, separate from catalog-db PVC<br/>mount: /data/catalog-bundles"]
@@ -939,7 +932,7 @@ The actual handler lives at [`apiserver/handlers/bundle_handler.go`](ai-services
 **`BundleHandler`** follows the same pattern as `ApplicationHandler` and `CatalogHandler`:
 
 ```go
-// BundleHandler handles catalog bundle upload, replacement, deletion, and listing.
+// BundleHandler handles catalog bundle creation, replacement, deletion, and listing.
 type BundleHandler struct {
     bundleService bundlesvc.BundleServiceInterface
 }
@@ -949,11 +942,11 @@ func NewBundleHandler(svc bundlesvc.BundleServiceInterface) *BundleHandler {
 }
 ```
 
-**`UploadBundle` (POST → 201)** — single form field: `file`. `catalog_id`, `catalog_type`,
+**`CreateBundle` (POST → 201)** — single form field: `file`. `catalog_id`, `catalog_type`,
 and `version` are read entirely from the archive's `metadata.yaml`:
 
 ```go
-func (h *BundleHandler) UploadBundle(c *gin.Context) {
+func (h *BundleHandler) CreateBundle(c *gin.Context) {
     c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
 
     file, header, err := c.Request.FormFile("file")
@@ -961,9 +954,9 @@ func (h *BundleHandler) UploadBundle(c *gin.Context) {
 
     userID := c.GetString(middleware.CtxUserIDKey)
 
-    // ProcessBundle: peek metadata → build BundleMetadata (ServiceMetadata or ComponentMetadata)
-    //                → conflict check (catalog_type + catalog_id) → extract to meta.DirName()
-    //                → validate → insert DB row as active → reload → return 201.
+    // ProcessBundle: peek minimal identity metadata → conflict check (catalog_type + catalog_id)
+    //                → validate directly from archive → extract to bundleDirPath()
+    //                → insert DB row as processing → reload → activate → return 201.
     resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
     // ... 409 / 422 / 500 handled by ValidationError.Code ...
     c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
@@ -971,7 +964,7 @@ func (h *BundleHandler) UploadBundle(c *gin.Context) {
 }
 ```
 
-**`UpdateBundle` (PUT → 202)** — resolves existing record from `bundle_id` path param;
+**`UpdateBundle` (PUT → 200)** — resolves existing record from `bundle_id` path param;
 single form field: `file`. No `dry_run` — use `POST /catalog/bundles/validate` for that:
 
 ```go
@@ -983,13 +976,14 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
     file, header, err := c.Request.FormFile("file")
     // ... 400 if missing or not .tar.gz ...
 
-    // ReplaceBundle: peek metadata → validate meta.CatalogID()/meta.CatalogType() immutable →
-    //                return 202 immediately with existing ID →
-    //                goroutine: extract to meta.DirName(), UPDATE existing row in-place,
-    //                delete old dir if dir_name changed, reload. On failure DB row unchanged.
+    // ReplaceBundle: peek minimal identity metadata → validate meta.CatalogID()/meta.CatalogType() immutable →
+    //                validate directly from archive → mark existing row processing →
+    //                extract to staging dir, rename into final path, UPDATE existing row in-place,
+    //                reload, delete old dir when different, return 200 with updated bundle record.
+    //                On failure after the status transition, mark DB row failed.
     resp, err := h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
     c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
-    c.JSON(http.StatusAccepted, resp)
+    c.JSON(http.StatusOK, resp)
 }
 ```
 
@@ -998,24 +992,26 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 ```go
 type BundleServiceInterface interface {
     // ValidateBundle — dedicated validate-only path (POST /catalog/bundles/validate).
-    // Reads id, type, version from metadata.yaml inside the archive,
-    // extracts to a temp directory, validates structure, then cleans up.
+    // Reads identity from metadata.yaml inside the archive and validates directly from the archive
+    // (structure, metadata, values/schema consistency, templates, labels, annotations,
+    // steps.md, and relevant file contents) without permanent extraction.
     // No DB row is written and no reload is triggered.
     // Returns a ServiceValidationResult or ComponentValidationResult (both implement ValidationResult).
     ValidateBundle(ctx context.Context, file io.Reader) (ValidationResult, error)
 
-    // ProcessBundle — synchronous POST upload.
-    // Reads metadata from archive, checks conflict, extracts to permanent dir,
-    // validates structure, inserts DB row then activates in one UPDATE, reloads catalog.
+    // ProcessBundle — synchronous POST bundle creation.
+    // Reads minimal identity metadata from archive, checks conflict, validates directly
+    // from archive, extracts to permanent dir, inserts DB row as processing,
+    // reloads catalog, then activates the row.
     // Returns *BundleResponse re-fetched from DB with status "active" (201).
     ProcessBundle(ctx context.Context, file io.Reader, userID string) (*BundleResponse, error)
 
-    // ReplaceBundle — async PUT update.
-    // Sync: validates archive and immutable fields, returns 202 immediately (same bundle ID).
-    // Async goroutine: extracts, validates, UPDATEs existing row in-place
-    //       (status=active, version, dir_name, name, size_bytes — single statement),
-    //       deletes old on-disk directory if dir_name changed, reloads catalog.
-    //       On failure: DB row left unchanged — existing bundle stays active.
+    // ReplaceBundle — synchronous PUT update.
+    // Validates directly from archive, marks existing row processing, extracts into a staging dir,
+    // renames staging into the final path, UPDATEs existing row in-place
+    // (status=active, version, name, size_bytes — single statement),
+    // reloads catalog, deletes old on-disk directory when different, and returns 200.
+    // On failure after the status transition: DB row is marked failed and error is returned.
     ReplaceBundle(ctx context.Context, existing *BundleRecord, file io.Reader, userID string) (*BundleResponse, error)
 
     GetByBundleID(ctx context.Context, bundleID string) (*BundleRecord, error)
@@ -1030,14 +1026,13 @@ type BundleServiceInterface interface {
 ```go
 // BundleRecord is the service-layer view of a DB row.
 type BundleRecord struct {
-    ID, Name, DirName, Status, CatalogType, CatalogID, Version, UploadedBy string
-    SizeBytes  *int64
-    UploadedAt time.Time
+    ID, Name, Status, CatalogType, CatalogID, Version, CreatedBy string
+    SizeBytes *int64
+    CreatedAt time.Time
 }
 
 // BundleMetadata is the interface returned by peekMetadata. Each concrete type
-// carries the scalar fields from its metadata.yaml and encodes all
-// type-specific derivations as methods — no type assertions needed in the pipeline.
+// carries the scalar fields from its metadata.yaml.
 //
 // Adding a new catalog type (e.g. "architecture") means:
 //   1. Define a new concrete struct implementing this interface.
@@ -1046,8 +1041,8 @@ type BundleRecord struct {
 //      is unchanged — it calls only these methods.
 type BundleMetadata interface {
     // CatalogID returns the globally unique value stored in the DB catalog_id column.
-    // Services:   bare id                         e.g. "my-service"
-    // Components: composite <component_type>:<id>  e.g. "llm:my-provider"
+    // Services:   bare id                              e.g. "my-service"
+    // Components: composite <component_type>--<id>     e.g. "llm--my-provider"
     //
     // This is what the DB unique index and conflict checks operate on.
     CatalogID() string
@@ -1057,15 +1052,6 @@ type BundleMetadata interface {
 
     // Version returns the semantic version string.
     Version() string
-
-    // DirName returns the server-determined on-disk directory name (DB dir_name column).
-    // Services:   <id>-<version>                       e.g. "my-service-1.0.0"
-    // Components: <component_type>-<id>-<version>       e.g. "llm-my-provider-1.0.0"
-    //
-    // This is what extractAndMeasure writes into — the archive top-level directory
-    // is stripped and discarded; DirName() is the authoritative destination.
-    // Always filesystem-safe (no "/" characters).
-    DirName() string
 
     // DisplayName returns the human-readable label from the metadata.yaml `name:` field.
     // e.g. "My Custom Service", "My Custom LLM Provider"
@@ -1080,21 +1066,20 @@ type ServiceMetadata struct {
     displayName string
 }
 
-func (m *ServiceMetadata) CatalogID() string    { return m.id }
-func (m *ServiceMetadata) CatalogType() string  { return "service" }
-func (m *ServiceMetadata) Version() string      { return m.version }
-func (m *ServiceMetadata) DirName() string      { return m.id + "-" + m.version }
-func (m *ServiceMetadata) DisplayName() string  { return m.displayName }
+func (m *ServiceMetadata) CatalogID() string   { return m.id }
+func (m *ServiceMetadata) CatalogType() string { return "service" }
+func (m *ServiceMetadata) Version() string     { return m.version }
+func (m *ServiceMetadata) DisplayName() string { return m.displayName }
 
 // ComponentMetadata is the BundleMetadata implementation for catalog_type="component".
 // ComponentType is required and must be one of the recognised component types
-// (llm, embedding, reranker, vector_store). The CatalogID is the composite
-// "<component_type>:<id>" and the on-disk DirName encodes both with a dash separator.
+// (llm, embedding, reranker, vector_store).
 //
-// The same id may exist under different component types — they produce different
-// CatalogID() values ("llm:my-provider" vs "embedding:my-provider") and are
+// CatalogID is the composite "<component_type>--<id>" value stored in the DB,
+// e.g. "llm--my-provider". The double-dash separator avoids filesystem conflicts.
+// The same bare id may exist under different component types — they produce different
+// CatalogID() values ("llm--my-provider" vs "embedding--my-provider") and are
 // stored as entirely independent DB rows and on-disk directories.
-// The same DisplayName() may also appear across types — it is not unique.
 type ComponentMetadata struct {
     id            string
     componentType string
@@ -1102,10 +1087,10 @@ type ComponentMetadata struct {
     displayName   string
 }
 
-func (m *ComponentMetadata) CatalogID() string   { return m.componentType + ":" + m.id }
+// CatalogID returns "<component_type>--<id>", e.g. "llm--my-provider".
+func (m *ComponentMetadata) CatalogID() string   { return m.componentType + "--" + m.id }
 func (m *ComponentMetadata) CatalogType() string { return "component" }
 func (m *ComponentMetadata) Version() string     { return m.version }
-func (m *ComponentMetadata) DirName() string     { return m.componentType + "-" + m.id + "-" + m.version }
 func (m *ComponentMetadata) DisplayName() string { return m.displayName }
 
 // ComponentType returns the component_type for this metadata.
@@ -1113,78 +1098,47 @@ func (m *ComponentMetadata) DisplayName() string { return m.displayName }
 func (m *ComponentMetadata) ComponentType() string { return m.componentType }
 ```
 
-`parseMetadataYAML` reads `id`, `type`, `name`, `version` (and `component_type` for components) as scalar fields. For `component`, `component_type` is required and rejected with `422` if absent or unrecognised. `ProcessBundle` and `ReplaceBundle` call only the `BundleMetadata` interface methods. `ValidateBundle` performs a single type-assertion `meta.(*ComponentMetadata)` to populate the `ComponentType` field on `ComponentValidationResult` — this is the only place where a type switch on the concrete metadata type occurs. `extractAndMeasure` takes no `catalogID` parameter — it strips the archive top-level directory blindly and writes into the caller-supplied `destDir` (`meta.DirName()`).
+`parseMetadataYAML` reads `id`, `type`, `name`, `version` (and `component_type` for components) as scalar fields. For `component`, `component_type` is required and rejected with `422` if absent or unrecognised. `ProcessBundle` and `ReplaceBundle` call only the `BundleMetadata` interface methods. `ValidateBundle` performs a single type-assertion `meta.(*ComponentMetadata)` to populate the `ComponentType` field on `ComponentValidationResult` — this is the only place where a type switch on the concrete metadata type occurs. `extractAndMeasure` strips the archive top-level directory blindly and writes into the caller-supplied `destDir` (`bundleDirPath(meta.CatalogType(), meta.CatalogID(), meta.Version())`).
 
 ```go
 // ValidationResult is the interface returned by ValidateBundle and serialised as the
 // 200 OK body for POST /catalog/bundles/validate.
 // Concrete types: ServiceValidationResult, ComponentValidationResult.
-//
-// Adding a new catalog type means:
-//   1. Define a new concrete struct implementing this interface.
-//   2. Add a case in parseMetadataYAML / ValidateBundle to construct it.
-//   3. MarshalJSON on the handler side serialises whichever concrete type is returned.
 type ValidationResult interface {
-    // IsValid reports whether the archive passed validation.
     IsValid() bool
-
-    // GetCatalogType returns "service" or "component".
     GetCatalogType() string
-
-    // GetCatalogID returns the same value as BundleMetadata.CatalogID():
-    // bare id for services, composite "<component_type>:<id>" for components.
+    // GetCatalogID returns bare id for services, "<component_type>--<id>" for components.
     GetCatalogID() string
-
-    // GetVersion returns the semantic version string from metadata.yaml.
     GetVersion() string
-
-    // GetDisplayName returns the human-readable label from metadata.yaml `name:`.
     GetDisplayName() string
-
-    // GetDirName returns the server-determined on-disk directory name.
-    // Services:   <id>-<version>                  e.g. "my-service-1.0.0"
-    // Components: <component_type>-<id>-<version>  e.g. "llm-my-provider-1.0.0"
-    GetDirName() string
 }
 
-// ServiceValidationResult is the ValidationResult implementation for catalog_type="service".
-// JSON shape:
+// ServiceValidationResult — JSON shape:
 //
 //	{
 //	  "valid":        true,
 //	  "catalog_type": "service",
 //	  "catalog_id":   "my-service",
 //	  "version":      "1.0.0",
-//	  "name":         "My Custom Service",
-//	  "dir_name":     "my-service-1.0.0"
+//	  "name":         "My Custom Service"
 //	}
 type ServiceValidationResult struct {
     Valid       bool   `json:"valid"`
     CatalogType string `json:"catalog_type"`
     CatalogID   string `json:"catalog_id"`
     Version     string `json:"version"`
-    Name        string `json:"name,omitempty"`  // display label; omitted if blank
-    DirName     string `json:"dir_name"`
+    Name        string `json:"name,omitempty"`
 }
 
-func (r *ServiceValidationResult) IsValid() bool          { return r.Valid }
-func (r *ServiceValidationResult) GetCatalogType() string { return r.CatalogType }
-func (r *ServiceValidationResult) GetCatalogID() string   { return r.CatalogID }
-func (r *ServiceValidationResult) GetVersion() string     { return r.Version }
-func (r *ServiceValidationResult) GetDisplayName() string { return r.Name }
-func (r *ServiceValidationResult) GetDirName() string     { return r.DirName }
-
-// ComponentValidationResult is the ValidationResult implementation for catalog_type="component".
-// JSON shape:
+// ComponentValidationResult — JSON shape:
 //
 //	{
 //	  "valid":          true,
 //	  "catalog_type":   "component",
 //	  "component_type": "llm",
-//	  "catalog_id":     "llm:my-provider",
+//	  "catalog_id":     "llm--my-provider",
 //	  "version":        "1.0.0",
-//	  "name":           "My Custom LLM Provider",
-//	  "dir_name":       "llm-my-provider-1.0.0"
+//	  "name":           "My Custom LLM Provider"
 //	}
 type ComponentValidationResult struct {
     Valid         bool   `json:"valid"`
@@ -1192,20 +1146,8 @@ type ComponentValidationResult struct {
     ComponentType string `json:"component_type"`
     CatalogID     string `json:"catalog_id"`
     Version       string `json:"version"`
-    Name          string `json:"name,omitempty"`  // display label; omitted if blank
-    DirName       string `json:"dir_name"`
+    Name          string `json:"name,omitempty"`
 }
-
-func (r *ComponentValidationResult) IsValid() bool          { return r.Valid }
-func (r *ComponentValidationResult) GetCatalogType() string { return r.CatalogType }
-func (r *ComponentValidationResult) GetCatalogID() string   { return r.CatalogID }
-func (r *ComponentValidationResult) GetVersion() string     { return r.Version }
-func (r *ComponentValidationResult) GetDisplayName() string { return r.Name }
-func (r *ComponentValidationResult) GetDirName() string     { return r.DirName }
-
-// ComponentType returns the component_type for this result.
-// Defined on the concrete type; callers that need it type-assert to *ComponentValidationResult.
-func (r *ComponentValidationResult) ComponentType() string { return r.ComponentType }
 
 // ValidationError carries an HTTP status code alongside its message.
 type ValidationError struct {
@@ -1218,21 +1160,21 @@ type ValidationError struct {
 
 #### Why the strategy collapses into the metadata type
 
-The `bundleTypeStrategy` interface described earlier (with `CatalogID`, `Name`, `ArchiveID` methods) and `BundleMetadata` are solving the same problem from two angles. With Option 3 they merge: the concrete metadata type **is** its own strategy. The pipeline calls `meta.CatalogID()`, `meta.DirName()`, `meta.DisplayName()`, `meta.CatalogType()` directly — no separate strategy object, no factory function, no second dispatch. Adding a new catalog type is a single step: implement the interface on a new struct and add one `case` in `parseMetadataYAML`.
+The `bundleTypeStrategy` interface and `BundleMetadata` are solving the same problem from two angles. With Option 3 they merge: the concrete metadata type **is** its own strategy. The pipeline calls `meta.CatalogID()`, `meta.DisplayName()`, `meta.CatalogType()`, `meta.Version()` directly — no separate strategy object, no factory function, no second dispatch. Adding a new catalog type is a single step: implement the interface on a new struct and add one `case` in `parseMetadataYAML`.
 
-Note: `ID()` (bare `id` field) is intentionally **not** in the `BundleMetadata` interface. Since the archive top-level directory name is no longer validated against `id`, there is no pipeline step that needs the bare `id` separately from `CatalogID()`. For services `CatalogID() == id` anyway. The `id` field is used internally by each concrete type to construct `CatalogID()` and `DirName()` but is not exposed.
+Note: `ID()` (bare `id` field) is intentionally **not** in the `BundleMetadata` interface. The archive top-level directory name is never validated against `id`; no pipeline step needs the bare `id` separately from `CatalogID()`. For services `CatalogID() == id` anyway. The `id` field is used internally by each concrete type to construct `CatalogID()` but is not exposed.
 
 #### `ApplicationClient` bundle methods (client/bundle.go)
 
 The CLI commands talk to the server through `ApplicationClient` in [`internal/pkg/catalog/client/bundle.go`](ai-services/internal/pkg/catalog/client/bundle.go). Beyond the existing `ListBundles` and `GetBundle`, the following methods are added:
 
 ```go
-// UploadBundle POSTs a .tar.gz archive as multipart/form-data.
+// CreateBundle POSTs a .tar.gz archive as multipart/form-data.
 // Returns the 201 BundleResponse (status always "active" on success).
-func (c *ApplicationClient) UploadBundle(filePath string) (*bundlesvc.BundleResponse, error)
+func (c *ApplicationClient) CreateBundle(filePath string) (*bundlesvc.BundleResponse, error)
 
 // UpdateBundle PUTs a replacement archive for the bundle identified by bundleID.
-// Returns the 202 BundleResponse immediately — poll with PollBundleActive.
+// Returns the 200 BundleResponse with status "active" (fully synchronous).
 func (c *ApplicationClient) UpdateBundle(bundleID, filePath string) (*bundlesvc.BundleResponse, error)
 
 // DeleteBundle sends DELETE /api/v1/catalog/bundles/:bundleID.
@@ -1242,10 +1184,6 @@ func (c *ApplicationClient) DeleteBundle(bundleID string) error
 // Returns a ServiceValidationResult or ComponentValidationResult (both implement
 // ValidationResult) on success, or a *ValidationError on 422.
 func (c *ApplicationClient) ValidateBundle(filePath string) (bundlesvc.ValidationResult, error)
-
-// PollBundleActive polls GET /api/v1/catalog/bundles/:bundleID until status == "active"
-// or the context is cancelled. Used after a 202 Accepted PUT response.
-func (c *ApplicationClient) PollBundleActive(ctx context.Context, bundleID string, interval time.Duration) (*bundlesvc.BundleResponse, error)
 ```
 
 ---
@@ -1268,9 +1206,9 @@ ai-services catalog bundle
 
 The `bundle` parent command requires an authenticated session (`ai-services catalog login` must have been run first). All subcommands call `client.New()` to load stored credentials — no `--server` or `--username` flags are needed.
 
-#### `bundle upload` — upload a new bundle
+#### `bundle upload` — create a new bundle
 
-Uploads a `.tar.gz` archive and blocks until the server returns `201 Created` (the POST endpoint is synchronous). `catalog_id`, `catalog_type`, and `version` are all read from `metadata.yaml` inside the archive — no additional flags needed.
+Creates a bundle from a `.tar.gz` archive and blocks until the server returns `201 Created` (the POST endpoint is synchronous). `catalog_id`, `catalog_type`, and `version` are all read from `metadata.yaml` inside the archive — no additional flags needed.
 
 ```
 ai-services catalog bundle upload --file <path-to-bundle.tar.gz>
@@ -1280,12 +1218,12 @@ ai-services catalog bundle upload --file <path-to-bundle.tar.gz>
 
 | Flag | Required | Description |
 |---|---|---|
-| `--file` | yes | Path to the `.tar.gz` archive to upload |
+| `--file` | yes | Path to the `.tar.gz` archive to create from |
 
 **Example output (service bundle):**
 ```
-Uploading bundle from my-bundle.tar.gz...
-✓ Bundle uploaded successfully
+Creating bundle from my-bundle.tar.gz...
+✓ Bundle created successfully
   ID:           550e8400-e29b-41d4-a716-446655440000
   Catalog type: service
   Catalog ID:   my-service
@@ -1297,13 +1235,12 @@ Uploading bundle from my-bundle.tar.gz...
 
 **Example output (component bundle — `component_type: llm`):**
 ```
-Uploading bundle from my-provider-bundle.tar.gz...
-✓ Bundle uploaded successfully
+Creating bundle from my-provider-bundle.tar.gz...
+✓ Bundle created successfully
   ID:             c3d4e5f6-...
   Catalog type:   component
   Component type: llm
-  Catalog ID:     llm:my-provider
-  Dir name:       llm-my-provider-1.0.0
+  Catalog ID:     llm--my-provider
   Version:        1.0.0
   Status:         active
   Size:           192 KB
@@ -1319,7 +1256,7 @@ Uploading bundle from my-provider-bundle.tar.gz...
 
 #### `bundle update` — replace an existing bundle
 
-Sends a `PUT` request (async `202 Accepted`) and polls until the bundle is `active`. The positional `<bundle_id>` is the internal UUID from `bundle list` or `bundle upload` output.
+Sends a synchronous `PUT` request (`200 OK`) that extracts, validates, activates, and reloads the catalog all in one go — no polling needed. The positional `<bundle_id>` is the internal UUID from `bundle list` or `bundle upload` output.
 
 ```
 ai-services catalog bundle update <bundle_id> --file <path-to-bundle.tar.gz>
@@ -1336,15 +1273,12 @@ ai-services catalog bundle update <bundle_id> --file <path-to-bundle.tar.gz>
 | Flag | Required | Description |
 |---|---|---|
 | `--file` | yes | Path to the replacement `.tar.gz` archive |
-| `--no-wait` | no | Return immediately after `202 Accepted` without polling |
-| `--timeout` | no | Maximum time to wait for `active` status (default: `5m`) |
 
 **Example output:**
 ```
 Updating bundle 550e8400-e29b-41d4-a716-446655440000 from my-bundle-v2.tar.gz...
   Catalog type: service  |  Catalog ID: my-service  |  Version: 2.0.0
   Dir name:     my-service-2.0.0
-Waiting for bundle to become active...
 ✓ Bundle updated successfully (status: active)
 ```
 
@@ -1353,8 +1287,7 @@ Waiting for bundle to become active...
 | Exit | Condition |
 |---|---|
 | `1` | `404 Not Found` — no bundle with that ID; use `bundle upload` to create one |
-| `1` | `422` — `catalog_id` or `catalog_type` in the archive doesn't match the existing record |
-| `1` | Timeout reached while polling (bundle stays in last known state) |
+| `1` | `422` — `catalog_id` or `catalog_type` in the archive doesn't match the existing record, or validation failed |
 
 #### `bundle delete` — delete a bundle
 
@@ -1384,7 +1317,7 @@ Delete bundle 550e8400-e29b-41d4-a716-446655440000 (my-service-1.0.0)? [y/N] y
 
 #### `bundle list` — list all bundles
 
-Prints a table of all registered bundles ordered by upload time (most recent first).
+Prints a table of all registered bundles ordered by creation time (most recent first).
 
 ```
 ai-services catalog bundle list
@@ -1392,12 +1325,12 @@ ai-services catalog bundle list
 
 **Example output:**
 ```
-ID                                     CATALOG TYPE  CATALOG ID       DIR NAME               VERSION  STATUS  UPLOADED AT
-550e8400-e29b-41d4-a716-446655440000   service       my-service       my-service-1.0.0       1.0.0    active  2026-05-12 09:14:02
-a1b2c3d4-e5f6-7890-abcd-ef1234567890   component     llm:my-provider  llm-my-provider-1.0.0  1.0.0    active  2026-05-13 11:30:00
+ID                                     CATALOG TYPE  CATALOG ID        VERSION  STATUS  CREATED AT
+550e8400-e29b-41d4-a716-446655440000   service       my-service        1.0.0    active  2026-05-12 09:14:02
+a1b2c3d4-e5f6-7890-abcd-ef1234567890   component     llm--my-provider  1.0.0    active  2026-05-13 11:30:00
 ```
 
-Note the `DIR NAME` column uses the `<component_type>-<catalog_id>-<version>` form for components, matching the on-disk path under `/data/catalog-bundles/component/`.
+The on-disk path is derived at runtime as `<catalog_id>-<version>` (e.g. `/data/catalog-bundles/component/llm--my-provider-1.0.0/`) — it is not stored in the DB or shown in this output.
 
 #### `bundle get` — get a single bundle
 
@@ -1417,11 +1350,11 @@ Catalog ID:   my-service
 Version:      1.0.0
 Status:       active
 Size:         280 KB
-Uploaded by:  admin
-Uploaded at:  2026-05-12 09:14:02
+Created by:   admin
+Created at:   2026-05-12 09:14:02
 ```
 
-#### `bundle validate` — validate a bundle without uploading
+#### `bundle validate` — validate a bundle without creating it
 
 Calls `POST /api/v1/catalog/bundles/validate`. No DB row is written and `CatalogProvider` is not reloaded. Use before `bundle upload` to verify the archive in CI/CD pipelines.
 
@@ -1452,8 +1385,7 @@ Validating bundle from my-provider-bundle.tar.gz...
 ✓ Bundle is valid
   Catalog type:   component
   Component type: llm
-  Catalog ID:     llm:my-provider
-  Dir name:       llm-my-provider-1.0.0
+  Catalog ID:     llm--my-provider
   Version:        1.0.0
   Name:           My Custom LLM Provider
 ```
@@ -1523,17 +1455,17 @@ resources:
 
 ### 7.4 Built-in IDs are reserved
 
-A bundle whose `catalog_id` (read from `metadata.yaml`) matches a built-in catalog item is rejected with a `422` error. For services, `catalog_id` is the bare `id`; for components it is the composite `<component_type>:<id>`. Custom bundles must use a unique `catalog_id` that does not conflict with any embedded item.
+A bundle whose `catalog_id` (read from `metadata.yaml`) matches a built-in catalog item is rejected with a `422` error. For services, `catalog_id` is the bare `id`; for components it is the composite `<component_type>--<id>`. Custom bundles must use a unique `catalog_id` that does not conflict with any embedded item.
 
 **Built-in service IDs reserved at this time:** `chat`, `digitize`, `similarity`, `summarize`, `rag`
 
-**Built-in component IDs reserved at this time** (by composite `<component_type>:<id>`):`llm:vllm-cpu`, `llm:vllm-spyre`, `llm:watsonx`, `embedding:vllm-cpu`, `reranker:vllm-cpu`, `reranker:vllm-spyre`, `vector_db:opensearch`
+**Built-in component IDs reserved at this time** (by composite `<component_type>--<id>`): `llm--vllm-cpu`, `llm--vllm-spyre`, `llm--watsonx`, `embedding--vllm-cpu`, `reranker--vllm-cpu`, `reranker--vllm-spyre`, `vector_db--opensearch`
 
 ---
 
 ## 8. Remote Deployment
 
-The control-plane catalog server acts as the authoritative bundle registry. Custom service assets are uploaded once to the control plane and stored there. Remote agents do not need to read assets directly — the control-plane catalog backend orchestrates all template resolution and service rendering on their behalf. No `.tar.gz` retention is required; only the extracted asset files are kept on the control-plane volume.
+The control-plane catalog server acts as the authoritative bundle registry. Custom service assets are created once on the control plane and stored there. Remote agents do not need to read assets directly — the control-plane catalog backend orchestrates all template resolution and service rendering on their behalf. No `.tar.gz` retention is required; only the extracted asset files are kept on the control-plane volume.
 
 ---
 
@@ -2012,7 +1944,7 @@ Custom component templates may adopt the same pattern for any key name. The `.en
 
 ## 10. Usage Examples
 
-### 10.1 Upload a custom service bundle
+### 10.1 Create a custom service bundle
 
 **Using the CLI (recommended):**
 
@@ -2023,9 +1955,9 @@ ai-services catalog login --server https://catalog-api.<domain> --username admin
 # Package the service directory (top-level dir name is irrelevant)
 COPYFILE_DISABLE=1 tar -czf my-bundle.tar.gz my-service/
 
-# Upload — synchronous; prints status once the bundle is active
+# Create Bundle — synchronous; prints status once the bundle is active
 ai-services catalog bundle upload --file my-bundle.tar.gz
-# ✓ Bundle uploaded successfully
+# ✓ Bundle created successfully
 #   ID:           550e8400-e29b-41d4-a716-446655440000
 #   Catalog type: service
 #   Catalog ID:   my-service
@@ -2051,27 +1983,23 @@ curl -X POST https://catalog-api.<domain>/api/v1/auth/login \
 COPYFILE_DISABLE=1 tar -czf my-bundle.tar.gz my-service/   # macOS
 # tar -czf my-bundle.tar.gz my-service/                     # Linux / WSL
 
-# Upload (synchronous; returns 201 when active)
+# Create Bundle (synchronous; returns 201 when active)
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-bundle.tar.gz"
-# 201 Created — {"id":"550e8400-...","status":"active","catalog_id":"my-service","dir_name":"my-service-1.0.0",...}
+# 201 Created — {"id":"550e8400-...","status":"active","catalog_id":"my-service","version":"1.0.0",...}
 
-# Update (async; poll until active)
+# Update (synchronous)
 COPYFILE_DISABLE=1 tar -czf my-bundle-v2.tar.gz my-service/
 curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-bundle-v2.tar.gz"
-# 202 Accepted
-
-curl -s https://catalog-api.<domain>/api/v1/catalog/bundles/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Authorization: Bearer $(cat token.txt)" | jq .status
-# "active"
+# 200 OK — {"id":"550e8400-...","status":"active","catalog_id":"my-service","version":"2.0.0",...}
 ```
 
-### 10.2 Upload a custom component bundle
+### 10.2 Create a custom component bundle
 
-Component bundles follow the same upload API. The `component_type` field in `metadata.yaml` is required — `parseMetadataYAML` constructs a `*ComponentMetadata` which encodes `catalog_id` as `llm:my-provider` and `dir_name` as `llm-my-provider-1.0.0`. Two providers with the same bare `id` but different `component_type` values are entirely independent bundles and can coexist.
+Component bundles follow the same Create Bundle API. The `component_type` field in `metadata.yaml` is required — `parseMetadataYAML` constructs a `*ComponentMetadata` which encodes `catalog_id` as `llm--my-provider`. The on-disk directory is derived at runtime as `<catalog_id>-<version>` (e.g. `llm--my-provider-1.0.0`). Two providers with the same bare `id` but different `component_type` values are entirely independent bundles and can coexist.
 
 **Using the CLI (recommended):**
 
@@ -2080,23 +2008,21 @@ Component bundles follow the same upload API. The `component_type` field in `met
 # metadata.yaml must declare: type: component, component_type: llm
 COPYFILE_DISABLE=1 tar -czf my-provider-bundle.tar.gz my-provider/
 
-# Upload — on success, dir_name uses the <component_type>-<id>-<version> scheme
+# Create Bundle — on success, catalog_id is "llm--my-provider", dir is llm--my-provider-1.0.0
 ai-services catalog bundle upload --file my-provider-bundle.tar.gz
-# ✓ Bundle uploaded successfully
+# ✓ Bundle created successfully
 #   ID:             c3d4e5f6-...
 #   Catalog type:   component
 #   Component type: llm
-#   Catalog ID:     llm:my-provider
-#   Dir name:       llm-my-provider-1.0.0
+#   Catalog ID:     llm--my-provider
 #   Version:        1.0.0
 
-# Upload the same id under a different component_type — independent bundle
+# Create the same id under a different component_type — independent bundle
 # metadata.yaml must declare: type: component, component_type: embedding
 COPYFILE_DISABLE=1 tar -czf my-provider-embedding-bundle.tar.gz my-provider/
 ai-services catalog bundle upload --file my-provider-embedding-bundle.tar.gz
-# ✓ Bundle uploaded successfully
-#   Catalog ID:     embedding:my-provider
-#   Dir name:       embedding-my-provider-1.0.0   ← entirely separate from the llm bundle
+# ✓ Bundle created successfully
+#   Catalog ID:     embedding--my-provider   ← entirely separate from the llm bundle
 ```
 
 **Using curl (API directly):**
@@ -2105,7 +2031,7 @@ ai-services catalog bundle upload --file my-provider-embedding-bundle.tar.gz
 # Package. metadata.yaml must declare: type: component, component_type: llm
 COPYFILE_DISABLE=1 tar -czf my-provider-bundle.tar.gz my-provider/
 
-# Upload — POST is synchronous; catalog_id in the response is the composite "llm:my-provider"
+# Create Bundle — POST is synchronous; catalog_id in the response is the composite "llm--my-provider"
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-provider-bundle.tar.gz"
@@ -2113,35 +2039,34 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
 # {
 #   "id":             "c3d4e5f6-...",
 #   "name":           "My Custom LLM Provider",
-#   "dir_name":       "llm-my-provider-1.0.0",
 #   "status":         "active",
 #   "catalog_type":   "component",
-#   "catalog_id":     "llm:my-provider",
+#   "catalog_id":     "llm--my-provider",
 #   "version":        "1.0.0",
-#   "uploaded_by":    "admin"
+#   "created_by":     "admin"
 # }
 
-# Second upload — same bare id, different component_type → independent bundle
+# Second create — same bare id, different component_type → independent bundle
 COPYFILE_DISABLE=1 tar -czf my-provider-embedding-bundle.tar.gz my-provider/
 curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles \
   -H "Authorization: Bearer $(cat token.txt)" \
   -F "file=@my-provider-embedding-bundle.tar.gz"
-# 201 Created — catalog_id: "embedding:my-provider", dir_name: "embedding-my-provider-1.0.0"
+# 201 Created — catalog_id: "embedding--my-provider"
 ```
 
-### 10.3 Uploading with a built-in ID (caution)
+### 10.3 Creating with a built-in ID (caution)
 
-Uploading a bundle whose `catalog_id` matches a built-in service is not currently rejected at the API level. When `CatalogProvider.Reload()` runs after upload, the bundle entry will overwrite the embedded entry in the items map (last write wins). Custom bundles should deliberately avoid `catalog_id` values that match built-in items.
+Creating a bundle whose `catalog_id` matches a built-in service is not currently rejected at the API level. When `CatalogProvider.Reload()` runs after creation, the bundle entry will overwrite the embedded entry in the items map (last write wins). Custom bundles should deliberately avoid `catalog_id` values that match built-in items.
 
 ```bash
-# Check which IDs are currently loaded in the catalog before uploading
+# Check which IDs are currently loaded in the catalog before creating a bundle
 curl -s https://catalog-api.<domain>/api/v1/services \
   -H "Authorization: Bearer $(cat token.txt)" | jq '.[].id'
 # "chat"
 # "digitize"
 # "similarity"
 # "summarize"
-# "my-service"   ← custom, safe to re-upload
+# "my-service"   ← custom, safe to create again only via PUT update if it already exists
 ```
 
 > A reserved-ID check (returning `422 Conflict` before extraction) is listed as a future enhancement.
@@ -2178,7 +2103,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/applications/ \
 
 ### 10.5 List custom services via the catalog API
 
-After uploading a bundle, custom services appear alongside built-in ones. The `GET /api/v1/services` endpoint returns an array of `ServiceSummary` objects (not a wrapped object), so the `jq` filter uses `.[].id`:
+After creating a bundle, custom services appear alongside built-in ones. The `GET /api/v1/services` endpoint returns an array of `ServiceSummary` objects (not a wrapped object), so the `jq` filter uses `.[].id`:
 
 ```bash
 curl -s https://catalog-api.<domain>/api/v1/services \
@@ -2191,9 +2116,9 @@ curl -s https://catalog-api.<domain>/api/v1/services \
 # "my-service"   ← custom
 ```
 
-### 10.6 Validate a bundle before uploading
+### 10.6 Validate a bundle before creating it
 
-`POST /api/v1/catalog/bundles/validate` is a dedicated validate-only endpoint — the server extracts the archive to a temporary directory, validates structure, cleans up, and replies inline. No DB record is written and `CatalogProvider` is not reloaded.
+`POST /api/v1/catalog/bundles/validate` is a dedicated validate-only endpoint — the server validates the archive structure and replies inline. No DB record is written and `CatalogProvider` is not reloaded.
 
 ```bash
 # --- Validate a service bundle (returns ServiceValidationResult) ---
@@ -2206,8 +2131,7 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles/validate \
 #   "catalog_type": "service",
 #   "catalog_id":   "my-service",
 #   "version":      "1.0.0",
-#   "name":         "My Custom Service",
-#   "dir_name":     "my-service-1.0.0"
+#   "name":         "My Custom Service"
 # }
 
 # --- Validate a component bundle (returns ComponentValidationResult) ---
@@ -2219,10 +2143,9 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles/validate \
 #   "valid":          true,
 #   "catalog_type":   "component",
 #   "component_type": "llm",
-#   "catalog_id":     "llm:my-provider",
+#   "catalog_id":     "llm--my-provider",
 #   "version":        "1.0.0",
-#   "name":           "My Custom LLM Provider",
-#   "dir_name":       "llm-my-provider-1.0.0"
+#   "name":           "My Custom LLM Provider"
 # }
 
 # --- Validation failure example ---
@@ -2237,9 +2160,9 @@ curl -X POST https://catalog-api.<domain>/api/v1/catalog/bundles/validate \
 ## 11. Future Enhancements
 
 1. **Reserved-ID guard** — reject a `POST` (with `422`) whose `catalog_id` conflicts with a built-in embedded item. Currently the bundle is accepted and overwrites the embedded entry in the items map on reload. The check should run after `peekMetadata` and before extraction.
-2. **Scaffolding generator** — `ai-services catalog scaffold --service my-service --runtime podman` emits a minimal but correct directory skeleton ready to be tar'd and uploaded.
-3. **Remote catalog repositories** — fetch a bundle from an OCI registry or HTTPS URL; the server pulls and applies it directly, removing the need for a client upload.
+2. **Scaffolding generator** — `ai-services catalog scaffold --service my-service --runtime podman` emits a minimal but correct directory skeleton ready to be tar'd and created.
+3. **Remote catalog repositories** — fetch a bundle from an OCI registry or HTTPS URL; the server pulls and applies it directly, removing the need for a client create-bundle request.
 4. **Schema enforcement on custom `metadata.yaml`** — reuse the existing [`validators.ApplicationValidator`](ai-services/internal/pkg/catalog/validators/validation.go) to reject malformed custom metadata at validation time.
 5. **Version compatibility checks** — validate that a custom service's `version` satisfies any `>=x.y.z` constraint declared by the built-in architecture that references it.
-6. **Role-based upload access** — introduce a `catalog-editor` JWT role that can upload bundles but cannot perform `DELETE /applications` or other destructive operations.
+6. **Role-based create-bundle access** — introduce a `catalog-editor` JWT role that can create bundles but cannot perform `DELETE /applications` or other destructive operations.
 7. **New `BundleMetadata` implementations** — adding support for a new catalog type (e.g. `architecture`) requires only: (a) a new struct implementing the `BundleMetadata` interface, and (b) a new `case` in `parseMetadataYAML`. The entire processing pipeline (`ProcessBundle`, `ReplaceBundle`, `ValidateBundle`) is unchanged.
