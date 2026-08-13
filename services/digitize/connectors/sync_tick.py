@@ -113,13 +113,9 @@ async def run_tick(connector_id: str) -> None:
     try:
         # Phase boundary: check for interrupt signals before any remote I/O starts.
         interrupt = _check_interrupt_call(connector_id, sync_seq)
-        if interrupt == InterruptType.DELETE_CONNECTOR:
+        if interrupt:
             raise asyncio.CancelledError(
-                f"Connector {connector_id!r} marked for deletion"
-            )
-        elif interrupt == InterruptType.SYNC_CANCEL:
-            raise asyncio.CancelledError(
-                f"Sync cancel requested for connector {connector_id!r}"
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
             )
 
         await asyncio.to_thread(scanner.connect)
