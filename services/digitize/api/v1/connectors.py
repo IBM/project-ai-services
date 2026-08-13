@@ -249,9 +249,12 @@ async def delete_connector(connector_id: str):
 
 async def _run_teardown(connector_id: str) -> None:
     """
-    Background teardown task for connector deletion (Case B: no tick running).
+    Teardown for connector deletion.
 
-    Steps mirror the spec teardown flow:
+    Scheduled via asyncio.create_task from the delete endpoint (Case B),
+    and awaited directly from _handle_interrupt in sync_tick (Case A).
+
+    Steps:
       C. Snapshot checksums owned by this connector
       D. Remove ownership rows; delete documents when last owner
       E. Delete the connector row (cascades to sync_logs)

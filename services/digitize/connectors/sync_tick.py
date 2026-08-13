@@ -148,7 +148,7 @@ async def run_tick(connector_id: str) -> None:
     except asyncio.CancelledError as ce:
         logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
         interrupt = _check_interrupt_call(connector_id, sync_seq)
-        _handle_interrupt(sync_seq, connector_id, interrupt)
+        await _handle_interrupt(sync_seq, connector_id, interrupt)
         raise
 
     except Exception as exc:
@@ -362,7 +362,7 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
 # Interrupt handler — differentiated handling for cancel vs delete
 # ---------------------------------------------------------------------------
 
-def _handle_interrupt(
+async def _handle_interrupt(
     sync_seq: int,
     connector_id: str,
     interrupt_type: Optional[InterruptType],
@@ -395,65 +395,8 @@ def _handle_interrupt(
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
         # Run full teardown: remove checksums, delete orphaned docs, delete connector row
-        _run_delete_teardown(connector_id)
-
-
-def _run_delete_teardown(connector_id: str) -> None:
-    """
-    Full teardown for connector deletion.
-
-    Steps:
-      1. Remove all checksum ownership rows; delete documents when last owner
-      2. Delete the connector row (cascades to sync_logs)
-      3. Sweep all residual batch staging directories
-    """
-    from digitize.utils.db import (
-        list_connector_checksums,
-        remove_connector_checksum_entry,
-        delete_active_connector,
-    )
-    from digitize.settings import settings
-    from digitize.api.v1.connectors import _sweep_staging_dir
-
-    logger.info(f"Running full teardown for connector {connector_id!r}")
-    try:
-        # Step 1: remove checksum ownership; delete orphaned documents
-        owned_checksums = list_connector_checksums(connector_id)
-        for checksum in owned_checksums:
-            try:
-                remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
-                if remaining == 0 and doc_id:
-                    _best_effort_delete_document(doc_id)
-            except Exception as exc:
-                logger.error(
-                    f"Error removing checksum {checksum!r} for connector "
-                    f"{connector_id!r}: {exc}",
-                    exc_info=True,
-                )
-
-        # Step 2: delete the connector row (cascades to connector_sync_logs)
-        deleted = delete_active_connector(connector_id)
-        if not deleted:
-            logger.warning(
-                f"delete_active_connector returned False for {connector_id!r} "
-                "— row may have already been removed"
-            )
-
-        # Step 3: sweep all residual batch staging directories for this connector
-        _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors")
-
-        logger.info(f"Connector {connector_id!r} full teardown complete")
-    except Exception as exc:
-        logger.error(
-            f"Unexpected error during full teardown for connector {connector_id!r}: {exc}",
-            exc_info=True,
-        )
-
-
-def _best_effort_delete_document(doc_id: str) -> None:
-    """Best-effort document deletion — log but don't raise on failure."""
-    from digitize.api.v1.connectors import _best_effort_delete_document as delete_doc
-    delete_doc(doc_id)
+        from digitize.api.v1.connectors import _run_teardown
+        await _run_teardown(connector_id)
 
 
 # ---------------------------------------------------------------------------
