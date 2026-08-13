@@ -9,6 +9,7 @@ interface UseResourcesResult {
   resourcesError: string | null;
 }
 
+// No caching, re-fetched on every mount intentionally — available resources reflect live cluster state.
 export const useResources = (): UseResourcesResult => {
   const [resources, setResources] = useState<ResourcesResponse | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);

@@ -1,4 +1,4 @@
-import { useReducer, useMemo, useEffect, useState } from "react";
+import { useReducer, useMemo, useEffect } from "react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
@@ -12,7 +12,10 @@ import {
 import { getResourceSharingKey } from "../utils/resourceSharing";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { useDeployStore } from "@/store/deploy.store";
-import type { DeployOptionsComponent as Component } from "@/types/api.types";
+import type {
+  DeployOptionsResponse,
+  DeployOptionsComponent as Component,
+} from "@/types/api.types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
 // Initial state
@@ -65,6 +68,127 @@ type DAStepProps = Omit<StepProps, "formData"> & {
   };
 };
 
+type DAFormData = DAStepProps["formData"];
+
+const calculateDARequiredResources = (
+  formData: DAFormData,
+  deployOptions: DeployOptionsResponse,
+) => {
+  const uniqueProviders: Record<
+    string,
+    {
+      cpu: number;
+      memory: number;
+      storage: number;
+      accelerators: Record<string, number>;
+    }
+  > = {};
+
+  // First, add global components (shared across all services).
+  // Global components get their resources from service-specific component definitions.
+  deployOptions.global_components.forEach((globalComponent) => {
+    const globalConfig = formData.globalComponents[globalComponent.type];
+    if (!globalConfig?.providerId) return;
+
+    // Find the first service that has this component type to get resource info
+    let resourceProvider = null;
+    for (const service of deployOptions.services) {
+      const serviceComponent = service.components.find(
+        (c) => c.type === globalComponent.type,
+      );
+      if (serviceComponent) {
+        resourceProvider = serviceComponent.providers.find(
+          (p) => p.id === globalConfig.providerId,
+        );
+        if (resourceProvider?.resources) {
+          break;
+        }
+      }
+    }
+
+    if (!resourceProvider?.resources) return;
+
+    const uniqueKey = getResourceSharingKey(
+      "global",
+      globalComponent.type,
+      globalConfig.providerId,
+      globalConfig.params || {},
+    );
+
+    if (!uniqueProviders[uniqueKey]) {
+      uniqueProviders[uniqueKey] = {
+        cpu: resourceProvider.resources.cpu || 0,
+        memory: resourceProvider.resources.memory || 0,
+        storage: resourceProvider.resources.storage || 0,
+        accelerators: { ...(resourceProvider.resources.accelerators || {}) },
+      };
+    }
+  });
+
+  // Then, add service-specific components for each enabled service.
+  Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
+    if (!serviceConfig.enabled) return;
+
+    const service = deployOptions.services.find((s) => s.id === serviceId);
+    if (!service) return;
+
+    // Service-level resources (the service application itself)
+    if (service.resources) {
+      const serviceKey = `service-${serviceId}`;
+      if (!uniqueProviders[serviceKey]) {
+        uniqueProviders[serviceKey] = {
+          cpu: service.resources.cpu || 0,
+          memory: service.resources.memory || 0,
+          storage: service.resources.storage || 0,
+          accelerators: { ...(service.resources.accelerators || {}) },
+        };
+      }
+    }
+
+    service.components.forEach((component) => {
+      // Skip global components — already counted above
+      const isGlobalComponent = deployOptions.global_components.some(
+        (gc) => gc.type === component.type,
+      );
+      if (isGlobalComponent) return;
+
+      const componentConfig = serviceConfig.components[component.type];
+      if (!componentConfig) return;
+
+      // Inference backend overrides provider when set
+      let selectedProviderId = componentConfig.providerId;
+      if (serviceConfig.inferenceBackend) {
+        selectedProviderId = serviceConfig.inferenceBackend;
+      }
+      if (!selectedProviderId) return;
+
+      const provider = component.providers.find(
+        (p) => p.id === selectedProviderId,
+      );
+      if (!provider?.resources) return;
+
+      // Resource sharing is model-aware — same model on same provider counts once
+      const uniqueKey = getResourceSharingKey(
+        serviceId,
+        component.type,
+        selectedProviderId,
+        componentConfig.params || {},
+      );
+
+      if (!uniqueProviders[uniqueKey]) {
+        uniqueProviders[uniqueKey] = {
+          cpu: provider.resources.cpu || 0,
+          memory: provider.resources.memory || 0,
+          storage: provider.resources.storage || 0,
+          accelerators: { ...(provider.resources.accelerators || {}) },
+        };
+      }
+    });
+  });
+
+  return sumProviderResources(uniqueProviders);
+};
+
 export const StepTwo: React.FC<DAStepProps> = ({
   title,
   formData,
@@ -74,143 +198,15 @@ export const StepTwo: React.FC<DAStepProps> = ({
   onResourceStatusChange,
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
-  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Get service description helper from store
   const { getServiceDescription } = useDeployStore();
 
   const { resources, resourcesLoading, resourcesError } = useResources();
-  // Calculate required resources based on selected services and providers
-  const calculatedResources = useMemo(() => {
-    const uniqueProviders: Record<
-      string,
-      {
-        cpu: number;
-        memory: number;
-        storage: number;
-        accelerators: Record<string, number>;
-      }
-    > = {};
-
-    // First, add global components (shared across all services)
-    // Note: Global components get their resources from service-specific component definitions
-    deployOptions.global_components.forEach((globalComponent) => {
-      const globalConfig = formData.globalComponents[globalComponent.type];
-      if (!globalConfig?.providerId) return;
-
-      // Find the first service that has this component type to get resource info
-      let resourceProvider = null;
-      for (const service of deployOptions.services) {
-        const serviceComponent = service.components.find(
-          (c) => c.type === globalComponent.type,
-        );
-        if (serviceComponent) {
-          resourceProvider = serviceComponent.providers.find(
-            (p) => p.id === globalConfig.providerId,
-          );
-          if (resourceProvider?.resources) {
-            break;
-          }
-        }
-      }
-
-      if (!resourceProvider?.resources) return;
-
-      // Global components are shared across all services, use provider+model as key
-      const uniqueKey = getResourceSharingKey(
-        "global", // Use "global" as serviceId for global components
-        globalComponent.type,
-        globalConfig.providerId,
-        globalConfig.params || {},
-      );
-
-      if (!uniqueProviders[uniqueKey]) {
-        uniqueProviders[uniqueKey] = {
-          cpu: resourceProvider.resources.cpu || 0,
-          memory: resourceProvider.resources.memory || 0,
-          storage: resourceProvider.resources.storage || 0,
-          accelerators: { ...(resourceProvider.resources.accelerators || {}) },
-        };
-      }
-    });
-
-    // Then, iterate through all services for service-specific components
-    Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
-      if (!serviceConfig.enabled) return;
-
-      const service = deployOptions.services.find((s) => s.id === serviceId);
-      if (!service) return;
-
-      // Add service-level resources (the service application itself)
-      if (service.resources) {
-        const serviceKey = `service-${serviceId}`;
-        if (!uniqueProviders[serviceKey]) {
-          uniqueProviders[serviceKey] = {
-            cpu: service.resources.cpu || 0,
-            memory: service.resources.memory || 0,
-            storage: service.resources.storage || 0,
-            accelerators: { ...(service.resources.accelerators || {}) },
-          };
-        }
-      }
-
-      // Iterate through all components in the service
-      service.components.forEach((component) => {
-        // Check if this is a global component (already counted above)
-        const isGlobalComponent = deployOptions.global_components.some(
-          (gc) => gc.type === component.type,
-        );
-
-        // Skip global components as they're already counted
-        if (isGlobalComponent) return;
-
-        const componentConfig = serviceConfig.components[component.type];
-        if (!componentConfig) return;
-
-        // For components that support inference backend, use it if available
-        let selectedProviderId = componentConfig.providerId;
-        if (serviceConfig.inferenceBackend) {
-          selectedProviderId = serviceConfig.inferenceBackend;
-        }
-
-        if (!selectedProviderId) return;
-
-        const provider = component.providers.find(
-          (p) => p.id === selectedProviderId,
-        );
-
-        if (!provider?.resources) return;
-
-        // Use dynamic resource sharing logic
-        // Always use component-level params (which contains the model parameter)
-        // This ensures proper resource sharing based on the model being used
-        const paramsForSharing = componentConfig.params || {};
-
-        const uniqueKey = getResourceSharingKey(
-          serviceId,
-          component.type,
-          selectedProviderId,
-          paramsForSharing,
-        );
-
-        if (!uniqueProviders[uniqueKey]) {
-          uniqueProviders[uniqueKey] = {
-            cpu: provider.resources.cpu || 0,
-            memory: provider.resources.memory || 0,
-            storage: provider.resources.storage || 0,
-            accelerators: { ...(provider.resources.accelerators || {}) },
-          };
-        }
-      });
-    });
-
-    return sumProviderResources(uniqueProviders);
-  }, [
-    formData.services,
-    formData.globalComponents,
-    deployOptions.services,
-    deployOptions.global_components,
-  ]);
+  const calculatedResources = useMemo(
+    () => calculateDARequiredResources(formData, deployOptions),
+    [formData, deployOptions],
+  );
 
   // Extract service version options from API response
   const serviceVersionOptions = useMemo(
@@ -368,7 +364,6 @@ export const StepTwo: React.FC<DAStepProps> = ({
 
   const handleEdit = (serviceId: string) => {
     const config = formData.services[serviceId];
-    setValidationError(null);
     dispatch({ type: "SET_TEMP_CONFIG", payload: { ...config } });
     dispatch({ type: "SET_EDITING_SERVICE", payload: serviceId });
     onEditingChange?.(true);
@@ -379,7 +374,6 @@ export const StepTwo: React.FC<DAStepProps> = ({
       return;
     }
 
-    setValidationError(null);
     onChange({
       services: {
         ...formData.services,
@@ -391,15 +385,11 @@ export const StepTwo: React.FC<DAStepProps> = ({
   };
 
   const handleCancel = () => {
-    setValidationError(null);
     dispatch({ type: "RESET_EDITING" });
     onEditingChange?.(false);
   };
 
   const updateTempConfig = (updates: Partial<ServiceConfig>) => {
-    if (validationError) {
-      setValidationError(null);
-    }
     dispatch({ type: "UPDATE_TEMP_CONFIG", payload: updates });
   };
 
@@ -637,12 +627,6 @@ export const StepTwo: React.FC<DAStepProps> = ({
       <div className={styles.stepHeader}>
         <h2 className={styles.stepTitle}>{title}</h2>
       </div>
-
-      {validationError && (
-        <div className={styles.errorContainer}>
-          <p>{validationError}</p>
-        </div>
-      )}
 
       {/* Resource Requirements */}
       <ResourceRequirementsPanel
