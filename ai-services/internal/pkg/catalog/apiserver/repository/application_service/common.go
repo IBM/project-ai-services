@@ -21,10 +21,10 @@ import (
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
