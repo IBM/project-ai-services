@@ -2,21 +2,17 @@ import { useReducer, useMemo, useEffect, useState } from "react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
-import { getResourceStatus, bytesToGB } from "../../Shared/utils/resources";
-import { ResourceRequirements } from "../components/ResourceRequirements";
+import { ResourceRequirementsPanel } from "../../Shared/components/ResourceRequirementsPanel";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
-import { fetchResources } from "@/api/applications.api";
+import { useResources } from "../../Shared/hooks/useResources";
 import {
   useBatchProviderParams,
   useMultiTypeProviderParams,
 } from "../hooks/useProviderParams";
 import { getResourceSharingKey } from "../utils/resourceSharing";
+import { sumProviderResources } from "../../Shared/utils/resources";
 import { useDeployStore } from "@/store/deploy.store";
-import type {
-  ResourcesResponse,
-  DeployOptionsComponent as Component,
-} from "@/types/api.types";
-import type { ResourceItem } from "../../Shared/types";
+import type { DeployOptionsComponent as Component } from "@/types/api.types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
 // Initial state
@@ -83,37 +79,9 @@ export const StepTwo: React.FC<DAStepProps> = ({
   // Get service description helper from store
   const { getServiceDescription } = useDeployStore();
 
-  // Fetch resources directly without caching
-  const [resources, setResources] = useState<ResourcesResponse | null>(null);
-  const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
-  const [resourcesError, setResourcesError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetchResources()
-      .then((data) => {
-        if (!cancelled) {
-          setResources(data);
-          setResourcesLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const errorMessage =
-            err instanceof Error ? err.message : "Failed to load resources";
-          setResourcesError(errorMessage);
-          setResourcesLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const { resources, resourcesLoading, resourcesError } = useResources();
   // Calculate required resources based on selected services and providers
-  const calculateRequiredResources = useMemo(() => {
+  const calculatedResources = useMemo(() => {
     const uniqueProviders: Record<
       string,
       {
@@ -236,128 +204,12 @@ export const StepTwo: React.FC<DAStepProps> = ({
       });
     });
 
-    let totalCPU = 0;
-    let totalMemory = 0;
-    let totalStorage = 0;
-    const totalAccelerators: Record<string, number> = {};
-
-    Object.values(uniqueProviders).forEach((resources) => {
-      totalCPU += resources.cpu;
-      totalMemory += resources.memory;
-      totalStorage += resources.storage;
-
-      Object.entries(resources.accelerators).forEach(([key, count]) => {
-        totalAccelerators[key] = (totalAccelerators[key] || 0) + count;
-      });
-    });
-
-    const memoryGB = Math.round(totalMemory / 1024 ** 3);
-    const storageGB = Math.round(totalStorage / 1024 ** 3);
-
-    return {
-      cpu: totalCPU,
-      memory: memoryGB,
-      accelerators: totalAccelerators,
-      storage: storageGB,
-    };
+    return sumProviderResources(uniqueProviders);
   }, [
     formData.services,
     formData.globalComponents,
     deployOptions.services,
     deployOptions.global_components,
-  ]);
-
-  // Format resources for display
-  const resourceRequirements = useMemo((): ResourceItem[] => {
-    if (!resources) {
-      return [];
-    }
-
-    const resourceItems: ResourceItem[] = [];
-
-    // 1. CPU (always present)
-    resourceItems.push({
-      label: "Processors",
-      required: calculateRequiredResources.cpu.toString(),
-      available: Math.floor(resources.cpu.available_cpu).toString(),
-      unit: "vCPUs",
-      type: "cpu",
-    });
-
-    // 2. Memory (always present)
-    resourceItems.push({
-      label: "Memory",
-      required: calculateRequiredResources.memory.toString(),
-      available: bytesToGB(resources.memory.available_bytes).toString(),
-      unit: "GB",
-      type: "memory",
-    });
-
-    // 3. Accelerators (may be empty object or contain multiple types)
-    const acceleratorKeys = Object.keys(resources.accelerators);
-    const totalRequired = Object.values(
-      calculateRequiredResources.accelerators,
-    ).reduce((sum, val) => sum + val, 0);
-
-    if (acceleratorKeys.length > 0) {
-      // Handle each accelerator type separately
-      acceleratorKeys.forEach((acceleratorKey) => {
-        const acceleratorData = resources.accelerators[acceleratorKey];
-        const requiredCount =
-          calculateRequiredResources.accelerators[acceleratorKey] || 0;
-
-        resourceItems.push({
-          label: "Accelerators",
-          required: requiredCount.toString(),
-          available: acceleratorData.available.toString(),
-          unit: "Cards",
-          type: "accelerator",
-          acceleratorType: acceleratorKey,
-        });
-      });
-    } else {
-      // No accelerators available in system - always show with 0 available
-      resourceItems.push({
-        label: "Accelerators",
-        required: totalRequired.toString(),
-        available: "0",
-        unit: "Cards",
-        type: "accelerator",
-      });
-    }
-
-    // 4. Storage (not provided by API, show required only)
-    if (calculateRequiredResources.storage > 0) {
-      resourceItems.push({
-        label: "Disk storage",
-        required: calculateRequiredResources.storage.toString(),
-        available: "N/A",
-        unit: "GB",
-        type: "storage",
-      });
-    }
-
-    return resourceItems;
-  }, [resources, calculateRequiredResources]);
-
-  // Check for insufficient resources and notify parent
-  useEffect(() => {
-    if (!resourcesLoading && !resourcesError && resources) {
-      const hasInsufficientResources = resourceRequirements.some((resource) => {
-        const status = getResourceStatus(resource.required, resource.available);
-        return status === "insufficient";
-      });
-      onResourceStatusChange?.(hasInsufficientResources);
-    } else {
-      // If resources are loading, in error state, or not available, consider it as insufficient
-      onResourceStatusChange?.(true);
-    }
-  }, [
-    resourceRequirements,
-    resourcesLoading,
-    resourcesError,
-    resources,
-    onResourceStatusChange,
   ]);
 
   // Extract service version options from API response
@@ -793,11 +645,12 @@ export const StepTwo: React.FC<DAStepProps> = ({
       )}
 
       {/* Resource Requirements */}
-      <ResourceRequirements
-        resourceRequirements={resourceRequirements}
+      <ResourceRequirementsPanel
+        calculatedResources={calculatedResources}
+        resourceData={resources}
         resourcesLoading={resourcesLoading}
         resourcesError={resourcesError}
-        resourceData={!!resources}
+        onResourceStatusChange={onResourceStatusChange}
       />
 
       {/* Service Configurations - Rendered Dynamically */}
