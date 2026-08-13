@@ -257,8 +257,8 @@ async def _process_new_files(
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
 
-    for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
-        batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
+    for batch_number, batch_offset in enumerate(range(0, len(ingest_list), _BATCH_SIZE), start=1):
+        batch = ingest_list[batch_offset : batch_offset + _BATCH_SIZE]
 
         # Cancellation checkpoint: bail before each batch starts.
         interrupt = _check_interrupt_call(connector_id, sync_seq)
@@ -318,7 +318,7 @@ async def _process_new_files(
 
         except Exception as exc:
             logger.warning(
-                f"Failed to ingest batch {batch_number!r} for connector {connector_id!r}: {exc}",
+                f"Failed to ingest batch {batch_number} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
             batch_failed = True
