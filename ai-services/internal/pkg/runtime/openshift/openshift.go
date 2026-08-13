@@ -39,6 +39,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ErrNamespaceNotFound is returned by GetNamespace when the namespace does not exist.
+var ErrNamespaceNotFound = errors.New("namespace not found")
+
 var (
 	scheme = runtime.NewScheme()
 
@@ -186,18 +189,18 @@ func (kc *OpenshiftClient) PullImage(image string) error {
 	return nil
 }
 
-// NamespaceExists reports whether the configured namespace exists.
-func (kc *OpenshiftClient) NamespaceExists() (bool, error) {
-	_, err := kc.KubeClient.CoreV1().Namespaces().Get(kc.Ctx, kc.Namespace, metav1.GetOptions{})
+// GetNamespace fetches the namespace details.
+func (kc *OpenshiftClient) GetNamespace() (string, error) {
+	ns, err := kc.KubeClient.CoreV1().Namespaces().Get(kc.Ctx, kc.Namespace, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			return false, nil
+			return "", fmt.Errorf("%w: %s", ErrNamespaceNotFound, kc.Namespace)
 		}
 
-		return false, fmt.Errorf("failed to check namespace existence: %w", err)
+		return "", fmt.Errorf("failed to get namespace: %w", err)
 	}
 
-	return true, nil
+	return ns.Name, nil
 }
 
 // ListPods lists pods with optional filters.

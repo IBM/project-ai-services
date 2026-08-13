@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -191,6 +193,13 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	}
 
 	logger.InfofCtx(ctx, "Syncing application: %s (ID: %s)", app.Name, app.ID)
+
+	// Fail early if the namespace does not exist (OpenShift only — podman has no namespace concept).
+	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
+		if _, err := rt.GetNamespace(); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
+			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
+		}
+	}
 
 	// Track errors during sync
 	errorMessages := []string{}

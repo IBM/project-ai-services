@@ -31,12 +31,9 @@ func newOpenShiftSync() *openShiftSync {
 
 // FetchPodStatuses fetches all pods labelled with the given templateID using the OpenShift runtime.
 func (s *openShiftSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	exists, err := rt.NamespaceExists()
+	_, err := rt.GetNamespace()
 	if err != nil {
 		return nil, err
-	}
-	if !exists {
-		return nil, fmt.Errorf("namespace does not exist")
 	}
 
 	filteredPods, err := common.FetchFilteredPods(rt, templateID)
