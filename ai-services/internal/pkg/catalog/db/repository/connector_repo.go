@@ -20,7 +20,7 @@ var ErrConnectorNotFound = errors.New("connector not found")
 // ConnectorFilters defines optional filters and pagination parameters for List queries.
 type ConnectorFilters struct {
 	Status   models.ConnectorStatus // Optional: filter by connector status
-	Provider string                 // Optional: filter by provider identifier (e.g. "s3", "ssh")
+	Provider string                 // Optional: filter by provider identifier (e.g. "s3", "file_system")
 	Limit    int                    // Optional: maximum number of records to return
 	Offset   int                    // Optional: number of records to skip
 }
