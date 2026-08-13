@@ -1261,13 +1261,11 @@ class DatabaseManager:
                         f"Sync log connector={connector_id!r} seq={seq} not found for update"
                     )
                     return False
-                # When a tick is cancelled (stop-sync request) the connector
-                # should revert to 'out of sync' so the scheduler can run the
-                # next tick normally.  All other terminal statuses are written
-                # through verbatim (completed → 'completed', failed → 'failed').
+                # Cancelled and failed ticks both leave the connector OUT_OF_SYNC
+                # so the scheduler can retry.  Only COMPLETED writes through verbatim.
                 connector_sync_status = (
                     SyncStatus.OUT_OF_SYNC
-                    if status == SyncStatus.CANCELLED
+                    if status in (SyncStatus.CANCELLED, SyncStatus.FAILED)
                     else status
                 )
                 session.execute(

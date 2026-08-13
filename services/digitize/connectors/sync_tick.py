@@ -253,8 +253,12 @@ async def _process_new_files(
     registered as a single job, and passed to ``ingest()`` together.
 
     Staging directories are removed after each batch regardless of success.
+
+    Raises ``RuntimeError`` after processing all batches if any batch failed,
+    so the caller can mark the connector as OUT_OF_SYNC.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
+    batch_failed = False
 
     for batch_number in range(0, len(ingest_list), _BATCH_SIZE):
         batch = ingest_list[batch_number : batch_number + _BATCH_SIZE]
@@ -312,14 +316,24 @@ async def _process_new_files(
 
             await _wait_for_job(job_id, connector_id, sync_seq)
 
+        except asyncio.CancelledError:
+            raise
+
         except Exception as exc:
             logger.warning(
                 f"Failed to ingest batch {batch_number!r} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
+            batch_failed = True
 
         finally:
             cleanup_staging_directory(batch_dir_name, staging_base, ignore_errors=True)
+
+    if batch_failed:
+        raise RuntimeError(
+            f"One or more batches failed to ingest for connector {connector_id!r}; "
+            "connector marked as out of sync"
+        )
 
 
 # ---------------------------------------------------------------------------
