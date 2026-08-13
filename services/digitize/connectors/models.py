@@ -7,6 +7,7 @@ Covers:
   GET  /v1/connectors
   GET  /v1/connectors/{connector_id}
   GET  /v1/connectors/{connector_id}/syncs
+  GET  /v1/connectors/{connector_id}/syncs/{sync_seq}
 """
 
 from enum import Enum
@@ -141,6 +142,19 @@ class SyncLogResponse(BaseModel):
     limit: int
     offset: int
     items: List[SyncLogItem]
+
+
+class SyncLogDetailResponse(BaseModel):
+    """Single sync-log item returned by GET /v1/connectors/{connector_id}/syncs/{sync_seq}."""
+
+    seq: int
+    started_at: str
+    finished_at: Optional[str]
+    total_files: int
+    new_files: int
+    removed_files: int
+    status: str
+    error: str
 
 
 class SyncTriggerResponse(BaseModel):

@@ -1431,6 +1431,15 @@ def list_sync_logs(
     return db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
 
 
+def get_sync_log(connector_id: str, seq: int) -> Optional[ConnectorSyncLog]:
+    """
+    Return the connector_sync_logs row for (connector_id, seq).
+
+    Returns None if the row does not exist.
+    """
+    return db_manager.get_sync_log(connector_id, seq)
+
+
 def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
     """
     Return the status of the connector_sync_logs row for (connector_id, seq).

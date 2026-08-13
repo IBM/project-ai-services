@@ -12,6 +12,7 @@ Coverage:
   - GET    /v1/connectors                                 (200)
   - GET    /v1/connectors/{id}                            (200, 404)
   - GET    /v1/connectors/{id}/syncs                      (200, 404)
+  - GET    /v1/connectors/{id}/syncs/{sync_seq}           (200, 404)
   - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
   - POST   /v1/connectors/{id}/syncs/{sync_seq}/stop      (204 signalled, 409 stale seq, 409 not running, 404)
   - GET    /v1/documents — excludes connector-sourced docs
@@ -537,6 +538,51 @@ class TestSyncLog:
             f"/v1/connectors/{CONNECTOR_ID}/syncs?limit=999"
         )
         assert response.status_code == 422  # FastAPI validation error
+
+
+class TestGetSync:
+    def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
+        log = _make_sync_log(seq=3)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log",
+            Mock(return_value=log),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/3"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["seq"] == 3
+        assert data["status"] == SyncStatus.COMPLETED
+        assert data["total_files"] == 42
+
+    def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/999"
+        )
+        assert response.status_code == 404
+
+    def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/3"
+        )
+        assert response.status_code == 404
 
 
 # ===========================================================================

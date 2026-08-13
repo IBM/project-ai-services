@@ -10,6 +10,7 @@ Endpoints:
   GET    /v1/connectors
   GET    /v1/connectors/{connector_id}
   GET    /v1/connectors/{connector_id}/syncs
+  GET    /v1/connectors/{connector_id}/syncs/{sync_seq}
   POST   /v1/connectors/{connector_id}/syncs
   POST   /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 """
@@ -27,6 +28,7 @@ from digitize.connectors.models import (
     ConnectorDetailResponse,
     ConnectorListItem,
     ConnectorUpdateRequest,
+    SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
     SyncStatus,
@@ -640,6 +642,58 @@ async def get_sync_history(
     except Exception as exc:
         logger.error(
             f"Unexpected error fetching sync log for {connector_id}: {exc}",
+            exc_info=True,
+        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/connectors/{connector_id}/syncs/{sync_seq}
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{connector_id}/syncs/{sync_seq}",
+    response_model=SyncLogDetailResponse,
+    responses={
+        404: http_error_responses[404],
+        500: http_error_responses[500],
+    },
+    summary="Get a specific sync log entry",
+    description="Returns one sync log entry identified by its sequence number.",
+    response_description="Sync log entry",
+)
+async def get_sync(connector_id: str, sync_seq: int):
+    try:
+        connector = db_ops.get_active_connector(connector_id)
+        if connector is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Connector {connector_id!r} not found",
+            )
+
+        log = db_ops.get_sync_log(connector_id, sync_seq)
+        if log is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Sync {sync_seq} not found for connector {connector_id!r}",
+            )
+
+        return SyncLogDetailResponse(
+            seq=log.seq,
+            started_at=get_utc_timestamp(log.started_at) or "",
+            finished_at=get_utc_timestamp(log.finished_at),
+            total_files=log.total_files,
+            new_files=log.new_files,
+            removed_files=log.removed_files,
+            status=log.status,
+            error=log.error or "",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            f"Unexpected error fetching sync {sync_seq} for {connector_id}: {exc}",
             exc_info=True,
         )
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))

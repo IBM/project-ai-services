@@ -1338,6 +1338,38 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_sync_log(connector_id: str, seq: int) -> Optional[ConnectorSyncLog]:
+        """Return a specific sync-log row identified by (connector_id, seq)."""
+        try:
+            with get_db_session() as session:
+                stmt = select(ConnectorSyncLog).where(
+                    ConnectorSyncLog.connector_id == connector_id,
+                    ConnectorSyncLog.seq == seq,
+                )
+                row = session.scalars(stmt).one_or_none()
+                if row is None:
+                    return None
+                _ = (
+                    row.connector_id,
+                    row.seq,
+                    row.started_at,
+                    row.finished_at,
+                    row.total_files,
+                    row.new_files,
+                    row.removed_files,
+                    row.status,
+                    row.error,
+                )
+                session.expunge(row)
+                return row
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
     def get_sync_logs(
         connector_id: str,
         limit: int = 50,
@@ -1353,7 +1385,7 @@ class DatabaseManager:
                 base = select(ConnectorSyncLog).where(
                     ConnectorSyncLog.connector_id == connector_id
                 )
-                total: int = session.execute(
+                total = session.execute(
                     select(func.count()).select_from(base.subquery())
                 ).scalar() or 0
 
