@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useCallback, useRef, useMemo } from "react";
+import { useReducer, useEffect, useRef, useMemo } from "react";
 import { Tearsheet } from "@carbon/ibm-products";
 import {
   ProgressIndicator,
@@ -10,7 +10,10 @@ import type { DeployFlowState, DeployFlowAction } from "./types.ts";
 import type { BaseDeployFlowProps, DeployFormData } from "../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
-import { handleUpdateFormData } from "../Shared/utils/formData";
+import {
+  sharedDeployFlowReducer,
+  useDeployFlowReducer,
+} from "../Shared/hooks/useDeployFlowReducer";
 import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { extractDeployError } from "../Shared/utils/deployError";
@@ -19,51 +22,26 @@ import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
+import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
 import { dedupe } from "@/utils/requestManager";
 import styles from "./DigitalAssistantDeployFlow.module.scss";
 
 const getInitialState = (formData: DeployFormData): DeployFlowState => ({
-  currentStep: 0,
+  ...BASE_INITIAL_STATE,
   isLoading: false,
-  isDeploying: false,
-  isEditing: false,
-  hasInsufficientResources: false,
   error: null,
-  deployError: null,
-  deployToastOpen: false,
   formData,
-  showStepOneNameError: false,
 });
 
-const deployFlowReducer = (
+const daDeployFlowReducer = (
   state: DeployFlowState,
   action: DeployFlowAction,
 ): DeployFlowState => {
   switch (action.type) {
-    case ACTION_TYPES.SET_CURRENT_STEP:
-      return { ...state, currentStep: action.payload };
     case ACTION_TYPES.SET_IS_LOADING:
       return { ...state, isLoading: action.payload };
-    case ACTION_TYPES.SET_IS_DEPLOYING:
-      return { ...state, isDeploying: action.payload };
-    case ACTION_TYPES.SET_IS_EDITING:
-      return { ...state, isEditing: action.payload };
-    case ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES:
-      return { ...state, hasInsufficientResources: action.payload };
     case ACTION_TYPES.SET_ERROR:
       return { ...state, error: action.payload };
-    case ACTION_TYPES.SET_DEPLOY_ERROR:
-      return { ...state, deployError: action.payload };
-    case ACTION_TYPES.SHOW_DEPLOY_TOAST:
-      return { ...state, deployToastOpen: true };
-    case ACTION_TYPES.HIDE_DEPLOY_TOAST:
-      return { ...state, deployToastOpen: false };
-    case ACTION_TYPES.SET_FORM_DATA:
-      return { ...state, formData: action.payload };
-    case ACTION_TYPES.UPDATE_FORM_DATA:
-      return handleUpdateFormData(state, action.payload);
-    case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
-      return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState({
         name: "Digital assistant (copy)",
@@ -72,7 +50,7 @@ const deployFlowReducer = (
         services: {},
       });
     default:
-      return state;
+      return sharedDeployFlowReducer(state, action);
   }
 };
 
@@ -142,7 +120,7 @@ export const DeployFlow = ({
     });
   }, [deployOptions]);
 
-  const [state, dispatch] = useReducer(deployFlowReducer, initialState);
+  const [state, dispatch] = useReducer(daDeployFlowReducer, initialState);
   const hasInitialized = useRef(false);
 
   useEffect(() => {
@@ -172,26 +150,12 @@ export const DeployFlow = ({
     }
   }, [error]);
 
-  const handleFormDataChange = useCallback(
-    (updates: Partial<DeployFormData>) => {
-      dispatch({ type: ACTION_TYPES.UPDATE_FORM_DATA, payload: updates });
-    },
-    [],
-  );
-
-  const handleEditingChange = useCallback((isEditing: boolean) => {
-    dispatch({ type: ACTION_TYPES.SET_IS_EDITING, payload: isEditing });
-  }, []);
-
-  const handleResourceStatusChange = useCallback(
-    (hasInsufficientResources: boolean) => {
-      dispatch({
-        type: ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES,
-        payload: hasInsufficientResources,
-      });
-    },
-    [],
-  );
+  const {
+    handleFormDataChange,
+    handleEditingChange,
+    handleResourceStatusChange,
+    handleBack,
+  } = useDeployFlowReducer(dispatch, state.currentStep);
 
   const handleNext = () => {
     if (!state.formData.name.trim()) {
@@ -210,15 +174,6 @@ export const DeployFlow = ({
       dispatch({
         type: ACTION_TYPES.SET_CURRENT_STEP,
         payload: state.currentStep + 1,
-      });
-    }
-  };
-
-  const handleBack = () => {
-    if (state.currentStep > 0) {
-      dispatch({
-        type: ACTION_TYPES.SET_CURRENT_STEP,
-        payload: state.currentStep - 1,
       });
     }
   };

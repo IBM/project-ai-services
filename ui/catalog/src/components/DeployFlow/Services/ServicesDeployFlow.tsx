@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useCallback, useRef, useMemo } from "react";
+import { useReducer, useEffect, useRef, useMemo } from "react";
 import { Tearsheet } from "@carbon/ibm-products";
 import {
   ProgressIndicator,
@@ -11,9 +11,12 @@ import type {
   DeployFlowState,
   DeployFlowAction,
 } from "./types.ts";
-import type { DeployFormData, ComponentConfig } from "../Shared/types";
+import type { ComponentConfig } from "../Shared/types";
 import { ACTION_TYPES } from "./types.ts";
-import { handleUpdateFormData } from "../Shared/utils/formData";
+import {
+  sharedDeployFlowReducer,
+  useDeployFlowReducer,
+} from "../Shared/hooks/useDeployFlowReducer";
 import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform";
 import { extractDeployError } from "../Shared/utils/deployError";
@@ -23,15 +26,12 @@ import { StepZero } from "./steps/StepZero";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
+import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
 import styles from "./ServicesDeployFlow.module.scss";
 
 // Initial state for the deployment flow
 const getInitialState = (): DeployFlowState => ({
-  currentStep: 0,
-  isDeploying: false,
-  isEditing: false,
-  hasInsufficientResources: false,
-  deployError: null,
+  ...BASE_INITIAL_STATE,
   formData: {
     name: "Service deployment (copy)",
     version: "",
@@ -39,36 +39,19 @@ const getInitialState = (): DeployFlowState => ({
     services: {},
   },
   selectedServiceId: null,
-  showStepOneNameError: false,
 });
 
-const deployFlowReducer = (
+const servicesDeployFlowReducer = (
   state: DeployFlowState,
   action: DeployFlowAction,
 ): DeployFlowState => {
   switch (action.type) {
-    case ACTION_TYPES.SET_CURRENT_STEP:
-      return { ...state, currentStep: action.payload };
-    case ACTION_TYPES.SET_IS_DEPLOYING:
-      return { ...state, isDeploying: action.payload };
-    case ACTION_TYPES.SET_IS_EDITING:
-      return { ...state, isEditing: action.payload };
-    case ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES:
-      return { ...state, hasInsufficientResources: action.payload };
-    case ACTION_TYPES.SET_DEPLOY_ERROR:
-      return { ...state, deployError: action.payload };
-    case ACTION_TYPES.SET_FORM_DATA:
-      return { ...state, formData: action.payload };
-    case ACTION_TYPES.UPDATE_FORM_DATA:
-      return handleUpdateFormData(state, action.payload);
     case ACTION_TYPES.SET_SELECTED_SERVICE:
       return { ...state, selectedServiceId: action.payload };
-    case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
-      return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState();
     default:
-      return state;
+      return sharedDeployFlowReducer(state, action);
   }
 };
 
@@ -78,7 +61,7 @@ export const ServicesDeployFlow = ({
   onSubmit,
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
-  const [state, dispatch] = useReducer(deployFlowReducer, {
+  const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId || null,
     currentStep: preSelectedServiceId ? 1 : 0, // Start at step 1 if service is pre-selected
@@ -285,31 +268,17 @@ export const ServicesDeployFlow = ({
     componentModels,
   ]);
 
-  const handleFormDataChange = useCallback(
-    (updates: Partial<DeployFormData>) => {
-      dispatch({ type: ACTION_TYPES.UPDATE_FORM_DATA, payload: updates });
-    },
-    [],
-  );
+  const {
+    handleFormDataChange,
+    handleEditingChange,
+    handleResourceStatusChange,
+    handleBack,
+  } = useDeployFlowReducer(dispatch, state.currentStep);
 
-  const handleEditingChange = useCallback((isEditing: boolean) => {
-    dispatch({ type: ACTION_TYPES.SET_IS_EDITING, payload: isEditing });
-  }, []);
-
-  const handleResourceStatusChange = useCallback(
-    (hasInsufficientResources: boolean) => {
-      dispatch({
-        type: ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES,
-        payload: hasInsufficientResources,
-      });
-    },
-    [],
-  );
-
-  const handleServiceSelect = useCallback((serviceId: string) => {
+  const handleServiceSelect = (serviceId: string) => {
     // Service selection will trigger useServiceDeployOptions to fetch data
     dispatch({ type: ACTION_TYPES.SET_SELECTED_SERVICE, payload: serviceId });
-  }, []);
+  };
 
   const handleNext = () => {
     // Show validation error if trying to proceed from step 1 with invalid name
@@ -325,15 +294,6 @@ export const ServicesDeployFlow = ({
       dispatch({
         type: ACTION_TYPES.SET_CURRENT_STEP,
         payload: state.currentStep + 1,
-      });
-    }
-  };
-
-  const handleBack = () => {
-    if (state.currentStep > 0) {
-      dispatch({
-        type: ACTION_TYPES.SET_CURRENT_STEP,
-        payload: state.currentStep - 1,
       });
     }
   };
