@@ -1,0 +1,9 @@
+# Connector identification
+type: connector
+id: file_system
+name: "File system"
+description: "Connect to a remote file system over SSH as a document source for ingestion pipelines."
+
+# Connector type this provider belongs to
+connector_type: datasource
+connector_name: "Data source"

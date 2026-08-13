@@ -1,7 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "title": "SSH Datasource Configuration",
   "required": [
     "host",
     "username",
@@ -37,7 +36,10 @@
       "description": "Restrict ingestion to files whose name ends with one of these extensions.",
       "items": {
         "type": "string",
-        "enum": [".pdf", ".docx"]
+        "enum": [
+          ".pdf",
+          ".docx"
+        ]
       }
     }
   },

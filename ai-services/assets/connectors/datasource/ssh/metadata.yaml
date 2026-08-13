@@ -1,9 +1,0 @@
-# Connector identification
-type: connector
-id: ssh
-name: "SSH Remote File Server"
-description: "Connect to a remote file server over SSH as a document source for ingestion pipelines."
-
-# Connector type this provider belongs to
-connector_type: datasource
-connector_type_name: "Datasource"

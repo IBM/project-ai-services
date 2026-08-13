@@ -1,9 +1,9 @@
 # Connector identification
 type: connector
-id: s3
-name: "Amazon S3 / S3-Compatible Object Storage"
+id: object_storage
+name: "Object Storage"
 description: "Connect to an S3-compatible object storage bucket as a document source for ingestion pipelines."
 
 # Connector type this provider belongs to
 connector_type: datasource
-connector_type_name: "Datasource"
+connector_name: "Data source"

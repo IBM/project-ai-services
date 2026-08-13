@@ -936,7 +936,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Provider identifier (e.g. 's3', 'ssh')",
+                        "description": "Provider identifier (e.g. 'object_storage', 'file_system')",
                         "name": "provider_id",
                         "in": "path",
                         "required": true
@@ -1566,12 +1566,12 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector": {
             "type": "object",
             "properties": {
-                "connector_type": {
-                    "description": "e.g. \"datasource\"",
+                "connector_name": {
+                    "description": "display label for connector_type",
                     "type": "string"
                 },
-                "connector_type_name": {
-                    "description": "display label for connector_type",
+                "connector_type": {
+                    "description": "e.g. \"datasource\"",
                     "type": "string"
                 },
                 "description": {
@@ -1579,7 +1579,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "description": "e.g. \"s3\", \"ssh\"",
+                    "description": "e.g. \"object_storage\", \"file_system\"",
                     "type": "string"
                 },
                 "name": {
@@ -1672,11 +1672,8 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService": {
             "type": "object",
             "properties": {
-                "accepts_connectors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "accepts_datasource": {
+                    "type": "boolean"
                 },
                 "components": {
                     "type": "array",
@@ -1802,11 +1799,8 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service": {
             "type": "object",
             "properties": {
-                "accepts_connectors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "accepts_datasource": {
+                    "type": "boolean"
                 },
                 "architectures": {
                     "type": "array",

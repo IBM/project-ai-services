@@ -280,7 +280,7 @@ func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			connector_type	path		string					true	"Connector type (e.g. 'datasource')"
-//	@Param			provider_id		path		string					true	"Provider identifier (e.g. 's3', 'ssh')"
+//	@Param			provider_id		path		string					true	"Provider identifier (e.g. 'object_storage', 'file_system')"
 //	@Success		200				{object}	map[string]interface{}	"JSON Schema for the provider's configuration"
 //	@Failure		401				{object}	ErrorResponse			"Unauthorized"
 //	@Failure		404				{object}	ErrorResponse			"Connector type or provider not found"

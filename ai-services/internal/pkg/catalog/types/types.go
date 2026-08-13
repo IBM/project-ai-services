@@ -112,7 +112,7 @@ type Service struct {
 	Architectures     []string              `yaml:"architectures" json:"architectures"`
 	Dependencies      []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 	Standalone        bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
-	AcceptsConnectors []string              `yaml:"accepts_connectors,omitempty" json:"accepts_connectors,omitempty"`
+	AcceptsDatasource bool                  `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"`
 	About             *yaml.Node            `yaml:"-" json:"-"`
 }
 
@@ -182,12 +182,12 @@ type ComponentSummary struct {
 
 // Connector holds the metadata loaded from a connector's metadata.yaml file.
 type Connector struct {
-	Type              string `yaml:"type" json:"type"`                               // always "connector"
-	ID                string `yaml:"id" json:"id"`                                   // e.g. "s3", "ssh"
-	Name              string `yaml:"name" json:"name"`                               // display name
-	Description       string `yaml:"description" json:"description"`                 // short description
-	ConnectorType     string `yaml:"connector_type" json:"connector_type"`           // e.g. "datasource"
-	ConnectorTypeName string `yaml:"connector_type_name" json:"connector_type_name"` // display label for connector_type
+	Type          string `yaml:"type" json:"type"`                     // always "connector"
+	ID            string `yaml:"id" json:"id"`                         // e.g. "object_storage", "file_system"
+	Name          string `yaml:"name" json:"name"`                     // display name
+	Description   string `yaml:"description" json:"description"`       // short description
+	ConnectorType string `yaml:"connector_type" json:"connector_type"` // e.g. "datasource"
+	ConnectorName string `yaml:"connector_name" json:"connector_name"` // display label for connector_type
 }
 
 // RuntimeMetadata contains runtime-specific metadata.
@@ -222,7 +222,7 @@ type DeployOptionsService struct {
 	Schema            string                   `json:"schema,omitempty"`
 	Components        []DeployOptionsComponent `json:"components"`
 	Resources         *Resources               `json:"resources,omitempty"`
-	AcceptsConnectors []string                 `json:"accepts_connectors,omitempty"`
+	AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.
