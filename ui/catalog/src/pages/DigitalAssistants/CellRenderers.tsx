@@ -60,8 +60,7 @@ interface CellRendererProps {
 }
 
 export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
-  const canDelete =
-    rowData?.status === "Running" || rowData?.status === "Error";
+  const canDelete = rowData?.status !== "Deleting";
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">

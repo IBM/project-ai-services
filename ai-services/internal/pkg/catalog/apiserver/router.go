@@ -63,6 +63,8 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
 		catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
 		catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
+		catalog.GET("/connectors", catalogHandler.ListConnectorProviders)
+		catalog.GET("/connectors/:connector_type/providers/:provider_id/params", catalogHandler.GetConnectorProviderParams)
 	}
 
 	applications := v1.Group("applications")

@@ -40,6 +40,7 @@ var (
 	providedTemplate            string
 	appRuntime                  string
 	deleteExistingApp           bool
+	runFailureTests             bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -77,7 +78,9 @@ func init() {
 	flag.StringVar(&providedTemplate, "template", "rag", "Template to use for application creation (rag, summarize, digitize)")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
-
+	flag.BoolVar(&runFailureTests, "run-failure-tests", false,
+		"Opt in to running failure test suites (bootstrap, catalog, similarity). "+
+			"Failure tests are skipped by default to prevent accidental execution during a normal suite run.")
 }
 
 func TestE2E(t *testing.T) {

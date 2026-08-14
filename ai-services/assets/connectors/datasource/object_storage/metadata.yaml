@@ -1,0 +1,9 @@
+# Connector identification
+type: connector
+id: object_storage
+name: "Object storage"
+description: "HTTPS based connection with cloud S3-compatible object storage support"
+
+# Connector type this provider belongs to
+connector_type: datasource
+connector_name: "Data sources"
