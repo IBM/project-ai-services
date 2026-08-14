@@ -15,7 +15,7 @@ const (
 )
 
 // Connector represents a tenant-level named remote content source registered in the catalog.
-// Sensitive credential fields within Metadata are stored encrypted (see ST-9).
+// Sensitive credential fields within Metadata are stored encrypted.
 type Connector struct {
 	ID        uuid.UUID       `json:"id"`
 	Name      string          `json:"name"`

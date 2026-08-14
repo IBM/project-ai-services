@@ -41,12 +41,10 @@ type ConnectorRepository interface {
 	// responsible for decrypting sensitive fields in-memory and must never forward the
 	// raw value to any API response.
 	// Returns ErrConnectorNotFound if the row does not exist.
-	// TODO: decrypt sensitive fields in Metadata when includeCreds is true.
 	GetByID(ctx context.Context, id uuid.UUID, includeCreds bool) (*models.Connector, error)
-	// List returns a page of connectors matching the optional filters together with the
-	// total count of matching rows (for pagination metadata).
+	// List returns a page of connectors matching the optional filters.
 	// Sensitive metadata is never included in the returned structs.
-	List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, int, error)
+	List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, error)
 	// GetCount returns the total count of connectors matching the filters.
 	GetCount(ctx context.Context, filters *ConnectorFilters) (int, error)
 	// Update applies a partial update of credential metadata fields only.
@@ -70,23 +68,12 @@ func NewConnectorRepository(pool *pgxpool.Pool) ConnectorRepository {
 	return &connectorRepo{pool: pool}
 }
 
-// connectorPublicCols are the columns that are safe to return in API responses.
-var connectorPublicCols = []string{
-	"id", "name", "type", "provider", "status", "message", "created_by", "created_at", "updated_at",
-}
-
-// connectorSensitiveCols are the credential columns that must never appear in API responses.
-// They are appended to connectorPublicCols to form the full column list for internal queries.
-var connectorSensitiveCols = []string{
-	"metadata",
-}
-
 // nonSensitiveColumns is the SELECT projection for API-safe queries.
-var nonSensitiveColumns = strings.Join(connectorPublicCols, ", ")
+const nonSensitiveColumns = "id, name, type, provider, status, message, created_by, created_at, updated_at"
 
-// allColumns appends the sensitive columns to the public ones for internal-use queries
+// allColumns extends nonSensitiveColumns with credential columns for internal-use queries
 // (sync job, Digitize propagation). Never use this on any response path.
-var allColumns = strings.Join(append(connectorPublicCols, connectorSensitiveCols...), ", ")
+const allColumns = nonSensitiveColumns + ", metadata"
 
 // scanConnector scans a pgx.Rows row projected from nonSensitiveColumns into a Connector.
 func scanConnector(rows pgx.Rows) (*models.Connector, error) {
@@ -209,8 +196,9 @@ func (r *connectorRepo) GetByID(ctx context.Context, id uuid.UUID, includeCreds 
 	return scanConnector(rows)
 }
 
-// GetCount returns the total count of connectors matching the filters.
-func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters) (int, error) {
+// buildWhereClause constructs the WHERE clause string and positional arguments from the
+// status and provider filters.
+func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 	args := []interface{}{}
 	whereClauses := []string{}
 
@@ -229,6 +217,13 @@ func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters)
 	if len(whereClauses) > 0 {
 		where = " WHERE " + strings.Join(whereClauses, " AND ")
 	}
+
+	return where, args
+}
+
+// GetCount returns the total count of connectors matching the filters.
+func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters) (int, error) {
+	where, args := buildWhereClause(filters)
 
 	var total int
 	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM connectors`+where, args...).Scan(&total); err != nil {
@@ -240,24 +235,7 @@ func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters)
 
 // buildListQuery constructs the SELECT query and arguments for List.
 func (r *connectorRepo) buildListQuery(filters *ConnectorFilters) (string, []interface{}) {
-	args := []interface{}{}
-	whereClauses := []string{}
-
-	if filters != nil {
-		if filters.Status != "" {
-			whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", len(args)+1))
-			args = append(args, filters.Status)
-		}
-		if filters.Provider != "" {
-			whereClauses = append(whereClauses, fmt.Sprintf("provider = $%d", len(args)+1))
-			args = append(args, filters.Provider)
-		}
-	}
-
-	where := ""
-	if len(whereClauses) > 0 {
-		where = " WHERE " + strings.Join(whereClauses, " AND ")
-	}
+	where, args := buildWhereClause(filters)
 
 	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors` + where + ` ORDER BY created_at DESC`
 
@@ -275,19 +253,14 @@ func (r *connectorRepo) buildListQuery(filters *ConnectorFilters) (string, []int
 	return query, args
 }
 
-// List returns a page of connectors matching optional filters and the total count of matching rows.
+// List returns a page of connectors matching optional filters.
 // Sensitive metadata is not selected.
-func (r *connectorRepo) List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, int, error) {
-	total, err := r.GetCount(ctx, filters)
-	if err != nil {
-		return nil, 0, err
-	}
-
+func (r *connectorRepo) List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, error) {
 	listQuery, args := r.buildListQuery(filters)
 
 	rows, err := r.pool.Query(ctx, listQuery, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list connectors: %w", err)
+		return nil, fmt.Errorf("failed to list connectors: %w", err)
 	}
 	defer rows.Close()
 
@@ -295,16 +268,16 @@ func (r *connectorRepo) List(ctx context.Context, filters *ConnectorFilters) ([]
 	for rows.Next() {
 		c, err := scanConnector(rows)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		connectors = append(connectors, *c)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating connectors: %w", err)
+		return nil, fmt.Errorf("error iterating connectors: %w", err)
 	}
 
-	return connectors, total, nil
+	return connectors, nil
 }
 
 // Update replaces the metadata JSONB column for the given connector.
