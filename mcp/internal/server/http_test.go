@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/project-ai-services/mcp/internal/openapi"
-	"github.com/project-ai-services/mcp/internal/tool"
-	"github.com/project-ai-services/mcp/internal/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/project-ai-services/mcp/internal/openapi"
+	"github.com/project-ai-services/mcp/internal/tool"
+	"github.com/project-ai-services/mcp/internal/types"
 	"golang.org/x/time/rate"
 )
 
@@ -121,7 +121,6 @@ func createTestAggregator() *tool.Aggregator {
 			},
 		},
 	}
-
 
 	// Create proper mock document
 	info := &base.Info{
@@ -612,5 +611,40 @@ func TestRateLimitMiddlewareExceeded(t *testing.T) {
 				t.Errorf("Expected error 'rate_limit_exceeded', got '%s'", body["code"])
 			}
 		}
+	}
+}
+
+func TestRateLimitMiddleware_DistinguishesCallersBehindProxy(t *testing.T) {
+	os.Setenv("RATE_LIMIT_REQUESTS", "3")
+	os.Setenv("RATE_LIMIT_PER_SECONDS", "60")
+
+	mockRateLimiter := NewRateLimiterManager(rate.Every(20*time.Second), 3)
+	server := NewHTTPServer(3000, createTestAggregator(), nil, NewMockLogger(), NewMockSignalHandler(), mockRateLimiter)
+	middleware := server.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Both requests arrive from the same Caddy address; only X-Forwarded-For
+	// distinguishes the two real callers.
+	callerA := httptest.NewRequest("POST", "/mcp", nil)
+	callerA.RemoteAddr = "10.0.0.5:443"
+	callerA.Header.Set("X-Forwarded-For", "203.0.113.7")
+
+	callerB := httptest.NewRequest("POST", "/mcp", nil)
+	callerB.RemoteAddr = "10.0.0.5:443"
+	callerB.Header.Set("X-Forwarded-For", "198.51.100.9")
+
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		middleware.ServeHTTP(w, callerA)
+		if w.Code != http.StatusOK {
+			t.Fatalf("callerA request %d: expected 200, got %d", i, w.Code)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	middleware.ServeHTTP(w, callerB)
+	if w.Code != http.StatusOK {
+		t.Errorf("callerB should be unaffected by callerA's traffic, got %d", w.Code)
 	}
 }

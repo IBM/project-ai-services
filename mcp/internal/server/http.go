@@ -258,14 +258,23 @@ func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// use X-Forwarded-For instead, so callers are not sharing a single rate limit
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func (s *HTTPServer) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Add("Accept", "text/event-stream")
 
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			host = r.RemoteAddr
-		}
+		host := clientIP(r)
 		limiter := s.rateLimiter.GetLimiter(host)
 
 		// another place the default is used... also why is it a string here -> fix default
