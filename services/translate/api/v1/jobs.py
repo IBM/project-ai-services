@@ -11,11 +11,19 @@ GET    /v1/translate/jobs/{job_id}/result/download — download translated file
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
-from common.error_utils import APIError, ErrorCode
-from common.misc_utils import get_logger
+from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.misc_utils import get_logger, get_utc_timestamp
+from translate.utils.errors import (
+    _raise_file_too_large,
+    _raise_invalid_language,
+    _raise_job_failed,
+    _raise_job_not_complete,
+    _raise_same_language,
+    _raise_unsupported_file_type,
+)
 from translate.db.manager import db_manager
 from translate.models import (
     JobCreatedResponse,
@@ -31,6 +39,7 @@ from translate.utils.jobs import (
     generate_uuid,
     read_result_file,
     stage_uploaded_file,
+    validate_file_content,
     validate_file_extension,
 )
 from translate.workers.concurrency import concurrency_manager
@@ -39,47 +48,6 @@ from translate.workers.translation_worker import run_translation_job
 logger = get_logger("jobs_api")
 
 router = APIRouter()
-
-# ---------------------------------------------------------------------------
-# Translation-specific HTTP error helpers
-# (codes not in the shared ErrorCode enum get their own raise helpers)
-# ---------------------------------------------------------------------------
-
-def _raise_invalid_language(detail: str) -> None:
-    raise HTTPException(
-        status_code=400,
-        detail={"error": {"code": "INVALID_LANGUAGE", "message": detail, "status": 400}},
-    )
-
-def _raise_same_language(detail: str) -> None:
-    raise HTTPException(
-        status_code=400,
-        detail={"error": {"code": "SAME_LANGUAGE", "message": detail, "status": 400}},
-    )
-
-def _raise_unsupported_file_type(detail: str) -> None:
-    raise HTTPException(
-        status_code=415,
-        detail={"error": {"code": "UNSUPPORTED_FILE_TYPE", "message": detail, "status": 415}},
-    )
-
-def _raise_file_too_large(detail: str) -> None:
-    raise HTTPException(
-        status_code=413,
-        detail={"error": {"code": "FILE_TOO_LARGE", "message": detail, "status": 413}},
-    )
-
-def _raise_job_not_complete(detail: str) -> None:
-    raise HTTPException(
-        status_code=409,
-        detail={"error": {"code": "JOB_NOT_COMPLETE", "message": detail, "status": 409}},
-    )
-
-def _raise_job_failed(detail: str) -> None:
-    raise HTTPException(
-        status_code=410,
-        detail={"error": {"code": "JOB_FAILED", "message": detail, "status": 410}},
-    )
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -140,13 +108,6 @@ def _validate_languages(
     return norm_source, norm_target
 
 
-def _format_dt(dt: Optional[datetime]) -> Optional[str]:
-    """Return ISO-8601 string for *dt*, or None."""
-    if dt is None:
-        return None
-    return dt.isoformat()
-
-
 def _job_to_detail(job) -> JobDetailResponse:
     return JobDetailResponse(
         job_id=job.job_id,
@@ -156,8 +117,8 @@ def _job_to_detail(job) -> JobDetailResponse:
         target_language=job.target_language,
         input_type=job.input_type,
         document_name=job.document_name,
-        submitted_at=_format_dt(job.submitted_at),
-        completed_at=_format_dt(job.completed_at),
+        submitted_at=get_utc_timestamp(job.submitted_at),
+        completed_at=get_utc_timestamp(job.completed_at),
         error=job.error,
         job_metadata=job.job_metadata,
     )
@@ -172,8 +133,8 @@ def _job_to_state(job) -> JobState:
         target_language=job.target_language,
         input_type=job.input_type,
         document_name=job.document_name,
-        submitted_at=_format_dt(job.submitted_at),
-        completed_at=_format_dt(job.completed_at),
+        submitted_at=get_utc_timestamp(job.submitted_at),
+        completed_at=get_utc_timestamp(job.completed_at),
         error=job.error,
     )
 
@@ -186,12 +147,20 @@ def _job_to_state(job) -> JobState:
     "",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=JobCreatedResponse,
+    response_description="Job accepted. Poll the returned job_id for status.",
     summary="Submit a file for async translation",
     description=(
         "Upload a `.txt` or `.md` file and specify a target language. "
         "Returns a ``job_id`` for polling. "
         "Source language is auto-detected when omitted."
     ),
+    responses={
+        400: http_error_responses[400],   # INVALID_LANGUAGE, SAME_LANGUAGE
+        413: http_error_responses[413],   # FILE_TOO_LARGE
+        415: http_error_responses[415],   # UNSUPPORTED_FILE_TYPE
+        429: http_error_responses[429],   # job_limiter at capacity
+        500: http_error_responses[500],
+    },
 )
 async def create_translation_job(
     background_tasks: BackgroundTasks,
@@ -214,10 +183,13 @@ async def create_translation_job(
     except ValueError as exc:
         _raise_unsupported_file_type(str(exc))
 
-    # 2. Validate languages.
+    # 2. Validate file content (UTF-8, not binary, not PDF-disguised-as-text).
+    await validate_file_content(file)
+
+    # 3. Validate languages.
     norm_source, norm_target = _validate_languages(source_language, target_language)
 
-    # 3. Check file size before reading content.
+    # 4. Check file size.
     content = await file.read()
     max_bytes = settings.translate.max_upload_size_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -226,7 +198,7 @@ async def create_translation_job(
             f"{settings.translate.max_upload_size_mb} MB limit."
         )
 
-    # 4. Check job admission semaphore — non-blocking try.
+    # 5. Check job admission semaphore — non-blocking try.
     if concurrency_manager.job_limiter.locked():
         APIError.raise_error(
             ErrorCode.RATE_LIMIT_EXCEEDED,
@@ -234,7 +206,7 @@ async def create_translation_job(
             "already running. Please try again later.",
         )
 
-    # 5. Generate job ID; stage the file.
+    # 6. Generate job ID; stage the file.
     job_id = generate_uuid()
     staged_path = await stage_uploaded_file(
         job_id=job_id,
@@ -242,7 +214,7 @@ async def create_translation_job(
         content=content,
     )
 
-    # 6. Insert DB row with status=accepted.
+    # 7. Insert DB row with status=accepted.
     db_manager.create_job(
         job_id=job_id,
         source_language=norm_source,
@@ -253,7 +225,7 @@ async def create_translation_job(
         submitted_at=datetime.now(timezone.utc),
     )
 
-    # 7. Launch background worker.
+    # 8. Launch background worker.
     background_tasks.add_task(
         run_translation_job,
         job_id=job_id,
@@ -279,8 +251,13 @@ async def create_translation_job(
 @router.get(
     "",
     response_model=JobsListResponse,
+    response_description="Paginated list of jobs matching the query.",
     summary="List translation jobs",
     description="Paginated list of jobs with optional status filter.",
+    responses={
+        400: http_error_responses[400],   # invalid query params
+        500: http_error_responses[500],
+    },
 )
 async def list_jobs(
     limit: int = 20,
@@ -324,8 +301,13 @@ async def list_jobs(
 @router.get(
     "/{job_id}",
     response_model=JobDetailResponse,
+    response_description="Full job status, phase metadata, and timestamps.",
     summary="Get job details",
     description="Return full status and metadata for a specific job.",
+    responses={
+        404: http_error_responses[404],   # job not found
+        500: http_error_responses[500],
+    },
 )
 async def get_job(job_id: str) -> JobDetailResponse:
     job = db_manager.get_job_by_id(job_id)
@@ -344,11 +326,18 @@ async def get_job(job_id: str) -> JobDetailResponse:
 @router.get(
     "/{job_id}/result",
     response_model=JobResultResponse,
+    response_description="Translation result with metadata and token usage.",
     summary="Get translation result",
     description=(
         "Retrieve the full translation result as JSON. "
         "Returns 409 if the job is still running, 410 if it failed."
     ),
+    responses={
+        404: http_error_responses[404],   # job not found
+        409: http_error_responses[409],   # JOB_NOT_COMPLETE
+        410: {"description": "Gone — job failed. Error details on the job resource."},
+        500: http_error_responses[500],
+    },
 )
 async def get_job_result(job_id: str) -> JobResultResponse:
     job = db_manager.get_job_by_id(job_id)
@@ -394,12 +383,19 @@ async def get_job_result(job_id: str) -> JobResultResponse:
 
 @router.get(
     "/{job_id}/result/download",
+    response_description="Translated file stream with Content-Disposition attachment header.",
     summary="Download translated file",
     description=(
         "Download the translated content as a plain-text file. "
         "Extension and MIME type match the original upload "
         "(.txt → text/plain, .md → text/markdown)."
     ),
+    responses={
+        404: http_error_responses[404],   # job not found
+        409: http_error_responses[409],   # JOB_NOT_COMPLETE
+        410: {"description": "Gone — job failed. Error details on the job resource."},
+        500: http_error_responses[500],
+    },
 )
 async def download_job_result(job_id: str):
     job = db_manager.get_job_by_id(job_id)

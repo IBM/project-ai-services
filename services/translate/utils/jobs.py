@@ -6,15 +6,20 @@ Provides:
 
 - ``generate_uuid``          — generate a random UUID for a new job.
 - ``validate_file_extension`` — check ``.txt`` / ``.md`` only.
+- ``validate_file_content``  — probe first 8 KB for binary / encoding issues.
 - ``stage_uploaded_file``    — persist uploaded bytes to the per-job staging dir.
 - ``read_result_file``       — load the result JSON for a completed job.
 - ``delete_job_files``       — clean up staging dir + result file after a job ends.
 """
 
+import unicodedata
 import uuid
 from pathlib import Path
 
+from fastapi import UploadFile
+
 from common.misc_utils import get_logger
+from translate.utils.errors import _raise_unsupported_file_type
 from translate.utils.storage import storage_manager
 
 logger = get_logger("jobs")
@@ -37,6 +42,58 @@ def validate_file_extension(filename: str) -> str:
             f"Accepted types: {', '.join(sorted(_ALLOWED_EXTENSIONS))}."
         )
     return suffix
+
+
+# Probe only the first 8 KB — large enough to catch null bytes, invalid UTF-8,
+# or control-character runs in virtually any misnamed binary file, while keeping
+# the check cheap. The full UTF-8 decode in the worker catches anything deeper.
+_MAX_PROBE_BYTES = 8192
+
+
+async def validate_file_content(file: UploadFile) -> None:
+    """
+    Probe the first 8 KB of *file* to confirm it is a genuine UTF-8 text file.
+    Resets the file pointer to 0 after the check so the caller can still read
+    the full content.
+
+    Raises ``HTTPException(415)`` on:
+    - empty file
+    - invalid UTF-8 encoding
+    - null bytes (binary file)
+    - excessive control characters (> 5% of probe)
+    - PDF magic bytes (``%PDF``) regardless of declared extension
+    """
+    probe = await file.read(_MAX_PROBE_BYTES)
+    await file.seek(0)
+
+    if not probe:
+        _raise_unsupported_file_type("File is empty.")
+
+    try:
+        decoded = probe.decode("utf-8")
+    except UnicodeDecodeError:
+        _raise_unsupported_file_type("File content is not valid UTF-8 text.")
+
+    if b"\x00" in probe:
+        _raise_unsupported_file_type(
+            "File contains null bytes and appears to be binary."
+        )
+
+    control_count = sum(
+        1 for ch in decoded
+        if unicodedata.category(ch).startswith("Cc")
+        and ch not in ("\n", "\r", "\t", "\f")
+    )
+    if len(decoded) > 0 and (control_count / len(decoded)) > 0.05:
+        _raise_unsupported_file_type(
+            "File contains excessive control characters and appears to be binary."
+        )
+
+    if probe[:4] == b"%PDF":
+        ext = Path(file.filename or "").suffix.lower()
+        _raise_unsupported_file_type(
+            f"File has '{ext or 'unknown'}' extension but contains PDF content."
+        )
 
 
 async def stage_uploaded_file(job_id: str, filename: str, content: bytes) -> Path:

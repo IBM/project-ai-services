@@ -152,7 +152,7 @@ async def build_translation_chunks(
                 running_tokens = 0
 
             if is_table:
-                # Table atomicity (§2.5): allow oversized chunk rather than split.
+                # Table atomicity: allow oversized chunk rather than split.
                 chunks.append(
                     TranslationChunk(
                         index=chunk_index,

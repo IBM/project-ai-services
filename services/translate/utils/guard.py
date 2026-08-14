@@ -91,47 +91,4 @@ def check_sync_guard(
     return max_tokens, None
 
 
-def check_chunk_guard(
-    chunk_tokens: int,
-    settings: Settings,
-) -> tuple[int, Optional[dict]]:
-    """
-    Per-chunk context-window guard (§8.2).
-
-    Validates a single packed chunk before its LLM call.  Because the
-    chunker already enforces ``CHUNK_TOKEN_BUDGET ≤ MAX_MODEL_LEN``, a
-    breach here indicates a misconfigured ``CHUNK_TOKEN_BUDGET`` and is
-    treated as a hard job-failure.
-
-    Args:
-        chunk_tokens: Token count of the packed chunk text.
-        settings:     Service settings instance.
-
-    Returns:
-        ``(max_tokens, None)``        — guard passes.
-        ``(0, diagnostics_dict)``     — guard fails; caller should fail the job.
-    """
-    max_model_len = settings.common.llm.max_model_len
-    prompt_overhead = settings.translate.prompt_overhead_tokens
-    min_output = settings.translate.min_output_tokens
-
-    # Guard condition: chunk_tokens + prompt_overhead must leave room for min_output
-    if chunk_tokens + prompt_overhead > max_model_len - min_output:
-        diag = _build_diagnostics(max_model_len, chunk_tokens, prompt_overhead, min_output)
-        logger.error(
-            f"Chunk guard breach: chunk_tokens={chunk_tokens} + "
-            f"overhead={prompt_overhead} > {max_model_len - min_output} "
-            f"(CHUNK_TOKEN_BUDGET is misconfigured)"
-        )
-        return 0, diag
-
-    available_output = max_model_len - chunk_tokens - prompt_overhead
-    max_tokens = _compute_max_tokens(available_output)
-
-    logger.debug(
-        f"Chunk guard OK: chunk_tokens={chunk_tokens}, "
-        f"available_output={available_output}, max_tokens={max_tokens}"
-    )
-    return max_tokens, None
-
 # Made with Bob

@@ -28,7 +28,6 @@ from translate.db.manager import db_manager
 from translate.models import JobStatus, TranslationChunk
 from translate.settings import settings
 from translate.utils.chunking import build_translation_chunks
-from translate.utils.guard import check_chunk_guard
 from translate.utils.llm import query_vllm_translate
 from translate.utils.prompt import build_messages, resolve_source_language
 from translate.utils.storage import storage_manager
@@ -46,6 +45,7 @@ async def _translate_chunk(
     resolved_source_language: Optional[str],
     target_language: str,
     http_client: httpx.AsyncClient,
+    max_tokens: int,
 ) -> tuple[TranslationChunk, str, int, int]:
     """
     Translate a single chunk, respecting both the per-job and global semaphores.
@@ -55,14 +55,7 @@ async def _translate_chunk(
 
     Raises:
         httpx.HTTPStatusError: Non-2xx response from vLLM (propagates to gather).
-        RuntimeError:          Per-chunk context guard breach.
     """
-    max_tokens, diag = check_chunk_guard(chunk.token_count, settings)
-    if diag:
-        raise RuntimeError(
-            f"Chunk {chunk.index} failed context guard: {diag}"
-        )
-
     messages = build_messages(chunk.text, resolved_source_language, target_language)
     llm_endpoint = settings.common.llm.endpoint
     model = settings.common.llm.model
@@ -89,7 +82,7 @@ def _assemble_translation(
     results: list[tuple[TranslationChunk, str, int, int]],
 ) -> tuple[str, int, int]:
     """
-    Join translated chunks using ``join_after``-aware logic (§2.6).
+    Join translated chunks using ``join_after``-aware logic.
 
     ``"paragraph"`` boundaries use ``"\\n\\n"``.
     ``"sentence"`` boundaries (sentence-fallback sub-chunks) use ``" "``.
@@ -101,6 +94,8 @@ def _assemble_translation(
     Returns:
         ``(translated_markdown, total_input_tokens, total_output_tokens)``
     """
+    results.sort(key=lambda result: result[0].index)
+
     parts: list[str] = []
     total_in = total_out = 0
 
@@ -201,16 +196,22 @@ async def run_translation_job(
                 f"[{job_id}] Chunked into {len(chunks)} chunk(s) in {chunking_secs}s"
             )
 
-            # Guard check: run eagerly before dispatching any LLM calls.
-            # A breach here means CHUNK_TOKEN_BUDGET is misconfigured.
+            # Compute max_tokens for each chunk: remaining context after chunk tokens + overhead.
+            # Fail the job early if any chunk leaves no room for output rather than
+            # passing a nonsensical max_tokens value to vLLM.
+            max_model_len = settings.common.llm.max_model_len
+            prompt_overhead = settings.translate.prompt_overhead_tokens
+            chunk_max_tokens: dict[int, int] = {}
             for chunk in chunks:
-                max_tokens, diag = check_chunk_guard(chunk.token_count, settings)
-                if diag:
+                available = max_model_len - chunk.token_count - prompt_overhead
+                if available <= 0:
                     raise RuntimeError(
                         f"CONTEXT_LIMIT_EXCEEDED: chunk {chunk.index} "
-                        f"({chunk.token_count} tokens) exceeds context window. "
-                        f"Diagnostics: {diag}"
+                        f"({chunk.token_count} tokens) + prompt overhead ({prompt_overhead}) "
+                        f"leaves no room for output in a {max_model_len}-token context window. "
+                        f"Reduce CHUNK_TOKEN_BUDGET."
                     )
+                chunk_max_tokens[chunk.index] = available
 
             # ------------------------------------------------------------------
             # Step 5 — Transition to translating; dispatch chunks concurrently
@@ -243,6 +244,7 @@ async def run_translation_job(
                             resolved_source_language=resolved_name,
                             target_language=target_language,
                             http_client=http_client,
+                            max_tokens=chunk_max_tokens[chunk.index],
                         )
                     )
                     for chunk in chunks
