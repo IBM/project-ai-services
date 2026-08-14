@@ -105,15 +105,28 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 // ctx should be a signal-aware context (e.g. from signal.NotifyContext) so that SIGINT/SIGTERM
 // trigger graceful shutdown of the gateway and sweeper.
 func (a *APIserver) Start(ctx context.Context) error {
+	// Wrap with CancelCause so the gateway can abort the whole process if Serve fails.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	// Start the gRPC worker gateway.
 	gw := gateway.New(a.workerRegistry, a.workerTokenStore, a.workerRepository)
 	gatewayAddr := fmt.Sprintf(":%d", a.workerGatewayPort)
-	if err := gw.Start(ctx, gatewayAddr); err != nil {
+	if err := gw.Start(ctx, cancel, gatewayAddr); err != nil {
 		return fmt.Errorf("failed to start worker gateway: %w", err)
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
 	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService)
 
-	return r.Run(fmt.Sprintf(":%d", a.port))
+	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
+		return err
+	}
+
+	// If ctx was cancelled by a gateway failure, surface that cause.
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+
+	return nil
 }

@@ -48,7 +48,9 @@ func New(reg *registry.Registry, ts *registry.TokenStore, repo repository.Worker
 
 // Start begins listening on addr (e.g. ":9090") and serves gRPC in a background goroutine.
 // It also starts the heartbeat sweeper. Both stop when ctx is cancelled.
-func (g *Gateway) Start(ctx context.Context, addr string) error {
+// cancel is a CancelCauseFunc for the server's root context; it is called with the
+// Serve error if the gRPC listener fails unexpectedly, so the whole process shuts down cleanly.
+func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("worker gateway: listen on %s: %w", addr, err)
@@ -60,7 +62,11 @@ func (g *Gateway) Start(ctx context.Context, addr string) error {
 	go func() {
 		logger.InfofCtx(ctx, "WorkerGateway gRPC server listening on %s", addr)
 		if err := g.grpcServer.Serve(lis); err != nil {
-			logger.ErrorfCtx(ctx, "WorkerGateway gRPC server exited: %v", err)
+			// Serve returned an unexpected error (not a clean GracefulStop).
+			// Cancel the root context so the whole server shuts down and the
+			// process exits with a non-zero code, triggering a pod restart.
+			logger.ErrorfCtx(ctx, "WorkerGateway gRPC server failed: %v", err)
+			cancel(fmt.Errorf("worker gateway: gRPC server failed: %w", err))
 		}
 	}()
 
