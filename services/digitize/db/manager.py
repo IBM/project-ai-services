@@ -1160,7 +1160,7 @@ class DatabaseManager:
             raise
 
     @staticmethod
-    def init_sync_log_and_set_syncing(
+    def init_sync_log_and_update_connector(
         connector_id: str,
         started_at: Optional[datetime] = None,
     ) -> int:
@@ -1196,10 +1196,10 @@ class DatabaseManager:
                     .where(Connector.id == connector_id)
                     .values(sync_status=ConnectorStatus.SYNCING)
                 )
-                logger.debug(f"init_sync_log_and_set_syncing: connector={connector_id!r} seq={seq}")
+                logger.debug(f"init_sync_log_and_update_connector: connector={connector_id!r} seq={seq}")
                 return seq
         except SQLAlchemyError as e:
-            logger.error(f"DB error in init_sync_log_and_set_syncing({connector_id}): {e}", exc_info=True)
+            logger.error(f"DB error in init_sync_log_and_update_connector({connector_id}): {e}", exc_info=True)
             raise
 
     @staticmethod

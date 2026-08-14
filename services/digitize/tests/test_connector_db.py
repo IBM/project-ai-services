@@ -456,12 +456,12 @@ class TestRemoveConnectorFromMembership:
 
 
 # ===========================================================================
-# init_sync_log_and_set_syncing
+# init_sync_log_and_update_connector
 # ===========================================================================
 
 class TestInsertSyncLog:
     def test_returns_generated_seq(self):
-        """init_sync_log_and_set_syncing must return the auto-generated seq value."""
+        """init_sync_log_and_update_connector must return the auto-generated seq value."""
         session = MagicMock()
         # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
@@ -470,9 +470,9 @@ class TestInsertSyncLog:
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, update_result]
 
-        from digitize.utils.db import init_sync_log_and_set_syncing
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            seq = init_sync_log_and_set_syncing(CONNECTOR_ID)
+            seq = init_sync_log_and_update_connector(CONNECTOR_ID)
         assert seq == 3
         assert session.execute.call_count == 2
 
@@ -483,26 +483,26 @@ class TestInsertSyncLog:
         insert_result.scalar_one.return_value = 1
         session.execute.side_effect = [insert_result, MagicMock()]
 
-        from digitize.utils.db import init_sync_log_and_set_syncing
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            init_sync_log_and_set_syncing(CONNECTOR_ID)
+            init_sync_log_and_update_connector(CONNECTOR_ID)
         # Two DB calls: INSERT log row + UPDATE connector status
         assert session.execute.call_count == 2
 
     def test_does_not_accept_seq_parameter(self):
         """seq must not be an accepted parameter — it is auto-generated."""
-        from digitize.utils.db import init_sync_log_and_set_syncing
+        from digitize.utils.db import init_sync_log_and_update_connector
         import inspect
-        sig = inspect.signature(init_sync_log_and_set_syncing)
+        sig = inspect.signature(init_sync_log_and_update_connector)
         assert "seq" not in sig.parameters
 
     def test_raises_on_db_error(self):
         session = MagicMock()
         session.execute.side_effect = SQLAlchemyError("constraint violation")
-        from digitize.utils.db import init_sync_log_and_set_syncing
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             with pytest.raises(SQLAlchemyError):
-                init_sync_log_and_set_syncing(CONNECTOR_ID)
+                init_sync_log_and_update_connector(CONNECTOR_ID)
 
 
 # ===========================================================================

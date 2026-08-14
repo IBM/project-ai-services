@@ -1358,7 +1358,7 @@ def remove_connector_checksum_entry(
 # Sync log helpers
 # ----------------------------------------------------------------------------
 
-def init_sync_log_and_set_syncing(
+def init_sync_log_and_update_connector(
     connector_id: str,
     started_at: Optional[datetime] = None,
 ) -> int:
@@ -1370,7 +1370,7 @@ def init_sync_log_and_set_syncing(
 
     Returns the generated seq value.
     """
-    return db_manager.init_sync_log_and_set_syncing(connector_id, started_at=started_at)
+    return db_manager.init_sync_log_and_update_connector(connector_id, started_at=started_at)
 
 
 def finalize_sync_log_and_update_connector(

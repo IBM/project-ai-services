@@ -31,7 +31,7 @@ _complete_tick / _fail_tick
 
 run_tick
   - aborts gracefully when connector not found
-  - calls init_sync_log_and_set_syncing, scan, classify, process, orphan, complete in order
+  - calls init_sync_log_and_update_connector, scan, classify, process, orphan, complete in order
   - on scanner.connect failure: _fail_tick is called, scanner.close still runs
   - on scan failure: _fail_tick is called, scanner.close still runs
 """
@@ -367,7 +367,7 @@ class TestRunTick:
 
     def test_aborts_when_connector_not_found(self):
         with patch(f"{DB_MODULE}.get_active_connector", return_value=None), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing") as mock_open:
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector") as mock_open:
             asyncio.run(run_tick("missing"))
         mock_open.assert_not_called()
 
@@ -376,7 +376,7 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_result=[])
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=1) as mock_open, \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=1) as mock_open, \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -399,7 +399,7 @@ class TestRunTick:
         mock_scanner = self._make_scanner(connect_raises=ConnectionError("refused"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=2), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=2), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
@@ -415,7 +415,7 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_raises=RuntimeError("scan exploded"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=3), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=3), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
@@ -431,7 +431,7 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_raises=IOError("timeout"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=4), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=4), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
@@ -528,7 +528,7 @@ class TestRunTickCancellation:
         mock_scanner = self._make_scanner()
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=10), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=10), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.DELETE_PENDING), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
@@ -545,7 +545,7 @@ class TestRunTickCancellation:
         mock_scanner = self._make_scanner()
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=11), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=11), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -576,7 +576,7 @@ class TestRunTickCancellation:
             return None
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_set_syncing", return_value=12), \
+             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=12), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \

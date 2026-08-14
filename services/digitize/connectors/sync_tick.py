@@ -3,7 +3,7 @@ connectors/sync_tick.py — end-to-end sync-tick logic for one connector.
 
 Phases
 ------
-1.  init_sync_log_and_set_syncing        → INSERT connector_sync_logs row (status='started')
+1.  init_sync_log_and_update_connector        → INSERT connector_sync_logs row (status='started')
 2.  load known/all checksums + scanner.scan()
 3.  _classify()              → ingest_list, orphan_checksums
                                cross-connector dups registered inline
@@ -40,7 +40,7 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    init_sync_log_and_set_syncing,
+    init_sync_log_and_update_connector,
     remove_connector_checksum_entry,
     update_sync_log,
 )
@@ -99,7 +99,7 @@ async def run_tick(connector_id: str) -> None:
     Execute one full sync tick for *connector_id*.
 
     The caller is responsible for acquiring the sync lock (sync_status='syncing')
-    before calling this coroutine.  init_sync_log_and_set_syncing() is called here to open
+    before calling this coroutine.  init_sync_log_and_update_connector() is called here to open
     the sync-log row.
     """
     config = get_active_connector(connector_id)
@@ -107,7 +107,7 @@ async def run_tick(connector_id: str) -> None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
         return
 
-    sync_seq: int = init_sync_log_and_set_syncing(connector_id)
+    sync_seq: int = init_sync_log_and_update_connector(connector_id)
     scanner = build_scanner(config)
 
     try:
