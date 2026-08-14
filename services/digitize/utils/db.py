@@ -1411,6 +1411,17 @@ def update_connector_total_files(connector_id: str, total_files: int) -> None:
     db_manager.update_connector(connector_id=connector_id, total_files=total_files)
 
 
+def set_connector_error(connector_id: str, error: str) -> None:
+    """Persist an error message on the connector row (best-effort; logs on failure)."""
+    try:
+        db_manager.update_connector(connector_id=connector_id, error=error)
+    except Exception as exc:
+        logger.warning(
+            f"Could not persist error on connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
+
+
 def update_sync_log(
     connector_id: str,
     seq: int,

@@ -269,6 +269,7 @@ async def _run_teardown(connector_id: str) -> None:
       4. Sweep residual batch staging directories
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
+    deletion_failed = False
     try:
         # Steps 1+2: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
@@ -276,13 +277,23 @@ async def _run_teardown(connector_id: str) -> None:
             try:
                 remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
                 if remaining == 0 and doc_id:
-                    _best_effort_delete_document(doc_id)
+                    if not _best_effort_delete_document(doc_id):
+                        deletion_failed = True
             except Exception as exc:
+                deletion_failed = True
                 logger.error(
                     f"Error removing checksum {checksum!r} for connector "
                     f"{connector_id!r}: {exc}",
                     exc_info=True,
                 )
+
+        if deletion_failed:
+            db_ops.set_connector_error(connector_id, "Documents deletion failed")
+            logger.warning(
+                f"Skipping connector row deletion for {connector_id!r} "
+                "due to document deletion failures"
+            )
+            return
 
         # Step 3: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
@@ -301,25 +312,30 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
+        db_ops.set_connector_error(connector_id, "Documents deletion failed")
 
 
-def _best_effort_delete_document(doc_id: str) -> None:
+def _best_effort_delete_document(doc_id: str) -> bool:
     """
     Delete a document via the full teardown path (VDB → files → DB record).
 
     Calls delete_document_data() so that indexed chunks and output files are
     cleaned up — not just the DB row.
     All failures are logged and swallowed (best-effort semantics).
+
+    Returns True on success, False if an error occurred.
     """
     try:
         from digitize.api.v1.documents import delete_document_data
         delete_document_data(doc_id)
         logger.debug(f"Deleted document {doc_id!r} (connector cleanup)")
+        return True
     except Exception as exc:
         logger.error(
             f"Best-effort document deletion failed for {doc_id!r}: {exc}",
             exc_info=True,
         )
+        return False
 
 
 def _sweep_staging_dir(
