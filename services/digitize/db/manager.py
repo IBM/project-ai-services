@@ -1136,23 +1136,18 @@ class DatabaseManager:
     @staticmethod
     def mark_connector_delete_pending(connector_id: str) -> bool:
         """
-        Atomically set sync_status='delete pending' when sync_status='syncing'.
+        Set sync_status='delete pending' for the given connector regardless of
+        current status.
 
-        Used when a DELETE request arrives while a tick is in progress: the
-        running tick will notice the status at its next _check_delete_pending
-        checkpoint and cancel itself, after which the caller must finish the
-        deletion (remove checksums / docs / row).
-
-        Returns True if the signal was set (a tick was running), False if no
-        tick was running or the connector does not exist.
+        Returns True if the connector was found and updated, False if it does
+        not exist.
         """
         try:
             with get_db_session() as session:
                 result = session.execute(
                     update(Connector)
                     .where(
-                        Connector.id == connector_id,
-                        Connector.sync_status == ConnectorStatus.SYNCING,
+                        Connector.id == connector_id
                     )
                     .values(sync_status=ConnectorStatus.DELETE_PENDING)
                     .returning(Connector.id)
