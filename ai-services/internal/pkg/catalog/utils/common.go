@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	helmchart "helm.sh/helm/v4/pkg/chart"
@@ -17,17 +19,20 @@ import (
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 )
 
+const uninstallHelmTimeout = 5 * time.Minute
+
 var (
 	ErrCatalogPodNotFound = fmt.Errorf("no catalog pod found")
 )
 
 // PodmanConfigureOptions contains the configuration for configuring the catalog service on Podman runtime.
 type PodmanConfigureOptions struct {
-	BaseDir     string
-	DomainName  string // Custom domain name for self-signed certificates
-	SSLCertPath string // Path to user-provided SSL certificate
-	SSLKeyPath  string // Path to user-provided SSL private key
-	HttpsPort   int
+	BaseDir           string
+	DomainName        string // Custom domain name for self-signed certificates
+	SSLCertPath       string // Path to user-provided SSL certificate
+	SSLKeyPath        string // Path to user-provided SSL private key
+	HttpsPort         int
+	WorkerGatewayPort int // gRPC worker gateway port; always active, default 9090
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
@@ -90,6 +95,9 @@ func extractConfigFromEnv(podEnv map[string]string, config *PodmanConfigureOptio
 	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
 		config.HttpsPort, _ = strconv.Atoi(value)
 	}
+	if value, ok := podEnv["WORKER_GATEWAY_PORT"]; ok {
+		config.WorkerGatewayPort, _ = strconv.Atoi(value)
+	}
 }
 
 // SanitizeFilePath cleans path to prevent path-traversal attacks.
@@ -126,6 +134,26 @@ func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
 	}
 
 	return loader.LoadFiles(files)
+}
+
+func HelmUninstall(ctx context.Context, namespace, release string) error {
+	helmClient, err := helm.NewHelm(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to create Helm client: %w", err)
+	}
+
+	exists, err := helmClient.IsReleaseExist(release)
+	if err != nil {
+		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
+	}
+
+	if !exists {
+		logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
+
+		return nil
+	}
+
+	return helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout})
 }
 
 // Made with Bob

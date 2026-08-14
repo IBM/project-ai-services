@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
@@ -49,7 +51,7 @@ type InstallOpts struct {
 	Timeout time.Duration
 }
 
-func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) error {
+func (h *Helm) Install(ctx context.Context, release string, chart chart.Charter, opts *InstallOpts) error {
 	// Configure the Installer client
 	installClient := action.NewInstall(h.actionConfig)
 	installClient.ReleaseName = release
@@ -60,7 +62,7 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 	installClient.SkipSchemaValidation = true
 
 	// Perform helm install
-	_, err := installClient.Run(chart, opts.Values)
+	_, err := installClient.RunWithContext(ctx, chart, opts.Values)
 	if err != nil {
 		return fmt.Errorf("Install failed: %w", err)
 	}
@@ -73,7 +75,7 @@ type UpgradeOpts struct {
 	Timeout time.Duration
 }
 
-func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) error {
+func (h *Helm) Upgrade(ctx context.Context, release string, chart chart.Charter, opts *UpgradeOpts) error {
 	// Configure the Upgrade client
 	upgradeClient := action.NewUpgrade(h.actionConfig)
 	upgradeClient.Namespace = h.namespace
@@ -85,7 +87,7 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.SkipSchemaValidation = true
 
 	// Perform helm upgrade
-	_, err := upgradeClient.Run(release, chart, opts.Values)
+	_, err := upgradeClient.RunWithContext(ctx, release, chart, opts.Values)
 	if err != nil {
 		return fmt.Errorf("Upgrade failed: %w", err)
 	}
@@ -94,17 +96,17 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 }
 
 // InstallOrUpgrade installs a release if it does not exist, or upgrades it if it does.
-func (h *Helm) InstallOrUpgrade(release string, chart chart.Charter, values map[string]any, timeout time.Duration) error {
+func (h *Helm) InstallOrUpgrade(ctx context.Context, release string, chart chart.Charter, values map[string]any, timeout time.Duration) error {
 	exists, err := h.IsReleaseExist(release)
 	if err != nil {
 		return fmt.Errorf("failed to check release existence: %w", err)
 	}
 
 	if !exists {
-		return h.Install(release, chart, &InstallOpts{Values: values, Timeout: timeout})
+		return h.Install(ctx, release, chart, &InstallOpts{Values: values, Timeout: timeout})
 	}
 
-	return h.Upgrade(release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
+	return h.Upgrade(ctx, release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
 }
 
 func (h *Helm) IsReleaseExist(release string) (bool, error) {
@@ -124,6 +126,23 @@ func (h *Helm) IsReleaseExist(release string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (h *Helm) GetReleaseManifest(release string) (string, error) {
+	client := action.NewGet(h.actionConfig)
+	client.Version = 0
+
+	rel, err := client.Run(release)
+	if err != nil {
+		return "", fmt.Errorf("failed to get release %s: %w", release, err)
+	}
+
+	releaseData, ok := rel.(*releasev1.Release)
+	if !ok || releaseData == nil {
+		return "", fmt.Errorf("unexpected release type %T for %s", rel, release)
+	}
+
+	return releaseData.Manifest, nil
 }
 
 type UninstallOpts struct {
