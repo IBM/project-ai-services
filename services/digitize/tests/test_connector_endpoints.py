@@ -196,7 +196,7 @@ class TestPostConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 201
-        assert response.text == ""
+        assert response.json() == {"connector_id": CONNECTOR_ID}
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
         captured = {}
@@ -225,7 +225,9 @@ class TestPostConnector:
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.text == ""
+        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert "private_key" not in response.text
+        assert "password" not in response.text
 
 
 # ===========================================================================
