@@ -1280,7 +1280,7 @@ def mark_sync_cancel_pending(connector_id: str) -> bool:
 
     Sets connector_sync_logs.status='cancel pending' on the active sync-log row,
     only when connectors.sync_status='syncing'.  The connector row itself stays
-    'syncing' until the tick's close_sync_log() transitions it to 'out of sync'.
+    'syncing' until the tick's finalize_sync_log_and_update_connector() transitions it to 'out of sync'.
     Returns True if the signal was written (tick was running), False otherwise.
     """
     return db_manager.mark_sync_cancel_pending(connector_id)
@@ -1358,19 +1358,22 @@ def remove_connector_checksum_entry(
 # Sync log helpers
 # ----------------------------------------------------------------------------
 
-def open_new_sync_log(
+def init_sync_log_and_set_syncing(
     connector_id: str,
     started_at: Optional[datetime] = None,
 ) -> int:
     """
-    Create a new sync-log row and set connector sync_status to 'syncing'.
+    Initialise a new sync run across two tables:
+      - connector_sync_log: inserts a new row with status=STARTED and an
+        auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
+      - connector: sets sync_status=SYNCING on the matching row.
 
     Returns the generated seq value.
     """
-    return db_manager.open_sync_log(connector_id, started_at=started_at)
+    return db_manager.init_sync_log_and_set_syncing(connector_id, started_at=started_at)
 
 
-def close_sync_log(
+def finalize_sync_log_and_update_connector(
     connector_id: str,
     seq: int,
     status: str,
@@ -1381,11 +1384,16 @@ def close_sync_log(
     error: Optional[str] = None,
 ) -> bool:
     """
-    Finalize a sync-log row and update connector last_sync_at / sync_status.
+    Finalize a sync run across two tables:
+      - connector_sync_log: UPDATEs the matching row with status, finished_at,
+        and optional file counts / error message.
+      - connector: UPDATEs last_sync_at to now, and sync_status to the terminal
+        state — CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can
+        retry; any other status (e.g. COMPLETED) is written through verbatim.
 
     Returns True on success, False if the sync-log row was not found.
     """
-    return db_manager.close_sync_log(
+    return db_manager.finalize_sync_log_and_update_connector(
         connector_id=connector_id,
         seq=seq,
         status=status,

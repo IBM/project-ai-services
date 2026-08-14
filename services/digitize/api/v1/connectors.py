@@ -285,7 +285,7 @@ async def _run_teardown(connector_id: str) -> None:
                     f"has non-terminal status {latest_log.status!r}; "
                     "marking it cancelled before teardown"
                 )
-                db_ops.close_sync_log(
+                db_ops.finalize_sync_log_and_update_connector(
                     connector_id=connector_id,
                     seq=latest_log.seq,
                     status=SyncLogStatus.CANCELLED,
@@ -496,12 +496,12 @@ async def trigger_sync(connector_id: str):
         if acquired:
             asyncio.create_task(run_tick(connector_id))
             logger.info(f"Manual sync dispatched for connector {connector_id!r}")
-            # open_new_sync_log hasn't been called yet (that happens inside run_tick),
+            # init_sync_log_and_set_syncing hasn't been called yet (that happens inside run_tick),
             # so fetch the seq of the row that the background task will open shortly.
             # Since we hold the lock we query for the highest existing seq + 1 via
             # the active row that run_tick will create. Instead, we read it after a
             # brief yield so the task can open the log first.
-            # Simpler and race-free: open_new_sync_log is the very first thing
+            # Simpler and race-free: init_sync_log_and_set_syncing is the very first thing
             # run_tick does — schedule a wait-for-seq helper.
             sync_seq = await _wait_for_sync_seq(connector_id)
         else:
@@ -522,7 +522,7 @@ async def trigger_sync(connector_id: str):
 
 
 async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: float = 0.1) -> int:
-    """Poll until run_tick's open_new_sync_log creates the active sync-log row.
+    """Poll until run_tick's init_sync_log_and_set_syncing creates the active sync-log row.
 
     Returns the seq as soon as it appears, or raises RuntimeError if it never does.
     """

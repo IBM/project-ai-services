@@ -1160,14 +1160,16 @@ class DatabaseManager:
             raise
 
     @staticmethod
-    def open_sync_log(
+    def init_sync_log_and_set_syncing(
         connector_id: str,
         started_at: Optional[datetime] = None,
     ) -> int:
         """
-        Create a new sync-log row and set connector sync_status to 'syncing'.
+        Initialise a new sync run across two tables:
+          - connector_sync_log: inserts a new row with status=STARTED and an
+            auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
+          - connector: sets sync_status=SYNCING on the matching row.
 
-        seq is auto-generated as COALESCE(MAX(seq), 0) + 1 scoped to this connector.
         Returns the generated seq value.
         """
         try:
@@ -1194,14 +1196,14 @@ class DatabaseManager:
                     .where(Connector.id == connector_id)
                     .values(sync_status=ConnectorStatus.SYNCING)
                 )
-                logger.debug(f"open_sync_log: connector={connector_id!r} seq={seq}")
+                logger.debug(f"init_sync_log_and_set_syncing: connector={connector_id!r} seq={seq}")
                 return seq
         except SQLAlchemyError as e:
-            logger.error(f"DB error in open_sync_log({connector_id}): {e}", exc_info=True)
+            logger.error(f"DB error in init_sync_log_and_set_syncing({connector_id}): {e}", exc_info=True)
             raise
 
     @staticmethod
-    def close_sync_log(
+    def finalize_sync_log_and_update_connector(
         connector_id: str,
         seq: int,
         status: str,
@@ -1212,7 +1214,12 @@ class DatabaseManager:
         error: Optional[str] = None,
     ) -> bool:
         """
-        Finalize a sync-log row and update connector last_sync_at / sync_status.
+        Finalize a sync run across two tables:
+          - connector_sync_log: UPDATEs the matching row with status, finished_at,
+            and optional file counts / error message.
+          - connector: UPDATEs last_sync_at to now, and sync_status to the terminal
+            state — CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can
+            retry; any other status (e.g. COMPLETED) is written through verbatim.
 
         Returns True on success, False if the sync-log row was not found.
         """
@@ -1260,7 +1267,7 @@ class DatabaseManager:
                 return True
         except SQLAlchemyError as e:
             logger.error(
-                f"DB error in close_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                f"DB error in finalize_sync_log_and_update_connector(connector={connector_id!r}, seq={seq}): {e}",
                 exc_info=True,
             )
             return False

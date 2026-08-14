@@ -3,14 +3,14 @@ connectors/sync_tick.py — end-to-end sync-tick logic for one connector.
 
 Phases
 ------
-1.  open_new_sync_log        → INSERT connector_sync_logs row (status='started')
+1.  init_sync_log_and_set_syncing        → INSERT connector_sync_logs row (status='started')
 2.  load known/all checksums + scanner.scan()
 3.  _classify()              → ingest_list, orphan_checksums
                                cross-connector dups registered inline
 3b. update_sync_log()        → single DB write of total/new/removed counts (all known post-classify)
 4a. _process_new_files()     → download → create job/doc → add checksum row
 4b. _delete_orphans()        → remove checksum rows; delete docs with no owners
-5.  close_sync_log()         → finalize tick row with terminal status + reset sync_status
+5.  finalize_sync_log_and_update_connector()         → finalize tick row with terminal status + reset sync_status
 
 Called by the APScheduler job (_run_tick_wrapped in scheduler.py, PR7) and
 directly by POST /v1/connectors/{id}/sync after the caller has already
@@ -32,7 +32,7 @@ from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
-    close_sync_log,
+    finalize_sync_log_and_update_connector,
     get_active_connector,
     get_connector_sync_status,
     get_sync_log_status,
@@ -40,7 +40,7 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    open_new_sync_log,
+    init_sync_log_and_set_syncing,
     remove_connector_checksum_entry,
     update_sync_log,
 )
@@ -99,7 +99,7 @@ async def run_tick(connector_id: str) -> None:
     Execute one full sync tick for *connector_id*.
 
     The caller is responsible for acquiring the sync lock (sync_status='syncing')
-    before calling this coroutine.  open_new_sync_log() is called here to open
+    before calling this coroutine.  init_sync_log_and_set_syncing() is called here to open
     the sync-log row.
     """
     config = get_active_connector(connector_id)
@@ -107,7 +107,7 @@ async def run_tick(connector_id: str) -> None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
         return
 
-    sync_seq: int = open_new_sync_log(connector_id)
+    sync_seq: int = init_sync_log_and_set_syncing(connector_id)
     scanner = build_scanner(config)
 
     try:
@@ -378,7 +378,7 @@ async def _handle_interrupt(
     if interrupt_type == InterruptType.SYNC_CANCEL:
         logger.info(f"Handling sync cancel for connector {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
-        # Note: close_sync_log() automatically sets connector to OUT_OF_SYNC when
+        # Note: finalize_sync_log_and_update_connector() automatically sets connector to OUT_OF_SYNC when
         # sync log status is CANCELLED. Cleanup staging directory for this sync.
         from digitize.api.v1.connectors import _sweep_staging_dir
         from digitize.settings import settings
@@ -401,7 +401,7 @@ async def _handle_interrupt(
 # ---------------------------------------------------------------------------
 
 def _complete_tick(sync_seq: int, connector_id: str) -> None:
-    close_sync_log(
+    finalize_sync_log_and_update_connector(
         connector_id=connector_id,
         seq=sync_seq,
         status=SyncLogStatus.COMPLETED,
@@ -412,7 +412,7 @@ def _complete_tick(sync_seq: int, connector_id: str) -> None:
 def _cancel_tick(sync_seq: int, connector_id: str) -> None:
     """Close the sync log with status='cancelled' after a CancelledError."""
     try:
-        close_sync_log(
+        finalize_sync_log_and_update_connector(
             connector_id=connector_id,
             seq=sync_seq,
             status=SyncLogStatus.CANCELLED,
@@ -426,7 +426,7 @@ def _cancel_tick(sync_seq: int, connector_id: str) -> None:
 
 def _fail_tick(sync_seq: int, connector_id: str, exc: Exception) -> None:
     try:
-        close_sync_log(
+        finalize_sync_log_and_update_connector(
             connector_id=connector_id,
             seq=sync_seq,
             status=SyncLogStatus.FAILED,
