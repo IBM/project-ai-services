@@ -102,9 +102,9 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 
 // Start initializes the API server and begins listening for incoming requests on the configured port.
 // It sets up the router with authentication middleware and routes, and starts the gRPC worker gateway.
-func (a *APIserver) Start() error {
-	ctx := context.Background()
-
+// ctx should be a signal-aware context (e.g. from signal.NotifyContext) so that SIGINT/SIGTERM
+// trigger graceful shutdown of the gateway and sweeper.
+func (a *APIserver) Start(ctx context.Context) error {
 	// Start the gRPC worker gateway.
 	gw := gateway.New(a.workerRegistry, a.workerTokenStore, a.workerRepository)
 	gatewayAddr := fmt.Sprintf(":%d", a.workerGatewayPort)

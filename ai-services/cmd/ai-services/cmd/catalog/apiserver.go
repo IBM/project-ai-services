@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -129,7 +131,11 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		return err
 	}
 
-	ctx := context.Background()
+	// Use a signal-aware context so that SIGINT/SIGTERM cancel the context,
+	// which stops the gateway sweeper and triggers gRPC GracefulStop.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	pool, err := db.ConnectPool(ctx, dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -145,7 +151,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 
 	opts.Port = port
 
-	return apiserver.NewAPIserver(opts).Start()
+	return apiserver.NewAPIserver(opts).Start(ctx)
 }
 
 func NewAPIServerCmd() *cobra.Command {
