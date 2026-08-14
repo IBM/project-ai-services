@@ -1021,12 +1021,11 @@ class DatabaseManager:
     @staticmethod
     def delete_connector_checksum(
         connector_id: str, checksum: str
-    ) -> tuple[int, Optional[str]]:
+    ) -> Optional[str]:
         """
         Delete the (checksum, connector_id) row.
 
-        Returns (remaining_owner_count, doc_id).
-        If the row did not exist, returns (0, None).
+        Returns the doc_id of the deleted row, or None if the row did not exist.
         """
         try:
             with get_db_session() as session:
@@ -1040,23 +1039,33 @@ class DatabaseManager:
                 )
                 deleted_row = session.execute(del_stmt).one_or_none()
                 if deleted_row is None:
-                    return 0, None
+                    return None
                 doc_id: str = deleted_row[0]
-
-                count_stmt = select(func.count()).where(
-                    ConnectorDocumentChecksum.checksum == checksum
-                )
-                remaining: int = session.execute(count_stmt).scalar() or 0
                 logger.debug(
                     f"delete_connector_checksum: connector={connector_id!r} "
-                    f"checksum={checksum[:20]}... remaining={remaining}"
+                    f"checksum={checksum[:20]}... doc_id={doc_id!r}"
                 )
-                return remaining, doc_id
+                return doc_id
         except SQLAlchemyError as e:
             logger.error(
                 f"DB error in delete_connector_checksum({connector_id}, {checksum[:20]}...): {e}",
                 exc_info=True,
             )
+            raise
+
+    @staticmethod
+    def count_checksum_owners(checksum: str) -> int:
+        """
+        Return the number of connector rows that still reference *checksum*.
+        """
+        try:
+            with get_db_session() as session:
+                count_stmt = select(func.count()).where(
+                    ConnectorDocumentChecksum.checksum == checksum
+                )
+                return session.execute(count_stmt).scalar() or 0
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in count_checksum_owners({checksum[:20]}...): {e}", exc_info=True)
             raise
 
     # ========================================================================
@@ -1161,15 +1170,13 @@ class DatabaseManager:
             raise
 
     @staticmethod
-    def init_sync_log_and_update_connector(
+    def insert_sync_log(
         connector_id: str,
         started_at: Optional[datetime] = None,
     ) -> int:
         """
-        Initialise a new sync run across two tables:
-          - connector_sync_log: inserts a new row with status=STARTED and an
-            auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
-          - connector: sets sync_status=SYNCING on the matching row.
+        Insert a new sync-log row with status=STARTED and an auto-incremented seq
+        (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
 
         Returns the generated seq value.
         """
@@ -1192,19 +1199,28 @@ class DatabaseManager:
                     .returning(ConnectorSyncLog.seq)
                 )
                 seq: int = session.execute(stmt).scalar_one()
+                logger.debug(f"insert_sync_log: connector={connector_id!r} seq={seq}")
+                return seq
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in insert_sync_log({connector_id}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def set_connector_sync_status_syncing(connector_id: str) -> None:
+        """Set sync_status=SYNCING on the connector row."""
+        try:
+            with get_db_session() as session:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
                     .values(sync_status=ConnectorStatus.SYNCING)
                 )
-                logger.debug(f"init_sync_log_and_update_connector: connector={connector_id!r} seq={seq}")
-                return seq
         except SQLAlchemyError as e:
-            logger.error(f"DB error in init_sync_log_and_update_connector({connector_id}): {e}", exc_info=True)
+            logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)
             raise
 
     @staticmethod
-    def finalize_sync_log_and_update_connector(
+    def finalize_sync_log(
         connector_id: str,
         seq: int,
         status: str,
@@ -1215,14 +1231,10 @@ class DatabaseManager:
         error: Optional[str] = None,
     ) -> bool:
         """
-        Finalize a sync run across two tables:
-          - connector_sync_log: UPDATEs the matching row with status, finished_at,
-            and optional file counts / error message.
-          - connector: UPDATEs last_sync_at to now, and sync_status to the terminal
-            state — CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can
-            retry; any other status (e.g. COMPLETED) is written through verbatim.
+        Update the sync-log row identified by (connector_id, seq) with the terminal
+        status, finished_at, and optional file counts / error message.
 
-        Returns True on success, False if the sync-log row was not found.
+        Returns True on success, False if the row was not found.
         """
         try:
             with get_db_session() as session:
@@ -1253,8 +1265,28 @@ class DatabaseManager:
                         f"Sync log connector={connector_id!r} seq={seq} not found for update"
                     )
                     return False
-                # Cancelled and failed ticks both leave the connector OUT_OF_SYNC
-                # so the scheduler can retry.  Only COMPLETED writes through verbatim.
+                return True
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in finalize_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
+    def update_connector_after_sync(
+        connector_id: str,
+        status: str,
+        last_sync_at: Optional[datetime] = None,
+    ) -> None:
+        """
+        Update last_sync_at and sync_status on the connector row after a sync run.
+
+        CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
+        any other status (e.g. COMPLETED) is written through verbatim.
+        """
+        try:
+            with get_db_session() as session:
                 connector_sync_status = (
                     ConnectorStatus.OUT_OF_SYNC
                     if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
@@ -1263,15 +1295,17 @@ class DatabaseManager:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(last_sync_at=now, sync_status=connector_sync_status)
+                    .values(
+                        last_sync_at=last_sync_at or datetime.now(timezone.utc),
+                        sync_status=connector_sync_status,
+                    )
                 )
-                return True
         except SQLAlchemyError as e:
             logger.error(
-                f"DB error in finalize_sync_log_and_update_connector(connector={connector_id!r}, seq={seq}): {e}",
+                f"DB error in update_connector_after_sync({connector_id!r}): {e}",
                 exc_info=True,
             )
-            return False
+            raise
 
     @staticmethod
     def update_sync_log_progress(
@@ -1378,27 +1412,35 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def get_sync_logs(
-        connector_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> tuple[List[ConnectorSyncLog], int]:
-        """
-        Return paginated sync-log rows for a connector, newest first.
-
-        Returns (items, total_count).
-        """
+    def count_sync_logs(connector_id: str) -> int:
+        """Return the total number of sync-log rows for the given connector."""
         try:
             with get_db_session() as session:
                 base = select(ConnectorSyncLog).where(
                     ConnectorSyncLog.connector_id == connector_id
                 )
-                total = session.execute(
+                return session.execute(
                     select(func.count()).select_from(base.subquery())
                 ).scalar() or 0
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in count_sync_logs({connector_id}): {e}", exc_info=True)
+            return 0
 
+    @staticmethod
+    def get_sync_logs(
+        connector_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[ConnectorSyncLog]:
+        """
+        Return paginated sync-log rows for a connector, newest first.
+        """
+        try:
+            with get_db_session() as session:
                 stmt = (
-                    base.order_by(ConnectorSyncLog.started_at.desc())
+                    select(ConnectorSyncLog)
+                    .where(ConnectorSyncLog.connector_id == connector_id)
+                    .order_by(ConnectorSyncLog.started_at.desc())
                     .limit(limit)
                     .offset(offset)
                 )
@@ -1412,13 +1454,12 @@ class DatabaseManager:
                     )
                     session.expunge(row)
                 logger.debug(
-                    f"get_sync_logs: connector={connector_id!r} "
-                    f"returned {len(rows)} of {total}"
+                    f"get_sync_logs: connector={connector_id!r} returned {len(rows)}"
                 )
-                return rows, total
+                return rows
         except SQLAlchemyError as e:
             logger.error(f"DB error in get_sync_logs({connector_id}): {e}", exc_info=True)
-            return [], 0
+            return []
 
     # ========================================================================
     # Document metadata helper

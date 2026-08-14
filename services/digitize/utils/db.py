@@ -1352,7 +1352,11 @@ def remove_connector_checksum_entry(
 
     Returns (remaining_owner_count, doc_id), or (0, None) if not found.
     """
-    return db_manager.delete_connector_checksum(connector_id, checksum)
+    doc_id = db_manager.delete_connector_checksum(connector_id, checksum)
+    if doc_id is None:
+        return 0, None
+    remaining = db_manager.count_checksum_owners(checksum)
+    return remaining, doc_id
 
 
 # ----------------------------------------------------------------------------
@@ -1371,7 +1375,9 @@ def init_sync_log_and_update_connector(
 
     Returns the generated seq value.
     """
-    return db_manager.init_sync_log_and_update_connector(connector_id, started_at=started_at)
+    seq = db_manager.insert_sync_log(connector_id, started_at=started_at)
+    db_manager.set_connector_sync_status_syncing(connector_id)
+    return seq
 
 
 def finalize_sync_log_and_update_connector(
@@ -1394,16 +1400,21 @@ def finalize_sync_log_and_update_connector(
 
     Returns True on success, False if the sync-log row was not found.
     """
-    return db_manager.finalize_sync_log_and_update_connector(
+    now = finished_at or datetime.now(timezone.utc)
+    found = db_manager.finalize_sync_log(
         connector_id=connector_id,
         seq=seq,
         status=status,
-        finished_at=finished_at,
+        finished_at=now,
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,
         error=error,
     )
+    if not found:
+        return False
+    db_manager.update_connector_after_sync(connector_id, status=status, last_sync_at=now)
+    return True
 
 
 def update_connector_total_files(connector_id: str, total_files: int) -> None:
@@ -1453,7 +1464,9 @@ def list_sync_logs(
 
     Returns (items, total_count).
     """
-    return db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
+    total = db_manager.count_sync_logs(connector_id)
+    rows = db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
+    return rows, total
 
 
 def get_sync_log(connector_id: str, seq: int) -> Optional[ConnectorSyncLog]:
