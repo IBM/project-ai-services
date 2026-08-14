@@ -376,26 +376,25 @@ class TestExtractSyncEndpoint:
             content=b"not json at all",
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "INVALID_JSON"
+        assert resp.status_code == 422
 
     def test_400_missing_schema_id(self, extract_test_client):
         resp = extract_test_client.post("/v1/extract", json={"text": "hello"})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert resp.status_code == 422
+        assert resp.json()["detail"][0]["type"] == "missing"
 
     def test_400_missing_text(self, extract_test_client):
         resp = extract_test_client.post("/v1/extract", json={"schema_id": "abc"})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert resp.status_code == 422
+        assert resp.json()["detail"][0]["type"] == "missing"
 
     def test_400_empty_text(self, extract_test_client):
         resp = extract_test_client.post(
             "/v1/extract",
             json={"text": "", "schema_id": "abc"},
         )
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert resp.status_code == 422
+        assert resp.json()["detail"][0]["type"] == "string_too_short"
 
     # ── 404 Not Found ─────────────────────────────────────────────────────
 
@@ -424,26 +423,24 @@ class TestExtractSyncEndpoint:
 
     def test_413_body_exceeds_limit_without_header(self, extract_test_client, monkeypatch):
         monkeypatch.setattr(
-            "extract.utils.request.settings.extract.max_request_body_bytes", 10
+            "extract.utils.request.settings.extract.max_request_body_bytes", 100
         )
         resp = extract_test_client.post(
             "/v1/extract",
-            content=b"x" * 100,
-            headers={"Content-Type": "application/json"},
+            json={"text": "x" * 200, "schema_id": "abc"},
         )
         assert resp.status_code == 413
         assert resp.json()["error"]["code"] == "REQUEST_TOO_LARGE"
 
     def test_413_details_include_limit(self, extract_test_client, monkeypatch):
         monkeypatch.setattr(
-            "extract.utils.request.settings.extract.max_request_body_bytes", 10
+            "extract.utils.request.settings.extract.max_request_body_bytes", 100
         )
         resp = extract_test_client.post(
             "/v1/extract",
-            content=b"x" * 100,
-            headers={"Content-Type": "application/json"},
+            json={"text": "x" * 200, "schema_id": "abc"},
         )
-        assert resp.json()["error"]["details"]["max_request_body_bytes"] == 10
+        assert resp.json()["error"]["details"]["max_request_body_bytes"] == 100
 
     # ── 413 Context limit exceeded ────────────────────────────────────────
 

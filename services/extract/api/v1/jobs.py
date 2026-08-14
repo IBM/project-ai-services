@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from common.error_utils import http_error_responses
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
@@ -85,28 +85,20 @@ logger = get_logger("jobs_router")
     },
     include_in_schema=True,
 )
-async def extract_sync(request: Request) -> JSONResponse:
+async def extract_sync(request: Request, body: ExtractionRequest) -> JSONResponse:
     """Synchronous entity extraction — blocking call with schema-validated JSON output."""
     t_start = time.monotonic()
 
     # ------------------------------------------------------------------
     # 0. Request-body size guard — before any parsing or tokenisation
     # ------------------------------------------------------------------
-    raw_body = await check_request_body_size(request)
+    await check_request_body_size(request)
 
     # ------------------------------------------------------------------
-    # 1. Parse & basic field validation
+    # 1. Basic field validation
     # ------------------------------------------------------------------
-    try:
-        body_dict = json.loads(raw_body)
-    except Exception:
-        raise ExtractException(400, "INVALID_JSON", "Request body is not valid JSON.")
-
-    try:
-        body = ExtractionRequest(**body_dict)
-    except Exception as exc:
-        raise ExtractException(400, "INVALID_REQUEST", f"Invalid request body: {exc}")
-
+    if not body.text.strip():
+        raise ExtractException(400, "INVALID_REQUEST", "text field is empty")
     schema_row = _resolve_schema(body.schema_id)
 
     # ------------------------------------------------------------------
@@ -121,7 +113,7 @@ async def extract_sync(request: Request) -> JSONResponse:
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
     llm_model: str = llm_model_dict.get("llm_model", "")
-    max_model_len: int = llm_model_dict.get('max_model_len')
+    max_model_len: int = llm_model_dict.get('max_model_len', "")
 
     # ------------------------------------------------------------------
     # 3–8. Core extraction
@@ -368,7 +360,7 @@ async def _validate_file_content(file: UploadFile) -> None:
     probe = await file.read(MAX_PROBE_BYTES)
     await file.seek(0)
 
-    if not probe:
+    if not probe or not probe.strip():
         raise ExtractException(400, "BAD_REQUEST", "File is empty.")
 
     try:
@@ -427,7 +419,6 @@ async def _validate_file_content(file: UploadFile) -> None:
     tags=["jobs"],
 )
 async def create_extract_job(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     schema_id: str = Form(...),
     job_name: Optional[str] = Form(None),
@@ -441,7 +432,7 @@ async def create_extract_job(
     job_id = str(uuid.uuid4())
     _stage_and_persist(job_id, file, schema_id, filename, source_type, job_name)
 
-    background_tasks.add_task(_process_extract_job, job_id)
+    asyncio.create_task(_process_extract_job(job_id))
     logger.info(f"Accepted extraction job {job_id} (schema={schema_id}, file={filename!r})")
     return JobCreatedResponse(job_id=job_id)
 
