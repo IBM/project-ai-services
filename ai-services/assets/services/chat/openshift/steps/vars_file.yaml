@@ -5,10 +5,10 @@ containers:
 
   - name: "backend-server"
     format: ".Status"
-    alias: BACKEND_STATUS
+    alias: API_STATUS
 
 hosts:
-  - fetch: UI_ROUTE
-    type: route
-  - fetch: BACKEND_ROUTE
-    type: route
+  - fetch: UI_URL
+    type: ui
+  - fetch: API_URL
+    type: api

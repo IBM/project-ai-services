@@ -4,5 +4,5 @@ containers:
     alias: API_STATUS
 
 hosts:
-  - fetch: API_ROUTE
-    type: route
+  - fetch: API_URL
+    type: api
