@@ -1,0 +1,6 @@
+openapi: 3.0.0
+# Missing info section - this should cause an error
+paths:
+  /test:
+    get:
+      summary: Test endpoint

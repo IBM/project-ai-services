@@ -51,12 +51,10 @@ func NewApplicationService(
 
 	switch runtimeType {
 	case runtimeTypes.RuntimeTypePodman:
-		return &appservice.PodmanApplicationService{ApplicationServiceBase: base}
+		return appservice.NewPodmanApplicationService(base)
 	case runtimeTypes.RuntimeTypeOpenShift:
-		return &appservice.OpenShiftApplicationService{ApplicationServiceBase: base}
+		return appservice.NewOpenShiftApplicationService(base)
 	default:
 		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
 	}
 }
-
-// Made with Bob
