@@ -14,11 +14,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
 const (
 	// commandChannelSize is the buffer size for the per-worker command channel.
+	// Each concurrent deployment to the same worker writes one command to this
+	// channel. A buffer large enough to hold all in-flight deployments prevents
+	// HTTP handlers from blocking while the gRPC stream drains the queue.
+	// 32 allows up to 32 simultaneous deployments targeting the same worker
+	// without any back-pressure on the HTTP layer.
 	commandChannelSize = 32
 
 	// tokenTTLHours is the validity window for single-use bootstrap tokens.
@@ -105,11 +111,10 @@ func (r *Registry) Register(ctx context.Context, req *workerpb.RegisterRequest) 
 	r.mu.Unlock()
 
 	if r.repo != nil {
-		status := models.WorkerStatusReady
 		w := &models.Worker{
 			Name:        workerName,
 			RuntimeType: models.WorkerRuntimeTypePodman,
-			Status:      status,
+			Status:      models.WorkerStatusReady,
 			Metadata:    metadataToAny(req.GetMetadata()),
 		}
 		if err := r.repo.Upsert(ctx, w); err != nil {
@@ -144,8 +149,7 @@ func (r *Registry) Disconnect(ctx context.Context, workerName string) {
 	r.mu.Unlock()
 
 	if ok && r.repo != nil {
-		status := models.WorkerStatusDisconnected
-		if err := r.repo.Update(ctx, workerName, repository.WorkerUpdate{Status: &status}); err != nil {
+		if err := r.repo.Update(ctx, workerName, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
 			logger.WarningfCtx(ctx, "worker registry: DB disconnect update failed for %s: %v", workerName, err)
 		}
 	}

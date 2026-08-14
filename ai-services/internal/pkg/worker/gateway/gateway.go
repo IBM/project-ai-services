@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"google.golang.org/grpc"
@@ -112,7 +113,6 @@ func (g *Gateway) sweepStaleWorkers(ctx context.Context) {
 		return
 	}
 
-	status := models.WorkerStatusDisconnected
 	now := time.Now()
 
 	for _, w := range workers {
@@ -121,7 +121,7 @@ func (g *Gateway) sweepStaleWorkers(ctx context.Context) {
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > heartbeatTimeout {
 			logger.WarningfCtx(ctx, "WorkerGateway sweeper: worker %s heartbeat timed out — marking disconnected", w.Name)
-			if err := g.repo.Update(ctx, w.Name, repository.WorkerUpdate{Status: &status}); err != nil {
+			if err := g.repo.Update(ctx, w.Name, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
 				logger.WarningfCtx(ctx, "WorkerGateway sweeper: failed to update worker %s: %v", w.Name, err)
 			}
 		}

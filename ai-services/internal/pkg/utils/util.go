@@ -39,6 +39,12 @@ func BoolPtr(v bool) *bool {
 	return &v
 }
 
+// Ptr returns a pointer to v. Useful for taking the address of a literal or
+// named constant without introducing a throwaway variable.
+func Ptr[T any](v T) *T {
+	return &v
+}
+
 // FlattenArray takes a 2D slice and returns a 1D slice with all values.
 func FlattenArray[T comparable](arr [][]T) []T {
 	// Calculate total capacity needed
