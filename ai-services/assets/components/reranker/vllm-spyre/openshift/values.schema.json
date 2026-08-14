@@ -3,9 +3,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "storageUri": {
-      "type": "string"
-    },
     "model": {
       "type": "string",
       "title": "Reranker model",
@@ -18,9 +15,6 @@
         }
       ],
       "default": "BAAI/bge-reranker-v2-m3"
-    },
-    "resources": {
-      "type": "object"
     }
   }
 }

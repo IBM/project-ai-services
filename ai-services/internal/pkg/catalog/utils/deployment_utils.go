@@ -41,6 +41,13 @@ func RunConcurrently(
 			logger.InfofCtx(ctx, "Deploying %s\n", itemID)
 
 			if err := deployFn(ctx, itemID); err != nil {
+				// Context cancelled — deletion is in charge of status, exit silently.
+				if ctx.Err() != nil {
+					logger.InfofCtx(ctx, "Deployment of %s cancelled (deletion in progress)\n", itemID)
+
+					return
+				}
+
 				errMsg := fmt.Sprintf("Deployment failed: %v", err)
 				if updateErr := onError(ctx, databaseID, errMsg); updateErr != nil {
 					logger.ErrorfCtx(ctx, "Failed to update error status for %s: %v\n", itemID, updateErr)

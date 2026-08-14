@@ -928,88 +928,66 @@ func extractProviderParams(prefix string, allParams map[string]string, providerP
 
 // selectProviderFromDeployOptions determines the provider ID for a component using deploy options.
 // Priority:
-// 1. If user provided provider-specific params (e.g., llm.vllm-cpu.model), use that provider.
-// 2. For LLM and reranker components: Use vllm-spyre by default.
-// 3. Default provider marked in deploy options.
+// 1. User-specified provider (matched against deploy options).
+// 2. Default-marked provider.
+// 3. Provider is "vllm-spyre".
 // 4. First available provider.
-// Returns an error if multiple providers are specified for the same component type.
+// Returns an error if multiple providers are explicitly selected for the same component type.
 func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string, error) {
-	// Check if user specified params for a specific provider.
-	providerID, params, err := findUserSpecifiedProvider(compDeployOpt, providerParams)
+	matchedProvider, defaultProvider, spyreProvider, firstProvider, err := collectProviderSelection(compDeployOpt, providerParams)
 	if err != nil {
 		return "", nil, err
 	}
 
-	if providerID != "" {
-		return providerID, params, nil
+	if matchedProvider != "" {
+		return matchedProvider, providerParams[matchedProvider], nil
 	}
 
-	// Special logic for LLM and reranker component types - prefer Spyre acceleration.
-	if spyreID := findSpyreProvider(compDeployOpt); spyreID != "" {
-		return spyreID, make(map[string]string), nil
+	if defaultProvider != "" {
+		return defaultProvider, make(map[string]string), nil
 	}
 
-	// Use default provider if marked.
-	if defaultID := findDefaultProvider(compDeployOpt); defaultID != "" {
-		return defaultID, make(map[string]string), nil
+	if spyreProvider != "" {
+		return spyreProvider, make(map[string]string), nil
 	}
 
-	// Fall back to first available provider.
-	if len(compDeployOpt.Providers) > 0 {
-		return compDeployOpt.Providers[0].ID, make(map[string]string), nil
-	}
-
-	return "", make(map[string]string), nil
+	return firstProvider, make(map[string]string), nil
 }
 
-// findUserSpecifiedProvider checks if user specified params for a specific provider.
-// Returns an error if multiple valid providers are specified for the same component type.
-func findUserSpecifiedProvider(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string, error) {
+func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, string, string, string, error) {
 	var matchedProvider string
-	var matchedParams map[string]string
+	var defaultProvider string
+	var spyreProvider string
+	var firstProvider string
 
-	for providerID := range providerParams {
-		// Verify this provider exists in deploy options.
-		for _, p := range compDeployOpt.Providers {
-			if p.ID == providerID {
-				if matchedProvider != "" {
-					return "", nil, fmt.Errorf(
-						"multiple providers specified for component type '%s': '%s' and '%s'. "+
-							"Only one provider can be selected per component type",
-						compDeployOpt.Type, matchedProvider, providerID)
-				}
-
-				matchedProvider = providerID
-				matchedParams = providerParams[providerID]
-
-				break
-			}
-		}
-	}
-
-	return matchedProvider, matchedParams, nil
-}
-
-// findSpyreProvider finds vllm-spyre provider if available for the component.
-func findSpyreProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
 	for _, p := range compDeployOpt.Providers {
-		if p.ID == "vllm-spyre" {
-			return p.ID
+		if firstProvider == "" {
+			firstProvider = p.ID
 		}
-	}
 
-	return ""
-}
+		if spyreProvider == "" && p.ID == "vllm-spyre" {
+			spyreProvider = p.ID
+		}
 
-// findDefaultProvider finds the default provider marked in deploy options.
-func findDefaultProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
-	for _, p := range compDeployOpt.Providers {
 		if p.Default {
-			return p.ID
+			defaultProvider = p.ID
 		}
+
+		if _, selected := providerParams[p.ID]; !selected {
+			continue
+		}
+
+		if matchedProvider != "" {
+			return "", "", "", "", fmt.Errorf(
+				"multiple providers specified for component type '%s': '%s' and '%s'. "+
+					"Only one provider can be selected per component type",
+				compDeployOpt.Type, matchedProvider, p.ID)
+		}
+
+		matchedProvider = p.ID
 	}
 
-	return ""
+	return matchedProvider, defaultProvider, spyreProvider, firstProvider, nil
 }
 
 // applySchemaDefaults fetches the component provider schema and applies default values.

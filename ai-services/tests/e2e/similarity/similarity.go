@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -432,4 +433,175 @@ func ReproduceValidationError(ctx context.Context, baseURL string) (*SimilarityE
 	}
 
 	return errResp, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Failure-path validators — used by similarity_failure_test.go
+// ─────────────────────────────────────────────────────────────────────────────
+
+// parseSimilarityErrorBody decodes rawBody into SimilarityErrorResponse.
+// Returns a non-nil err if the body cannot be decoded or Error.Code is empty.
+func parseSimilarityErrorBody(rawBody string) (*SimilarityErrorResponse, error) {
+	var env SimilarityErrorResponse
+	if err := json.Unmarshal([]byte(rawBody), &env); err != nil {
+		return nil, fmt.Errorf("parse similarity error envelope: %w — body: %s", err, rawBody)
+	}
+	if env.Error.Code == "" {
+		return nil, fmt.Errorf("similarity error envelope missing 'code' field — body: %s", rawBody)
+	}
+
+	return &env, nil
+}
+
+// ValidateSimilarityEmptyQueryError asserts that the service correctly rejected
+// an empty query with HTTP 400 and error code EMPTY_INPUT.
+func ValidateSimilarityEmptyQueryError(statusCode int, rawBody string) error {
+	if statusCode != http.StatusBadRequest {
+		return fmt.Errorf("expected HTTP 400 for empty query, got %d — body: %s", statusCode, rawBody)
+	}
+	env, err := parseSimilarityErrorBody(rawBody)
+	if err != nil {
+		return err
+	}
+	if env.Error.Code != "EMPTY_INPUT" {
+		return fmt.Errorf("expected error code EMPTY_INPUT, got %q — body: %s", env.Error.Code, rawBody)
+	}
+	if !strings.Contains(env.Error.Message, "query is required") {
+		return fmt.Errorf("expected message to contain %q, got %q", "query is required", env.Error.Message)
+	}
+
+	return nil
+}
+
+// ValidateSimilarityInvalidModeError asserts that the service correctly rejected
+// an unsupported mode value with HTTP 400 and error code INVALID_PARAMETER.
+func ValidateSimilarityInvalidModeError(statusCode int, rawBody string) error {
+	if statusCode != http.StatusBadRequest {
+		return fmt.Errorf("expected HTTP 400 for invalid mode, got %d — body: %s", statusCode, rawBody)
+	}
+	env, err := parseSimilarityErrorBody(rawBody)
+	if err != nil {
+		return err
+	}
+	if env.Error.Code != "INVALID_PARAMETER" {
+		return fmt.Errorf("expected error code INVALID_PARAMETER, got %q — body: %s", env.Error.Code, rawBody)
+	}
+	if !strings.Contains(env.Error.Message, "mode must be one of") {
+		return fmt.Errorf("expected message to contain %q, got %q", "mode must be one of", env.Error.Message)
+	}
+
+	return nil
+}
+
+// pydanticDetailEntry is one element of the FastAPI 422 {"detail":[...]} array.
+type pydanticDetailEntry struct {
+	Loc  []interface{} `json:"loc"`
+	Msg  string        `json:"msg"`
+	Type string        `json:"type"`
+}
+
+// findTopKDetailEntry searches detail entries for one whose loc contains "top_k"
+// and whose msg contains "greater than or equal to".
+// Returns an error if no matching entry is found or the message is wrong.
+func findTopKDetailEntry(details []pydanticDetailEntry) error {
+	for _, d := range details {
+		for _, loc := range d.Loc {
+			if locStr, ok := loc.(string); ok && locStr == "top_k" {
+				if !strings.Contains(d.Msg, "greater than or equal to") {
+					return fmt.Errorf("expected top_k detail msg to contain %q, got %q",
+						"greater than or equal to", d.Msg)
+				}
+
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("expected a detail entry with loc containing %q", "top_k")
+}
+
+// parseTopK422Body unmarshals a FastAPI 422 body into a slice of pydanticDetailEntry.
+func parseTopK422Body(rawBody string) ([]pydanticDetailEntry, error) {
+	var env SimilarityErrorResponse
+	if err := json.Unmarshal([]byte(rawBody), &env); err != nil {
+		return nil, fmt.Errorf("parse 422 response body: %w — body: %s", err, rawBody)
+	}
+
+	detailBytes, err := json.Marshal(env.Detail)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal detail field: %w — body: %s", err, rawBody)
+	}
+
+	var details []pydanticDetailEntry
+	if err := json.Unmarshal(detailBytes, &details); err != nil || len(details) == 0 {
+		return nil, fmt.Errorf("expected non-empty detail array in 422 body — body: %s", rawBody)
+	}
+
+	return details, nil
+}
+
+// ValidateSimilarityInvalidTopKError asserts that the service correctly rejected
+// a top_k value below the minimum (ge=1) with HTTP 422 (Pydantic validation).
+//
+// FastAPI 422 bodies use {"detail":[{"loc":[...],"msg":"...","type":"..."}]}
+// rather than the custom error envelope.  This validator checks:
+//   - HTTP status is 422
+//   - at least one detail entry references "top_k" in its loc array
+//   - the entry's msg contains the expected constraint phrase
+func ValidateSimilarityInvalidTopKError(statusCode int, rawBody string) error {
+	if statusCode != http.StatusUnprocessableEntity {
+		return fmt.Errorf("expected HTTP 422 for invalid top_k, got %d — body: %s", statusCode, rawBody)
+	}
+
+	details, err := parseTopK422Body(rawBody)
+	if err != nil {
+		return err
+	}
+
+	return findTopKDetailEntry(details)
+}
+
+// ValidateSimilarityUnreachableError asserts that a call to an unreachable host
+// produced a transport-level error, by checking that err is non-nil and its
+// message contains at least one known connectivity-failure keyword.
+//
+// Note: this validator is used exclusively with PostSimilaritySearchRaw (rag package),
+// which preserves raw transport errors.  Do not use with SimilaritySearchExpectingError,
+// which wraps transport errors as "request failed: %w".
+func ValidateSimilarityUnreachableError(err error) error {
+	if err == nil {
+		return errors.New("expected a transport error for unreachable similarity API, but got nil")
+	}
+	msg := strings.ToLower(err.Error())
+	keywords := []string{"connection", "dial", "no such host", "i/o timeout", "context deadline exceeded"}
+	for _, kw := range keywords {
+		if strings.Contains(msg, kw) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"expected transport error to contain one of %v — got: %s",
+		keywords, err.Error(),
+	)
+}
+
+// ValidateSimilarityNotReadyError asserts that the service correctly reported an
+// empty vector index with HTTP 503 and error code VECTOR_STORE_NOT_READY.
+func ValidateSimilarityNotReadyError(statusCode int, rawBody string) error {
+	if statusCode != http.StatusServiceUnavailable {
+		return fmt.Errorf("expected HTTP 503 for empty index, got %d — body: %s", statusCode, rawBody)
+	}
+	env, err := parseSimilarityErrorBody(rawBody)
+	if err != nil {
+		return err
+	}
+	if env.Error.Code != "VECTOR_STORE_NOT_READY" {
+		return fmt.Errorf("expected error code VECTOR_STORE_NOT_READY, got %q — body: %s", env.Error.Code, rawBody)
+	}
+	if !strings.Contains(env.Error.Message, "Ingest documents first") {
+		return fmt.Errorf("expected message to contain %q, got %q", "Ingest documents first", env.Error.Message)
+	}
+
+	return nil
 }

@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -37,6 +38,9 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// ErrNamespaceNotFound is returned by GetNamespace when the namespace does not exist.
+var ErrNamespaceNotFound = errors.New("namespace not found")
 
 var (
 	scheme = runtime.NewScheme()
@@ -57,6 +61,9 @@ func init() {
 
 const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
+
+	deleteNamespaceGracePeriod = int64(30)       // deleteNamespaceGracePeriod is the grace period in seconds for namespace deletion.
+	deleteNamespaceTimeout     = 3 * time.Minute // deleteNamespaceTimeout is the maximum time to wait for a namespace deletion to complete.
 )
 
 // OpenshiftClient implements the Runtime interface for Openshift.
@@ -182,6 +189,20 @@ func (kc *OpenshiftClient) PullImage(image string) error {
 	return nil
 }
 
+// GetNamespace fetches the namespace details.
+func (kc *OpenshiftClient) GetNamespace() (string, error) {
+	ns, err := kc.KubeClient.CoreV1().Namespaces().Get(kc.Ctx, kc.Namespace, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s", ErrNamespaceNotFound, kc.Namespace)
+		}
+
+		return "", fmt.Errorf("failed to get namespace: %w", err)
+	}
+
+	return ns.Name, nil
+}
+
 // ListPods lists pods with optional filters.
 func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
 	labels := client.MatchingLabels{}
@@ -204,7 +225,7 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 }
 
 // CreatePod creates a pod from YAML manifest.
-func (kc *OpenshiftClient) CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error) {
+func (kc *OpenshiftClient) CreatePod(_ context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	logger.Warningln("Not implemented")
 
 	return nil, nil
@@ -342,6 +363,34 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	}
 
 	return fmt.Errorf("cannot find pod for the given container")
+}
+
+// ListCRD populates list resources based on input
+// resources in the client namespace that carry every label key in filters["label"].
+func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
+	labelKeys := []string{}
+	if labelFilters, exists := filters["label"]; exists {
+		labelKeys = append(labelKeys, labelFilters...)
+	}
+
+	opts := []client.ListOption{
+		client.InNamespace(kc.Namespace),
+		client.HasLabels(labelKeys),
+	}
+
+	if err := kc.Client.List(kc.Ctx, list, opts...); err != nil {
+		return nil, fmt.Errorf("failed to list CRD resources : %w", err)
+	}
+
+	result := make([]types.CRDResource, 0, len(list.Items))
+	for _, item := range list.Items {
+		result = append(result, types.CRDResource{
+			Name:   item.GetName(),
+			Labels: item.GetLabels(),
+		})
+	}
+
+	return result, nil
 }
 
 // ListRoutes lists all routes in the namespace.
@@ -508,9 +557,16 @@ func (kc *OpenshiftClient) DeleteVolume(name string) error {
 }
 
 func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
-	logger.Warningln("Not implemented")
+	_, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
 
-	return false, nil
+		return false, fmt.Errorf("failed to check pvc existence: %w", err)
+	}
+
+	return true, nil
 }
 
 // GetSystemInfo returns cluster-level CPU, memory, and Spyre card availability.
@@ -810,6 +866,30 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart deployment %q: %w", name, err)
+	}
+
+	return nil
+}
+
+func (kc *OpenshiftClient) DeleteNamespace(name string) error {
+	gracePeriod := deleteNamespaceGracePeriod
+	propagation := metav1.DeletePropagationBackground
+
+	ctx, cancel := context.WithTimeout(kc.Ctx, deleteNamespaceTimeout)
+	defer cancel()
+
+	err := kc.KubeClient.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+		PropagationPolicy:  &propagation,
+	})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			logger.DebugfCtx(kc.Ctx, "Ignoring '%s' namespace deletion error: no namespace found\n", name)
+
+			return nil
+		}
+
+		return fmt.Errorf("failed to delete namespace %s: %w", name, err)
 	}
 
 	return nil

@@ -16,7 +16,15 @@ import (
 )
 
 // HandleDeploymentStepError updates the application status to Error and logs the failure.
+// If the context has already been cancelled (e.g. a mid-deployment delete), it exits
+// silently so the deletion goroutine retains ownership of the application status.
 func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, stepContext string, err error) {
+	if ctx.Err() != nil {
+		logger.WarningfCtx(ctx, "Deployment step %q for %s cancelled (deletion in progress)\n", stepContext, appID)
+
+		return
+	}
+
 	errMsg := fmt.Sprintf("%s: %v", stepContext, err)
 	if updateErr := UpdateApplicationStatus(ctx, appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
 		logger.ErrorfCtx(ctx, "Failed to update application status: %v\n", updateErr)
@@ -32,7 +40,7 @@ func AppNamespace(appID uuid.UUID) string {
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
 // e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
 func HelmReleaseName(appID uuid.UUID, id string) string {
-	return id + "-" + appID.String()[:8]
+	return strings.ReplaceAll(id, "_", "-") + "-" + appID.String()[:8]
 }
 
 // DeployingStatusMessage returns the human-readable deploying status message.

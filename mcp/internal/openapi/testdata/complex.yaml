@@ -1,0 +1,129 @@
+openapi: 3.0.0
+info:
+  title: Cloud Service API
+  version: 2.0.0
+servers:
+  - url: https://api.us-south.cloud.ibm.com
+    description: US South region
+  - url: https://api.eu-gb.cloud.ibm.com
+    description: Europe region
+tags:
+  - name: Resources
+    description: Resource management
+  - name: Users
+    description: User management
+paths:
+  /users/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The user ID
+    get:
+      operationId: getUser
+      summary: Get user by ID
+      description: Returns a single user
+      tags:
+        - Users
+      parameters:
+        - name: includeDetails
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Include extra details
+      responses:
+        '200':
+          description: Successful response
+        '404':
+          description: User not found
+    put:
+      operationId: updateUser
+      summary: Update user
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+              required:
+                - name
+      responses:
+        '200':
+          description: User updated
+    delete:
+      operationId: deleteUser
+      summary: Delete user
+      tags:
+        - Users
+      responses:
+        '204':
+          description: User deleted
+  /resources:
+    get:
+      operationId: listResources
+      summary: List all resources
+      tags:
+        - Resources
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of resources
+    post:
+      operationId: createResource
+      summary: Create a new resource
+      tags:
+        - Resources
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: ["compute", "storage", "network"]
+              required:
+                - name
+                - type
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+      responses:
+        '201':
+          description: Resource created
