@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     last_sync_at            TIMESTAMPTZ,
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     last_sync_error         TEXT,
+    error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
     CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
 );

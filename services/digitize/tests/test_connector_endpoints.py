@@ -90,6 +90,7 @@ def _make_connector(
     c.last_sync_at = _NOW
     c.sync_status = sync_status
     c.last_sync_error = None
+    c.error = None
     c.total_files = 42
     return c
 
