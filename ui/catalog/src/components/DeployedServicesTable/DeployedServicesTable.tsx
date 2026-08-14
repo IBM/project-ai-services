@@ -50,6 +50,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
+import type { SharedTableAction } from "@/components/Table/types";
 import { calculateUptime } from "@/api/applications.api";
 
 // Generic cell renderer wrapper
@@ -57,7 +58,7 @@ interface RenderCellProps {
   header: string;
   value: unknown;
   rowId: string;
-  dispatch: Dispatch<AppAction>;
+  dispatch: Dispatch<AppAction | SharedTableAction>;
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData: DeployedServicesRow;
@@ -544,7 +545,7 @@ const DeployedServicesTable = ({
                           onChange={(e) => {
                             if (typeof e !== "string") {
                               dispatch({
-                                type: ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH,
+                                type: "SHARED_SET_SEARCH",
                                 payload: e.target.value,
                               });
                             }

@@ -1,12 +1,14 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.47
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.53
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.214
+  image: icr.io/ai-services-cicd/ai-services:v0.0.235
   runtime: ""
   adminPasswordHash: ""
+  # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9090.
+  workerGatewayPort: "9090"
   podman:
     uri: "/run/podman/podman.sock"
     authFileContent: ""

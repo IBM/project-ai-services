@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router';
 import { useState } from 'react';
 import AppHeader from '../components/AppHeader';
 import Navbar from '../components/Navbar';

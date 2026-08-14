@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { PageHeader } from "@carbon/ibm-products";
-import { Search, Accordion, Button, Tag } from "@carbon/react";
+import { Search, Accordion, Button, DismissibleTag } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
 import styles from "./CatalogBrowseLayout.module.scss";
 
@@ -72,14 +72,13 @@ const CatalogBrowseLayout = ({
             <div className={styles.filterHeader}>
               <span className={styles.filterTitle}>Filters</span>
               {totalSelectedFilters > 0 && (
-                <Tag
+                <DismissibleTag
                   type="high-contrast"
                   size="md"
-                  filter
+                  text={String(totalSelectedFilters)}
+                  title="Clear filters"
                   onClose={onClearFilters}
-                >
-                  {totalSelectedFilters}
-                </Tag>
+                />
               )}
             </div>
 

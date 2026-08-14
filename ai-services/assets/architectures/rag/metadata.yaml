@@ -1,6 +1,6 @@
 # Architecture identification
 id: rag
-name: "Digital Assistant"
+name: "Digital Assistants"
 description: "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG)."
 version: "1.0.0"
 type: architecture

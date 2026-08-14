@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services
-TAG?=v0.0.214
+TAG?=v0.0.235
 CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
@@ -41,7 +41,7 @@ REPORT_DIR := tests/e2e/reports
 RUN_ID := $(shell date +%s)
 export RUN_ID
 
-TEST_BASE = ginkgo -r
+TEST_BASE = ginkgo -r --tags "$(BUILDTAGS)"
 TEST_PKG = ./tests/e2e
 TEST_ARGS ?=
 JUNIT_FLAG = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
@@ -112,9 +112,9 @@ test:
 test-generate-report:
 	@echo "Using RUN_ID=$(RUN_ID)"
 	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG) \
-     -- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
-        $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
-        $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
+	-- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
+	   $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
+	   $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
 
 .PHONY: swagger
 swagger:

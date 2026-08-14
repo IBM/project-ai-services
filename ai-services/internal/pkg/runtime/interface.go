@@ -1,10 +1,12 @@
 package runtime
 
 import (
+	"context"
 	"io"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type Runtime interface {
@@ -14,7 +16,7 @@ type Runtime interface {
 
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)
-	CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error)
+	CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error)
 	DeletePod(id string, force *bool) error
 	StopPod(id string) error
 	StartPod(id string) error
@@ -38,9 +40,17 @@ type Runtime interface {
 	InspectContainer(nameOrId string) (*types.Container, error)
 	ContainerExists(nameOrID string) (bool, error)
 	ContainerLogs(containerNameOrID string) error
+	ExecInContainerWithCmd(podName, containerName string, command []string) (string, error)
 
 	// Network operations
 	ListRoutes(labelSelector string) ([]types.Route, error)
+
+	// ListCRD populates crd list
+	// resources in the namespace that carry every label key in filters["label"].
+	ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error)
+
+	// Namespace operations
+	DeleteNamespace(name string) error
 
 	// PVC operations
 	DeletePVCs(appLabel string) error

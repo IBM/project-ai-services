@@ -1,6 +1,6 @@
 import React, { useReducer, useEffect } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { useDeployOptions } from "@/hooks/useDeployOptions";
+import { useDeployOptions } from "@/components/DeployFlow/DigitalAssistant/hooks/useDeployOptions";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -46,7 +46,7 @@ import { CELL_RENDERERS, StatusCell } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
-import { DeployFlow } from "@/components/DeployFlow";
+import { DeployFlow } from "@/components/DeployFlow/DigitalAssistant";
 import {
   fetchApplications,
   deleteApplication,
@@ -92,8 +92,6 @@ const renderCell = ({
     </TableCell>
   );
 };
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
@@ -179,6 +177,17 @@ const DigitalAssistantsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogId, state.rowsData.length]);
 
+  // Poll every 5 s while any row is in a transitional state
+  useEffect(() => {
+    const hasTransitional = state.rowsData.some(
+      (r) => r.status === "Deploying..." || r.status === "Deleting...",
+    );
+    if (!hasTransitional) return;
+    const id = setInterval(loadApplications, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.rowsData]);
+
   const handleDeploySubmit = () => {
     loadApplications();
   };
@@ -208,8 +217,6 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
-      // Await the delayed reload to ensure error handling
-      await sleep(5000);
       await loadApplications();
     } catch (err) {
       const msg =

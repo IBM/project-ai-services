@@ -43,8 +43,12 @@ class SchemaRegisterRequest(BaseModel):
     description: Optional[str] = Field(
         None, description="Free-text description of what the schema extracts"
     )
-    json_schema: Dict[str, Any] = Field(
-        ..., description="JSON Schema draft 2020-12.  Root must be type:object."
+    json_schema: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "JSON Schema draft 2020-12.  Root must be type:object.  "
+            "If omitted, the schema is inferred automatically from the provided examples."
+        ),
     )
     examples: Optional[List[ExampleItem]] = Field(
         None,
@@ -103,6 +107,7 @@ class SchemaDetailResponse(BaseModel):
     schema_id: str
     name: str
     description: Optional[str] = None
+    is_schema_inferred: bool = False
     json_schema: Dict[str, Any]
     examples: Optional[List[Dict[str, Any]]] = None
     custom_prompt: Optional[str] = None
@@ -125,8 +130,6 @@ class DocumentInfo(BaseModel):
     """Inline document info embedded in job detail responses."""
     name: str
     source_type: str
-    digitize_job_id: Optional[str] = None
-    digitize_doc_id: Optional[str] = None
 
 
 class JobDetailResponse(BaseModel):

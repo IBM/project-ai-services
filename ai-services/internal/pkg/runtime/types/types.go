@@ -66,3 +66,9 @@ type PodResources struct {
 	MemUsage   uint64   // Memory usage in bytes
 	SpyreCards []string // List of Spyre card PCI addresses
 }
+
+// CRDResource represents a custom resource in openshift.
+type CRDResource struct {
+	Name   string
+	Labels map[string]string
+}

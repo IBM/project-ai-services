@@ -31,9 +31,11 @@ from extract.utils.schema import (
     SchemaValidationError,
     check_schema_share_in_context,
     compute_token_counts,
+    infer_schema_from_examples,
     normalize_schema,
     validate_examples,
-    validate_json_schema_structure, fmt_dt
+    validate_json_schema_structure,
+    fmt_dt,
 )
 
 
@@ -74,14 +76,29 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
             f"A schema with name {body.name!r} already exists.",
             status=409,
         )
-    # --- Normalize per-property "required": true convention FIRST ---
-    normalized = normalize_schema(body.json_schema)
+
+    examples_raw = [ex.model_dump() for ex in body.examples] if body.examples else None
+
+    if body.json_schema is None and not examples_raw:
+        raise SchemaValidationError(
+            "MISSING_SCHEMA",
+            "Either json_schema or at least one example must be provided.",
+            status=400,
+        )
+
+    if body.json_schema is None:
+        # --- Infer schema from examples when no explicit schema is provided ---
+        normalized = infer_schema_from_examples(examples_raw or [])
+        is_inferred = True
+    else:
+        # --- Normalize per-property "required": true convention FIRST ---
+        normalized = normalize_schema(body.json_schema)
+        is_inferred = False
 
     # --- JSON Schema structural validation (against the normalized form) ---
     validate_json_schema_structure(normalized)
 
     # --- Validate example outputs against normalized schema ---
-    examples_raw = [ex.model_dump() for ex in body.examples] if body.examples else None
     validate_examples(examples_raw, normalized)
 
 
@@ -121,6 +138,7 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
         description=body.description,
         examples=examples_raw,
         custom_prompt=body.custom_prompt,
+        is_schema_inferred=is_inferred,
     )
     if row is None:
         raise SchemaValidationError(
@@ -172,7 +190,7 @@ async def list_schemas(
             schema_tokens=row.schema_tokens,
             examples_tokens=row.examples_tokens,
             custom_prompt_tokens=row.custom_prompt_tokens,
-            created_at=fmt_dt(row.created_at),
+            created_at=fmt_dt(row.created_at) or "",
         )
         for row in rows
     ]
@@ -212,13 +230,14 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
         schema_id=row.schema_id,
         name=row.name,
         description=row.description,
+        is_schema_inferred=row.is_schema_inferred,
         json_schema=row.json_schema,
         examples=row.examples,
         custom_prompt=row.custom_prompt,
         schema_tokens=row.schema_tokens,
         examples_tokens=row.examples_tokens,
         custom_prompt_tokens=row.custom_prompt_tokens,
-        created_at=fmt_dt(row.created_at),
+        created_at=fmt_dt(row.created_at) or "",
     )
 
 

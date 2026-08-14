@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"flag"
@@ -39,6 +40,7 @@ var (
 	providedTemplate            string
 	appRuntime                  string
 	deleteExistingApp           bool
+	runFailureTests             bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -76,7 +78,9 @@ func init() {
 	flag.StringVar(&providedTemplate, "template", "rag", "Template to use for application creation (rag, summarize, digitize)")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
-
+	flag.BoolVar(&runFailureTests, "run-failure-tests", false,
+		"Opt in to running failure test suites (bootstrap, catalog, similarity). "+
+			"Failure tests are skipped by default to prevent accidental execution during a normal suite run.")
 }
 
 func TestE2E(t *testing.T) {
@@ -2005,6 +2009,561 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	
+	ginkgo.Context("Synchronous Summarization Tests", ginkgo.Label("summarization-tests"), func() {
+		// summarizeBaseURL is resolved fresh in BeforeAll from the running app.
+		var syncSummarizeBaseURL string
+
+		ginkgo.BeforeAll(func() {
+			if templateName != "summarize" {
+				ginkgo.Skip(fmt.Sprintf("Skipping synchronous summarization tests — template is '%s', not 'summarize'", templateName))
+			}
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
+
+			logger.Infof("[SUMMARIZE-SYNC] Setting up synchronous summarization tests for app: %s", appName)
+
+			loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			catalogLoginWithDiscovery(loginCtx, true)
+			loginCancel()
+
+			pollCtx, pollCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer pollCancel()
+
+			const summarizePollInterval = 15 * time.Second
+			var infoOutput string
+			for {
+				var infoErr error
+				infoOutput, infoErr = cli.ApplicationInfo(pollCtx, cfg, appName, appRuntime)
+				if infoErr != nil {
+					logger.Warningf("[SUMMARIZE-SYNC] application info error while polling for summarize URL: %v", infoErr)
+				} else {
+					syncSummarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOutput)
+					if syncSummarizeBaseURL != "" {
+						break
+					}
+				}
+				if pollCtx.Err() != nil {
+					ginkgo.Fail(fmt.Sprintf(
+						"Timed out waiting for summarize-api URL in 'application info' for app %q.\nLast output:\n%s",
+						appName, infoOutput))
+				}
+				logger.Infof("[SUMMARIZE-SYNC] summarize-api URL not yet present — retrying in %s", summarizePollInterval)
+				select {
+				case <-pollCtx.Done():
+					ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api URL for app %q", appName))
+				case <-time.After(summarizePollInterval):
+				}
+			}
+
+			logger.Infof("[SUMMARIZE-SYNC] Summarize Base URL: %s", syncSummarizeBaseURL)
+
+			// Wait for /health before running any tests.
+			healthCtx, healthCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer healthCancel()
+			const healthPollInterval = 15 * time.Second
+			for {
+				if err := summarization.HealthCheck(healthCtx, syncSummarizeBaseURL); err == nil {
+					logger.Infof("[SUMMARIZE-SYNC] summarize-api is healthy")
+					break
+				} else {
+					if healthCtx.Err() != nil {
+						ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api to become healthy at %s", syncSummarizeBaseURL))
+					}
+					logger.Infof("[SUMMARIZE-SYNC] summarize-api not yet healthy (%v) — retrying in %s", err, healthPollInterval)
+					select {
+					case <-healthCtx.Done():
+						ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api to become healthy at %s", syncSummarizeBaseURL))
+					case <-time.After(healthPollInterval):
+					}
+				}
+			}
+		})
+
+		// ── JSON body — happy path ────────────────────────────────────────────
+
+		ginkgo.It("summarizes small text via JSON body (standard level)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL,
+				"AI is transforming industries.", "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ small text standard (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("summarizes medium text via JSON body (standard level)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL,
+				"Artificial intelligence is widely used in healthcare, finance, and transportation.", "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ medium text standard (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("summarizes larger text via JSON body (standard level)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			text := "Artificial intelligence has significantly evolved over the past decade, transforming industries " +
+				"ranging from healthcare and finance to transportation and education. " +
+				"Machine learning algorithms now power recommendation engines, fraud detection systems, " +
+				"and predictive analytics platforms used by millions of people every day.\n\n" +
+				"In healthcare, AI-assisted diagnostics can detect diseases such as cancer and diabetic " +
+				"retinopathy from medical images with accuracy rivalling that of experienced clinicians. " +
+				"Drug discovery pipelines are being accelerated by models that predict molecular interactions, " +
+				"reducing the time and cost of bringing new treatments to market.\n\n" +
+				"The financial sector relies on AI for real-time fraud detection, algorithmic trading, " +
+				"credit scoring, and personalised investment advice. Natural language processing enables " +
+				"chatbots and virtual assistants to handle customer queries at scale, reducing operational " +
+				"costs while improving response times.\n\n" +
+				"Despite these advances, significant challenges remain. Ensuring fairness, transparency, " +
+				"and accountability in automated decision-making is an active area of research and regulation. " +
+				"The environmental cost of training large models and the risk of job displacement in " +
+				"certain sectors are also subjects of ongoing public debate."
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL, text, "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ larger text standard (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("summarizes text via JSON body with 'brief' level", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			text := "The explosion in AI's capabilities over the last few years has been immense. " +
+				"And we're starting to see how AI can be applied to real business use cases at the scale needed for enterprise demands. " +
+				"In 2022, IBM unveiled the IBM z16, the latest system that brought powerful AI capabilities to IBM Z for the first time."
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL, text, "brief")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ text brief (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("summarizes text via JSON body with 'detailed' level", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			text := "Quantum computing leverages superposition and entanglement to process information differently than classical computers. " +
+				"Quantum bits (qubits) can represent both 0 and 1 simultaneously, giving quantum computers an exponential advantage " +
+				"for cryptography, drug discovery, and optimization problems."
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL, text, "detailed")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ text detailed (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("summarizes text via JSON body with no level (defaults to standard)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL,
+				"AI improves efficiency", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ text no-level (len=%d)", len(resp.Summary()))
+		})
+
+		ginkgo.It("different JSON levels produce different summaries for the same text", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			text := "The Internet of Things connects billions of physical devices to the internet, enabling data collection " +
+				"and remote control. Smart cities use IoT sensors to optimize traffic, energy, and public safety. " +
+				"Wearable devices monitor health metrics in real time. Security and privacy remain the key challenges."
+
+			levels := []string{"brief", "standard", "detailed"}
+			summaries := make(map[string]string, len(levels))
+			for _, level := range levels {
+				resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL, text, level)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+				summaries[level] = resp.Summary()
+				logger.Infof("[TEST] level=%s summary_len=%d", level, len(resp.Summary()))
+			}
+			gomega.Expect(summaries["brief"]).NotTo(gomega.Equal(summaries["detailed"]))
+			logger.Infof("[TEST] ✓ different levels produce different summaries")
+		})
+
+		// ── JSON body — legacy length ─────────────────────────────────────────
+
+		ginkgo.It("summarizes text via JSON body with legacy 'length' field and verifies summary_length range", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			text := "Artificial intelligence is transforming industries across healthcare, finance, transportation, education, " +
+				"manufacturing, retail, logistics, and many other domains by automating complex processes, improving efficiency, " +
+				"enabling faster decision-making, reducing operational costs, enhancing customer experience, and driving innovation."
+
+			resp, err := summarization.SummarizeTextWithLength(ctx, syncSummarizeBaseURL, text, 20)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			// Allow ±75% tolerance around the requested length (server does approximate word-count).
+			gomega.Expect(resp.Data.SummaryLength).To(gomega.BeNumerically(">=", 5))
+			gomega.Expect(resp.Data.SummaryLength).To(gomega.BeNumerically("<=", 35))
+			logger.Infof("[TEST] ✓ legacy length=20, actual summary_length=%d", resp.Data.SummaryLength)
+		})
+
+		// ── JSON body — stream=true ───────────────────────────────────────────
+
+		ginkgo.It("receives SSE chunks when stream=true via JSON body", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(`{"text":"Artificial intelligence improves productivity and efficiency.","stream":true}`),
+				"application/json",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusOK))
+			// SSE responses contain "data:" event lines.
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("data:"))
+			logger.Infof("[TEST] ✓ stream=true returned SSE body (len=%d)", len(rawBody))
+		})
+
+		ginkgo.It("summarizes text with stream=false via JSON body", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeText(ctx, syncSummarizeBaseURL,
+				"AI improves productivity", "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ stream=false returned summary (len=%d)", len(resp.Summary()))
+		})
+
+		// ── Multipart / file upload — happy path ─────────────────────────────
+
+		ginkgo.It("summarizes a TXT file via multipart form (standard level)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeFile(ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sample_txt.txt"), "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kw, found := common.SummaryContainsAnyKeyword(resp.Summary(), summarization.TXTSummaryKeywords)
+			gomega.Expect(found).To(gomega.BeTrue(),
+				fmt.Sprintf("expected TXT summary to mention one of %v, got: %q", summarization.TXTSummaryKeywords, resp.Summary()))
+			logger.Infof("[TEST] ✓ TXT upload standard (len=%d, keyword=%q)", len(resp.Summary()), kw)
+		})
+
+		ginkgo.It("summarizes a TXT file via multipart form with 'brief' level field", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeFile(ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sample_txt.txt"), "brief")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kw, found := common.SummaryContainsAnyKeyword(resp.Summary(), summarization.TXTSummaryKeywords)
+			gomega.Expect(found).To(gomega.BeTrue(),
+				fmt.Sprintf("expected TXT summary to mention one of %v, got: %q", summarization.TXTSummaryKeywords, resp.Summary()))
+			logger.Infof("[TEST] ✓ TXT level=brief (len=%d, keyword=%q)", len(resp.Summary()), kw)
+		})
+
+		ginkgo.It("summarizes a PDF file via multipart form (no level — default)", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeFile(ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sync_test.pdf"), "")
+			if summarization.IsContextLimitError(err) {
+				ginkgo.Skip(fmt.Sprintf("skipping — PDF exceeds model context limit: %v", err))
+			}
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kw, found := common.SummaryContainsAnyKeyword(resp.Summary(), summarization.PDFSummaryKeywords)
+			gomega.Expect(found).To(gomega.BeTrue(),
+				fmt.Sprintf("expected PDF summary to mention one of %v, got: %q", summarization.PDFSummaryKeywords, resp.Summary()))
+			logger.Infof("[TEST] ✓ PDF no level (len=%d, keyword=%q)", len(resp.Summary()), kw)
+		})
+
+		ginkgo.It("summarizes a PDF file via multipart form with 'detailed' level field", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeFile(ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sync_test.pdf"), "detailed")
+			if summarization.IsContextLimitError(err) {
+				ginkgo.Skip(fmt.Sprintf("skipping — PDF exceeds model context limit: %v", err))
+			}
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kw, found := common.SummaryContainsAnyKeyword(resp.Summary(), summarization.PDFSummaryKeywords)
+			gomega.Expect(found).To(gomega.BeTrue(),
+				fmt.Sprintf("expected PDF summary to mention one of %v, got: %q", summarization.PDFSummaryKeywords, resp.Summary()))
+			logger.Infof("[TEST] ✓ PDF level=detailed (len=%d, keyword=%q)", len(resp.Summary()), kw)
+		})
+
+		ginkgo.It("summarizes a PDF file via multipart form with legacy 'length' field", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			resp, err := summarization.SummarizeFileWithLength(ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sync_test.pdf"), 50)
+			if summarization.IsContextLimitError(err) {
+				ginkgo.Skip(fmt.Sprintf("skipping — PDF exceeds model context limit: %v", err))
+			}
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp.Summary()).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] ✓ PDF legacy length=50 (summary_len=%d)", resp.Data.SummaryLength)
+		})
+
+		// ── Error paths — input validation ────────────────────────────────────
+
+		ginkgo.It("returns 400 for missing input — empty JSON object {}", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(`{}`),
+				"application/json",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ empty JSON object rejected (status=%d)", statusCode)
+		})
+
+		ginkgo.It("returns 400 for invalid field name — {\"txt\":\"AI\"}", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(`{"txt":"AI"}`),
+				"application/json",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ invalid field rejected (status=%d)", statusCode)
+		})
+
+		ginkgo.It("returns 400 for invalid JSON body", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(`{"text":"AI"`), // truncated JSON
+				"application/json",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ invalid JSON rejected (status=%d)", statusCode)
+		})
+
+		ginkgo.It("returns 415 for wrong Content-Type (text/plain)", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString("AI"),
+				"text/plain",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnsupportedMediaType))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ text/plain rejected (status=%d)", statusCode)
+		})
+
+		ginkgo.It("returns 415 for empty request (no Content-Type)", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(""),
+				"", // no content-type
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnsupportedMediaType))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ empty request (no content-type) rejected (status=%d)", statusCode)
+		})
+
+		ginkgo.It("returns 400 for empty text in JSON body", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			errResp, statusCode, err := summarization.SummarizeTextExpectingError(
+				ctx, syncSummarizeBaseURL, "", "standard")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(400))
+			logger.Infof("[TEST] ✓ empty text rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		ginkgo.It("returns 400 for empty TXT file upload", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			emptyPath := filepath.Join(os.TempDir(), fmt.Sprintf("empty-sync-%d.txt", time.Now().Unix()))
+			gomega.Expect(os.WriteFile(emptyPath, []byte(""), 0644)).To(gomega.Succeed())
+			defer os.Remove(emptyPath) //nolint:errcheck
+
+			errResp, statusCode, err := summarization.SummarizeFileExpectingError(
+				ctx, syncSummarizeBaseURL, emptyPath, "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(400))
+			logger.Infof("[TEST] ✓ empty file rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		ginkgo.It("returns 400 for blank PDF file upload", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			errResp, statusCode, err := summarization.SummarizeFileExpectingError(
+				ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/blank.pdf"), "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(400))
+			logger.Infof("[TEST] ✓ blank PDF rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		ginkgo.It("returns 400 for invalid level parameter via multipart form", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			errResp, statusCode, err := summarization.SummarizeFileExpectingError(
+				ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sample_txt.txt"), "rejk")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(400))
+			logger.Infof("[TEST] ✓ invalid level rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		ginkgo.It("returns 415 for invalid PDF file (fake bytes with .pdf extension)", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			invalidPDFPath := filepath.Join(os.TempDir(), fmt.Sprintf("invalid-sync-%d.pdf", time.Now().Unix()))
+			gomega.Expect(os.WriteFile(invalidPDFPath, []byte("not a real pdf"), 0644)).To(gomega.Succeed())
+			defer os.Remove(invalidPDFPath) //nolint:errcheck
+
+			errResp, statusCode, err := summarization.SummarizeFileExpectingError(
+				ctx, syncSummarizeBaseURL, invalidPDFPath, "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnsupportedMediaType))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(415))
+			logger.Infof("[TEST] ✓ invalid PDF rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		ginkgo.It("returns 415 for binary TXT file (random bytes with .txt extension)", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			binaryTXTPath := filepath.Join(os.TempDir(), fmt.Sprintf("invalid-sync-%d.txt", time.Now().Unix()))
+			// Write 32 bytes of non-UTF8 binary content to mimic `head -c 100 /dev/urandom`.
+			binaryContent := make([]byte, 32)
+			for i := range binaryContent {
+				binaryContent[i] = byte(i + 128) //nolint:mnd // values > 127 are non-ASCII
+			}
+			gomega.Expect(os.WriteFile(binaryTXTPath, binaryContent, 0644)).To(gomega.Succeed())
+			defer os.Remove(binaryTXTPath) //nolint:errcheck
+
+			errResp, statusCode, err := summarization.SummarizeFileExpectingError(
+				ctx, syncSummarizeBaseURL, binaryTXTPath, "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnsupportedMediaType))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(415))
+			logger.Infof("[TEST] ✓ binary TXT rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		// ── Concurrency ───────────────────────────────────────────────────────
+
+		ginkgo.It("handles 32 concurrent JSON text requests without transport errors", func() {
+			// Mirrors: seq 32 | parallel -j 32 make_request {}
+			// Each goroutine fires simultaneously via a shared start gate.
+			// Assertions:
+			//   • No goroutine-level transport errors (network / TLS).
+			//   • Every response is either 200 OK (success) or a documented server
+			//     limit code: 429 Too Many Requests or 503 Service Unavailable.
+			//   • At least one request must succeed (200).
+			const concurrency = 32
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			text := "Artificial intelligence is transforming industries worldwide. " +
+				"Machine learning enables computers to learn from data. " +
+				"Deep learning uses neural networks to process complex patterns."
+
+			results := summarization.RunConcurrentSummarizeText(
+				ctx, syncSummarizeBaseURL, text, "standard", concurrency)
+
+			successCount := 0
+			for _, r := range results {
+				gomega.Expect(r.Err).NotTo(gomega.HaveOccurred(),
+					fmt.Sprintf("request #%d had a transport error", r.Index))
+				gomega.Expect(r.StatusCode).To(gomega.BeElementOf(
+					http.StatusOK,
+					http.StatusTooManyRequests,
+					http.StatusServiceUnavailable,
+				), fmt.Sprintf("request #%d returned unexpected status", r.Index))
+				if r.StatusCode == http.StatusOK {
+					successCount++
+				}
+				logger.Infof("[TEST] request #%d status=%d latency=%s",
+					r.Index, r.StatusCode, r.Latency.Round(time.Millisecond))
+			}
+			gomega.Expect(successCount).To(gomega.BeNumerically(">=", 1),
+				"expected at least one concurrent request to succeed")
+			logger.Infof("[TEST] ✓ concurrent text: %d/%d succeeded", successCount, concurrency)
+		})
+
+		ginkgo.It("handles 32 concurrent file upload requests without transport errors", func() {
+			// Same as above but uses multipart/form-data with sync_test.pdf.
+			// sync_test.pdf is intentionally small (~80 words) so no request
+			// hits the 413 CONTEXT_LIMIT_EXCEEDED threshold.
+			const concurrency = 32
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			results := summarization.RunConcurrentSummarizeFile(
+				ctx, syncSummarizeBaseURL,
+				testFilePath("ingestion/docs/sync_test.pdf"), "standard", concurrency)
+
+			successCount := 0
+			for _, r := range results {
+				if summarization.IsContextLimitError(r.Err) {
+					ginkgo.Skip(fmt.Sprintf("skipping — PDF exceeds model context limit on request #%d: %v", r.Index, r.Err))
+				}
+				gomega.Expect(r.Err).NotTo(gomega.HaveOccurred(),
+					fmt.Sprintf("request #%d had a transport error", r.Index))
+				gomega.Expect(r.StatusCode).To(gomega.BeElementOf(
+					http.StatusOK,
+					http.StatusTooManyRequests,
+					http.StatusServiceUnavailable,
+				), fmt.Sprintf("request #%d returned unexpected status", r.Index))
+				if r.StatusCode == http.StatusOK {
+					successCount++
+				}
+				logger.Infof("[TEST] file request #%d status=%d latency=%s",
+					r.Index, r.StatusCode, r.Latency.Round(time.Millisecond))
+			}
+			gomega.Expect(successCount).To(gomega.BeNumerically(">=", 1),
+				"expected at least one concurrent file upload to succeed")
+			logger.Infof("[TEST] ✓ concurrent file: %d/%d succeeded", successCount, concurrency)
+		})
+	})
+
 	ginkgo.Context("Similarity Tests", ginkgo.Label("spyre-dependent", "similarity-tests"), func() {
 		var similarityBaseURL string
 		var digitizeBaseURL string

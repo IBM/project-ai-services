@@ -1,4 +1,4 @@
-import { SESSION_CONFIG } from "@/constants/session.constants";
+import { SESSION_CONFIG } from "@/constants";
 
 export const parseTokenExpiry = (headerValue: string | null): Date | null => {
   if (!headerValue) {
