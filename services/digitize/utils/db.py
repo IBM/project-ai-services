@@ -1405,6 +1405,11 @@ def finalize_sync_log_and_update_connector(
     )
 
 
+def update_connector_total_files(connector_id: str, total_files: int) -> None:
+    """Update the total_files count on the connectors table for *connector_id*."""
+    db_manager.update_connector(connector_id=connector_id, total_files=total_files)
+
+
 def update_sync_log(
     connector_id: str,
     seq: int,

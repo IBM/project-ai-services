@@ -42,6 +42,7 @@ from digitize.utils.db import (
     lookup_connector_content_by_checksum,
     init_sync_log_and_update_connector,
     remove_connector_checksum_entry,
+    update_connector_total_files,
     update_sync_log,
 )
 from digitize.utils.jobs import generate_uuid, initialize_job_state
@@ -135,6 +136,7 @@ async def run_tick(connector_id: str) -> None:
             new_files=len(ingest_list),
             removed_files=len(orphan_checksums),
         )
+        update_connector_total_files(connector_id, len(scanned_files))
 
         await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 

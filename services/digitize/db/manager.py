@@ -800,6 +800,7 @@ class DatabaseManager:
         name: Optional[str] = None,
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
+        total_files: Optional[int] = None,
     ) -> None:
         """
         Partial update of an existing connector.
@@ -816,6 +817,8 @@ class DatabaseManager:
                     values["name"] = name
                 if allowed_extensions is not None:
                     values["allowed_extensions"] = allowed_extensions
+                if total_files is not None:
+                    values["total_files"] = total_files
                 if connection_details is not None:
                     stmt = (
                         update(Connector)
