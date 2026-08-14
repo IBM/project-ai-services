@@ -240,7 +240,7 @@ async def delete_connector(connector_id: str):
                 f"Connector {connector_id!r} not found",
             )
 
-        db_ops.mark_sync_delete_pending(connector_id)
+        db_ops.mark_connector_delete_pending(connector_id)
 
         if connector.sync_status != ConnectorStatus.SYNCING:
             # No tick running — kick off teardown ourselves.

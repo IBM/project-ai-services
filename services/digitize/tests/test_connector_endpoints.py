@@ -303,7 +303,7 @@ class TestDeleteConnector:
     def _patch_mark(self, monkeypatch, return_value=True):
         mock = Mock(return_value=return_value)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.mark_sync_delete_pending",
+            "digitize.api.v1.connectors.db_ops.mark_connector_delete_pending",
             mock,
         )
         return mock

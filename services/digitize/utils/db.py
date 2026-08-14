@@ -1286,14 +1286,14 @@ def mark_sync_cancel_pending(connector_id: str) -> bool:
     return db_manager.mark_sync_cancel_pending(connector_id)
 
 
-def mark_sync_delete_pending(connector_id: str) -> bool:
+def mark_connector_delete_pending(connector_id: str) -> bool:
     """
     Signal a running tick that the connector is being deleted.
 
     Atomically sets sync_status='delete pending' only when sync_status='syncing'.
     Returns True if the signal was set (tick was running), False otherwise.
     """
-    return db_manager.mark_sync_delete_pending(connector_id)
+    return db_manager.mark_connector_delete_pending(connector_id)
 
 
 def list_connectors() -> List[Connector]:

@@ -1134,7 +1134,7 @@ class DatabaseManager:
             raise
 
     @staticmethod
-    def mark_sync_delete_pending(connector_id: str) -> bool:
+    def mark_connector_delete_pending(connector_id: str) -> bool:
         """
         Atomically set sync_status='delete pending' when sync_status='syncing'.
 
@@ -1159,7 +1159,7 @@ class DatabaseManager:
                 ).one_or_none()
                 return result is not None
         except SQLAlchemyError as e:
-            logger.error(f"DB error in mark_sync_delete_pending({connector_id!r}): {e}", exc_info=True)
+            logger.error(f"DB error in mark_connector_delete_pending({connector_id!r}): {e}", exc_info=True)
             raise
 
     @staticmethod
