@@ -16,6 +16,8 @@ import (
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -202,6 +204,11 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 
 // identifyWorker reads the first message from the stream, validates the worker is known,
 // and returns the worker name and registry entry.
+//
+// Error codes used by the worker daemon to decide its retry strategy:
+//   - codes.Unauthenticated — worker not in registry; must call Register before retrying CommandStream.
+//   - codes.InvalidArgument  — first message is malformed; worker has a bug.
+//   - any other error        — transient; retry CommandStream with backoff (no re-registration needed).
 func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingServer[workerpb.CommandResult, workerpb.Command]) (string, *registry.WorkerEntry, error) {
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -209,12 +216,17 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 	}
 	workerName := firstMsg.GetWorkerName()
 	if workerName == "" {
-		return "", nil, fmt.Errorf("CommandStream: first message missing worker name")
+		return "", nil, status.Error(codes.InvalidArgument, "CommandStream: first message missing worker_name")
 	}
 
 	entry, ok := g.registry.Get(workerName)
 	if !ok {
-		return "", nil, fmt.Errorf("CommandStream: unknown worker %s – call Register first", workerName)
+		// The control plane has no in-memory entry for this worker — either it never
+		// registered or the control plane restarted and lost its registry.
+		// Return Unauthenticated so the worker knows it must call Register again
+		// before opening a new CommandStream.
+		return "", nil, status.Errorf(codes.Unauthenticated,
+			"CommandStream: worker %s not registered — call Register first", workerName)
 	}
 
 	logger.InfofCtx(ctx, "WorkerGateway: CommandStream opened for worker %s", workerName)
