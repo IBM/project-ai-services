@@ -91,65 +91,19 @@ func loadConnectorEncryptionKey() ([]byte, error) {
 	return key, nil
 }
 
-// initApplicationService sets up the database pool, repositories, sync service,
-// and application service. The caller is responsible for closing the pool and
-// stopping the sync service via the returned cleanup function.
-func initApplicationService(ctx context.Context) (
-	appSvc apirepository.ApplicationServiceInterface,
-	blacklist *apirepository.DBTokenBlacklist,
-	cleanup func(),
-	err error,
-) {
+// loadConfig validates all required startup configuration by loading the database
+// config and verifying the connector encryption key before any connections are made.
+func loadConfig() (db.Config, error) {
 	dbConfig, err := loadDBConfig()
 	if err != nil {
-		return nil, nil, nil, err
+		return db.Config{}, err
 	}
 
-	pool, err := db.ConnectPool(ctx, dbConfig)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	logger.Infoln("Connected to database successfully")
-
-	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
-	bl := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
-
-	applicationRepo := repository.NewApplicationRepository(pool)
-	serviceRepo := repository.NewServiceRepository(pool)
-	componentRepo := repository.NewComponentRepository(pool)
-	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
-
-	// TODO: implement sync service on remote machines
-	syncService, err := sync.NewSyncService(
-		applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo,
-		sync.DefaultSyncInterval,
-	)
-	if err != nil {
-		pool.Close()
-		bl.Stop()
-
-		return nil, nil, nil, fmt.Errorf("failed to initialize sync service: %w", err)
-	}
-	syncService.Start(ctx)
-
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		syncService.Stop(ctx)
-		pool.Close()
-		bl.Stop()
-
-		return nil, nil, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	if _, err := loadConnectorEncryptionKey(); err != nil {
+		return db.Config{}, err
 	}
 
-	svc := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
-
-	cleanup = func() {
-		syncService.Stop(ctx)
-		bl.Stop()
-		pool.Close()
-	}
-
-	return svc, bl, cleanup, nil
+	return dbConfig, nil
 }
 
 // runAPIServer initializes and starts the API server with the provided configuration.
@@ -159,18 +113,54 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		return err
 	}
 
-	if _, err := loadConnectorEncryptionKey(); err != nil {
+	dbConfig, err := loadConfig()
+	if err != nil {
 		return err
 	}
 
 	ctx := context.Background()
-	applicationService, blacklist, cleanup, err := initApplicationService(ctx)
+	pool, err := db.ConnectPool(ctx, dbConfig)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer cleanup()
+	defer pool.Close()
+
+	logger.Infoln("Connected to database successfully")
 
 	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
+	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
+	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
+	defer blacklist.Stop()
+
+	// Initialize repositories
+	applicationRepo := repository.NewApplicationRepository(pool)
+	serviceRepo := repository.NewServiceRepository(pool)
+	componentRepo := repository.NewComponentRepository(pool)
+	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+
+	// Initialize sync service for background DB-Pod synchronization
+	// TODO: implement sync service on remote machines
+	syncService, err := sync.NewSyncService(
+		applicationRepo,
+		serviceRepo,
+		componentRepo,
+		serviceDependencyRepo,
+		sync.DefaultSyncInterval,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
+	defer syncService.Stop(ctx)
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
+	// Initialize application service with all required repositories
+	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType())
+
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
 
