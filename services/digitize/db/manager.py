@@ -1404,7 +1404,7 @@ class DatabaseManager:
                 rows = list(session.scalars(stmt).all())
                 for row in rows:
                     _ = (
-                        row.id, row.connector_id, row.seq,
+                        row.connector_id, row.seq,
                         row.started_at, row.finished_at,
                         row.total_files, row.new_files, row.removed_files,
                         row.status, row.error,
