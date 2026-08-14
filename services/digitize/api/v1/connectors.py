@@ -33,7 +33,6 @@ from digitize.connectors.models import (
     SyncLogItem,
     SyncLogResponse,
     ConnectorStatus,
-    SyncLogStatus,
     SyncTriggerResponse,
 )
 from digitize.connectors.encryption import (
@@ -264,35 +263,14 @@ async def _run_teardown(connector_id: str) -> None:
     and awaited directly from _handle_interrupt in sync_tick (Case A).
 
     Steps:
-      1. Guard: ensure the latest sync-log is in a terminal state; if it is
-         stuck in 'started' mark it 'cancelled' before proceeding.
-      2. Snapshot checksums owned by this connector
-      3. Remove ownership rows; delete documents when last owner
-      4. Delete the connector row (cascades to sync_logs)
-      5. Sweep residual batch staging directories
+      1. Snapshot checksums owned by this connector
+      2. Remove ownership rows; delete documents when last owner
+      3. Delete the connector row (cascades to sync_logs)
+      4. Sweep residual batch staging directories
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     try:
-        # Step 1: guard — verify the latest sync-log is terminal before
-        # proceeding.  If it is still 'started' (stuck), cancel it now.
-        _TERMINAL_STATUSES = {SyncLogStatus.CANCELLED, SyncLogStatus.FAILED, SyncLogStatus.COMPLETED}
-        logs, _ = db_ops.list_sync_logs(connector_id, limit=1)
-        if logs:
-            latest_log = logs[0]
-            if latest_log.status not in _TERMINAL_STATUSES:
-                logger.warning(
-                    f"Connector {connector_id!r} latest sync-log (seq={latest_log.seq}) "
-                    f"has non-terminal status {latest_log.status!r}; "
-                    "marking it cancelled before teardown"
-                )
-                db_ops.finalize_sync_log_and_update_connector(
-                    connector_id=connector_id,
-                    seq=latest_log.seq,
-                    status=SyncLogStatus.CANCELLED,
-                    error="Cancelled by connector deletion",
-                )
-
-        # Steps 2+3: remove checksum ownership; delete orphaned documents
+        # Steps 1+2: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
         for checksum in owned_checksums:
             try:
@@ -306,7 +284,7 @@ async def _run_teardown(connector_id: str) -> None:
                     exc_info=True,
                 )
 
-        # Step 4: delete the connector row (cascades to connector_sync_logs)
+        # Step 3: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -314,7 +292,7 @@ async def _run_teardown(connector_id: str) -> None:
                 "— row may have already been removed"
             )
 
-        # Step 5: sweep any residual batch staging directories
+        # Step 4: sweep any residual batch staging directories
         _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} teardown complete")
