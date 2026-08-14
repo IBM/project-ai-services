@@ -68,9 +68,10 @@ def _classify(connector_id, scanned_files, known, all_cs):
     return _real_classify(connector_id, scanned_files, known, all_cs)
 
 
-def _connector(connector_id: str = "conn-1", **kwargs):
+def _connector(connector_id: str = "conn-1", name: str = "conn-name", **kwargs):
     return SimpleNamespace(
         id=connector_id,
+        name=name,
         type="s3",
         connection_details={"bucket_name": "b", "access_key_id": "a", "secret_access_key": "s"},
         allowed_extensions=[".pdf"],
@@ -200,7 +201,7 @@ class TestProcessNewFiles:
         scanner = self._make_scanner()
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches():
-            asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+            asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
     def test_failure_does_not_stop_loop(self):
         """First batch fails, second batch succeeds — both batches are attempted."""
@@ -243,7 +244,7 @@ class TestProcessNewFiles:
             stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
 
             with pytest.raises(RuntimeError, match="One or more batches failed"):
-                asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+                asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
         assert call_count["n"] == 2
 
@@ -251,7 +252,7 @@ class TestProcessNewFiles:
         scanner = self._make_scanner()
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches() as stack:
-            asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+            asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
         # cleanup is patched — just verifying it was called (no exception means finally ran)
 
     def test_staging_dir_cleaned_on_failure(self):
@@ -259,14 +260,14 @@ class TestProcessNewFiles:
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches():
             with pytest.raises(RuntimeError, match="One or more batches failed"):
-                asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+                asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
     def test_add_checksum_entry_called_on_success(self):
         scanner = self._make_scanner()
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches() as stack:
             with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
-                asyncio.run(_process_new_files(1, "conn-1", scanner, ingest_list))
+                asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
         mock_add.assert_called_once_with("conn-1", "ck1", "doc-1")
 
 

@@ -136,7 +136,7 @@ async def run_tick(connector_id: str) -> None:
             removed_files=len(orphan_checksums),
         )
 
-        await _process_new_files(sync_seq, connector_id, scanner, ingest_list)
+        await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
@@ -241,6 +241,7 @@ async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
 async def _process_new_files(
     sync_seq: int,
     connector_id: str,
+    connector_name: str,
     scanner,
     ingest_list: list[tuple[str, str]],
 ) -> None:
@@ -297,7 +298,7 @@ async def _process_new_files(
                 )
 
             filenames = list(checksum_to_filename.values())
-            job_name = f"{connector_id} - {sync_seq} - {batch_number}"
+            job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
             doc_id_dict = initialize_job_state(
                 job_id=job_id,
                 operation=OperationType.INGESTION,
