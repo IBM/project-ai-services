@@ -282,4 +282,25 @@
   line-height: 1.5;
 }
 
+.duplicatesSection {
+  margin-top: $spacing-05;
+}
+
+.duplicatesHelperText {
+  font-size: 0.875rem;
+  color: var(--cds-text-secondary);
+  margin: $spacing-03 0 $spacing-02 0;
+}
+
+.duplicatesList {
+  margin: 0;
+  padding-left: $spacing-05;
+  font-size: 0.875rem;
+  color: var(--cds-text-primary);
+
+  li {
+    padding: $spacing-01 0;
+  }
+}
+
 // Made with Bob

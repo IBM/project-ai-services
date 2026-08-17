@@ -22,6 +22,15 @@ export interface Document {
   message?: string | null;
 }
 
+export interface DocumentDetail extends Document {
+  job_id?: string | null;
+  type?: string;
+  completed_at?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown> | null;
+  duplicate_names: string[];
+}
+
 export interface JobStats {
   total_documents: number;
   completed: number;
@@ -158,6 +167,11 @@ export const listDocuments = async (params: ListDocumentsParams = {}): Promise<D
 
 export const getDocumentMetadata = async (docId: string, details: boolean = false): Promise<Document> => {
   const response: AxiosResponse<Document> = await api.get(`/documents/${docId}?details=${details}`);
+  return response.data;
+};
+
+export const getDocumentDetail = async (docId: string): Promise<DocumentDetail> => {
+  const response: AxiosResponse<DocumentDetail> = await api.get(`/documents/${docId}`);
   return response.data;
 };
 
