@@ -6,6 +6,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// BundleUpdate carries the fields to update on an existing CatalogBundle row.
+// Only non-nil fields are written; nil fields are left unchanged in the database.
+type BundleUpdate struct {
+	Status    *BundleStatus
+	Version   *string
+	Name      *string
+	SizeBytes *int64
+	Error     *string
+}
+
 // BundleStatus represents the lifecycle status of a catalog bundle.
 type BundleStatus string
 

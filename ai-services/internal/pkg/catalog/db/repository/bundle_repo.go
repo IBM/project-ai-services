@@ -3,9 +3,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
@@ -24,8 +27,9 @@ type BundleRepository interface {
 	// Returns (nil, nil) when no active row exists.
 	GetActiveByCatalogID(ctx context.Context, catalogType, catalogID string) (*models.CatalogBundle, error)
 
-	// Activate sets status='active', version, name, and size_bytes for an existing row.
-	Activate(ctx context.Context, id uuid.UUID, version, name string, sizeBytes int64) error
+	// UpdateBundle applies only the non-nil fields in upd to the row identified by id.
+	// Returns an error if no fields are set.
+	UpdateBundle(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error
 
 	// UpdateStatus transitions a row to the given status.
 	// errMsg is stored in the error column when status is 'failed'; it is cleared for all other statuses.
@@ -128,7 +132,7 @@ func (r *bundleRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Catalog
 
 	b, err := scanBundle(row.Scan)
 	if err != nil {
-		if isNotFound(err) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 
@@ -147,7 +151,7 @@ func (r *bundleRepo) GetActiveByCatalogID(ctx context.Context, catalogType, cata
 
 	b, err := scanBundle(row.Scan)
 	if err != nil {
-		if isNotFound(err) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 
@@ -157,22 +161,53 @@ func (r *bundleRepo) GetActiveByCatalogID(ctx context.Context, catalogType, cata
 	return b, nil
 }
 
-// Activate sets status='active', version, name, and size_bytes for the given row.
-func (r *bundleRepo) Activate(ctx context.Context, id uuid.UUID, version, name string, sizeBytes int64) error {
-	query := `
-		UPDATE catalog_bundles
-		SET status = 'active', version = $1, name = $2, size_bytes = $3, error = NULL
-		WHERE id = $4
-	`
+// UpdateBundle applies only the non-nil fields in upd to the row identified by id.
+// Returns an error if upd is empty (no fields set).
+func (r *bundleRepo) UpdateBundle(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error {
+	var setClauses []string
+	var args []any
+	i := 1
 
-	_, err := r.pool.Exec(ctx, query,
-		version,
-		sql.NullString{String: name, Valid: name != ""},
-		sizeBytes,
-		id,
+	if upd.Status != nil {
+		setClauses = append(setClauses, fmt.Sprintf("status = $%d", i))
+		args = append(args, *upd.Status)
+		i++
+	}
+	if upd.Version != nil {
+		setClauses = append(setClauses, fmt.Sprintf("version = $%d", i))
+		args = append(args, *upd.Version)
+		i++
+	}
+	if upd.Name != nil {
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", i))
+		args = append(args, sql.NullString{String: *upd.Name, Valid: *upd.Name != ""})
+		i++
+	}
+	if upd.SizeBytes != nil {
+		setClauses = append(setClauses, fmt.Sprintf("size_bytes = $%d", i))
+		args = append(args, *upd.SizeBytes)
+		i++
+	}
+	if upd.Error != nil {
+		setClauses = append(setClauses, fmt.Sprintf("error = $%d", i))
+		args = append(args, sql.NullString{String: *upd.Error, Valid: *upd.Error != ""})
+		i++
+	}
+
+	if len(setClauses) == 0 {
+		return fmt.Errorf("UpdateBundle called with no fields to update")
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE catalog_bundles SET %s WHERE id = $%d",
+		strings.Join(setClauses, ", "),
+		i,
 	)
+	args = append(args, id)
+
+	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to activate catalog bundle: %w", err)
+		return fmt.Errorf("failed to update catalog bundle: %w", err)
 	}
 
 	return nil
@@ -235,7 +270,3 @@ func (r *bundleRepo) ListAll(ctx context.Context) ([]models.CatalogBundle, error
 	return bundles, nil
 }
 
-// isNotFound returns true when the error represents a "no rows" result.
-func isNotFound(err error) bool {
-	return err != nil && err.Error() == "no rows in result set"
-}
