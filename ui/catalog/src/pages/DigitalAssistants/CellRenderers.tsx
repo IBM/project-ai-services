@@ -49,6 +49,7 @@ export const NameCell = ({
     value={value}
     rowId={rowId}
     rowData={rowData}
+    isLinkEnabled={rowData?.status === "Running"}
     onNameClick={(id, name, status, type) =>
       dispatch({
         type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
