@@ -33,6 +33,7 @@ from digitize.connectors.models import (
     SyncLogItem,
     SyncLogResponse,
     ConnectorStatus,
+    SyncLogStatus,
     SyncTriggerResponse,
 )
 from digitize.connectors.encryption import (
@@ -495,6 +496,21 @@ async def trigger_sync(connector_id: str):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
+        if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Connector {connector_id!r} is pending deletion and cannot accept new syncs.",
+            )
+
+        active_seq = db_ops.get_active_sync_seq(connector_id)
+        if active_seq is not None:
+            sync_log_status = db_ops.get_sync_log_status(connector_id, active_seq)
+            if sync_log_status == SyncLogStatus.CANCEL_PENDING:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Connector {connector_id!r} has a sync cancellation in progress (seq={active_seq}) "
+                    "and cannot accept a new sync until it completes.",
+                )
 
         acquired = db_ops.try_acquire_sync_lock(connector_id)
         if acquired:
