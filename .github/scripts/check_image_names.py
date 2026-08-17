@@ -59,6 +59,7 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
         ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
         ("ai-services/assets/services/chat/podman/values.yaml", "ui"),
         ("ai-services/assets/services/chat/openshift/values.yaml", "ui"),
     ],
