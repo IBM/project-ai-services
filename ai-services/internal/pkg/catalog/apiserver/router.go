@@ -24,71 +24,70 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	// Apply RequestID middleware to all routes
 	router.Use(middleware.RequestIDMiddleware())
-
 	// Health check endpoint
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	})
-
+	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "ok"}) })
 	// Expose /health for liveness probes
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	})
-
-	// Swagger documentation endpoint
+	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "ok"}) })
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	authHandler := handlers.NewAuthHandler(authSvc)
-	catalogHandler := handlers.NewCatalogHandler()
-	resourcesHandler := handlers.NewResourcesHandler()
-	applicationHandler := handlers.NewApplicationHandler(appService)
-	workerHandler := handlers.NewWorkerHandler(workerReg)
-
 	v1 := router.Group("/api/v1")
-	{
-		v1.POST("/auth/login", authHandler.Login)
-		v1.POST("/auth/token", authHandler.TokenLogin)
-		v1.POST("/auth/logout", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Logout)
-		v1.POST("/auth/refresh", authHandler.Refresh)
-		v1.GET("/auth/me", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Me)
-	}
+	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), tokenMgr, blacklist)
 
-	// Catalog endpoints
-	catalog := v1.Group("")
-	catalog.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
-	{
-		catalog.GET("/resources", resourcesHandler.GetResources)
-		catalog.GET("/architectures", catalogHandler.ListArchitectures)
-		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
-		catalog.GET("/architectures/:id/deploy-options", catalogHandler.GetArchitectureDeployOptions)
-		catalog.GET("/services", catalogHandler.ListServices)
-		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
-		catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
-		catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
-		catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
-		catalog.GET("/connectors", catalogHandler.ListConnectorProviders)
-		catalog.GET("/connectors/:connector_type/providers/:provider_id/params", catalogHandler.GetConnectorProviderParams)
-	}
-
-	applications := v1.Group("applications")
-	applications.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
-	{
-		applications.GET("/", applicationHandler.ListApplications)
-		applications.GET("/:id", applicationHandler.GetApplicationByID)
-		applications.GET("/:id/resources", applicationHandler.GetApplicationResources)
-		applications.POST("/", applicationHandler.CreateApplication)
-		applications.PUT("/:id", applicationHandler.UpdateApplication)
-		applications.DELETE("/:id", applicationHandler.DeleteApplication)
-		applications.GET("/:id/ps", applicationHandler.ApplicationPS)
-	}
-
-	workers := v1.Group("workers")
-	workers.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
-	{
-		workers.POST("", workerHandler.CreateWorker)
-		workers.GET("", workerHandler.ListWorkers)
-		workers.DELETE("/:id", workerHandler.DeleteWorker)
-	}
+	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
+	registerCatalogRoutes(v1, handlers.NewCatalogHandler(), handlers.NewResourcesHandler(), auth)
+	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), auth)
+	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
 
 	return router
+}
+
+func registerAuthRoutes(v1 *gin.RouterGroup, h *handlers.AuthHandler, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) {
+	authMw := middleware.AuthMiddleware(tokenMgr, blacklist)
+	v1.POST("/auth/login", h.Login)
+	v1.POST("/auth/token", h.TokenLogin)
+	v1.POST("/auth/logout", authMw, h.Logout)
+	v1.POST("/auth/refresh", h.Refresh)
+	v1.GET("/auth/me", authMw, h.Me)
+}
+
+func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler, resources *handlers.ResourcesHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("")
+	g.Use(authMw)
+	{
+		g.GET("/resources", resources.GetResources)
+		g.GET("/architectures", catalog.ListArchitectures)
+		g.GET("/architectures/:id", catalog.GetArchitectureDetails)
+		g.GET("/architectures/:id/deploy-options", catalog.GetArchitectureDeployOptions)
+		g.GET("/services", catalog.ListServices)
+		g.GET("/services/:id", catalog.GetServiceDetails)
+		g.GET("/services/:id/deploy-options", catalog.GetServiceDeployOptions)
+		g.GET("/services/:id/params", catalog.GetServiceParams)
+		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
+		g.GET("/connectors", catalog.ListConnectorProviders)
+		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)
+	}
+}
+
+func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("applications")
+	g.Use(authMw)
+	{
+		g.GET("/", h.ListApplications)
+		g.GET("/:id", h.GetApplicationByID)
+		g.GET("/:id/resources", h.GetApplicationResources)
+		g.POST("/", h.CreateApplication)
+		g.PUT("/:id", h.UpdateApplication)
+		g.DELETE("/:id", h.DeleteApplication)
+		g.GET("/:id/ps", h.ApplicationPS)
+	}
+}
+
+func registerWorkerRoutes(v1 *gin.RouterGroup, h *handlers.WorkerHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("workers")
+	g.Use(authMw)
+	{
+		g.POST("", h.CreateWorker)
+		g.GET("", h.ListWorkers)
+		g.DELETE("/:id", h.DeleteWorker)
+	}
 }
