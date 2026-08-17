@@ -13,6 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// ErrNotFound is returned by Update when no row matches the given id.
+var ErrNotFound = errors.New("catalog bundle not found")
+
 // BundleRepository defines the interface for catalog_bundles data operations.
 type BundleRepository interface {
 	// Insert creates a new bundle row with status 'processing'.
@@ -94,9 +97,7 @@ func scanBundle(scan func(dest ...any) error) (*models.CatalogBundle, error) {
 	return &b, nil
 }
 
-const selectCols = `
-	id, name, status, size_bytes, catalog_type, catalog_id, version, error, created_by, created_at, updated_at
-`
+const selectCols = "id, name, status, size_bytes, catalog_type, catalog_id, version, error, created_by, created_at, updated_at"
 
 // Insert inserts a new row with status 'processing' and populates b.ID, b.CreatedAt, b.UpdatedAt.
 func (r *bundleRepo) Insert(ctx context.Context, b *models.CatalogBundle) error {
@@ -201,9 +202,12 @@ func (r *bundleRepo) Update(ctx context.Context, id uuid.UUID, upd models.Bundle
 	)
 	args = append(args, id)
 
-	_, err := r.pool.Exec(ctx, query, args...)
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update catalog bundle: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 
 	return nil

@@ -30,7 +30,7 @@ CREATE TABLE catalog_bundles (
     catalog_id       VARCHAR(200)   NOT NULL,
 
     -- Semantic version of this bundle: e.g. "1.0.0", "2.1.0"
-    version          VARCHAR(50)    NOT NULL DEFAULT '',
+    version          VARCHAR(50)    NOT NULL,
 
     error            TEXT,
     created_by       VARCHAR(100),
