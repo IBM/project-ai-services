@@ -366,17 +366,14 @@ class TestRunTick:
         return scanner
 
     def test_aborts_when_connector_not_found(self):
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=None), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector") as mock_open:
-            asyncio.run(run_tick("missing"))
-        mock_open.assert_not_called()
+        with patch(f"{DB_MODULE}.get_active_connector", return_value=None):
+            asyncio.run(run_tick("missing", sync_seq=1))
 
     def test_happy_path_calls_phases_in_order(self):
         connector = _connector()
         mock_scanner = self._make_scanner(scan_result=[])
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=1) as mock_open, \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -389,9 +386,8 @@ class TestRunTick:
                    new_callable=AsyncMock, return_value=None), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
-            asyncio.run(run_tick("conn-1"))
+            asyncio.run(run_tick("conn-1", sync_seq=1))
 
-        mock_open.assert_called_once_with("conn-1")
         mock_close.assert_called_once()
         assert mock_close.call_args.kwargs["status"] == SyncLogStatus.COMPLETED
 
@@ -400,12 +396,11 @@ class TestRunTick:
         mock_scanner = self._make_scanner(connect_raises=ConnectionError("refused"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=2), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
-            asyncio.run(run_tick("conn-1"))
+            asyncio.run(run_tick("conn-1", sync_seq=2))
 
         args = mock_close.call_args.kwargs
         assert args["status"] == SyncLogStatus.FAILED
@@ -416,14 +411,13 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_raises=RuntimeError("scan exploded"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=3), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"):
-            asyncio.run(run_tick("conn-1"))
+            asyncio.run(run_tick("conn-1", sync_seq=3))
 
         mock_scanner.close.assert_called_once()
 
@@ -432,14 +426,13 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_raises=IOError("timeout"))
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=4), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
-            asyncio.run(run_tick("conn-1"))
+            asyncio.run(run_tick("conn-1", sync_seq=4))
 
         args = mock_close.call_args.kwargs
         assert args["status"] == SyncLogStatus.FAILED
@@ -529,12 +522,11 @@ class TestRunTickCancellation:
         mock_scanner = self._make_scanner()
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=10), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.DELETE_PENDING), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
             with pytest.raises(asyncio.CancelledError):
-                asyncio.run(run_tick("conn-1"))
+                asyncio.run(run_tick("conn-1", sync_seq=10))
 
         args = mock_close.call_args.kwargs
         assert args["status"] == SyncLogStatus.CANCELLED
@@ -546,7 +538,6 @@ class TestRunTickCancellation:
         mock_scanner = self._make_scanner()
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=11), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -559,7 +550,7 @@ class TestRunTickCancellation:
                    new_callable=AsyncMock, return_value=None), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
-            asyncio.run(run_tick("conn-1"))  # must not raise
+            asyncio.run(run_tick("conn-1", sync_seq=11))  # must not raise
 
         assert mock_close.call_args.kwargs["status"] == SyncLogStatus.COMPLETED
 
@@ -578,7 +569,6 @@ class TestRunTickCancellation:
             return None
 
         with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
-             patch(f"{DB_MODULE}.init_sync_log_and_update_connector", return_value=12), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -587,7 +577,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner):
             with pytest.raises(asyncio.CancelledError):
-                asyncio.run(run_tick("conn-1"))
+                asyncio.run(run_tick("conn-1", sync_seq=12))
 
         args = mock_close.call_args.kwargs
         assert args["status"] == SyncLogStatus.CANCELLED

@@ -659,22 +659,22 @@ class TestTriggerSync:
     def test_returns_202_with_sync_seq_when_lock_acquired(
         self, connector_test_client, monkeypatch
     ):
-        """Lock acquired → create_task called, 202 returned with sync_seq."""
+        """Lock acquired → sync-log opened, create_task called, 202 returned with sync_seq."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=None),  # no sync running — lock can be acquired
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
             Mock(return_value=True),
         )
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            "digitize.api.v1.connectors.db_ops.init_sync_log_and_update_connector",
             Mock(return_value=7),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_sync_log_status",
-            Mock(return_value=SyncLogStatus.STARTED),
         )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):

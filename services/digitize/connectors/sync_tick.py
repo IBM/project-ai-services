@@ -3,18 +3,31 @@ connectors/sync_tick.py — end-to-end sync-tick logic for one connector.
 
 Phases
 ------
-1.  init_sync_log_and_update_connector        → INSERT connector_sync_logs row (status='started')
-2.  load known/all checksums + scanner.scan()
-3.  _classify()              → ingest_list, orphan_checksums
+1.  [caller] try_acquire_sync_lock()              → atomically set connector.sync_status=SYNCING
+2.  [caller] init_sync_log_and_update_connector() → INSERT connector_sync_logs row (status='started'),
+             returns sync_seq which is passed directly into run_tick()
+3.  load known/all checksums + scanner.scan()
+4.  _classify()              → ingest_list, orphan_checksums
                                cross-connector dups registered inline
-3b. update_sync_log()        → single DB write of total/new/removed counts (all known post-classify)
-4a. _process_new_files()     → download → create job/doc → add checksum row
-4b. _delete_orphans()        → remove checksum rows; delete docs with no owners
-5.  finalize_sync_log_and_update_connector()         → finalize tick row with terminal status + reset sync_status
+4b. update_sync_log()        → single DB write of total/new/removed counts (all known post-classify)
+5a. _process_new_files()     → download → create job/doc → add checksum row
+5b. _delete_orphans()        → remove checksum rows; delete docs with no owners
+6.  finalize_sync_log_and_update_connector()      → finalize tick row with terminal status + reset sync_status
 
-Called by the APScheduler job (_run_tick_wrapped in scheduler.py, PR7) and
-directly by POST /v1/connectors/{id}/sync after the caller has already
-acquired the sync lock via try_acquire_sync_lock().
+Caller contract
+---------------
+Any caller — the HTTP handler (POST /v1/connectors/{id}/syncs) or the future
+APScheduler job (_run_tick_wrapped in scheduler.py) — must follow the same
+three-step preamble before calling run_tick():
+
+    acquired = db_ops.try_acquire_sync_lock(connector_id)
+    if not acquired:
+        return  # another tick is already running
+    sync_seq = db_ops.init_sync_log_and_update_connector(connector_id)
+    asyncio.create_task(run_tick(connector_id, sync_seq))
+
+This keeps seq generation synchronous and in the caller's control, eliminating
+any need for polling after task dispatch.
 """
 
 from __future__ import annotations
@@ -40,7 +53,6 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    init_sync_log_and_update_connector,
     remove_connector_checksum_entry,
     update_connector_total_files,
     update_sync_log,
@@ -95,20 +107,25 @@ def _check_interrupt_call(connector_id: str, sync_seq: int) -> Optional[Interrup
 # Public entry-point
 # ---------------------------------------------------------------------------
 
-async def run_tick(connector_id: str) -> None:
+async def run_tick(connector_id: str, sync_seq: int) -> None:
     """
     Execute one full sync tick for *connector_id*.
 
-    The caller is responsible for acquiring the sync lock (sync_status='syncing')
-    before calling this coroutine.  init_sync_log_and_update_connector() is called here to open
-    the sync-log row.
+    Parameters
+    ----------
+    connector_id:
+        The connector to sync.
+    sync_seq:
+        The seq of the sync-log row that the caller already opened via
+        ``init_sync_log_and_update_connector()``.  The caller is also
+        responsible for acquiring the sync lock beforehand via
+        ``try_acquire_sync_lock()``.
     """
     config = get_active_connector(connector_id)
     if config is None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
         return
 
-    sync_seq: int = init_sync_log_and_update_connector(connector_id)
     scanner = build_scanner(config)
 
     try:

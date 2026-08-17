@@ -514,16 +514,11 @@ async def trigger_sync(connector_id: str):
 
         acquired = db_ops.try_acquire_sync_lock(connector_id)
         if acquired:
-            asyncio.create_task(run_tick(connector_id))
-            logger.info(f"Manual sync dispatched for connector {connector_id!r}")
-            # init_sync_log_and_update_connector hasn't been called yet (that happens inside run_tick),
-            # so fetch the seq of the row that the background task will open shortly.
-            # Since we hold the lock we query for the highest existing seq + 1 via
-            # the active row that run_tick will create. Instead, we read it after a
-            # brief yield so the task can open the log first.
-            # Simpler and race-free: init_sync_log_and_update_connector is the very first thing
-            # run_tick does — schedule a wait-for-seq helper.
-            sync_seq = await _wait_for_sync_seq(connector_id)
+            # Open the sync-log row here, before dispatching the background task,
+            # so the seq is known synchronously.  run_tick() receives it directly
+            sync_seq = db_ops.init_sync_log_and_update_connector(connector_id)
+            asyncio.create_task(run_tick(connector_id, sync_seq))
+            logger.info(f"Manual sync dispatched for connector {connector_id!r}, seq={sync_seq}")
         else:
             sync_seq = db_ops.get_active_sync_seq(connector_id)
             if sync_seq is None:
@@ -539,21 +534,6 @@ async def trigger_sync(connector_id: str):
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-
-
-async def _wait_for_sync_seq(connector_id: str, attempts: int = 10, interval: float = 0.1) -> int:
-    """Poll until run_tick's init_sync_log_and_update_connector creates the active sync-log row.
-
-    Returns the seq as soon as it appears, or raises RuntimeError if it never does.
-    """
-    for _ in range(attempts):
-        await asyncio.sleep(interval)
-        seq = db_ops.get_active_sync_seq(connector_id)
-        if seq is not None:
-            return seq
-    raise RuntimeError(
-        f"Timed out waiting for sync-log row to appear for connector {connector_id!r}"
-    )
 
 
 # ---------------------------------------------------------------------------
