@@ -157,7 +157,7 @@ func TestRegistry_Preregister_TokenNotReusable(t *testing.T) {
 func TestRegistry_RegisterAddsEntry(t *testing.T) {
 	reg := New(nil)
 
-	entry, err := reg.Register(context.Background(), "worker-1", nil)
+	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
 	if err != nil {
 		t.Fatalf("Register: unexpected error: %v", err)
 	}
@@ -172,11 +172,20 @@ func TestRegistry_RegisterAddsEntry(t *testing.T) {
 	}
 }
 
+func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
+	reg := New(nil)
+
+	_, err := reg.Register(context.Background(), "worker-1", "docker", nil)
+	if err == nil {
+		t.Fatal("expected error for unsupported runtime_type")
+	}
+}
+
 func TestRegistry_RegisterIdempotent(t *testing.T) {
 	reg := New(nil)
 
-	e1, _ := reg.Register(context.Background(), "worker-1", nil)
-	e2, _ := reg.Register(context.Background(), "worker-1", nil)
+	e1, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
+	e2, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
 
 	// Both calls must return the same in-memory entry pointer.
 	if e1 != e2 {
@@ -186,7 +195,7 @@ func TestRegistry_RegisterIdempotent(t *testing.T) {
 
 func TestRegistry_GetKnownWorker(t *testing.T) {
 	reg := New(nil)
-	reg.Register(context.Background(), "worker-1", nil) //nolint:errcheck
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	entry, ok := reg.Get("worker-1")
 	if !ok {
@@ -208,7 +217,7 @@ func TestRegistry_GetUnknownWorker(t *testing.T) {
 
 func TestRegistry_Disconnect(t *testing.T) {
 	reg := New(nil)
-	reg.Register(context.Background(), "worker-1", nil) //nolint:errcheck
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	reg.Disconnect(context.Background(), "worker-1")
 
@@ -247,7 +256,7 @@ func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
 
 func TestRegistry_DeliverResult_Routing(t *testing.T) {
 	reg := New(nil)
-	reg.Register(context.Background(), "worker-1", nil) //nolint:errcheck
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	ch, err := reg.WaitForResult("worker-1", "cmd-42")
 	if err != nil {
@@ -273,7 +282,7 @@ func TestRegistry_DeliverResult_Routing(t *testing.T) {
 
 func TestRegistry_DeliverResult_NoWaiter(t *testing.T) {
 	reg := New(nil)
-	reg.Register(context.Background(), "worker-1", nil) //nolint:errcheck
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	// Delivering a result with no waiter must not block or panic.
 	reg.DeliverResult(&workerpb.CommandResult{

@@ -99,7 +99,7 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 // cannot self-assign a name different from what was pre-registered by an admin.
 // Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	logger.InfofCtx(ctx, "WorkerGateway: Register request (token=%s)", req.GetPreSharedToken())
+	logger.InfofCtx(ctx, "WorkerGateway: Register request received")
 
 	// Validate token and recover the pre-registered worker name.
 	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
@@ -109,7 +109,7 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, fmt.Errorf("registration rejected: %w", err)
 	}
 
-	if _, err := g.registry.Register(ctx, workerName, req.GetMetadata()); err != nil {
+	if _, err := g.registry.Register(ctx, workerName, req.GetRuntimeType(), req.GetMetadata()); err != nil {
 		return nil, fmt.Errorf("failed to register worker: %w", err)
 	}
 

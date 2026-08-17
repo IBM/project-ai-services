@@ -142,6 +142,7 @@ func TestGateway_Register_ValidToken(t *testing.T) {
 
 	resp, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	})
 	if err != nil {
 		t.Fatalf("Register: unexpected error: %v", err)
@@ -180,6 +181,7 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 	// First use succeeds.
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	}); err != nil {
 		t.Fatalf("first Register: unexpected error: %v", err)
 	}
@@ -187,6 +189,7 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 	// Second use of the same token must fail.
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	}); err == nil {
 		t.Fatal("second Register: expected error for reused token")
 	}
@@ -251,6 +254,7 @@ func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 	// Register the worker via the RPC.
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -304,6 +308,7 @@ func TestGateway_CommandStream_ResultRouted(t *testing.T) {
 
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -364,6 +369,7 @@ func TestGateway_CommandStream_Disconnect(t *testing.T) {
 
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
+		RuntimeType:    "podman",
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -51,6 +52,15 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 	var req createWorkerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+
+		return
+	}
+
+	// Normalise: trim surrounding whitespace and lowercase so that
+	// "Worker-A", "worker-a", and " worker-a " all resolve to the same name.
+	req.WorkerName = strings.ToLower(strings.TrimSpace(req.WorkerName))
+	if req.WorkerName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "worker_name must not be blank"})
 
 		return
 	}

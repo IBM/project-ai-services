@@ -94,7 +94,14 @@ func New(repo repository.WorkerRepository) *Registry {
 // and ensures an in-memory entry with a live CommandCh exists.
 // workerName must come from the validated token — callers must not trust the name
 // the worker declares in its RegisterRequest.
-func (r *Registry) Register(ctx context.Context, workerName string, metadata map[string]string) (*WorkerEntry, error) {
+// runtimeType must be one of the supported values ("podman", "openshift");
+// an unsupported or empty value is rejected with an error.
+func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
+	rt, err := runtimeTypeFromString(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
 	r.mu.Lock()
 	entry, exists := r.workers[workerName]
 	if !exists {
@@ -110,7 +117,7 @@ func (r *Registry) Register(ctx context.Context, workerName string, metadata map
 	if r.repo != nil {
 		w := &models.Worker{
 			Name:        workerName,
-			RuntimeType: models.WorkerRuntimeTypePodman,
+			RuntimeType: rt,
 			Status:      models.WorkerStatusReady,
 			Metadata:    metadataToAny(metadata),
 		}
@@ -138,7 +145,7 @@ func (r *Registry) Preregister(ctx context.Context, workerName string) (string, 
 
 	w := &models.Worker{
 		Name:        workerName,
-		RuntimeType: models.WorkerRuntimeTypePodman,
+		RuntimeType: models.WorkerRuntimeTypeUnknown,
 		Status:      models.WorkerStatusPending,
 	}
 	if err := r.repo.Upsert(ctx, w); err != nil {
@@ -296,6 +303,21 @@ func metadataToAny(m map[string]string) map[string]any {
 	}
 
 	return out
+}
+
+// runtimeTypeFromString maps a runtime type string declared by the worker to the
+// corresponding DB model constant. Returns an error for unsupported or empty values.
+// Supported values: "podman", "openshift".
+func runtimeTypeFromString(s string) (models.WorkerRuntimeType, error) {
+	switch s {
+	case string(models.WorkerRuntimeTypePodman):
+		return models.WorkerRuntimeTypePodman, nil
+	case string(models.WorkerRuntimeTypeOpenShift):
+		return models.WorkerRuntimeTypeOpenShift, nil
+	default:
+		return "", fmt.Errorf("unsupported runtime_type %q: must be %q or %q",
+			s, models.WorkerRuntimeTypePodman, models.WorkerRuntimeTypeOpenShift)
+	}
 }
 
 // ValidateToken checks a bootstrap token, marks it used, and returns the worker name it was
