@@ -73,7 +73,7 @@ func (img *Images) ListImages() ([]string, error) {
 }
 
 // Run executes the image pull policy.
-func (img *Images) Run(policy ImagePullPolicy) error {
+func (img *Images) Run(ctx context.Context, policy ImagePullPolicy) error {
 	// Fetch all images required for the template
 	images, err := img.ListImages()
 	if err != nil {
@@ -82,19 +82,18 @@ func (img *Images) Run(policy ImagePullPolicy) error {
 
 	switch policy {
 	case PullAlways:
-		return img.always(images)
+		return img.always(ctx, images)
 	case PullIfNotPresent:
-		return img.IfNotPresent(context.Background(), images)
+		return img.IfNotPresent(ctx, images)
 	case PullNever:
-		return img.never(images)
+		return img.never(ctx, images)
 	default:
 		return fmt.Errorf("unsupported policy: %s", policy)
 	}
 }
 
 // always -> pulls all the images for a given app template.
-func (img *Images) always(images []string) error {
-	ctx := context.Background()
+func (img *Images) always(ctx context.Context, images []string) error {
 	logger.InfolnCtx(ctx, "Downloading container images required for application template "+img.AppTemplate+":")
 
 	return PullImageFromRegistry(ctx, img.Runtime, images)
@@ -118,7 +117,7 @@ func (img *Images) IfNotPresent(ctx context.Context, images []string) error {
 
 // never -> never pulls any image.
 // It checks whether all the images for given appTemplate is present locally, if not then raises an error.
-func (img *Images) never(images []string) error {
+func (img *Images) never(ctx context.Context, images []string) error {
 	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
 	if err != nil {
 		return err
@@ -128,7 +127,7 @@ func (img *Images) never(images []string) error {
 		return fmt.Errorf("some required images are not present locally: %v. Either pull the image manually or rerun create command without --image-pull-policy or --skip-image-download flag", notFoundImages)
 	}
 
-	logger.InfolnCtx(context.Background(), "All required container images are present locally.")
+	logger.InfolnCtx(ctx, "All required container images are present locally.")
 
 	return nil
 }
