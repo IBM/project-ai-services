@@ -51,6 +51,7 @@ export const NameCell = ({
     value={value}
     rowId={rowId}
     rowData={rowData}
+    isLinkEnabled={rowData?.status === "Running"}
     onNameClick={
       onRowClick
         ? (id, name, status, type) =>
