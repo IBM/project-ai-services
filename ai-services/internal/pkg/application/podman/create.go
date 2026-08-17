@@ -114,7 +114,7 @@ func (p *PodmanApplication) validateAndAllocateSpyreCards(ctx context.Context, t
 
 func (p *PodmanApplication) prepareApplicationArtifacts(ctx context.Context, opts types.CreateOptions) error {
 	// Download Container Images
-	if err := p.downloadImagesForTemplate(opts.TemplateName, opts.Name, opts.ImagePullPolicy); err != nil {
+	if err := p.downloadImagesForTemplate(ctx, opts.TemplateName, opts.Name, opts.ImagePullPolicy); err != nil {
 		return err
 	}
 
@@ -285,7 +285,7 @@ func (p *PodmanApplication) fetchSpyreCardsFromPodAnnotations(annotations map[st
 	return spyreCards, spyreCardContainerMap, nil
 }
 
-func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
+func (p *PodmanApplication) downloadImagesForTemplate(ctx context.Context, templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
 	// create Images struct and run with the specified policy
 	img := &image.Images{
 		Runtime:     p.runtime,
@@ -293,7 +293,7 @@ func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName stri
 		AppTemplate: templateName,
 	}
 
-	return img.Run(imagePullPolicy)
+	return img.Run(ctx, imagePullPolicy)
 }
 
 func (p *PodmanApplication) executePodTemplates(ctx context.Context, tp templates.Template,

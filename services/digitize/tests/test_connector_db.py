@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, Mock, call, patch
 import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+
 
 # ---------------------------------------------------------------------------
 # Helpers shared across test cases
@@ -158,7 +160,7 @@ class TestGetConnector:
         c.sync_interval_seconds = SYNC_INTERVAL
         c.attached_at = _NOW
         c.last_sync_at = None
-        c.sync_status = "up to date"
+        c.sync_status = ConnectorStatus.UP_TO_DATE
         c.last_sync_error = None
         c.total_files = 0
         return c
@@ -205,7 +207,7 @@ class TestListConnectors:
         c1.sync_interval_seconds = 300
         c1.attached_at = _NOW
         c1.last_sync_at = None
-        c1.sync_status = "up to date"
+        c1.sync_status = ConnectorStatus.UP_TO_DATE
         c1.last_sync_error = None
         c1.total_files = 0
 
@@ -454,12 +456,12 @@ class TestRemoveConnectorFromMembership:
 
 
 # ===========================================================================
-# open_new_sync_log
+# init_sync_log_and_update_connector
 # ===========================================================================
 
 class TestInsertSyncLog:
     def test_returns_generated_seq(self):
-        """open_new_sync_log must return the auto-generated seq value."""
+        """init_sync_log_and_update_connector must return the auto-generated seq value."""
         session = MagicMock()
         # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
@@ -468,9 +470,9 @@ class TestInsertSyncLog:
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, update_result]
 
-        from digitize.utils.db import open_new_sync_log
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            seq = open_new_sync_log(CONNECTOR_ID)
+            seq = init_sync_log_and_update_connector(CONNECTOR_ID)
         assert seq == 3
         assert session.execute.call_count == 2
 
@@ -481,30 +483,30 @@ class TestInsertSyncLog:
         insert_result.scalar_one.return_value = 1
         session.execute.side_effect = [insert_result, MagicMock()]
 
-        from digitize.utils.db import open_new_sync_log
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            open_new_sync_log(CONNECTOR_ID)
+            init_sync_log_and_update_connector(CONNECTOR_ID)
         # Two DB calls: INSERT log row + UPDATE connector status
         assert session.execute.call_count == 2
 
     def test_does_not_accept_seq_parameter(self):
         """seq must not be an accepted parameter — it is auto-generated."""
-        from digitize.utils.db import open_new_sync_log
+        from digitize.utils.db import init_sync_log_and_update_connector
         import inspect
-        sig = inspect.signature(open_new_sync_log)
+        sig = inspect.signature(init_sync_log_and_update_connector)
         assert "seq" not in sig.parameters
 
     def test_raises_on_db_error(self):
         session = MagicMock()
         session.execute.side_effect = SQLAlchemyError("constraint violation")
-        from digitize.utils.db import open_new_sync_log
+        from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             with pytest.raises(SQLAlchemyError):
-                open_new_sync_log(CONNECTOR_ID)
+                init_sync_log_and_update_connector(CONNECTOR_ID)
 
 
 # ===========================================================================
-# close_sync_log
+# finalize_sync_log_and_update_connector
 # ===========================================================================
 
 class TestUpdateSyncLog:
@@ -516,10 +518,10 @@ class TestUpdateSyncLog:
         # Second execute: UPDATE connectors
         conn_result = _execute_result(rowcount=1)
         session.execute.side_effect = [log_result, conn_result]
-        from digitize.utils.db import close_sync_log
+        from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = close_sync_log(
-                CONNECTOR_ID, seq=1, status="completed", total_files=10, new_files=2
+            result = finalize_sync_log_and_update_connector(
+                CONNECTOR_ID, seq=1, status=SyncLogStatus.COMPLETED, total_files=10, new_files=2
             )
         assert result is True
         assert session.execute.call_count == 2
@@ -528,9 +530,9 @@ class TestUpdateSyncLog:
         """When the log row is not found, return False without updating connectors."""
         session = MagicMock()
         session.execute.return_value = _execute_result(rowcount=0)
-        from digitize.utils.db import close_sync_log
+        from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = close_sync_log(CONNECTOR_ID, seq=999, status="failed")
+            result = finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=999, status=SyncLogStatus.FAILED)
         assert result is False
         # Only one execute call: the failed log-row lookup; connectors must NOT be updated
         assert session.execute.call_count == 1
@@ -541,9 +543,9 @@ class TestUpdateSyncLog:
         log_result = _execute_result(rowcount=1)
         conn_result = _execute_result(rowcount=1)
         session.execute.side_effect = [log_result, conn_result]
-        from digitize.utils.db import close_sync_log
+        from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            close_sync_log(CONNECTOR_ID, seq=2, status="up to date")
+            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=2, status=ConnectorStatus.UP_TO_DATE)
         assert session.execute.call_count == 2
 
     def test_optional_fields_omitted_when_none(self):
@@ -552,9 +554,9 @@ class TestUpdateSyncLog:
         log_result = _execute_result(rowcount=1)
         conn_result = _execute_result(rowcount=1)
         session.execute.side_effect = [log_result, conn_result]
-        from digitize.utils.db import close_sync_log
+        from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            close_sync_log(CONNECTOR_ID, seq=1, status="completed")
+            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=1, status=SyncLogStatus.COMPLETED)
         assert session.execute.called
 
 
@@ -568,7 +570,7 @@ class TestUpdateSyncLogFilesSyncing:
         session.execute.return_value = _execute_result(rowcount=1)
         from digitize.utils.db import update_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = update_sync_log(42, total_files=5, new_files=3)
+            result = update_sync_log(CONNECTOR_ID, 1, total_files=5, new_files=3)
         assert result is True
 
     def test_returns_true_when_nothing_to_update(self):
@@ -576,7 +578,7 @@ class TestUpdateSyncLogFilesSyncing:
         session = MagicMock()
         from digitize.utils.db import update_sync_log
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = update_sync_log(42)
+            result = update_sync_log(CONNECTOR_ID, 1)
         assert result is True
         session.execute.assert_not_called()
 
@@ -598,9 +600,8 @@ class TestUpdateSyncLogFilesSyncing:
 # ===========================================================================
 
 class TestListSyncLogs:
-    def _make_log(self, log_id: int, seq: int) -> MagicMock:
+    def _make_log(self, seq: int) -> MagicMock:
         log = MagicMock()
-        log.id = log_id
         log.connector_id = CONNECTOR_ID
         log.seq = seq
         log.started_at = _NOW
@@ -608,13 +609,12 @@ class TestListSyncLogs:
         log.total_files = 0
         log.new_files = 0
         log.removed_files = 0
-        log.failed_files = 0
-        log.status = "started"
+        log.status = SyncLogStatus.STARTED
         log.error = ""
         return log
 
     def test_returns_items_and_total(self):
-        log = self._make_log(1, 1)
+        log = self._make_log(1)
         session = MagicMock()
         # First execute: COUNT query → total=1
         count_result = MagicMock()
@@ -668,5 +668,40 @@ class TestSetDocumentMetadata:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             result = set_document_metadata(DOC_ID_A, {"source_type": "sftp"})
         assert result is False
+
+
+# ===========================================================================
+# get_connector_sync_status
+# ===========================================================================
+
+class TestGetConnectorSyncStatus:
+    def _call(self, session_mock, connector_id=CONNECTOR_ID):
+        from digitize.utils.db import get_connector_sync_status
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session_mock)):
+            return get_connector_sync_status(connector_id)
+
+    def test_returns_status_string(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = (ConnectorStatus.SYNCING,)
+        result = self._call(session)
+        assert result == ConnectorStatus.SYNCING
+
+    def test_returns_none_when_not_found(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = None
+        result = self._call(session)
+        assert result is None
+
+    def test_returns_delete_pending(self):
+        session = MagicMock()
+        session.execute.return_value.one_or_none.return_value = (ConnectorStatus.DELETE_PENDING,)
+        result = self._call(session)
+        assert result == ConnectorStatus.DELETE_PENDING
+
+    def test_returns_none_on_db_error(self):
+        session = MagicMock()
+        session.execute.side_effect = SQLAlchemyError("timeout")
+        result = self._call(session)
+        assert result is None
 
 # Made with Bob
