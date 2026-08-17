@@ -265,8 +265,8 @@ async def _run_teardown(connector_id: str) -> None:
     Steps:
       1. Snapshot checksums owned by this connector
       2. Remove ownership rows; delete documents when last owner
-      3. Delete the connector row (cascades to sync_logs)
-      4. Sweep residual batch staging directories
+      3. Sweep residual batch staging directories
+      4. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_failed = False
@@ -287,24 +287,22 @@ async def _run_teardown(connector_id: str) -> None:
                     exc_info=True,
                 )
 
+        # Step 3: sweep any residual batch staging directories
+        if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
+            deletion_failed = True
+
         if deletion_failed:
-            db_ops.set_connector_error(connector_id, "Documents deletion failed")
-            logger.warning(
-                f"Skipping connector row deletion for {connector_id!r} "
-                "due to document deletion failures"
-            )
+            db_ops.set_connector_error(connector_id, "Teardown failed — skipping connector row deletion")
+            logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures")
             return
 
-        # Step 3: delete the connector row (cascades to connector_sync_logs)
+        # Step 4: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
                 f"delete_active_connector returned False for {connector_id!r} "
                 "— row may have already been removed"
             )
-
-        # Step 4: sweep any residual batch staging directories
-        _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors")
 
         logger.info(f"Connector {connector_id!r} teardown complete")
     except Exception as exc:
@@ -342,7 +340,7 @@ def _sweep_staging_dir(
     connector_id: str,
     staging_connectors_dir,
     sync_seq: int | None = None,
-) -> None:
+) -> bool:
     """
     Remove any residual batch staging directories for *connector_id*.
 
@@ -352,17 +350,27 @@ def _sweep_staging_dir(
 
     When *sync_seq* is given the sweep is narrowed to dirs matching
     ``<connector_id>-<sync_seq>-*`` (i.e. only the batches of that sync).
+
+    Returns True on success, False if an error occurred.
     """
     from pathlib import Path
 
     base = Path(staging_connectors_dir)
     if not base.exists():
-        return
+        return True
     prefix = f"{connector_id}-{sync_seq}-" if sync_seq is not None else f"{connector_id}-"
-    for entry in base.iterdir():
-        if entry.is_dir() and entry.name.startswith(prefix):
-            cleanup_staging_directory(entry.name, base, ignore_errors=True)
-            logger.debug(f"Swept residual staging dir {entry.name!r} for connector {connector_id!r}")
+    try:
+        for entry in base.iterdir():
+            if entry.is_dir() and entry.name.startswith(prefix):
+                cleanup_staging_directory(entry.name, base, ignore_errors=True)
+                logger.debug(f"Swept residual staging dir {entry.name!r} for connector {connector_id!r}")
+        return True
+    except Exception as exc:
+        logger.error(
+            f"Error sweeping staging dir for connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
