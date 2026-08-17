@@ -54,6 +54,14 @@ COMPONENTS = {
         ("ai-services/assets/services/similarity/podman/values.yaml", "similarity"),
         ("ai-services/assets/services/similarity/openshift/values.yaml", "similarity")
     ],
+    "services/extract/Makefile": [
+        ("ai-services/assets/services/extract/podman/values.yaml", "extract"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "extract")
+    ],
+    "services/translate/Makefile": [
+        ("ai-services/assets/services/translate/podman/values.yaml", "translate"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "translate")
+    ],
     "ui/chatbot/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
