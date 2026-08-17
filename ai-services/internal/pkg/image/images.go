@@ -84,7 +84,7 @@ func (img *Images) Run(policy ImagePullPolicy) error {
 	case PullAlways:
 		return img.always(images)
 	case PullIfNotPresent:
-		return img.IfNotPresent(images)
+		return img.IfNotPresent(context.Background(), images)
 	case PullNever:
 		return img.never(images)
 	default:
@@ -101,20 +101,19 @@ func (img *Images) always(images []string) error {
 }
 
 // IfNotPresent pulls only the missing images for a given app template.
-func (img *Images) IfNotPresent(images []string) error {
+func (img *Images) IfNotPresent(ctx context.Context, images []string) error {
 	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
 	if err != nil {
 		return err
 	}
 
 	if len(notFoundImages) == 0 {
-		ctx := context.Background()
 		logger.InfolnCtx(ctx, "All required container images are already present locally.")
 
 		return nil
 	}
 
-	return PullImageFromRegistry(context.Background(), img.Runtime, notFoundImages)
+	return PullImageFromRegistry(ctx, img.Runtime, notFoundImages)
 }
 
 // never -> never pulls any image.
