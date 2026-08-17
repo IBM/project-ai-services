@@ -69,6 +69,46 @@ definitions:
       status:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker:
+    properties:
+      id:
+        type: string
+      last_heartbeat:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      registered_at:
+        type: string
+      runtime_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType'
+      status:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus'
+      updated_at:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType:
+    enum:
+    - unknown
+    - podman
+    - openshift
+    type: string
+    x-enum-varnames:
+    - WorkerRuntimeTypeUnknown
+    - WorkerRuntimeTypePodman
+    - WorkerRuntimeTypeOpenShift
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus:
+    enum:
+    - pending
+    - ready
+    - disconnected
+    type: string
+    x-enum-varnames:
+    - WorkerStatusPending
+    - WorkerStatusReady
+    - WorkerStatusDisconnected
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       catalog_id:
@@ -238,6 +278,27 @@ definitions:
       type:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector:
+    properties:
+      connector_name:
+        description: display label for connector_type
+        type: string
+      connector_type:
+        description: e.g. "datasource"
+        type: string
+      description:
+        description: short description
+        type: string
+      id:
+        description: e.g. "object_storage", "file_system"
+        type: string
+      name:
+        description: display name
+        type: string
+      type:
+        description: always "connector"
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference:
     properties:
       id:
@@ -290,6 +351,8 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService:
     properties:
+      accepts_datasource:
+        type: boolean
       components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent'
@@ -372,6 +435,8 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
+      accepts_datasource:
+        type: boolean
       architectures:
         items:
           type: string
@@ -503,6 +568,22 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  internal_pkg_catalog_apiserver_handlers.createWorkerReq:
+    properties:
+      worker_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - worker_name
+    type: object
+  internal_pkg_catalog_apiserver_handlers.createWorkerResp:
+    properties:
+      token:
+        type: string
+      worker_name:
+        type: string
     type: object
   internal_pkg_catalog_apiserver_handlers.loginReq:
     properties:
@@ -1043,6 +1124,46 @@ paths:
       summary: Refresh access token
       tags:
       - Authentication
+  /auth/token:
+    post:
+      description: |-
+        **Experimental** — This endpoint is under active development and may change without notice.
+        IBM Power Mission Control use this
+        endpoint to exchange a pre-existing ManageIQ token for an internal JWT
+        without supplying username/password credentials.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns access_token, refresh_token, and token_type
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Invalid or expired ManageIQ token
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: ManageIQ token does not have required permissions
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: ManageIQ resource not found
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: ManageIQ unavailable or returned an unexpected server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Exchange a ManageIQ token for a Catalog API JWT
+      tags:
+      - Authentication
   /components/{component_type}/providers/{provider_id}/params:
     get:
       description: Retrieves the configuration schema (JSON Schema) for a specific
@@ -1089,6 +1210,75 @@ paths:
       security:
       - BearerAuth: []
       summary: Get component provider parameters
+      tags:
+      - Catalog
+  /connectors:
+    get:
+      description: Returns registered providers. When connector_type is supplied only
+        that type is returned; omitting it returns all providers across all connector
+        types.
+      parameters:
+      - description: Filter by connector type (e.g. 'datasource'). Omit to return
+          all types.
+        in: query
+        name: connector_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of providers
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Connector type not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List connector providers
+      tags:
+      - Catalog
+  /connectors/{connector_type}/providers/{provider_id}/params:
+    get:
+      description: Returns the JSON Schema for the configuration parameters of a specific
+        connector provider.
+      parameters:
+      - description: Connector type (e.g. 'datasource')
+        in: path
+        name: connector_type
+        required: true
+        type: string
+      - description: Provider identifier (e.g. 'object_storage', 'file_system')
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JSON Schema for the provider's configuration
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Connector type or provider not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get connector provider parameters
       tags:
       - Catalog
   /resources:
@@ -1250,6 +1440,100 @@ paths:
       summary: Get service parameters
       tags:
       - Catalog
+  /workers:
+    get:
+      description: Returns all registered workers and their current status from the
+        database.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of workers
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker'
+            type: array
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List all workers
+      tags:
+      - Workers
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.
+        The operator passes this token when starting the worker daemon (`worker start --token <token>`).
+      parameters:
+      - description: Worker registration request
+        in: body
+        name: worker
+        required: true
+        schema:
+          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.createWorkerReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Worker registered; token valid for 24 hours
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.createWorkerResp'
+        "400":
+          description: Invalid payload
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Register a new worker
+      tags:
+      - Workers
+  /workers/{id}:
+    delete:
+      description: |-
+        Permanently removes a worker from the registry and the database.
+        If the worker is currently connected its gRPC stream is also cleaned up.
+      parameters:
+      - description: Worker ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Worker deleted
+        "400":
+          description: Invalid worker ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Worker not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deregister a worker
+      tags:
+      - Workers
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and JWT token.

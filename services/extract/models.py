@@ -171,4 +171,30 @@ class JobResultResponse(BaseModel):
     meta: Dict[str, Any]
     usage: Dict[str, Any]
 
+
+# ---------------------------------------------------------------------------
+# Sync extraction — request / response models
+# ---------------------------------------------------------------------------
+
+class ExtractionRequest(BaseModel):
+    """Request body for POST /v1/extract."""
+
+    text: str = Field(..., min_length=1, description="Raw text to extract from")
+    schema_id: str = Field(..., min_length=1, description="ID of a registered schema")
+
+
+class ExtractionSourceInfo(BaseModel):
+    """Source metadata embedded in the sync extraction response."""
+
+    input_type: str = "text"
+    input_tokens: int
+
+
+class ExtractionResponse(BaseModel):
+    """Response body for POST /v1/extract (200 OK)."""
+
+    data: Dict[str, Any]
+    meta: Dict[str, Any]
+    usage: Dict[str, Any]
+
 # Made with Bob

@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "chat-bot"
+  name: "chat-bot-ui"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Values.templateID }}

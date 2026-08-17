@@ -164,6 +164,63 @@ func (c *Client) Login(username, password string) (LoginResponse, error) {
 	return resp, nil
 }
 
+// LoginWithMIQToken calls POST /api/v1/auth/token, passing the ManageIQ token in
+// the Authorization header. Used by IBM Power Mission Control (Flow B).
+func (c *Client) LoginWithMIQToken(miqToken string) (LoginResponse, error) {
+	var resp LoginResponse
+	httpResp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+miqToken).
+		SetResult(&resp).
+		Post("/api/v1/auth/token")
+	if err != nil {
+		return LoginResponse{}, fmt.Errorf("token login request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return LoginResponse{}, fmt.Errorf("token login failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return resp, nil
+}
+
+// NewWithMIQToken creates a Client by exchanging a ManageIQ token for a Catalog API JWT.
+// This is Flow B: used by IBM Power Mission Control which already holds a MIQ token.
+// The resulting tokens are saved to the local config file exactly like NewWithLogin.
+func NewWithMIQToken(serverURL, miqToken string, insecure bool) (*Client, error) {
+	restyClient := resty.New().SetBaseURL(serverURL)
+	if insecure {
+		restyClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec
+	}
+
+	c := &Client{
+		serverURL:  serverURL,
+		httpClient: restyClient,
+	}
+
+	resp, err := c.LoginWithMIQToken(miqToken)
+	if err != nil {
+		return nil, err
+	}
+
+	c.creds = config.Credentials{
+		ServerURL:    serverURL,
+		AccessToken:  resp.AccessToken,
+		RefreshToken: resp.RefreshToken,
+		Insecure:     insecure,
+	}
+	c.httpClient.SetAuthToken(resp.AccessToken)
+
+	if exp, err := jwtExpiry(resp.AccessToken); err == nil {
+		c.creds.AccessTokenExpiry = exp
+	}
+
+	if err := config.Save(c.creds); err != nil {
+		return nil, fmt.Errorf("save credentials: %w", err)
+	}
+
+	return c, nil
+}
+
 // RefreshToken calls POST /api/v1/auth/refresh using the stored refresh token
 // and updates the in-memory credentials (and persists them to disk).
 func (c *Client) RefreshToken() error {

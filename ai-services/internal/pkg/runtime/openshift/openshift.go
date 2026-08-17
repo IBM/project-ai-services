@@ -183,7 +183,7 @@ func (kc *OpenshiftClient) ListImages() ([]types.Image, error) {
 }
 
 // PullImage pulls a container image.
-func (kc *OpenshiftClient) PullImage(image string) error {
+func (kc *OpenshiftClient) PullImage(_ context.Context, image string) error {
 	logger.Warningln("PullImage is not implemented for OpenshiftClient as image pulling is managed by kubelet.")
 
 	return nil

@@ -12,7 +12,7 @@ import (
 type Runtime interface {
 	// Image operations
 	ListImages() ([]types.Image, error)
-	PullImage(image string) error
+	PullImage(ctx context.Context, image string) error
 
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)

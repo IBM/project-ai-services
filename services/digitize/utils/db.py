@@ -1245,6 +1245,58 @@ def get_active_connector(connector_id: str) -> Optional[Connector]:
     return db_manager.get_connector_by_id(connector_id)
 
 
+def get_connector_sync_status(connector_id: str) -> Optional[str]:
+    """
+    Return the current sync_status string for a connector.
+
+    Does a minimal SELECT — does not load the full row.
+    Returns None if the connector does not exist.
+    """
+    return db_manager.get_connector_sync_status(connector_id)
+
+
+def get_active_sync_seq(connector_id: str) -> Optional[int]:
+    """
+    Return the seq of the currently-running sync-log row for connector_id.
+
+    Returns None if no active sync is in progress.
+    """
+    return db_manager.get_active_sync_seq(connector_id)
+
+
+def try_acquire_sync_lock(connector_id: str) -> bool:
+    """
+    Atomically acquire the sync lock for *connector_id*.
+
+    Sets sync_status='syncing' only when it is not already 'syncing'.
+    Returns True if the lock was acquired, False if already held (or not found).
+    """
+    return db_manager.try_acquire_sync_lock(connector_id)
+
+
+def mark_sync_cancel_pending(connector_id: str) -> bool:
+    """
+    Signal a running tick to cancel without deleting the connector.
+
+    Sets connector_sync_logs.status='cancel pending' on the active sync-log row,
+    only when connectors.sync_status='syncing'.  The connector row itself stays
+    'syncing' until the tick's finalize_sync_log_and_update_connector() transitions it to 'out of sync'.
+    Returns True if the signal was written (tick was running), False otherwise.
+    """
+    return db_manager.mark_sync_cancel_pending(connector_id)
+
+
+def mark_connector_delete_pending(connector_id: str) -> bool:
+    """
+    Set sync_status='delete pending' for the given connector regardless of
+    current status.
+
+    Returns True if the connector was found and updated, False if it does
+    not exist.
+    """
+    return db_manager.mark_connector_delete_pending(connector_id)
+
+
 def list_connectors() -> List[Connector]:
     """Return all connectors ordered by attached_at descending."""
     return db_manager.get_all_connectors()
@@ -1300,26 +1352,35 @@ def remove_connector_checksum_entry(
 
     Returns (remaining_owner_count, doc_id), or (0, None) if not found.
     """
-    return db_manager.delete_connector_checksum(connector_id, checksum)
+    doc_id = db_manager.delete_connector_checksum(connector_id, checksum)
+    if doc_id is None:
+        return 0, None
+    remaining = db_manager.count_checksum_owners(checksum)
+    return remaining, doc_id
 
 
 # ----------------------------------------------------------------------------
 # Sync log helpers
 # ----------------------------------------------------------------------------
 
-def open_new_sync_log(
+def init_sync_log_and_update_connector(
     connector_id: str,
     started_at: Optional[datetime] = None,
 ) -> int:
     """
-    Create a new sync-log row and set connector sync_status to 'syncing'.
+    Initialise a new sync run across two tables:
+      - connector_sync_log: inserts a new row with status=STARTED and an
+        auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
+      - connector: sets sync_status=SYNCING on the matching row.
 
     Returns the generated seq value.
     """
-    return db_manager.open_sync_log(connector_id, started_at=started_at)
+    seq = db_manager.insert_sync_log(connector_id, started_at=started_at)
+    db_manager.set_connector_sync_status_syncing(connector_id)
+    return seq
 
 
-def close_sync_log(
+def finalize_sync_log_and_update_connector(
     connector_id: str,
     seq: int,
     status: str,
@@ -1327,33 +1388,57 @@ def close_sync_log(
     total_files: Optional[int] = None,
     new_files: Optional[int] = None,
     removed_files: Optional[int] = None,
-    failed_files: Optional[int] = None,
     error: Optional[str] = None,
 ) -> bool:
     """
-    Finalize a sync-log row and update connector last_sync_at / sync_status.
+    Finalize a sync run across two tables:
+      - connector_sync_log: UPDATEs the matching row with status, finished_at,
+        and optional file counts / error message.
+      - connector: UPDATEs last_sync_at to now, and sync_status to the terminal
+        state — CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can
+        retry; any other status (e.g. COMPLETED) is written through verbatim.
 
     Returns True on success, False if the sync-log row was not found.
     """
-    return db_manager.close_sync_log(
+    now = finished_at or datetime.now(timezone.utc)
+    found = db_manager.finalize_sync_log(
         connector_id=connector_id,
         seq=seq,
         status=status,
-        finished_at=finished_at,
+        finished_at=now,
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,
-        failed_files=failed_files,
         error=error,
     )
+    if not found:
+        return False
+    db_manager.update_connector_after_sync(connector_id, status=status, last_sync_at=now)
+    return True
+
+
+def update_connector_total_files(connector_id: str, total_files: int) -> None:
+    """Update the total_files count on the connectors table for *connector_id*."""
+    db_manager.update_connector(connector_id=connector_id, total_files=total_files)
+
+
+def set_connector_error(connector_id: str, error: str) -> None:
+    """Persist an error message on the connector row (best-effort; logs on failure)."""
+    try:
+        db_manager.update_connector(connector_id=connector_id, error=error)
+    except Exception as exc:
+        logger.warning(
+            f"Could not persist error on connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
 
 
 def update_sync_log(
-    log_id: int,
+    connector_id: str,
+    seq: int,
     total_files: Optional[int] = None,
     new_files: Optional[int] = None,
     removed_files: Optional[int] = None,
-    failed_files: Optional[int] = None,
 ) -> bool:
     """
     Write live progress counters into an in-progress sync-log row.
@@ -1361,11 +1446,11 @@ def update_sync_log(
     Returns True on success, False if the row was not found.
     """
     return db_manager.update_sync_log_progress(
-        log_id=log_id,
+        connector_id=connector_id,
+        seq=seq,
         total_files=total_files,
         new_files=new_files,
         removed_files=removed_files,
-        failed_files=failed_files,
     )
 
 
@@ -1379,7 +1464,27 @@ def list_sync_logs(
 
     Returns (items, total_count).
     """
-    return db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
+    total = db_manager.count_sync_logs(connector_id)
+    rows = db_manager.get_sync_logs(connector_id, limit=limit, offset=offset)
+    return rows, total
+
+
+def get_sync_log(connector_id: str, seq: int) -> Optional[ConnectorSyncLog]:
+    """
+    Return the connector_sync_logs row for (connector_id, seq).
+
+    Returns None if the row does not exist.
+    """
+    return db_manager.get_sync_log(connector_id, seq)
+
+
+def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
+    """
+    Return the status of the connector_sync_logs row for (connector_id, seq).
+
+    Returns None if the row does not exist.
+    """
+    return db_manager.get_sync_log_status(connector_id, seq)
 
 
 # ----------------------------------------------------------------------------

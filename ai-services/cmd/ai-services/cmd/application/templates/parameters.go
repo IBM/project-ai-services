@@ -10,8 +10,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -31,11 +29,6 @@ func NewParametersCmd() *cobra.Command {
   ai-services application templates parameters --template rag --runtime podman`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-
-			// Check runtime - only supported for Podman
-			if vars.RuntimeFactory.GetRuntimeType() != types.RuntimeTypePodman {
-				return fmt.Errorf("templates parameters subcommand is only supported for Podman runtime")
-			}
 
 			if templateID == "" {
 				return fmt.Errorf("--template flag is required")
