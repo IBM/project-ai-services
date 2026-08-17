@@ -11,13 +11,7 @@ import {
 export interface DeployedServicesRow {
   id: string;
   name: string;
-  status:
-    | "Deploying"
-    | "Deleting"
-    | "Downloading"
-    | "Error"
-    | "Stopped"
-    | "Running";
+  status: "Downloading" | "Deploying" | "Running" | "Deleting" | "Error";
   type?: string;
   uptime: string;
   messages: string;
@@ -72,12 +66,11 @@ export const HEADERS: DataTableHeader[] = [
 
 // Status Column sort order
 export const STATUS_SORT_ORDER: Record<string, number> = {
-  Deploying: 1,
-  Downloading: 2,
+  Downloading: 1,
+  Deploying: 2,
   Deleting: 3,
   Error: 4,
-  Stopped: 5,
-  Running: 6,
+  Running: 5,
 };
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
