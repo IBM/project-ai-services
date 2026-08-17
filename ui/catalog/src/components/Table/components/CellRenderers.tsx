@@ -45,6 +45,17 @@ export const STATUS_CONFIG = {
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
+  // ── Data source connector statuses ──────────────────────────────────────────
+  connected: {
+    tagType: "green" as const,
+    icon: CheckmarkFilled,
+    className: sharedStyles.statusTagSuccess,
+  },
+  offline: {
+    tagType: "red" as const,
+    icon: ErrorFilled,
+    className: sharedStyles.statusTagError,
+  },
 } as const;
 
 const DEFAULT_STATUS_CONFIG = {
@@ -77,6 +88,8 @@ export interface NameCellProps {
     status: string,
     type: string,
   ) => void;
+  /** When true, the name renders as a clickable link; otherwise plain text. */
+  isLinkEnabled?: boolean;
 }
 
 export const StatusCell = ({ value }: SharedCellRendererProps) => {
@@ -109,8 +122,8 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
   let MessageIcon;
   let iconClassName: string;
 
-  // First check row status for accurate icon selection
-  if (status === "Error") {
+  // Error and offline both indicate a hard failure — use the error icon
+  if (status === "Error" || status === "offline") {
     MessageIcon = ErrorFilled;
     iconClassName = sharedStyles.messageIconError;
   } else {
@@ -156,10 +169,9 @@ export const NameCell = ({
   rowId,
   rowData,
   onNameClick,
+  isLinkEnabled,
 }: NameCellProps) => {
-  const isRunning = rowData?.status === "Running";
-
-  if (!isRunning || !onNameClick) {
+  if (!isLinkEnabled || !onNameClick) {
     return <span>{String(value)}</span>;
   }
 
