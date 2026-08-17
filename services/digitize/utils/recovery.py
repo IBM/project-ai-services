@@ -11,7 +11,12 @@ recovery logic is isolated from the general utility bag.
 
 from common.misc_utils import get_logger, cleanup_staging_directory
 from digitize.models import JobStatus, DocStatus
-from digitize.utils.db import get_all_jobs, get_status_manager
+from digitize.utils.db import (
+    close_open_sync_log,
+    get_all_jobs,
+    get_status_manager,
+    reset_syncing_connectors,
+)
 
 logger = get_logger("recovery")
 
@@ -144,3 +149,48 @@ def recover_zombie_jobs() -> int:
         logger.debug("✅ No zombie jobs found on startup")
 
     return orphan_count
+
+
+def recover_connector_sync_state() -> int:
+    """
+    Recover connectors that were mid-tick when the service crashed.
+
+    On startup this function:
+    1. Bulk-updates every connector whose ``sync_status = 'syncing'`` to
+       ``'out of sync'`` — releasing the sync lock so future ticks can run.
+    2. For each affected connector, closes the still-open ``connector_sync_logs``
+       row (status = 'started' or 'cancel pending') by setting it to
+       ``'failed'`` with an explanatory error message.
+
+    Returns:
+        Number of connectors that were recovered.
+    """
+    _CRASH_ERROR = "Service restarted during sync tick"
+
+    affected_ids = reset_syncing_connectors()
+
+    for connector_id in affected_ids:
+        try:
+            closed = close_open_sync_log(connector_id, _CRASH_ERROR)
+            if closed:
+                logger.info(
+                    f"Closed stale sync log for connector {connector_id!r} after crash recovery"
+                )
+            else:
+                logger.warning(
+                    f"No open sync-log row found for connector {connector_id!r} during crash recovery"
+                )
+        except Exception as exc:
+            logger.error(
+                f"Error closing sync log for connector {connector_id!r}: {exc}",
+                exc_info=True,
+            )
+
+    if affected_ids:
+        logger.info(
+            f"Connector crash recovery: reset {len(affected_ids)} connector(s): {affected_ids}"
+        )
+    else:
+        logger.debug("No stuck connector syncs found on startup")
+
+    return len(affected_ids)

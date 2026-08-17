@@ -1488,6 +1488,26 @@ def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
 
 
 # ----------------------------------------------------------------------------
+# Connector sync-state recovery helpers
+# ----------------------------------------------------------------------------
+
+def reset_syncing_connectors() -> List[str]:
+    """
+    Bulk-set sync_status='out of sync' for every connector currently stuck in
+    'syncing'.  Returns the list of affected connector IDs.
+    """
+    return db_manager.reset_syncing_connectors()
+
+
+def close_open_sync_log(connector_id: str, error: str) -> bool:
+    """
+    Close the open sync-log row for *connector_id* with status=FAILED and
+    the provided *error* string.  Returns True if a row was updated.
+    """
+    return db_manager.close_open_sync_log(connector_id, error)
+
+
+# ----------------------------------------------------------------------------
 # Document metadata helper
 # ----------------------------------------------------------------------------
 

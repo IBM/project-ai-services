@@ -100,8 +100,19 @@ async def create_connector(body: ConnectorCreateRequest):
             f"Connector {connector_id!r} ({body.connector_name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
-        # Worker start is a no-op stub in PR3 — the worker manager (PR7) will hook
-        # in here once implemented.
+
+        # Register the connector with the scheduler so it starts ticking
+        # immediately (fire_immediately=True for the first-ever sync).
+        try:
+            import digitize.connectors.scheduler as _sched
+            await _sched.register_connector_job(
+                connector_id, sync_interval, fire_immediately=True
+            )
+        except Exception as sched_exc:
+            logger.warning(
+                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
+            )
+
         return Response(
             content=f'{{"connector_id": "{connector_id}"}}',
             status_code=201,
@@ -270,15 +281,26 @@ async def _run_teardown(connector_id: str) -> None:
     and awaited directly from _handle_interrupt in sync_tick (Case A).
 
     Steps:
-      1. Snapshot checksums owned by this connector
-      2. Remove ownership rows; delete documents when last owner
-      3. Sweep residual batch staging directories
-      4. Delete the connector row (cascades to connector_sync_logs)
+      1. Remove the scheduled job so no new ticks fire
+      2. Snapshot checksums owned by this connector
+      3. Remove ownership rows; delete documents when last owner
+      4. Sweep residual batch staging directories
+      5. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_failed = False
     try:
-        # Steps 1+2: remove checksum ownership; delete orphaned documents
+        # Step 1: Remove the scheduled job so no new ticks fire after this point.
+        try:
+            import digitize.connectors.scheduler as _sched
+            await _sched.remove_connector_job(connector_id)
+        except Exception as sched_exc:
+            deletion_failed = True
+            logger.warning(
+                f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
+            )
+
+        # Steps 2+3: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
         for checksum in owned_checksums:
             try:
@@ -294,7 +316,7 @@ async def _run_teardown(connector_id: str) -> None:
                     exc_info=True,
                 )
 
-        # Step 3: sweep any residual batch staging directories
+        # Step 4: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
             deletion_failed = True
 
@@ -303,7 +325,7 @@ async def _run_teardown(connector_id: str) -> None:
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures")
             return
 
-        # Step 4: delete the connector row (cascades to connector_sync_logs)
+        # Step 5: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -485,9 +507,9 @@ async def dispatch_sync(connector_id: str) -> int:
     """Dispatch a sync tick for *connector_id* and return the active sync_seq.
 
     This is the shared core used by both the HTTP handler (``trigger_sync``)
-    and the APScheduler job (``_run_tick_wrapped``).  It contains no FastAPI or
-    HTTP concerns — callers map the exceptions it raises to their own error
-    handling:
+    and the APScheduler (registered directly via ``register_connector_job``).
+    It contains no FastAPI or HTTP concerns — callers map the exceptions it
+    raises to their own error handling:
 
     Raises
     ------
@@ -509,17 +531,10 @@ async def dispatch_sync(connector_id: str) -> int:
 
     APScheduler usage
     -----------------
-    The scheduler can call this directly without any HTTP machinery::
+    The scheduler registers this function directly as the job callable::
 
-        from digitize.api.v1.connectors import dispatch_sync, SyncNotFound, SyncLocked
-
-        async def _run_tick_wrapped(connector_id: str) -> None:
-            try:
-                await dispatch_sync(connector_id)
-            except SyncNotFound:
-                logger.warning(f"Connector {connector_id!r} not found; skipping")
-            except SyncLocked as exc:
-                logger.info(f"Connector {connector_id!r} skipped: {exc}")
+        from digitize.api.v1.connectors import dispatch_sync
+        await sched.add_schedule(func_or_task_id=dispatch_sync, args=[connector_id], ...)
     """
     from digitize.connectors.sync_tick import run_tick
 

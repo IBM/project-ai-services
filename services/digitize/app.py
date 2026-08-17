@@ -33,7 +33,7 @@ set_log_level(settings.common.app.log_level)
 
 from digitize.db.connection import check_db_connection, close_db_connections
 import digitize.utils.jobs as dg_util
-from digitize.utils.recovery import recover_zombie_jobs
+from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state
 
 logger = get_logger("digitize_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -105,7 +105,60 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"Error during zombie job recovery: {exc}", exc_info=True)
 
-    yield
+    # ------------------------------------------------------------------ #
+    # Connector scheduler                                                  #
+    # ------------------------------------------------------------------ #
+    import digitize.connectors.scheduler as scheduler_module
+    from digitize.utils.db import list_connectors
+    from apscheduler import AsyncScheduler
+    from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+    from digitize.db.connection import engine as db_engine
+
+    try:
+        data_store = SQLAlchemyDataStore(db_engine)
+        async with AsyncScheduler(data_store=data_store) as sched:
+            scheduler_module._scheduler = sched
+
+            # Connector crash recovery — unlock connectors stuck in 'syncing'.
+            try:
+                recovered = recover_connector_sync_state()
+                if recovered:
+                    logger.info(
+                        f"Connector crash recovery: reset {recovered} stuck connector(s)"
+                    )
+            except Exception as exc:
+                logger.error(
+                    f"Error during connector sync state recovery: {exc}", exc_info=True
+                )
+
+            # Re-register all existing connectors (fire_immediately=False so we
+            # don't trigger a duplicate tick for connectors that are already
+            # up-to-date after crash recovery).
+            try:
+                connectors = list_connectors()
+                for connector in connectors:
+                    await scheduler_module.register_connector_job(
+                        connector.id,
+                        connector.sync_interval_seconds,
+                        fire_immediately=False,
+                    )
+                if connectors:
+                    logger.info(
+                        f"Re-registered {len(connectors)} connector job(s) with scheduler"
+                    )
+            except Exception as exc:
+                logger.error(
+                    f"Error re-registering connector jobs: {exc}", exc_info=True
+                )
+
+            yield
+
+    except Exception as exc:
+        logger.error(
+            f"❌ Failed to start connector scheduler: {exc}", exc_info=True
+        )
+        # Yield anyway so the service stays up even if the scheduler fails.
+        yield
 
     # Shutdown.
     logger.info("Application shutting down...")
@@ -116,6 +169,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Error closing database connections: {exc}", exc_info=True)
 
     stderr_monitor.stop()
+
 
 
 # ------------------------------------------------------------------ #
