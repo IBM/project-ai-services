@@ -21,12 +21,12 @@ type WorkerUpdate struct {
 
 // WorkerRepository defines the interface for worker data operations.
 type WorkerRepository interface {
-	// Upsert inserts a new worker or updates its runtime_type and registered_at on name conflict.
+	// Upsert inserts a new worker or updates its runtime_type, status, and metadata on name conflict.
 	Upsert(ctx context.Context, worker *models.Worker) error
 	// Update applies a partial update to the fields set in WorkerUpdate; nil fields are left unchanged.
-	Update(ctx context.Context, name string, update WorkerUpdate) error
-	// Delete removes a worker by ID.
-	Delete(ctx context.Context, id uuid.UUID) error
+	Update(ctx context.Context, id uuid.UUID, update WorkerUpdate) error
+	// Delete removes a worker by ID. Returns (false, nil) if no row matched.
+	Delete(ctx context.Context, id uuid.UUID) (bool, error)
 	// GetAll returns all worker rows ordered by registered_at ascending.
 	GetAll(ctx context.Context) ([]models.Worker, error)
 }
@@ -80,7 +80,7 @@ func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
 
 // Update performs a partial update on a worker row.
 // Nil fields in WorkerUpdate are left unchanged via COALESCE. updated_at is always refreshed.
-func (r *workerRepo) Update(ctx context.Context, name string, update WorkerUpdate) error {
+func (r *workerRepo) Update(ctx context.Context, id uuid.UUID, update WorkerUpdate) error {
 	var hb sql.NullTime
 	if update.LastHeartbeat != nil {
 		hb = sql.NullTime{Time: *update.LastHeartbeat, Valid: true}
@@ -96,27 +96,28 @@ func (r *workerRepo) Update(ctx context.Context, name string, update WorkerUpdat
 		SET status         = COALESCE($1, status),
 		    last_heartbeat = COALESCE($2, last_heartbeat),
 		    updated_at     = NOW()
-		WHERE name = $3
+		WHERE id = $3
 	`
 
-	_, err := r.pool.Exec(ctx, query, statusArg, hb, name)
+	_, err := r.pool.Exec(ctx, query, statusArg, hb, id)
 	if err != nil {
-		return fmt.Errorf("failed to update worker %q: %w", name, err)
+		return fmt.Errorf("failed to update worker %q: %w", id, err)
 	}
 
 	return nil
 }
 
 // Delete removes a worker by ID.
-func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) error {
+// Returns (true, nil) if the row was deleted, (false, nil) if no row matched.
+func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
 	query := `DELETE FROM workers WHERE id = $1`
 
-	_, err := r.pool.Exec(ctx, query, id)
+	tag, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("failed to delete worker %q: %w", id, err)
+		return false, fmt.Errorf("failed to delete worker %q: %w", id, err)
 	}
 
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 // GetAll returns all worker rows ordered by registered_at ascending.

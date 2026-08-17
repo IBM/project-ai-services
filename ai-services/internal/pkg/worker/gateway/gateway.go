@@ -10,10 +10,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"google.golang.org/grpc"
@@ -35,18 +32,12 @@ type Gateway struct {
 	workerpb.UnimplementedWorkerGatewayServer
 
 	registry   *registry.Registry
-	tokenStore *registry.TokenStore
-	repo       repository.WorkerRepository // may be nil in tests
 	grpcServer *grpc.Server
 }
 
-// New creates a Gateway backed by the given registry, token store, and worker repository.
-func New(reg *registry.Registry, ts *registry.TokenStore, repo repository.WorkerRepository) *Gateway {
-	return &Gateway{
-		registry:   reg,
-		tokenStore: ts,
-		repo:       repo,
-	}
+// New creates a Gateway backed by the given registry.
+func New(reg *registry.Registry) *Gateway {
+	return &Gateway{registry: reg}
 }
 
 // Start begins listening on addr (e.g. ":9090") and serves gRPC in a background goroutine.
@@ -84,9 +75,7 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 	return nil
 }
 
-// runSweeper periodically queries the DB for workers whose last_heartbeat has
-// exceeded heartbeatTimeout and marks them disconnected.
-// It runs entirely against the DB — no in-memory state required.
+// runSweeper periodically asks the registry to mark stale workers disconnected.
 func (g *Gateway) runSweeper(ctx context.Context) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
@@ -96,34 +85,7 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			g.sweepStaleWorkers(ctx)
-		}
-	}
-}
-
-func (g *Gateway) sweepStaleWorkers(ctx context.Context) {
-	if g.repo == nil {
-		return
-	}
-
-	workers, err := g.repo.GetAll(ctx)
-	if err != nil {
-		logger.WarningfCtx(ctx, "WorkerGateway sweeper: failed to fetch workers: %v", err)
-
-		return
-	}
-
-	now := time.Now()
-
-	for _, w := range workers {
-		if w.Status == models.WorkerStatusDisconnected {
-			continue
-		}
-		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > heartbeatTimeout {
-			logger.WarningfCtx(ctx, "WorkerGateway sweeper: worker %s heartbeat timed out — marking disconnected", w.Name)
-			if err := g.repo.Update(ctx, w.Name, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
-				logger.WarningfCtx(ctx, "WorkerGateway sweeper: failed to update worker %s: %v", w.Name, err)
-			}
+			g.registry.SweepStale(ctx, heartbeatTimeout)
 		}
 	}
 }
@@ -133,19 +95,21 @@ func (g *Gateway) sweepStaleWorkers(ctx context.Context) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Register implements WorkerGatewayServer. Workers call this once at bootstrap.
-// Metadata supplied in the request is persisted to the
-// DB metadata JSON column by registry.Register — no separate handling needed here.
+// The worker name is taken from the token, not from the request — the worker
+// cannot self-assign a name different from what was pre-registered by an admin.
+// Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	workerName := req.GetWorkerName()
-	logger.InfofCtx(ctx, "WorkerGateway: Register request from worker_name=%s", workerName)
+	logger.InfofCtx(ctx, "WorkerGateway: Register request (token=%s)", req.GetPreSharedToken())
 
-	if err := g.tokenStore.Validate(req.GetPreSharedToken()); err != nil {
-		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration for worker %s: %v", workerName, err)
+	// Validate token and recover the pre-registered worker name.
+	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
+	if err != nil {
+		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
 
 		return nil, fmt.Errorf("registration rejected: %w", err)
 	}
 
-	if _, err := g.registry.Register(ctx, req); err != nil {
+	if _, err := g.registry.Register(ctx, workerName, req.GetMetadata()); err != nil {
 		return nil, fmt.Errorf("failed to register worker: %w", err)
 	}
 
@@ -233,7 +197,7 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 
 	// Deliver the first message if it is a real result (not a heartbeat).
 	if firstMsg.GetIsHeartbeat() {
-		g.updateHeartbeat(ctx, workerName)
+		g.registry.UpdateHeartbeat(ctx, workerName)
 	} else {
 		g.registry.DeliverResult(firstMsg)
 	}
@@ -242,7 +206,7 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 }
 
 // recvLoop reads CommandResults from the stream and dispatches them to waiting callers.
-// Heartbeat messages update last_heartbeat in the DB.
+// Heartbeat messages update last_heartbeat in the DB via the registry.
 // Errors are sent to errCh and the goroutine exits.
 func (g *Gateway) recvLoop(ctx context.Context, stream grpc.BidiStreamingServer[workerpb.CommandResult, workerpb.Command], workerName string, errCh chan<- error) {
 	for {
@@ -257,22 +221,11 @@ func (g *Gateway) recvLoop(ctx context.Context, stream grpc.BidiStreamingServer[
 		}
 
 		if res.GetIsHeartbeat() {
-			g.updateHeartbeat(ctx, workerName)
+			g.registry.UpdateHeartbeat(ctx, workerName)
 
 			continue
 		}
 
 		g.registry.DeliverResult(res)
-	}
-}
-
-// updateHeartbeat writes the current timestamp to last_heartbeat in the DB.
-func (g *Gateway) updateHeartbeat(ctx context.Context, workerName string) {
-	if g.repo == nil {
-		return
-	}
-	now := time.Now()
-	if err := g.repo.Update(ctx, workerName, repository.WorkerUpdate{LastHeartbeat: &now}); err != nil {
-		logger.WarningfCtx(ctx, "WorkerGateway: heartbeat update failed for %s: %v", workerName, err)
 	}
 }

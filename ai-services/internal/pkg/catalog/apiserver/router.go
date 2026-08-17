@@ -10,12 +10,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -41,6 +42,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	catalogHandler := handlers.NewCatalogHandler()
 	resourcesHandler := handlers.NewResourcesHandler()
 	applicationHandler := handlers.NewApplicationHandler(appService)
+	workerHandler := handlers.NewWorkerHandler(workerReg)
 
 	v1 := router.Group("/api/v1")
 	{
@@ -78,6 +80,14 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		applications.PUT("/:id", applicationHandler.UpdateApplication)
 		applications.DELETE("/:id", applicationHandler.DeleteApplication)
 		applications.GET("/:id/ps", applicationHandler.ApplicationPS)
+	}
+
+	workers := v1.Group("workers")
+	workers.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
+	{
+		workers.POST("", workerHandler.CreateWorker)
+		workers.GET("", workerHandler.ListWorkers)
+		workers.DELETE("/:id", workerHandler.DeleteWorker)
 	}
 
 	return router
