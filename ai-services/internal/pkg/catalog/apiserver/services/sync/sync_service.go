@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -191,6 +193,13 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	}
 
 	logger.InfofCtx(ctx, "Syncing application: %s (ID: %s)", app.Name, app.ID)
+
+	// Fail early if the namespace does not exist
+	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
+		if _, err := rt.GetNamespace(); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
+			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
+		}
+	}
 
 	// Track errors during sync
 	errorMessages := []string{}
@@ -392,7 +401,7 @@ func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, appID,
 
 // updateServiceStatusIfChanged updates service status only if it has changed.
 func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service models.Service, newStatus models.ServiceStatus, message string) error {
-	if service.Status != newStatus {
+	if service.Status != newStatus || service.Message != message {
 		if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
 			return fmt.Errorf("failed to update service status: %w", err)
 		}
@@ -484,7 +493,7 @@ func (s *SyncService) checkPodsHealth(pods []*PodStatus) (models.ComponentStatus
 
 // updateComponentStatusIfChanged updates component status only if it has changed.
 func (s *SyncService) updateComponentStatusIfChanged(ctx context.Context, component *models.Component, componentID uuid.UUID, newStatus models.ComponentStatus, message string) error {
-	if component.Status != newStatus {
+	if component.Status != newStatus || component.Message != message {
 		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
 			return fmt.Errorf("failed to update component status: %w", err)
 		}
@@ -528,8 +537,8 @@ func (s *SyncService) updateApplicationStatus(ctx context.Context, app *models.A
 		message = ""
 	}
 
-	// Update only if status changed
-	if app.Status != newStatus {
+	// Update if status or message changed
+	if app.Status != newStatus || app.Message != message {
 		if err := catalogutils.UpdateApplicationStatus(ctx, s.appRepo, app.ID, newStatus, message); err != nil {
 			return fmt.Errorf("failed to update application status: %w", err)
 		}

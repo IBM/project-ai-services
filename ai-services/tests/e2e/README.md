@@ -122,12 +122,10 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
-| `failure-test` | Bootstrap negative-path coverage |
-| `catalog-configure` | Catalog service configure, uninstall, SSL, reset, and endpoint tests (podman-only) |
-| `catalog-configure && ssl` | SSL certificate deployment and reset tests only |
-| `catalog-configure && non-root` | Non-root user configure and permission tests only |
-| `catalog-configure && negative` | Negative/flag-validation tests that never deploy a catalog |
-| `catalog-configure && endpoints` | Live catalog API endpoint tests (require a running catalog) |
+| `failure-test` | **Umbrella label** — all negative-path tests across bootstrap, catalog, and similarity. **Skipped by default** unless `--run-failure-tests` is passed; use `--label-filter="failure-test"` to further narrow once unlocked |
+| `bootstrap-failure` | Bootstrap domain failure tests only (`bootstrap_failure_test.go`) — requires `--run-failure-tests` |
+| `catalog-failure` | Catalog domain failure tests only (`catalog_failure_test.go`) — requires `--run-failure-tests` |
+| `similarity-failure` | Similarity domain failure tests only (`similarity_failure_test.go`) — requires `--run-failure-tests` |
 
 ### Running Summarization Tests Only
 
@@ -295,154 +293,245 @@ ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
   ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
 
-## Running Bootstrap Failure Tests
+## Running Failure Tests
 
-Bootstrap failure tests are in `bootstrap_failure_test.go` and cover the three most critical error paths: invalid registry credentials, catalog service unavailability, and missing prerequisites detected by `bootstrap validate`.
+### Overview — why failure tests are excluded by default
 
-These tests are **independent of the main lifecycle** (no running application required) and can be run at any time.
+The three failure test files exercise **intentional error paths** (wrong credentials, bad inputs, unreachable services). They are **not** part of the normal E2E suite run because:
 
-Point the test suite at the binary you just built:
-```bash
-export AI_SERVICES_BIN=<path to ai-services binary>
+- They require specific environment conditions (e.g. a reachable catalog server to test wrong-password rejection).
+- They intentionally make commands fail, which would appear as unexpected failures in a normal run.
+- They should be run deliberately, in isolation, as part of a dedicated failure-scenario validation pass.
+
+Each failure file has a `BeforeEach` guard at the `Describe` level that calls `ginkgo.Skip` unless the `--run-failure-tests` flag is explicitly passed. This mirrors the `--app-name` guard used by Language Support Tests — **no flag, no execution, no accidents**.
+
+The labels (`failure-test`, `bootstrap-failure`, `catalog-failure`, `similarity-failure`, and sub-labels) are retained for **precision targeting** once the flag unlocks execution.
+
+### How the two mechanisms interact
+
 ```
-### Run all Bootstrap failure tests
+Normal full suite run  (make test)
+  └─ --run-failure-tests not passed
+     └─ BeforeEach fires ginkgo.Skip on every failure It() → all 15 skipped ✓
 
-```bash
-ginkgo -r \
-  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="failure-test" \
-  --timeout=5m \
-  ./tests/e2e
+Run ALL failure tests
+  └─ pass --run-failure-tests → guard passes → all 15 run ✓
 
-go test -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-   -v -run TestE2E -timeout 5m \
-   -ginkgo.label-filter="failure-test" \
-   -runtime=podman \
-   ./tests/e2e
-```
+Run only one domain
+  └─ pass --run-failure-tests + --label-filter="catalog-failure"
+     └─ guard passes, label narrows to 5 catalog tests ✓
 
-### Run a specific failure category
-
-```bash
-# Registry authentication failures
-ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote"  \ 
-  --label-filter="failure-test && registry" --timeout=2m ./tests/e2e
-
-# Catalog service failures (wrong credentials + unreachable server)
-ginkgo -r \
-  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="failure-test && catalog" \
-  --timeout=2m \
-  ./tests/e2e
-
-# Bootstrap validation failures (missing prerequisites)
-ginkgo -r \
-  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="failure-test && validation && spyre-independent" \
-  --timeout=2m \
-  ./tests/e2e
-
-# Run only the Spyre-specific failure test
-ginkgo -r \
-  -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="failure-test && spyre" \
-  --timeout=2m \
-  ./tests/e2e
+Run one sub-category
+  └─ pass --run-failure-tests + --label-filter="failure-test && catalog-configure"
+     └─ guard passes, label narrows to Tests 4 & 5 of catalog_failure_test.go ✓
 ```
 
-### Exclude failure tests from a normal run
+### Label hierarchy
 
-```bash
-ginkgo -r --label-filter="!failure-test" ./tests/e2e
+```
+failure-test                           ← umbrella: selects ALL failure tests by label
+  ├─ bootstrap-failure                 ← domain: bootstrap_failure_test.go (5 tests)
+  │    ├─ registry                     ← sub: invalid registry credentials
+  │    ├─ catalog                      ← sub: wrong catalog password + unreachable server
+  │    └─ validation / spyre           ← sub: bootstrap validate failures
+  ├─ catalog-failure                   ← domain: catalog_failure_test.go (5 tests)
+  │    ├─ catalog-login                ← sub: missing flag, bad URL, whoami without login
+  │    └─ catalog-configure            ← sub: unpaired SSL flags, invalid port
+  └─ similarity-failure                ← domain: similarity_failure_test.go (5 tests)
+       ├─ similarity-input             ← sub: empty query, invalid mode, top_k=0
+       ├─ similarity-connectivity      ← sub: unreachable similarity API
+       └─ similarity-readiness         ← sub: empty vector index (HTTP 503)
 ```
 
-### Environment variables required
+---
 
-The failure tests reuse the same environment variables as the main suite.  No
-additional variables are needed — the tests deliberately supply *wrong* values
-internally and only read the registry/catalog URLs from the environment so they
-know which endpoint to target.
+### Running the full E2E suite (failure tests excluded automatically)
 
-```bash
-export REGISTRY_URL="icr.io"          # used to target the correct registry endpoint
-export CATALOG_SERVER_URL="..."        # optional — auto-discovered from 'catalog info' if absent
-```
-
-### Failure test labels reference
-
-| Label | Tests |
-|---|---|
-| `failure-test` | All tests in `bootstrap_failure_test.go` |
-| `failure-test && registry` | Invalid registry credentials |
-| `failure-test && catalog` | Wrong catalog password + unreachable catalog server |
-| `failure-test && validation` | `bootstrap validate` with missing Podman |
-
-## Running Catalog Failure Tests
-
-### Option 1 — Ginkgo CLI
-
-Always pass `--tags` to exclude C library dependencies.
+No special flag or filter needed. Because `--run-failure-tests` is not passed, the `BeforeEach` guard skips all 15 failure tests automatically.
 
 ```bash
-cd ai-services
+# Using make (recommended — build tags applied automatically)
+make test
 
-# Run all 5 catalog failure tests
-ginkgo -r \
-  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="catalog-failure" \
-  --timeout=3m \
-  ./tests/e2e
+# Using make with a JUnit report
+make test-generate-report TEST_ARGS="--timeout=3h" APP_RUNTIME=podman
 
-# Run only login/whoami failures (Tests 1, 2, 3)
-ginkgo -r \
-  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="catalog-failure && catalog-login" \
-  --timeout=2m \
-  ./tests/e2e
-
-# Run only configure failures (Tests 4, 5)
-ginkgo -r \
-  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="catalog-failure && catalog-configure" \
-  --timeout=2m \
-  ./tests/e2e
-```
-
-Pass `--runtime=podman` after `--` if the default does not match your environment:
-
-```bash
-ginkgo -r \
-  --tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
-  --label-filter="catalog-failure" \
-  --timeout=3m \
+# Using ginkgo CLI directly
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r -tags "$TAGS" \
+  --timeout=3h \
   ./tests/e2e -- --runtime=podman
 ```
 
-### Option 2 — `make test`
+> **Note**: the `--label-filter="!failure-test"` approach also works as a belt-and-braces
+> exclusion if preferred, but it is no longer required — the `BeforeEach` guard handles
+> exclusion automatically.
+
+---
+
+### Running ALL failure tests together
+
+Pass `--run-failure-tests` after `--` to unlock all three failure suites in a single pass.
 
 ```bash
-cd ai-services
+# Using make
+make test TEST_ARGS="--timeout=10m" APP_RUNTIME=podman -- --run-failure-tests
 
-make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m"
-
-# With explicit runtime
-make test TEST_ARGS="--label-filter=catalog-failure --timeout=3m" APP_RUNTIME=podman
+# Using ginkgo CLI
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r -tags "$TAGS" \
+  --timeout=10m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
 ```
 
+---
+
+### Running a single failure domain
+
+Pass `--run-failure-tests` to unlock, then use a domain label to narrow.
+
+```bash
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+
+# Bootstrap failure tests only (5 tests)
+ginkgo -r -tags "$TAGS" --label-filter="bootstrap-failure" --timeout=5m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Catalog failure tests only (5 tests)
+ginkgo -r -tags "$TAGS" --label-filter="catalog-failure" --timeout=3m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Similarity failure tests only (5 tests)
+ginkgo -r -tags "$TAGS" --label-filter="similarity-failure" --timeout=3m \
+  ./tests/e2e -- --app-name=<deployed-app-name> --runtime=podman --run-failure-tests
+```
+
+Or with `make test`:
+
+```bash
+make test TEST_ARGS="--label-filter=bootstrap-failure  --timeout=5m" APP_RUNTIME=podman         -- --run-failure-tests
+make test TEST_ARGS="--label-filter=catalog-failure    --timeout=3m" APP_RUNTIME=podman         -- --run-failure-tests
+make test TEST_ARGS="--label-filter=similarity-failure --timeout=3m" APP_RUNTIME=podman APP_NAME=<app> -- --run-failure-tests
+```
+
+---
+
+### Running a failure sub-category
+
+Pass `--run-failure-tests` to unlock, then use a sub-label to narrow to a specific category.
+
+```bash
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+
+# Bootstrap — registry authentication only (Test 1)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && registry"    --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Bootstrap — catalog credential / connectivity failures (Tests 2a, 2b)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && catalog"     --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Bootstrap — invalid --runtime flag only (Test 3)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && validation && spyre-independent" --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Bootstrap — missing Spyre accelerator card only (Test 4)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && spyre"       --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Catalog — login / whoami failures only (Tests 1, 2, 3)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && catalog-login"     --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Catalog — configure validation failures only (Tests 4, 5)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && catalog-configure" --timeout=2m \
+  ./tests/e2e -- --runtime=podman --run-failure-tests
+
+# Similarity — input validation failures only (Tests 1, 2, 3)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && similarity-input"        --timeout=2m \
+  ./tests/e2e -- --app-name=<app> --runtime=podman --run-failure-tests
+
+# Similarity — connectivity failure only (Test 4 — no deployed app needed)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && similarity-connectivity" --timeout=2m \
+  ./tests/e2e -- --run-failure-tests
+
+# Similarity — empty-index readiness failure (Test 5)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && similarity-readiness"    --timeout=2m \
+  ./tests/e2e -- --app-name=<app> --runtime=podman --run-failure-tests
+```
+
+---
+
+### Environment variables required by failure tests
+
+Failure tests reuse the same environment variables as the main suite. No additional variables are needed — the tests deliberately supply *wrong* values internally and only read registry/catalog URLs from the environment to know which endpoint to target.
+
+```bash
+export AI_SERVICES_BIN=<path to ai-services binary>   # required by all failure tests
+export REGISTRY_URL="icr.io"                           # used to target the correct registry endpoint
+export CATALOG_SERVER_URL="..."                        # optional — auto-discovered from 'catalog info' if absent
+```
+
+---
+
+### Failure test labels reference
+
+| Label | File | Tests |
+|---|---|---|
+| `failure-test` | all three failure files | All 15 failure tests — umbrella label |
+| `bootstrap-failure` | `bootstrap_failure_test.go` | All 5 bootstrap failure tests |
+| `catalog-failure` | `catalog_failure_test.go` | All 5 catalog failure tests |
+| `similarity-failure` | `similarity_failure_test.go` | All 5 similarity failure tests |
+| `failure-test && registry` | `bootstrap_failure_test.go` | Invalid registry credentials (Test 1) |
+| `failure-test && catalog` | `bootstrap_failure_test.go` | Wrong catalog password + unreachable server (Tests 2a, 2b) |
+| `failure-test && validation` | `bootstrap_failure_test.go` | `bootstrap validate` failures (Tests 3, 4) |
+| `failure-test && spyre` | `bootstrap_failure_test.go` | Missing Spyre accelerator card (Test 4) |
+| `failure-test && catalog-login` | `catalog_failure_test.go` | Missing flag, bad URL, whoami without login (Tests 1, 2, 3) |
+| `failure-test && catalog-configure` | `catalog_failure_test.go` | Unpaired SSL, invalid port (Tests 4, 5) |
+| `failure-test && similarity-input` | `similarity_failure_test.go` | Empty query, invalid mode, top_k=0 (Tests 1, 2, 3) |
+| `failure-test && similarity-connectivity` | `similarity_failure_test.go` | Unreachable similarity API (Test 4) |
+| `failure-test && similarity-readiness` | `similarity_failure_test.go` | Empty vector index HTTP 503 (Test 5) |
+
+---
 
 ### Adding new failure tests
 
-Follow the same component-per-file convention:
+Follow the component-per-file convention:
 
 - Bootstrap failures → `bootstrap_failure_test.go`
+- Catalog failures → `catalog_failure_test.go`
+- Similarity failures → `similarity_failure_test.go`
 - Digitization failures → `digitization_failure_test.go` *(future)*
 - Ingestion failures → `ingestion_failure_test.go` *(future)*
 
-Each failure `It()` block must:
-1. Label itself with `"failure-test"` plus a component label (e.g. `"registry"`).
-2. Assert `err` **is non-nil** (the command must fail).
-3. Call the matching `ValidateXxxFailureOutput()` function in `cli/output.go` to verify the error message is actionable.
-4. Clean up any environment changes in a `defer` block.
+Each new failure `Describe` block **must** include the `BeforeEach` guard as its first statement:
+
+```go
+ginkgo.BeforeEach(func() {
+    if !runFailureTests {
+        ginkgo.Skip(
+            "[FAILURE-TEST][Domain] Skipping — pass --run-failure-tests to opt in to failure test execution",
+        )
+    }
+})
+```
+
+Each failure `It()` block **must**:
+1. Carry **both** the `"failure-test"` umbrella label and its domain label (e.g. `"bootstrap-failure"`).
+2. Carry at least one sub-category label (e.g. `"registry"`, `"catalog-login"`).
+3. Assert `err` **is non-nil** (the command must fail).
+4. Call the matching `ValidateXxxFailureOutput()` function in `cli/output.go` to verify the error message is actionable.
+5. Clean up any environment changes in a `defer` block.
+
+Example `It()` label decoration:
+
+```go
+ginkgo.It(
+    "rejects X when Y",
+    ginkgo.Label("failure-test", "bootstrap-failure", "registry", "spyre-independent"),
+    func() { ... },
+)
+```
 
 ---
 

@@ -97,7 +97,7 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	}
 
 	// Check if route already exists
-	checkResp, err := c.httpClient.R().Get(idURL)
+	checkResp, err := c.httpClient.R().SetContext(ctx).Get(idURL)
 	if err != nil {
 		return fmt.Errorf("failed to check route existence: %w", err)
 	}
@@ -110,17 +110,18 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	}
 
 	// Route doesn't exist, create it
-	return c.createRoute(routeConfig)
+	return c.createRoute(ctx, routeConfig)
 }
 
 // Helper to append a new route to the server's route array.
-func (c *caddyManager) createRoute(routeConfig map[string]any) error {
+func (c *caddyManager) createRoute(ctx context.Context, routeConfig map[string]any) error {
 	routeURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
 	if err != nil {
 		return err
 	}
 
 	resp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetBody(routeConfig).
 		Post(routeURL)

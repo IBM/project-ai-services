@@ -1,26 +1,30 @@
 """Job-related API endpoints.
 
-Handles job creation, listing, retrieval, and deletion.
+Handles extraction (sync) and job CRUD.
 
 Exposes one router:
 - ``router`` → mounted at ``/v1/extract``
 """
 
+import asyncio
+import json
 import os
+import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-
 from common.error_utils import http_error_responses
-from common.misc_utils import cleanup_staging_directory, get_logger
+from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
 
 from extract.db.manager import db_repo
 from extract.models import (
     DocumentInfo,
+    ExtractionRequest,
+    ExtractionResponse,
     JobCreatedResponse,
     JobDetailResponse,
     JobListItem,
@@ -28,8 +32,16 @@ from extract.models import (
     JobsListResponse,
     PaginationInfo,
 )
+from extract.state import concurrency_limiter
 from extract.settings import settings
-from extract.state import job_limiter
+from extract.utils.exceptions import ExtractException
+from extract.utils.request import check_request_body_size
+from extract.utils.vllm import (
+    build_messages,
+    call_vllm_safe,
+    render_few_shot_block,
+    validate_with_retry,
+)
 from extract.utils.job import (
     delete_all_job_files,
     delete_job_files,
@@ -37,13 +49,207 @@ from extract.utils.job import (
     stage_uploaded_file,
     validate_file_extension,
 )
-from extract.utils.exceptions import ExtractException
-from extract.utils.schema import fmt_dt
+from extract.utils.schema import (
+    _tokenize,
+    check_extraction_budget,
+    compute_reserved_output,
+    fmt_dt,
+)
 
 router = APIRouter()
 logger = get_logger("jobs_router")
 
 
+# ---------------------------------------------------------------------------
+# POST /v1/extract — Synchronous extraction
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "",
+    response_model=ExtractionResponse,
+    status_code=200,
+    tags=["extraction"],
+    summary="Synchronous extraction",
+    description=(
+        "Extract structured data from plain text against a registered schema in a "
+        "single blocking call.  Returns validated, schema-conformant JSON.\n\n"
+    ),
+    responses={
+        400: http_error_responses[400],
+        404: http_error_responses[404],
+        413: http_error_responses[413],
+        422: {"description": "Extraction output failed schema validation after retry"},
+        429: http_error_responses[429],
+        500: http_error_responses[500],
+        503: http_error_responses[503],
+    },
+    include_in_schema=True,
+)
+async def extract_sync(request: Request, body: ExtractionRequest) -> JSONResponse:
+    """Synchronous entity extraction — blocking call with schema-validated JSON output."""
+    t_start = time.monotonic()
+
+    # ------------------------------------------------------------------
+    # 0. Request-body size guard — before any parsing or tokenisation
+    # ------------------------------------------------------------------
+    await check_request_body_size(request)
+
+    # ------------------------------------------------------------------
+    # 1. Basic field validation
+    # ------------------------------------------------------------------
+    if not body.text.strip():
+        raise ExtractException(400, "INVALID_REQUEST", "text field is empty")
+    schema_row = _resolve_schema(body.schema_id)
+
+    # ------------------------------------------------------------------
+    # 2. Semaphore check (non-blocking — reject immediately if saturated)
+    # ------------------------------------------------------------------
+    if concurrency_limiter.locked():
+        raise ExtractException(
+            429, "RATE_LIMIT_EXCEEDED",
+            "Server is at maximum vLLM concurrency. Please retry later.",
+        )
+
+    llm_model_dict = get_llm_endpoint()
+    llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
+    llm_model: str = llm_model_dict.get("llm_model", "")
+    max_model_len: int = llm_model_dict.get('max_model_len', "")
+
+    # ------------------------------------------------------------------
+    # 3–8. Core extraction
+    #       One semaphore slot held across BOTH the initial call and the
+    #       validation retry so a second attempt cannot be starved.
+    # ------------------------------------------------------------------
+
+
+    # ── 3. Exact input token count via /tokenize ─────────────────────
+    try:
+        input_tokens: int = await asyncio.to_thread(
+            _tokenize, body.text, llm_endpoint
+        )
+    except Exception as exc:
+        logger.error(f"Tokenization failed: {exc}", exc_info=True)
+        raise ExtractException(
+            503, "TOKENIZATION_ERROR",
+            "Failed to tokenise the input text. "
+            "Ensure the vLLM /tokenize endpoint is reachable.",
+        )
+
+    # ── 4. Hard context-window guard ─────────────────────────────────
+    #       check_extraction_budget raises ExtractException.
+    try:
+        reserved_output = check_extraction_budget(
+            input_tokens=input_tokens,
+            schema_tokens=schema_row.schema_tokens,
+            examples_tokens=schema_row.examples_tokens,
+            custom_prompt_tokens=schema_row.custom_prompt_tokens,
+            max_model_len=max_model_len,
+        )
+    except ExtractException as ext_exc:
+        raise ext_exc
+    except Exception as e:
+        logger.error(e)
+        raise ExtractException(500,
+            "INTERNAL_SERVER_ERROR",
+            "Something went wrong. Please try again later."
+        )
+
+    # ── 5. Prompt assembly ────────────────────────────────────────────
+    few_shot_block = render_few_shot_block(schema_row.examples)
+    messages = build_messages(
+        normalized_schema=schema_row.json_schema,
+        few_shot_block=few_shot_block,
+        input_text=body.text,
+        custom_prompt=schema_row.custom_prompt,
+    )
+
+
+    async with concurrency_limiter:
+        # ── 6. First vLLM call ────────────────────────────────────────────
+        vllm_resp = await call_vllm_safe(
+            messages, reserved_output, schema_row.json_schema, llm_endpoint, llm_model
+        )
+
+        choices = vllm_resp.get("choices", [])
+        if not choices:
+            raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list.")
+
+        choice = choices[0]
+        finish_reason: str = choice.get("finish_reason", "")
+
+        # ── 7. Output-budget exceeded — retry once with 1.5× output_token_factor ─
+        if finish_reason == "length":
+            boosted_reserved_output = compute_reserved_output(
+                schema_row.schema_tokens,
+                output_token_factor=1.5 * settings.extract.output_token_factor,
+            )
+            logger.warning(
+                "finish_reason=length on first call; retrying with boosted "
+                "reserved_output=%d (was %d)",
+                boosted_reserved_output,
+                reserved_output,
+            )
+            vllm_resp = await call_vllm_safe(
+                messages, boosted_reserved_output, schema_row.json_schema, llm_endpoint, llm_model
+            )
+            choices = vllm_resp.get("choices", [])
+            if not choices:
+                raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list.")
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason", "")
+            if finish_reason == "length":
+                raise ExtractException(
+                    413, "OUTPUT_BUDGET_EXCEEDED",
+                    "The model output was truncated because it reached the reserved "
+                    "output token limit.",
+                    details={
+                        "reserved_output_tokens": boosted_reserved_output,
+                        "finish_reason": "length",
+                    },
+                )
+            reserved_output = boosted_reserved_output
+
+        raw_output: str = choice.get("message", {}).get("content", "") or ""
+        usage = vllm_resp.get("usage", {})
+        total_prompt_tokens: int = usage.get("prompt_tokens", 0)
+        total_completion_tokens: int = usage.get("completion_tokens", 0)
+
+        # ── 8. Server-side validation + one bounded retry ─────────────────
+        parsed_output, validation_attempts, extra_pt, extra_ct = await validate_with_retry(
+            raw_output, messages, reserved_output,
+            schema_row.json_schema, llm_endpoint, llm_model,
+        )
+        total_prompt_tokens += extra_pt
+        total_completion_tokens += extra_ct
+
+    # ------------------------------------------------------------------
+    # 9. Return response
+    # ------------------------------------------------------------------
+    processing_time_ms = int((time.monotonic() - t_start) * 1000)
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "data": {
+                "extraction": parsed_output,
+                "schema_id": body.schema_id,
+                "source": {
+                    "input_type": "text",
+                    "input_tokens": input_tokens,
+                },
+            },
+            "meta": {
+                "model": llm_model,
+                "processing_time_ms": processing_time_ms,
+                "validation_attempts": validation_attempts,
+            },
+            "usage": {
+                "input_tokens": total_prompt_tokens,
+                "output_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens,
+            },
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +258,8 @@ logger = get_logger("jobs_router")
 
 def _check_job_admission() -> None:
     """Raise 429 if the concurrency slot is exhausted."""
-    if job_limiter.locked():
+    from extract import state
+    if state.job_limiter.locked():
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
             "Job concurrency limit reached. Please try again later.",
@@ -88,9 +295,8 @@ def _resolve_schema(schema_id: str):
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
         raise ExtractException(
-            404, "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.",
-        )
+            404,"SCHEMA_NOT_FOUND",
+              f"No schema with id {schema_id!r}.")
     return row
 
 
@@ -101,10 +307,10 @@ def _stage_and_persist(
     filename: str,
     source_type: str,
     job_name: Optional[str],
-):
+) -> None:
     """Stage the uploaded file then write the DB record.
 
-    Cleans up the staging directory on *any* failure after staging so no
+    Cleans up the staging directory on any failure after staging so no
     orphaned files are left on disk.
 
     Raises:
@@ -136,47 +342,36 @@ def _stage_and_persist(
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/extract — Synchronous extraction stub
-# ---------------------------------------------------------------------------
-
-@router.post("", tags=["extraction"], include_in_schema=True)
-async def extract_sync():
-    """Synchronous extraction — implementation in follow-up iteration."""
-    raise ExtractException(501, "NOT_IMPLEMENTED", "POST /v1/extract not yet implemented.")
-
 # Probe size for binary-detection heuristics. 8 KB is large enough to catch
 # null bytes, invalid UTF-8, or control-character runs in virtually any
 # misnamed binary file, while aligning with the OS page size and Python's
 # default IO buffer. The full UTF-8 decode in the worker catches anything
 # deeper; this probe just moves obvious rejections to submission time.
+# Probe size for binary-detection heuristics.
 MAX_PROBE_BYTES = 8192
 
-async def _validate_file_content(file):
-    """
-        Validate that an uploaded file is a genuine text file.
-        Reads only the first 8 KB, then resets the file pointer.
-        Raises 415 if the content doesn't match expectations.
-        """
-    # Extension check
-    filename = file.filename or ""
-    ext = filename[filename.rfind("."):].lower() if "." in filename else ""
 
-    # Read probe and reset
+async def _validate_file_content(file: UploadFile) -> None:
+    """Validate that an uploaded file is a genuine text file.
+
+    Reads only the first 8 KB, then resets the file pointer.
+    Raises ExtractException on any content validation failure.
+    """
     probe = await file.read(MAX_PROBE_BYTES)
     await file.seek(0)
 
-    if not probe:
+    if not probe or not probe.strip():
         raise ExtractException(400, "BAD_REQUEST", "File is empty.")
 
     try:
         decoded = probe.decode("utf-8")
     except UnicodeDecodeError:
         raise ExtractException(400, "BAD_REQUEST", "File content is not valid UTF-8 text.")
-
     # Gate 2: no null bytes
     if b"\x00" in probe:
-        raise ExtractException(415, "BAD_REQUEST", "File contains null bytes and appears to be binary.")
-
+        raise ExtractException(
+            415, "BAD_REQUEST", "File contains null bytes and appears to be binary."
+        )
     # Gate 3: low control character ratio
     control_count = sum(
         1 for ch in decoded
@@ -184,19 +379,22 @@ async def _validate_file_content(file):
         and ch not in ("\n", "\r", "\t", "\f")
     )
     if len(decoded) > 0 and (control_count / len(decoded)) > 0.05:
-        raise ExtractException(415, "BAD_REQUEST", "File contains excessive control characters and appears to be binary.")
-
+        raise ExtractException(
+            415, "BAD_REQUEST",
+            "File contains excessive control characters and appears to be binary.",
+        )
     # Gate 4: reject text files that are actually PDFs
-    pdf_magic = b"%PDF"
-    if probe[:4].startswith(pdf_magic):
-        raise ExtractException(415, "BAD_REQUEST", f"File has {ext} extension but contains PDF content.")
-
-    return
+    if probe[:4] == b"%PDF":
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        raise ExtractException(
+            415, "BAD_REQUEST", f"File has {ext} extension but contains PDF content."
+        )
 
 
 # ---------------------------------------------------------------------------
 # POST /v1/extract/jobs — Submit an async extraction job
 # ---------------------------------------------------------------------------
+
 @router.post(
     "/jobs",
     status_code=202,
@@ -221,7 +419,6 @@ async def _validate_file_content(file):
     tags=["jobs"],
 )
 async def create_extract_job(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     schema_id: str = Form(...),
     job_name: Optional[str] = Form(None),
@@ -235,7 +432,7 @@ async def create_extract_job(
     job_id = str(uuid.uuid4())
     _stage_and_persist(job_id, file, schema_id, filename, source_type, job_name)
 
-    background_tasks.add_task(_process_extract_job, job_id)
+    asyncio.create_task(_process_extract_job(job_id))
     logger.info(f"Accepted extraction job {job_id} (schema={schema_id}, file={filename!r})")
     return JobCreatedResponse(job_id=job_id)
 
@@ -244,12 +441,12 @@ async def _process_extract_job(job_id: str) -> None:
     """
     Background worker stub.
 
-    A full worker (tokenization, vLLM call,
-    schema validation) will be added in a follow-up iteration.
-    For now it simply acquires the job_limiter slot so the semaphore
-    accounting is correct and immediately releases it.
+    A full worker (tokenization, vLLM call, schema validation) will be added
+    in a follow-up iteration.  For now it acquires the job_limiter slot so
+    semaphore accounting is correct and immediately releases it.
     """
-    async with job_limiter:
+    from extract import state
+    async with state.job_limiter:
         logger.info(f"Background worker invoked for job {job_id} (stub — no processing yet)")
 
 
@@ -351,7 +548,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
         status=row.status,
         document=DocumentInfo(
             name=row.document_name,
-            source_type=row.source_type
+            source_type=row.source_type,
         ),
         metadata=row.job_metadata,
         submitted_at=fmt_dt(row.submitted_at) or "",
@@ -421,7 +618,9 @@ async def get_extract_job_result(job_id: str):
     result_data = read_result_file(job_id)
     if result_data is None:
         logger.error(f"Result file missing for completed job {job_id}")
-        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Result file not found for completed job.")
+        raise ExtractException(
+            500, "INTERNAL_SERVER_ERROR", "Result file not found for completed job."
+        )
 
     return JobResultResponse(
         data=result_data.get("data", {}),
@@ -447,7 +646,7 @@ async def get_extract_job_result(job_id: str):
     summary="Delete extraction job",
     description=(
         "Delete a job record and its result file.  "
-        "Returns **409 Conflict** if the job is `accepted` or `in_progress`. "
+        "Returns **409 Conflict** if the job is `accepted` or `in_progress`."
     ),
     tags=["jobs"],
 )
@@ -466,7 +665,9 @@ async def delete_extract_job(job_id: str) -> Response:
 
     success = db_repo.delete_job(job_id)
     if not success:
-        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Failed to delete job from database.")
+        raise ExtractException(
+            500, "INTERNAL_SERVER_ERROR", "Failed to delete job from database."
+        )
 
     logger.info(f"Deleted job {job_id!r}")
     return Response(status_code=204)
@@ -514,7 +715,9 @@ async def bulk_delete_extract_jobs(
 
     success = db_repo.delete_all_jobs()
     if not success:
-        raise ExtractException(500, "INTERNAL_SERVER_ERROR", "Failed to delete jobs from database.")
+        raise ExtractException(
+            500, "INTERNAL_SERVER_ERROR", "Failed to delete jobs from database."
+        )
 
     logger.info("Bulk deleted all extraction jobs")
     return Response(status_code=204)

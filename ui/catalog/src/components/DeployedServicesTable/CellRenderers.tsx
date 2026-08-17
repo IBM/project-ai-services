@@ -63,9 +63,7 @@ interface CellRendererProps {
 }
 
 export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
-  // Enable delete button only for "error" or "running" status
-  const status = rowData?.status?.toLowerCase() || "";
-  const isDeleteEnabled = status === "error" || status === "running";
+  const isDeleteEnabled = rowData?.status?.toLowerCase() !== "deleting...";
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">

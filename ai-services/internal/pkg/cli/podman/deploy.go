@@ -23,7 +23,7 @@ const (
 // DeployPodAndReadinessCheck deploys a pod and performs readiness checks on its containers.
 func DeployPodAndReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
-	pods, err := rt.CreatePod(body, opts)
+	pods, err := rt.CreatePod(ctx, body, opts)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}

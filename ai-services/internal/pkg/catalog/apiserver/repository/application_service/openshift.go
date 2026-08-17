@@ -16,6 +16,14 @@ type OpenShiftApplicationService struct {
 	ApplicationServiceBase
 }
 
+// NewOpenShiftApplicationService creates a new OpenShiftApplicationService with a fresh DeploymentRegistry
+// wired into the base. This makes in-flight deployments cancellable by a concurrent DeleteApplication.
+func NewOpenShiftApplicationService(base ApplicationServiceBase) *OpenShiftApplicationService {
+	base.DeploymentRegistry = NewDeploymentRegistry()
+
+	return &OpenShiftApplicationService{ApplicationServiceBase: base}
+}
+
 func (s *OpenShiftApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
 	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData, runtimeTypes.RuntimeTypeOpenShift)
 }
@@ -37,5 +45,3 @@ func (s *OpenShiftApplicationService) GetApplicationResources(ctx context.Contex
 func (s *OpenShiftApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
 	return s.ApplicationServiceBase.ApplicationsPs(ctx, appID, catalogutils.AppNamespace(appID))
 }
-
-// Made with Bob

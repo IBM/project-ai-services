@@ -154,7 +154,7 @@ func deployCatalogHelm(ctx context.Context, chartData chart.Charter, timeout tim
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.InstallOrUpgrade(catalogconstants.CatalogAppName, chartData, values, timeout); err != nil {
+	if err := helmClient.InstallOrUpgrade(ctx, catalogconstants.CatalogAppName, chartData, values, timeout); err != nil {
 		s.Fail("failed to deploy catalog")
 
 		return fmt.Errorf("failed to deploy catalog: %w", err)
