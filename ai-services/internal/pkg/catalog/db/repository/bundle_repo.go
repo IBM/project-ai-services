@@ -31,10 +31,6 @@ type BundleRepository interface {
 	// Returns an error if no fields are set.
 	UpdateBundle(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error
 
-	// UpdateStatus transitions a row to the given status.
-	// errMsg is stored in the error column when status is 'failed'; it is cleared for all other statuses.
-	UpdateStatus(ctx context.Context, id uuid.UUID, status models.BundleStatus, errMsg string) error
-
 	// Delete permanently removes the row.
 	Delete(ctx context.Context, id uuid.UUID) error
 
@@ -208,23 +204,6 @@ func (r *bundleRepo) UpdateBundle(ctx context.Context, id uuid.UUID, upd models.
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update catalog bundle: %w", err)
-	}
-
-	return nil
-}
-
-// UpdateStatus transitions a row to the given status.
-// For 'failed', errMsg is stored in the error column; for all other statuses it is cleared.
-func (r *bundleRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.BundleStatus, errMsg string) error {
-	query := `UPDATE catalog_bundles SET status = $1, error = $2 WHERE id = $3`
-
-	_, err := r.pool.Exec(ctx, query,
-		status,
-		sql.NullString{String: errMsg, Valid: errMsg != ""},
-		id,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update catalog bundle status: %w", err)
 	}
 
 	return nil
