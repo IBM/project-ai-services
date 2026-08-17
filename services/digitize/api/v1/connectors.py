@@ -152,18 +152,24 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
             return Response(status_code=200)
 
+        existing = db_ops.get_active_connector(connector_id)
+        if existing is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"Connector {connector_id!r} not found",
+            )
+        if existing.sync_status == ConnectorStatus.DELETE_PENDING:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Connector {connector_id!r} is pending deletion and cannot be updated",
+            )
+
         key_path = _get_key_path()
 
         # If connection_details is being updated, we need to merge with existing
         # encrypted details so untouched keys stay encrypted and intact.
         merged_details: Optional[dict] = None
         if body.connection_details is not None:
-            existing = db_ops.get_active_connector(connector_id)
-            if existing is None:
-                APIError.raise_error(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    f"Connector {connector_id!r} not found",
-                )
             merged_details = merge_and_encrypt_partial(
                 existing.type,
                 existing.connection_details,

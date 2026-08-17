@@ -265,6 +265,10 @@ class TestPutConnector:
 
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
         """PUT with only connector_name must not touch connection_details."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
         upsert_mock = Mock()
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", upsert_mock)
         connector_test_client.put(
@@ -277,12 +281,27 @@ class TestPutConnector:
 
     def test_returns_409_on_name_conflict(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.upsert_connector",
             Mock(side_effect=IntegrityError(None, None, Exception("dup"))),
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
             json={"connector_name": "taken-name"},
+        )
+        assert response.status_code == 409
+
+    def test_returns_409_when_delete_pending(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)),
+        )
+        response = connector_test_client.put(
+            f"/v1/connectors/{CONNECTOR_ID}",
+            json={"connector_name": "new-name"},
         )
         assert response.status_code == 409
 
