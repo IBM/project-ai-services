@@ -14,12 +14,12 @@ export interface DigitalAssistantRow {
   id: string;
   name: string;
   status:
-    | "Deploying"
-    | "Deleting"
     | "Downloading"
+    | "Deploying"
+    | "Running"
+    | "Deleting"
     | "Error"
-    | "Stopped"
-    | "Running";
+    | "Initializing";
   type?: string;
   uptime: string;
   messages: string;
