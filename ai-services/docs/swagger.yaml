@@ -91,10 +91,12 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType:
     enum:
+    - unknown
     - podman
     - openshift
     type: string
     x-enum-varnames:
+    - WorkerRuntimeTypeUnknown
     - WorkerRuntimeTypePodman
     - WorkerRuntimeTypeOpenShift
   github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus:

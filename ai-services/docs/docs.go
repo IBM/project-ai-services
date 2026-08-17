@@ -1532,10 +1532,12 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType": {
             "type": "string",
             "enum": [
+                "unknown",
                 "podman",
                 "openshift"
             ],
             "x-enum-varnames": [
+                "WorkerRuntimeTypeUnknown",
                 "WorkerRuntimeTypePodman",
                 "WorkerRuntimeTypeOpenShift"
             ]
