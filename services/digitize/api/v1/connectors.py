@@ -465,6 +465,93 @@ async def get_connector(connector_id: str):
 # POST /v1/connectors/{connector_id}/syncs
 # ---------------------------------------------------------------------------
 
+
+class SyncNotFound(Exception):
+    """Raised by dispatch_sync when the connector does not exist."""
+
+
+class SyncLocked(Exception):
+    """Raised by dispatch_sync when the connector cannot accept a new sync
+    (DELETE_PENDING or a cancellation already in progress)."""
+
+
+async def dispatch_sync(connector_id: str) -> int:
+    """Dispatch a sync tick for *connector_id* and return the active sync_seq.
+
+    This is the shared core used by both the HTTP handler (``trigger_sync``)
+    and the APScheduler job (``_run_tick_wrapped``).  It contains no FastAPI or
+    HTTP concerns — callers map the exceptions it raises to their own error
+    handling:
+
+    Raises
+    ------
+    SyncNotFound
+        The connector does not exist.
+    SyncLocked
+        The connector is pending deletion, or a cancellation is already in
+        progress and a new sync cannot be accepted yet.
+    RuntimeError
+        The sync lock is held but no active sync-log row exists (should not
+        happen under normal operation).
+
+    Returns
+    -------
+    int
+        The ``sync_seq`` of the active sync — either the newly dispatched one
+        or the already-running one (idempotent: safe to call when a tick is
+        already in progress).
+
+    APScheduler usage
+    -----------------
+    The scheduler can call this directly without any HTTP machinery::
+
+        from digitize.api.v1.connectors import dispatch_sync, SyncNotFound, SyncLocked
+
+        async def _run_tick_wrapped(connector_id: str) -> None:
+            try:
+                await dispatch_sync(connector_id)
+            except SyncNotFound:
+                logger.warning(f"Connector {connector_id!r} not found; skipping")
+            except SyncLocked as exc:
+                logger.info(f"Connector {connector_id!r} skipped: {exc}")
+    """
+    from digitize.connectors.sync_tick import run_tick
+
+    connector = db_ops.get_active_connector(connector_id)
+    if connector is None:
+        raise SyncNotFound(f"Connector {connector_id!r} not found")
+    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+        raise SyncLocked(
+            f"Connector {connector_id!r} is pending deletion and cannot accept new syncs."
+        )
+
+    active_seq = db_ops.get_active_sync_seq(connector_id)
+    if active_seq is not None:
+        sync_log_status = db_ops.get_sync_log_status(connector_id, active_seq)
+        if sync_log_status == SyncLogStatus.CANCEL_PENDING:
+            raise SyncLocked(
+                f"Connector {connector_id!r} has a sync cancellation in progress "
+                f"(seq={active_seq}) and cannot accept a new sync until it completes."
+            )
+
+    acquired = db_ops.try_acquire_sync_lock(connector_id)
+    if acquired:
+        # Open the sync-log row synchronously before dispatching the background
+        # task so the seq is known immediately — no polling required.
+        sync_seq = db_ops.init_sync_log_and_update_connector(connector_id)
+        asyncio.create_task(run_tick(connector_id, sync_seq))
+        logger.info(f"Sync dispatched for connector {connector_id!r}, seq={sync_seq}")
+    else:
+        sync_seq = db_ops.get_active_sync_seq(connector_id)
+        if sync_seq is None:
+            raise RuntimeError(
+                f"Sync lock held but no active sync-log row found for connector {connector_id!r}"
+            )
+        logger.info(f"Sync already in progress for connector {connector_id!r}, seq={sync_seq}")
+
+    return sync_seq
+
+
 @router.post(
     "/{connector_id}/syncs",
     status_code=status.HTTP_202_ACCEPTED,
@@ -486,49 +573,13 @@ async def get_connector(connector_id: str):
     response_description="Sync dispatched (or already in progress)",
 )
 async def trigger_sync(connector_id: str):
-    import asyncio
-    from digitize.connectors.sync_tick import run_tick
-
     try:
-        connector = db_ops.get_active_connector(connector_id)
-        if connector is None:
-            APIError.raise_error(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                f"Connector {connector_id!r} not found",
-            )
-        if connector.sync_status == ConnectorStatus.DELETE_PENDING:
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                f"Connector {connector_id!r} is pending deletion and cannot accept new syncs.",
-            )
-
-        active_seq = db_ops.get_active_sync_seq(connector_id)
-        if active_seq is not None:
-            sync_log_status = db_ops.get_sync_log_status(connector_id, active_seq)
-            if sync_log_status == SyncLogStatus.CANCEL_PENDING:
-                APIError.raise_error(
-                    ErrorCode.RESOURCE_LOCKED,
-                    f"Connector {connector_id!r} has a sync cancellation in progress (seq={active_seq}) "
-                    "and cannot accept a new sync until it completes.",
-                )
-
-        acquired = db_ops.try_acquire_sync_lock(connector_id)
-        if acquired:
-            # Open the sync-log row here, before dispatching the background task,
-            # so the seq is known synchronously.  run_tick() receives it directly
-            sync_seq = db_ops.init_sync_log_and_update_connector(connector_id)
-            asyncio.create_task(run_tick(connector_id, sync_seq))
-            logger.info(f"Manual sync dispatched for connector {connector_id!r}, seq={sync_seq}")
-        else:
-            sync_seq = db_ops.get_active_sync_seq(connector_id)
-            if sync_seq is None:
-                raise RuntimeError(
-                    f"Sync lock held but no active sync-log row found for connector {connector_id!r}"
-                )
-            logger.info(f"Sync already in progress for connector {connector_id!r}, seq={sync_seq}")
-
+        sync_seq = await dispatch_sync(connector_id)
         return SyncTriggerResponse(sync_seq=sync_seq)
-
+    except SyncNotFound as exc:
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
+    except SyncLocked as exc:
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED, str(exc))
     except HTTPException:
         raise
     except Exception as exc:

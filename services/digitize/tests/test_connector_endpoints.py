@@ -22,7 +22,7 @@ Coverage:
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -652,73 +652,143 @@ class TestDocumentListConnectorFilter:
         assert response.status_code == 404
 
 # ===========================================================================
-# POST /v1/connectors/{connector_id}/sync
+# dispatch_sync  (core logic — no HTTP)
+# ===========================================================================
+
+class TestDispatchSync:
+    """Unit tests for dispatch_sync — verifies the dispatch logic in isolation,
+    without going through the HTTP layer."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_dispatches_task_and_returns_seq_when_lock_acquired(self):
+        """Lock acquired → sync-log opened, task created, seq returned."""
+        from digitize.api.v1.connectors import dispatch_sync
+
+        task_mock = Mock(side_effect=lambda coro: coro.close())
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=None), \
+             patch("digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+                   return_value=True), \
+             patch("digitize.api.v1.connectors.db_ops.init_sync_log_and_update_connector",
+                   return_value=7), \
+             patch("asyncio.create_task", task_mock):
+            seq = self._run(dispatch_sync(CONNECTOR_ID))
+
+        assert seq == 7
+        task_mock.assert_called_once()
+
+    def test_returns_existing_seq_when_already_syncing(self):
+        """Lock not acquired → existing seq returned, no new task."""
+        from digitize.api.v1.connectors import dispatch_sync
+
+        task_mock = Mock()
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=3), \
+             patch("digitize.api.v1.connectors.db_ops.get_sync_log_status",
+                   return_value=SyncLogStatus.STARTED), \
+             patch("digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+                   return_value=False), \
+             patch("asyncio.create_task", task_mock):
+            seq = self._run(dispatch_sync(CONNECTOR_ID))
+
+        assert seq == 3
+        task_mock.assert_not_called()
+
+    def test_raises_sync_not_found_when_connector_missing(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncNotFound
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=None):
+            with pytest.raises(SyncNotFound):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+    def test_raises_sync_locked_when_delete_pending(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncLocked
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)):
+            with pytest.raises(SyncLocked):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+    def test_raises_sync_locked_when_cancel_pending(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncLocked
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=5), \
+             patch("digitize.api.v1.connectors.db_ops.get_sync_log_status",
+                   return_value=SyncLogStatus.CANCEL_PENDING):
+            with pytest.raises(SyncLocked):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+
+# ===========================================================================
+# POST /v1/connectors/{connector_id}/syncs  (HTTP mapping only)
 # ===========================================================================
 
 class TestTriggerSync:
-    def test_returns_202_with_sync_seq_when_lock_acquired(
+    """Tests for the trigger_sync route handler.
+
+    The dispatch logic is tested in TestDispatchSync; these tests only verify
+    that dispatch_sync results and exceptions are mapped to the correct HTTP
+    responses.
+    """
+
+    def test_returns_202_with_sync_seq_when_dispatched(
         self, connector_test_client, monkeypatch
     ):
-        """Lock acquired → sync-log opened, create_task called, 202 returned with sync_seq."""
+        """dispatch_sync succeeds → 202 with sync_seq."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(return_value=7),
         )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
-            Mock(return_value=None),  # no sync running — lock can be acquired
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
-            Mock(return_value=True),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.init_sync_log_and_update_connector",
-            Mock(return_value=7),
-        )
-        task_mock = Mock(side_effect=lambda coro: coro.close())
-        with patch("asyncio.create_task", task_mock):
-            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
         assert response.status_code == 202
         assert response.json()["sync_seq"] == 7
-        task_mock.assert_called_once()
 
-    def test_returns_202_no_op_with_existing_sync_seq_when_already_syncing(
+    def test_returns_202_no_op_when_already_syncing(
         self, connector_test_client, monkeypatch
     ):
-        """Lock not acquired (already syncing) → 202, no task created, existing sync_seq returned."""
+        """dispatch_sync returns existing seq (no-op) → 202."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(return_value=3),
         )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
-            Mock(return_value=False),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
-            Mock(return_value=3),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_sync_log_status",
-            Mock(return_value=SyncLogStatus.STARTED),
-        )
-        task_mock = Mock(side_effect=lambda coro: coro.close())
-        with patch("asyncio.create_task", task_mock):
-            response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
         assert response.status_code == 202
         assert response.json()["sync_seq"] == 3
-        task_mock.assert_not_called()
 
     def test_returns_404_when_connector_not_found(
         self, connector_test_client, monkeypatch
     ):
+        """dispatch_sync raises SyncNotFound → 404."""
+        from digitize.api.v1.connectors import SyncNotFound
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=None),
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(side_effect=SyncNotFound("not found")),
         )
-        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/sync")
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
         assert response.status_code == 404
+
+    def test_returns_409_when_sync_locked(
+        self, connector_test_client, monkeypatch
+    ):
+        """dispatch_sync raises SyncLocked → 409."""
+        from digitize.api.v1.connectors import SyncLocked
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(side_effect=SyncLocked("locked")),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        assert response.status_code == 409
 
 # ===========================================================================
 # POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
