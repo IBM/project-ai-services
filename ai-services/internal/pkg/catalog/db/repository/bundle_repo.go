@@ -248,4 +248,3 @@ func (r *bundleRepo) ListAll(ctx context.Context) ([]models.CatalogBundle, error
 
 	return bundles, nil
 }
-
