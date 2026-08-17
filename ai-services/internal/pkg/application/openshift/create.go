@@ -121,11 +121,11 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 	if !isAppExist {
 		// if App does not exist then perform install
 		logger.Infof("App: %s does not exist, proceeding with install...", app)
-		err = helmClient.Install(app, chart, &helm.InstallOpts{Values: values, Timeout: timeout})
+		err = helmClient.Install(ctx, app, chart, &helm.InstallOpts{Values: values, Timeout: timeout})
 	} else {
 		// if App exists, perform upgrade so that the actual state of the app meets the desired state
 		logger.Infof("App: %s already exist, proceeding with reconciling...", app)
-		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Values: values, Timeout: timeout})
+		err = helmClient.Upgrade(ctx, app, chart, &helm.UpgradeOpts{Values: values, Timeout: timeout})
 	}
 	if err != nil {
 		s.Fail("failed to create application")

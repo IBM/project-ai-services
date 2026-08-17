@@ -28,9 +28,18 @@
 //
 // Labels
 //
-//	catalog-failure   – all tests in this file
+//	failure-test      – all tests in this file (umbrella label, shared with all failure suites)
+//	catalog-failure   – all tests in this file (domain label)
 //	catalog-login     – Tests 1, 2, 3
 //	catalog-configure – Tests 4, 5
+//
+// Running ALL failure tests together (all three failure suites):
+//
+//	ginkgo -r --label-filter="failure-test" ./tests/e2e
+//
+// Excluding ALL failure tests from the normal run:
+//
+//	ginkgo -r --label-filter="!failure-test" ./tests/e2e
 //
 // Running only catalog failure tests:
 //
@@ -38,12 +47,8 @@
 //
 // Running by sub-category:
 //
-//	ginkgo -r --label-filter="catalog-failure && catalog-login"     ./tests/e2e
-//	ginkgo -r --label-filter="catalog-failure && catalog-configure" ./tests/e2e
-//
-// Excluding catalog failure tests from the normal run:
-//
-//	ginkgo -r --label-filter="!catalog-failure" ./tests/e2e
+//	ginkgo -r --label-filter="failure-test && catalog-login"     ./tests/e2e
+//	ginkgo -r --label-filter="failure-test && catalog-configure" ./tests/e2e
 package e2e
 
 import (
@@ -73,6 +78,19 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 	// self-contained and must not depend on the result of a preceding test.
 	func() {
 
+		// ── Default-exclusion guard ───────────────────────────────────────────
+		//
+		// Failure tests are skipped unless --run-failure-tests is explicitly
+		// passed.  This mirrors the --app-name guard used by Language Support
+		// Tests and prevents accidental execution during a normal suite run.
+		ginkgo.BeforeEach(func() {
+			if !runFailureTests {
+				ginkgo.Skip(
+					"[FAILURE-TEST][Catalog] Skipping — pass --run-failure-tests to opt in to failure test execution",
+				)
+			}
+		})
+
 		// ── Test 1: Missing required --server flag ────────────────────────────
 		//
 		// Rationale: `catalog login` declares --server as a required cobra flag.
@@ -87,7 +105,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 			func() {
 				ginkgo.It(
 					"catalog login rejects invocation with missing --server flag",
-					ginkgo.Label("catalog-failure", "catalog-login", "spyre-independent"),
+					ginkgo.Label("failure-test", "catalog-failure", "catalog-login", "spyre-independent"),
 					func() {
 						ctx, cancel := context.WithTimeout(
 							context.Background(),
@@ -133,7 +151,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 				//   "invalid --server URL %q: scheme must be http or https"
 				ginkgo.It(
 					"catalog login rejects a --server URL with invalid scheme",
-					ginkgo.Label("catalog-failure", "catalog-login", "spyre-independent"),
+					ginkgo.Label("failure-test", "catalog-failure", "catalog-login", "spyre-independent"),
 					func() {
 						ctx, cancel := context.WithTimeout(
 							context.Background(),
@@ -184,7 +202,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 				//   "no such file or directory" OR "not logged in" OR "credentials"
 				ginkgo.It(
 					"catalog whoami fails when no credentials are stored",
-					ginkgo.Label("catalog-failure", "catalog-login", "spyre-independent"),
+					ginkgo.Label("failure-test", "catalog-failure", "catalog-login", "spyre-independent"),
 					func() {
 						ctx, cancel := context.WithTimeout(
 							context.Background(),
@@ -252,7 +270,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 				//   "--ssl-cert and --ssl-key must be used together"
 				ginkgo.It(
 					"catalog configure rejects --ssl-cert without --ssl-key",
-					ginkgo.Label("catalog-failure", "catalog-configure", "spyre-independent"),
+					ginkgo.Label("failure-test", "catalog-failure", "catalog-configure", "spyre-independent"),
 					func() {
 						// catalog configure is not supported on OpenShift — the product
 						// itself returns "openshift runtime is not yet supported for catalog
@@ -311,7 +329,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 				//   "invalid HTTPS port 0: must be between 1 and 65535"
 				ginkgo.It(
 					"catalog configure rejects an out-of-range --https-port value",
-					ginkgo.Label("catalog-failure", "catalog-configure", "spyre-independent"),
+					ginkgo.Label("failure-test", "catalog-failure", "catalog-configure", "spyre-independent"),
 					func() {
 						// Same reason as Test 4 — catalog configure is not supported on
 						// OpenShift, so the port validation error we want to assert would

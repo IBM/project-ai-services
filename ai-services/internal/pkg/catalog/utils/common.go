@@ -144,7 +144,7 @@ func HelmUninstall(ctx context.Context, namespace, release string) error {
 
 	exists, err := helmClient.IsReleaseExist(release)
 	if err != nil {
-		return fmt.Errorf("failed to check release existence: %w", err)
+		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
 	}
 
 	if !exists {

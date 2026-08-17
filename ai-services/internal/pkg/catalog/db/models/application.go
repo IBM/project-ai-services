@@ -53,6 +53,7 @@ type Application struct {
 	Message        string            `json:"message,omitempty"`
 	Version        string            `json:"version"`
 	CreatedBy      string            `json:"created_by"`
+	WorkerID       *uuid.UUID        `json:"worker_id,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
 	Services       []Service         `json:"services,omitempty"`

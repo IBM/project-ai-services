@@ -310,5 +310,5 @@ func helmInstallOrUpgrade(ctx context.Context, namespace, release, catalogPath s
 		overrides["templateID"] = templateID
 	}
 
-	return helmClient.InstallOrUpgrade(release, chart, overrides, defaultHelmTimeout)
+	return helmClient.InstallOrUpgrade(ctx, release, chart, overrides, defaultHelmTimeout)
 }
