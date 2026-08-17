@@ -27,7 +27,6 @@ import (
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -46,6 +45,7 @@ var (
 	templateName string
 	rawArgParams []string
 	argParams    map[string]string
+	legacyCreate bool
 
 	// podman flags.
 	skipModelDownload     bool
@@ -53,7 +53,6 @@ var (
 	skipChecks            []string
 	valuesFiles           []string
 	rawArgImagePullPolicy string
-	legacyCreate          bool
 
 	// openshift flags.
 	timeout time.Duration
@@ -97,9 +96,8 @@ Arguments:
 		}
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-		// When legacyCreate is true and runtime is podman, use the older/stable code path
-		// For openshift runtime, always use the older/stable code path regardless of legacy flag
-		if legacyCreate && rt == types.RuntimeTypePodman {
+		// When legacyCreate is true, use the older/stable code path
+		if legacyCreate {
 			// Create application instance using factory
 			appFactory := application.NewFactory(rt)
 			app, err := appFactory.Create(appName)
@@ -122,30 +120,7 @@ Arguments:
 		}
 
 		// Default: use catalog way of deploying application
-		// For openshift runtime, always use the older/stable code path
-		if rt == types.RuntimeTypePodman {
-			return createApp(appName)
-		}
-
-		// OpenShift runtime uses the older implementation
-		appFactory := application.NewFactory(rt)
-		app, err := appFactory.Create(appName)
-		if err != nil {
-			return fmt.Errorf("failed to create application instance: %w", err)
-		}
-
-		opts := appTypes.CreateOptions{
-			Name:              appName,
-			TemplateName:      templateName,
-			SkipModelDownload: skipModelDownload,
-			SkipImageDownload: skipImageDownload,
-			ArgParams:         argParams,
-			ValuesFiles:       valuesFiles,
-			ImagePullPolicy:   image.ImagePullPolicy(rawArgImagePullPolicy),
-			Timeout:           timeout,
-		}
-
-		return app.Create(ctx, opts)
+		return createApp(appName)
 	},
 }
 
@@ -219,6 +194,8 @@ func initCreateCommonFlags() {
 			"Usage:\n"+
 			"- Can be provided multiple times; files are applied in order and later files override earlier ones\n",
 	)
+
+	createCmd.Flags().BoolVar(&legacyCreate, appFlags.Create.Legacy, false, "Use legacy application create implementation")
 }
 
 func initCreatePodmanFlags() {
@@ -246,8 +223,6 @@ func initCreatePodmanFlags() {
 			"- If left false in air-gapped environments → download attempt will fail\n"+
 			"Note: Supported for podman runtime only.\n",
 	)
-	createCmd.Flags().BoolVar(&legacyCreate, "legacy", false, "Use legacy application create implementation")
-
 	initializeImagePullPolicyFlag()
 
 	// deprecated flags
@@ -297,7 +272,8 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddCommonFlag(appFlags.Create.SkipValidation, validateSkipChecksFlag).
 		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
 		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
-		AddCommonFlag(appFlags.Create.Values, validateValuesFlag)
+		AddCommonFlag(appFlags.Create.Values, validateValuesFlag).
+		AddCommonFlag(appFlags.Create.Legacy, nil)
 
 	// Register Podman-specific flags
 	builder.
@@ -314,26 +290,15 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 // validateTemplateFlag validates the template flag.
 func validateTemplateFlag(cmd *cobra.Command) error {
-	// do template validation in legacy mode for podman runtime
+	// do template validation in legacy mode
 	// In default mode, templates are validated against catalog API
-	if legacyCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	if legacyCreate {
 		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 		if err := tp.AppTemplateExist(templateName); err != nil {
 			return err
 		}
 
 		return nil
-	}
-
-	// Default mode for podman: skip embedded template validation (uses catalog API)
-	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return nil
-	}
-
-	// OpenShift runtime: validate against embedded templates
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
-	if err := tp.AppTemplateExist(templateName); err != nil {
-		return err
 	}
 
 	return nil
@@ -351,9 +316,9 @@ func validateParamsFlag(cmd *cobra.Command) error {
 		return fmt.Errorf("invalid format: %w", err)
 	}
 
-	// do template validation in legacy mode for podman runtime
+	// do template validation in legacy mode
 	// In default mode, params are validated against catalog API schemas
-	if legacyCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	if legacyCreate {
 		// Validate params against template values (legacy mode)
 		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 		_, err = tp.LoadValues(templateName, nil, argParams)
@@ -362,18 +327,6 @@ func validateParamsFlag(cmd *cobra.Command) error {
 		}
 
 		return nil
-	}
-
-	// Default mode for podman: skip embedded template validation (uses catalog API)
-	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return nil
-	}
-
-	// OpenShift runtime: validate params against template values
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
-	_, err = tp.LoadValues(templateName, nil, argParams)
-	if err != nil {
-		return fmt.Errorf("failed to load params: %w", err)
 	}
 
 	return nil
@@ -614,7 +567,7 @@ func printNextSteps(app *catalogTypes.Application) error {
 			continue
 		}
 
-		err = printNextStepsMD(tmpls, params, application.Name)
+		err = printNextStepsMD(tmpls, params, application.Name, runtimeType)
 		if err != nil {
 			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
 		}
@@ -624,7 +577,7 @@ func printNextSteps(app *catalogTypes.Application) error {
 }
 
 // printNextStepsMD renders and prints the next.md template for a service.
-func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName string) error {
+func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName, runtime string) error {
 	tmpl, ok := tmpls["next.md"]
 	if !ok {
 		// next.md doesn't exist for this service, return nil
@@ -644,7 +597,7 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 	}
 
 	// Print the info command for all services
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime podman`\n", appName)
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", appName, runtime)
 
 	return nil
 }
