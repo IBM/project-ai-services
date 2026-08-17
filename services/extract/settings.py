@@ -25,6 +25,18 @@ class ExtractionConfig(BaseSettings):
     )
 
 
+    # Request body size limit (bytes) — enforced before tokenisation to avoid
+    # spending a /tokenize round-trip on obviously oversized payloads.
+    max_request_body_bytes: int = Field(
+        default=1_048_576,  # 1 MiB
+        ge=1,
+        description=(
+            "Maximum allowed size of the POST /v1/extract JSON request body "
+            "in bytes. Requests exceeding this limit receive 413 before "
+            "tokenisation begins."
+        ),
+    )
+
     max_examples: int = Field(
         default=5,
         ge=1,

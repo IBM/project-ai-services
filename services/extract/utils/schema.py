@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator
 
 from common.misc_utils import get_logger
 from extract.settings import settings
+from extract.utils.exceptions import ExtractException
 
 logger = get_logger("schema_utils")
 
@@ -68,8 +69,6 @@ class SchemaValidationError(Exception):
         self.status = status
         self.details = details or {}
         super().__init__(message)
-
-
 
 
 
@@ -593,7 +592,10 @@ def check_schema_share_in_context(
 # Per-request reserved-output computation
 # ---------------------------------------------------------------------------
 
-def compute_reserved_output(schema_tokens: int) -> int:
+def compute_reserved_output(
+    schema_tokens: int,
+    output_token_factor: float | None = None,
+) -> int:
     """
     Return the number of output tokens to reserve for the extraction result.
 
@@ -604,7 +606,9 @@ def compute_reserved_output(schema_tokens: int) -> int:
             MAX_OUTPUT_TOKENS,
         )
     """
-    raw = schema_tokens * settings.extract.output_token_factor
+    if output_token_factor is None:
+        output_token_factor = settings.extract.output_token_factor
+    raw = schema_tokens * output_token_factor
     return int(
         max(
             settings.extract.min_output_tokens,
@@ -626,7 +630,7 @@ def check_extraction_budget(
     Returns the reserved_output token count (== max_tokens for the LLM call)
     if the budget is within limits.
 
-    Raises SchemaValidationError with code CONTEXT_LIMIT_EXCEEDED and full
+    Raises ExtractException with code CONTEXT_LIMIT_EXCEEDED and full
     diagnostics on failure.  The caller is responsible for converting this
     into the appropriate HTTP 413 response.
     """
@@ -654,13 +658,12 @@ def check_extraction_budget(
             "total_required_tokens": total,
             "excess_tokens": total - max_model_len,
         }
-        raise SchemaValidationError(
+        raise ExtractException(413,
             "CONTEXT_LIMIT_EXCEEDED",
             (
                 "Input does not fit in the model context window. "
                 "Reduce input size or use the async job path with a smaller document."
             ),
-            status=413,
             details=details,
         )
 

@@ -2,6 +2,7 @@
 Extract Information Service — FastAPI application.
 """
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -154,10 +155,11 @@ async def schema_validation_error_handler(request: Request, exc: SchemaValidatio
 
 @app.exception_handler(ExtractException)
 async def extract_exception_handler(request: Request, exc: ExtractException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message, "status": exc.status_code}},
-    )
+    body: dict = {"error": {"code": exc.code, "message": exc.message, "status": exc.status_code}}
+    if exc.details:
+        body["error"]["details"] = exc.details
+    return JSONResponse(status_code=exc.status_code, content=body)
+
 
 
 from extract.api.v1.schema import router as schema_router

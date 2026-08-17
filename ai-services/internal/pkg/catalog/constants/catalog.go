@@ -16,6 +16,8 @@ const (
 	CatalogTypeServices = "services"
 	// CatalogTypeComponents represents the components catalog type.
 	CatalogTypeComponents = "components"
+	// CatalogTypeConnectors represents the connectors catalog type.
+	CatalogTypeConnectors = "connectors"
 )
 
 // Catalog name constants.

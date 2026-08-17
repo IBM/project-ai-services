@@ -1,0 +1,96 @@
+// worker.proto – bidirectional gRPC stream between WorkerGateway (control-plane)
+// and worker daemons.
+syntax = "proto3";
+
+package worker.v1;
+
+option go_package = "github.com/project-ai-services/ai-services/internal/pkg/worker/proto";
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Service
+// ──────────────────────────────────────────────────────────────────────────────
+
+service WorkerGateway {
+  // Register is called once by a new worker at bootstrap time.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // CommandStream is a long-lived bidirectional stream.
+  // The worker initiates the stream and sends CommandResult messages;
+  // the control plane sends Command messages.
+  rpc CommandStream(stream CommandResult) returns (stream Command);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Registration messages
+// ──────────────────────────────────────────────────────────────────────────────
+
+message RegisterRequest {
+  string worker_name      = 1;
+  string pre_shared_token = 2;
+  map<string, string> metadata = 3;
+}
+
+message RegisterResponse {
+  string worker_name  = 1;
+  // tls_cert_pem / tls_key_pem are reserved for future mTLS support.
+  string tls_cert_pem = 2;
+  string tls_key_pem  = 3;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Command / result messages (bidirectional stream)
+// ──────────────────────────────────────────────────────────────────────────────
+
+message Command {
+  string      command_id = 1;
+  CommandType type       = 2;
+  bytes       payload    = 3; // JSON-encoded type-specific payload
+}
+
+message CommandResult {
+  string command_id   = 1;
+  bool   success      = 2;
+  bytes  data         = 3; // JSON-encoded response payload
+  string error        = 4;
+  bool   is_heartbeat = 5;
+  string worker_name  = 6; // set on first result and every heartbeat
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED        = 0;
+  COMMAND_TYPE_LIST_IMAGES        = 1;
+  COMMAND_TYPE_PULL_IMAGE         = 2;
+  COMMAND_TYPE_LIST_PODS          = 3;
+  COMMAND_TYPE_CREATE_POD         = 4;
+  COMMAND_TYPE_DELETE_POD         = 5;
+  COMMAND_TYPE_STOP_POD           = 6;
+  COMMAND_TYPE_START_POD          = 7;
+  COMMAND_TYPE_INSPECT_POD        = 8;
+  COMMAND_TYPE_POD_EXISTS         = 9;
+  COMMAND_TYPE_POD_LOGS           = 10;
+  COMMAND_TYPE_GET_POD_RESOURCES  = 11;
+  COMMAND_TYPE_LIST_SECRETS       = 12;
+  COMMAND_TYPE_DELETE_SECRET      = 13;
+  COMMAND_TYPE_SECRET_EXISTS      = 14;
+  COMMAND_TYPE_DELETE_VOLUME      = 15;
+  COMMAND_TYPE_VOLUME_EXISTS      = 16;
+  COMMAND_TYPE_INSPECT_CONTAINER  = 17;
+  COMMAND_TYPE_CONTAINER_EXISTS   = 18;
+  COMMAND_TYPE_CONTAINER_LOGS     = 19;
+  COMMAND_TYPE_LIST_ROUTES        = 20;
+  COMMAND_TYPE_DELETE_PVCS        = 21;
+  COMMAND_TYPE_GET_SYSTEM_INFO    = 22;
+  COMMAND_TYPE_RUNTIME_TYPE              = 23;
+  COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER   = 24;
+
+  // Caddy proxy management on the worker node.
+  COMMAND_TYPE_REGISTER_PROXY_ROUTE      = 25;
+  COMMAND_TYPE_UNREGISTER_PROXY_ROUTE    = 26;
+  COMMAND_TYPE_GET_PROXY_ROUTE           = 27;
+  COMMAND_TYPE_PROXY_HEALTH_CHECK        = 28;
+
+  // HTTP proxy tunnel through the gRPC stream.
+  // The control plane sends an HTTP request; the worker executes it locally
+  // against a pod endpoint and returns the response.
+  COMMAND_TYPE_HTTP_PROXY                = 29;
+}

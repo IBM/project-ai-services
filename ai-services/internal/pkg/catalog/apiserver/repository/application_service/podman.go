@@ -16,13 +16,20 @@ type PodmanApplicationService struct {
 	ApplicationServiceBase
 }
 
-// DeleteApplication initiates async deletion of an application and returns immediately.
+// NewPodmanApplicationService creates a new PodmanApplicationService with a fresh DeploymentRegistry
+// wired into the base. This makes in-flight deployments cancellable by a concurrent DeleteApplication.
+func NewPodmanApplicationService(base ApplicationServiceBase) *PodmanApplicationService {
+	base.DeploymentRegistry = NewDeploymentRegistry()
+
+	return &PodmanApplicationService{ApplicationServiceBase: base}
+}
+
 func (s *PodmanApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
 	return s.ApplicationServiceBase.DeleteApplication(ctx, id, user, keepData, runtimeTypes.RuntimeTypePodman)
 }
 
-// CreateApplication validates, plans, persists, and asynchronously deploys a new application
-// using the Podman runtime executor.
+// CreateApplication satisfies ApplicationServiceInterface by delegating to the base with
+// the Podman runtime type fixed.
 func (s *PodmanApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
 	return s.ApplicationServiceBase.CreateApplication(ctx, req, runtimeTypes.RuntimeTypePodman)
 }

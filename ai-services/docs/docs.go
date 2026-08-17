@@ -863,6 +863,108 @@ const docTemplate = `{
                 }
             }
         },
+        "/connectors": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "List connector providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
+                        "name": "connector_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of providers",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Connector type not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/connectors/{connector_type}/providers/{provider_id}/params": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the JSON Schema for the configuration parameters of a specific connector provider.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get connector provider parameters",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connector type (e.g. 'datasource')",
+                        "name": "connector_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider identifier (e.g. 'object_storage', 'file_system')",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON Schema for the provider's configuration",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Connector type or provider not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -1461,6 +1563,35 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector": {
+            "type": "object",
+            "properties": {
+                "connector_name": {
+                    "description": "display label for connector_type",
+                    "type": "string"
+                },
+                "connector_type": {
+                    "description": "e.g. \"datasource\"",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "short description",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "e.g. \"object_storage\", \"file_system\"",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "display name",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "always \"connector\"",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference": {
             "type": "object",
             "properties": {
@@ -1541,6 +1672,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService": {
             "type": "object",
             "properties": {
+                "accepts_datasource": {
+                    "type": "boolean"
+                },
                 "components": {
                     "type": "array",
                     "items": {
@@ -1665,6 +1799,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service": {
             "type": "object",
             "properties": {
+                "accepts_datasource": {
+                    "type": "boolean"
+                },
                 "architectures": {
                     "type": "array",
                     "items": {

@@ -1,17 +1,21 @@
 Day N:
 
+{{- if ne .UI_URL "" }}
 {{- if eq .UI_STATUS "running" }}
 
-- {{ .SERVICE_NAME }} is available to use at https://{{ .UI_ROUTE }}.
+- {{ .SERVICE_NAME }} is available to use at {{ .UI_URL }}.
 {{- else }}
 
-- {{ .SERVICE_NAME }} is unavailable to use. Please make sure the 'ui' container in the 'chat-bot' deployment is running.
+- {{ .SERVICE_NAME }} is unavailable to use. Please make sure 'chat-bot' pod is running.
+{{- end }}
 {{- end }}
 
-{{- if eq .BACKEND_STATUS "running" }}
+{{- if ne .API_URL "" }}
+{{- if eq .API_STATUS "running" }}
 
-- {{ .SERVICE_NAME }} API is available to use at https://{{ .BACKEND_ROUTE }}.
+- {{ .SERVICE_NAME }} API is available to use at {{ .API_URL }}.
 {{- else }}
 
-- {{ .SERVICE_NAME }} API is unavailable to use. Please make sure the 'backend-server' container in the 'chat-bot' deployment is running.
+- {{ .SERVICE_NAME }} API is unavailable to use. Please make sure 'chat-bot' pod is running.
+{{- end }}
 {{- end }}
