@@ -27,9 +27,9 @@ type BundleRepository interface {
 	// Returns (nil, nil) when no active row exists.
 	GetActiveByCatalogID(ctx context.Context, catalogType, catalogID string) (*models.CatalogBundle, error)
 
-	// UpdateBundle applies only the non-nil fields in upd to the row identified by id.
+	// Update applies only the non-nil fields in upd to the row identified by id.
 	// Returns an error if no fields are set.
-	UpdateBundle(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error
+	Update(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error
 
 	// Delete permanently removes the row.
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -157,9 +157,9 @@ func (r *bundleRepo) GetActiveByCatalogID(ctx context.Context, catalogType, cata
 	return b, nil
 }
 
-// UpdateBundle applies only the non-nil fields in upd to the row identified by id.
+// Update applies only the non-nil fields in upd to the row identified by id.
 // Returns an error if upd is empty (no fields set).
-func (r *bundleRepo) UpdateBundle(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error {
+func (r *bundleRepo) Update(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error {
 	var setClauses []string
 	var args []any
 	i := 1
@@ -191,7 +191,7 @@ func (r *bundleRepo) UpdateBundle(ctx context.Context, id uuid.UUID, upd models.
 	}
 
 	if len(setClauses) == 0 {
-		return fmt.Errorf("UpdateBundle called with no fields to update")
+		return fmt.Errorf("Update called with no fields to update")
 	}
 
 	query := fmt.Sprintf(
