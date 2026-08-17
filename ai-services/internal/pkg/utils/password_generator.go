@@ -383,12 +383,13 @@ func applyOption(key, value string, opts *passwordOptions) error {
 
 // generateValue generates a value based on the annotation string.
 func generateValue(annotation string) (string, error) {
-	parts := strings.Split(annotation, ":")
+	parts := strings.SplitN(annotation, ":", minAnnotationParts)
 	if len(parts) < minAnnotationParts {
 		return "", fmt.Errorf("invalid annotation format: %s", annotation)
 	}
 
-	annotationType := parts[1]
+	// Extract just the type keyword before any options (e.g. "password" from "password length=32")
+	annotationType := strings.Fields(parts[1])[0]
 	switch annotationType {
 	case "password":
 		opts, err := parsePasswordOptions(annotation)
