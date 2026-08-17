@@ -672,6 +672,10 @@ class TestTriggerSync:
             "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
             Mock(return_value=7),
         )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log_status",
+            Mock(return_value=SyncLogStatus.STARTED),
+        )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
             response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
@@ -694,6 +698,10 @@ class TestTriggerSync:
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
             Mock(return_value=3),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log_status",
+            Mock(return_value=SyncLogStatus.STARTED),
         )
         task_mock = Mock(side_effect=lambda coro: coro.close())
         with patch("asyncio.create_task", task_mock):
