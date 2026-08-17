@@ -5,8 +5,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
+
+// Ensure dbmodels is imported for Swagger documentation.
+var _ dbmodels.Worker
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
@@ -37,8 +41,8 @@ type createWorkerResp struct {
 //	@Tags			Workers
 //	@Accept			json
 //	@Produce		json
-//	@Param			worker	body		createWorkerReq		true	"Worker registration request"
-//	@Success		201		{object}	createWorkerResp	"Worker registered; token valid for 24 hours"
+//	@Param			worker	body		createWorkerReq			true	"Worker registration request"
+//	@Success		201		{object}	createWorkerResp		"Worker registered; token valid for 24 hours"
 //	@Failure		400		{object}	map[string]interface{}	"Invalid payload"
 //	@Failure		500		{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
@@ -72,7 +76,7 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 //	@Description	Returns all registered workers and their current status from the database.
 //	@Tags			Workers
 //	@Produce		json
-//	@Success		200	{array}		models.Worker			"List of workers"
+//	@Success		200	{array}		dbmodels.Worker			"List of workers"
 //	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [get]
@@ -94,11 +98,11 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 //	@Description	If the worker is currently connected its gRPC stream is also cleaned up.
 //	@Tags			Workers
 //	@Produce		json
-//	@Param			id	path		string					true	"Worker ID (UUID)"
-//	@Success		204		"Worker deleted"
-//	@Failure		400		{object}	map[string]interface{}	"Invalid worker ID"
-//	@Failure		404		{object}	map[string]interface{}	"Worker not found"
-//	@Failure		500		{object}	map[string]interface{}	"Internal error"
+//	@Param			id	path	string	true	"Worker ID (UUID)"
+//	@Success		204	"Worker deleted"
+//	@Failure		400	{object}	map[string]interface{}	"Invalid worker ID"
+//	@Failure		404	{object}	map[string]interface{}	"Worker not found"
+//	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers/{id} [delete]
 func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
