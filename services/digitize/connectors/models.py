@@ -7,37 +7,63 @@ Covers:
   GET  /v1/connectors
   GET  /v1/connectors/{connector_id}
   GET  /v1/connectors/{connector_id}/syncs
+  GET  /v1/connectors/{connector_id}/syncs/{sync_seq}
 """
 
+import uuid
+from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
 # Connector / sync-log status constants
 # ---------------------------------------------------------------------------
 
-class SyncStatus:
-    """String constants for connector sync_status and sync-log status columns.
+class ConnectorStatus(str, Enum):
+    """String enum for the Connector.sync_status column.
 
-    Connector.sync_status lifecycle:
-        UP_TO_DATE  ──► SYNCING  ──► UP_TO_DATE  (tick completed cleanly)
-                          └──► OUT_OF_SYNC (tick finished with errors)
+    Inherits from str so values can be passed directly to SQLAlchemy and
+    compared with raw DB strings without calling .value.
 
-    ConnectorSyncLog.status lifecycle:
-        STARTED ──► COMPLETED  (all files processed successfully)
-                └──► FAILED    (fatal tick error or partial failure)
+    Lifecycle:
+        UP_TO_DATE ──► SYNCING       ──► UP_TO_DATE   (tick completed cleanly)
+                           └──► OUT_OF_SYNC            (tick finished with errors)
+        UP_TO_DATE ──► DELETE_PENDING                  (DELETE, no active sync)
+        SYNCING    ──► DELETE_PENDING                  (DELETE arrived mid-sync)
+        SYNCING    ──► OUT_OF_SYNC                     (cancel honoured; finalize_sync_log_and_update_connector
+                                                        reverts connector after CANCELLED)
     """
 
-    # Connector.sync_status values
     UP_TO_DATE = "up to date"
     SYNCING = "syncing"
     OUT_OF_SYNC = "out of sync"
+    DELETE_PENDING = "delete pending"
 
-    # ConnectorSyncLog.status values
+
+class SyncLogStatus(str, Enum):
+    """String enum for the ConnectorSyncLog.status column.
+
+    Inherits from str so values can be passed directly to SQLAlchemy and
+    compared with raw DB strings without calling .value.
+
+    Lifecycle:
+        STARTED ──► CANCEL_PENDING ──► CANCELLED  (cancel-sync request received mid-tick;
+                │                                   finalize_sync_log_and_update_connector sets connector OUT_OF_SYNC)
+                ├──► COMPLETED                    (all files processed successfully)
+                ├──► FAILED                       (fatal tick error or partial failure)
+                └──► CANCELLED                    (tick interrupted by DELETE_PENDING)
+
+    Note: CANCEL_PENDING is written to connector_sync_logs.status (not to connectors).
+    The connector stays SYNCING while the tick winds down; finalize_sync_log_and_update_connector() transitions
+    it to OUT_OF_SYNC when it writes the terminal CANCELLED status.
+    """
+
     STARTED = "started"
+    CANCEL_PENDING = "cancel pending"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -47,11 +73,28 @@ class SyncStatus:
 class ConnectorCreateRequest(BaseModel):
     """Body accepted by POST /v1/connectors."""
 
-    connector_id: str = Field(..., description="Stable catalog UUID for this connector")
+    connector_id: Optional[str] = Field(
+        None,
+        description=(
+            "Stable catalog UUID for this connector. "
+            "If omitted, a UUID v4 is generated automatically."
+        ),
+    )
     connector_name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
     type: str = Field(..., description="Connector transport type: 'ssh' or 's3'")
     allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
+
+    @field_validator("connector_id", mode="before")
+    @classmethod
+    def validate_connector_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        try:
+            uuid.UUID(str(v))
+        except ValueError:
+            raise ValueError(f"connector_id must be a valid UUID, got {v!r}")
+        return str(v)
 
 
 class ConnectorUpdateRequest(BaseModel):
@@ -84,6 +127,7 @@ class ConnectorListItem(BaseModel):
     last_sync_at: Optional[str]
     sync_status: str
     last_sync_error: Optional[str]
+    error: Optional[str]
     total_files: int
 
 
@@ -99,6 +143,7 @@ class ConnectorDetailResponse(BaseModel):
     last_sync_at: Optional[str]
     sync_status: str
     last_sync_error: Optional[str]
+    error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int
 
@@ -106,13 +151,12 @@ class ConnectorDetailResponse(BaseModel):
 class SyncLogItem(BaseModel):
     """One tick entry in GET /v1/connectors/{connector_id}/syncs."""
 
-    id: int
+    seq: int
     started_at: str
     finished_at: Optional[str]
     total_files: int
     new_files: int
     removed_files: int
-    failed_files: int
     status: str
     error: str
 
@@ -124,5 +168,24 @@ class SyncLogResponse(BaseModel):
     limit: int
     offset: int
     items: List[SyncLogItem]
+
+
+class SyncLogDetailResponse(BaseModel):
+    """Single sync-log item returned by GET /v1/connectors/{connector_id}/syncs/{sync_seq}."""
+
+    seq: int
+    started_at: str
+    finished_at: Optional[str]
+    total_files: int
+    new_files: int
+    removed_files: int
+    status: str
+    error: str
+
+
+class SyncTriggerResponse(BaseModel):
+    """Response body for POST /v1/connectors/{connector_id}/sync."""
+
+    sync_seq: int = Field(..., description="Sequence number of the active or newly-started sync")
 
 # Made with Bob

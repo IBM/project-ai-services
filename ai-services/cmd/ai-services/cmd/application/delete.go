@@ -16,7 +16,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -63,9 +62,8 @@ Arguments:
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// When legacyDelete is true and runtime is podman, use the older/stable code path
-		// For openshift runtime, always use the older/stable code path regardless of legacy flag
-		if legacyDelete && rt == types.RuntimeTypePodman {
+		// When legacyDelete is true use the older/stable code path
+		if legacyDelete {
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)
@@ -83,28 +81,8 @@ Arguments:
 			return app.Delete(cmd.Context(), opts)
 		}
 
-		// Default: use new implementation (validate application name using catalog API)
-		// For openshift runtime, always use the older/stable code path
-		if rt == types.RuntimeTypePodman {
-			return deleteApplication(applicationName)
-		}
-
-		// OpenShift runtime uses the older implementation
-		factory := application.NewFactory(rt)
-		app, err := factory.Create(applicationName)
-		if err != nil {
-			return fmt.Errorf("failed to create application instance: %w", err)
-		}
-
-		opts := appTypes.DeleteOptions{
-			Name:        applicationName,
-			AutoYes:     autoYes,
-			SkipCleanup: skipCleanup,
-			Timeout:     deleteTimeout,
-		}
-
-		return app.Delete(cmd.Context(), opts)
-
+		// Default: use new implementation via catalog
+		return deleteApplication(applicationName)
 	},
 }
 
@@ -116,7 +94,7 @@ func init() {
 func initDeleteCommonFlags() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, appFlags.Delete.SkipCleanup, false, "Skip deleting application data (default=false)")
 	deleteCmd.Flags().BoolVarP(&autoYes, appFlags.Delete.AutoYes, "y", false, "Automatically accept all confirmation prompts (default=false)")
-	deleteCmd.Flags().BoolVar(&legacyDelete, "legacy", false, "Use legacy application delete implementation")
+	deleteCmd.Flags().BoolVar(&legacyDelete, appFlags.Delete.Legacy, false, "Use legacy application delete implementation")
 }
 
 func initDeleteOpenShiftFlags() {
@@ -138,7 +116,8 @@ func buildDeleteFlagValidator() *flagvalidator.FlagValidator {
 	// Register common flags
 	builder.
 		AddCommonFlag(appFlags.Delete.SkipCleanup, nil).
-		AddCommonFlag(appFlags.Delete.AutoYes, nil)
+		AddCommonFlag(appFlags.Delete.AutoYes, nil).
+		AddCommonFlag(appFlags.Delete.Legacy, nil)
 
 	// Register OpenShift-specific flags
 	builder.
