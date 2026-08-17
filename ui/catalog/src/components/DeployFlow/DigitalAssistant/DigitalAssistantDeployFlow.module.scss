@@ -77,14 +77,6 @@
   }
 }
 
-// TODO PR 9: unify with Services deployErrorNotification into one shared class
-.customToast {
-  position: fixed;
-  top: $spacing-10;
-  right: $spacing-07;
-  z-index: 10000;
-}
-
 // TODO PR 9: move to shared once serviceConfigFieldRow is unified
 .fullWidth {
   grid-column: 1 / -1;
