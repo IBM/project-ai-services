@@ -92,10 +92,10 @@ spec:
                 secretKeyRef:
                   name: catalog-db-secret
                   key: db-password
-            - name: CONNECTOR_ENCRYPTION_KEY
+            - name: DB_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: catalog-connector-secret
+                  name: catalog-db-encryption-secret
                   key: db-encryption-key
             - name: GIN_MODE
               value: "release"
