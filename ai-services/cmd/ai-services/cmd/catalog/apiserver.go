@@ -21,6 +21,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	pkgconstants "github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/miq"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -98,7 +99,7 @@ func loadConnectorEncryptionKey() ([]byte, error) {
 // buildAPIServerOptions wires all service dependencies and returns the options
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
-func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int) (apiserver.APIServerOptions, func(), error) {
+func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int, manageiqURL string, manageiqInsecure bool) (apiserver.APIServerOptions, func(), error) {
 	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
 	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
 	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
@@ -128,9 +129,19 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	workerRepo := repository.NewWorkerRepository(pool)
 	workerReg := workerregistry.New(workerRepo)
 
+	var authSvc auth.Service
+	if manageiqURL != "" {
+		logger.Infof("ManageIQ integration enabled: %s (insecure TLS: %v)\n", manageiqURL, manageiqInsecure)
+		miqClient := miq.NewHTTPClient(manageiqURL, manageiqInsecure)
+		authSvc = auth.NewAuthServiceWithMIQ(userRepo, tokenMgr, blacklist, miqClient)
+	} else {
+		logger.Infoln("Using the default auth service")
+		authSvc = auth.NewAuthService(userRepo, tokenMgr, blacklist)
+	}
+
 	opts := apiserver.APIServerOptions{
 		Port:               0, // set by caller
-		AuthService:        auth.NewAuthService(userRepo, tokenMgr, blacklist),
+		AuthService:        authSvc,
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
@@ -148,7 +159,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 }
 
 // runAPIServer initializes and starts the API server with the provided configuration.
-func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int) error {
+func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int, manageiqURL string, manageiqInsecure bool) error {
 	secretKey, err := getOrGenerateSecretKey()
 	if err != nil {
 		return err
@@ -175,7 +186,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	defer pool.Close()
 	logger.Infoln("Connected to database successfully")
 
-	opts, cleanup, err := buildAPIServerOptions(ctx, pool, secretKey, adminUser, adminPassHash, accessTTL, refreshTTL, workerGatewayPort)
+	opts, cleanup, err := buildAPIServerOptions(ctx, pool, secretKey, adminUser, adminPassHash, accessTTL, refreshTTL, workerGatewayPort, manageiqURL, manageiqInsecure)
 	if err != nil {
 		return err
 	}
@@ -188,11 +199,14 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 
 func NewAPIServerCmd() *cobra.Command {
 	var (
-		port                   = 8080
+		port = 8080
+		// TODO: ManageIQ sessions default to a 600s token TTL; the defaultAccessTokenTTL may need to be aligned when ManageIQ support is formalised.
 		defaultAccessTokenTTL  = time.Minute * 15
 		defaultRefreshTokenTTL = time.Hour * 24 * 1
 		adminUserName          string
 		adminPasswordHash      string
+		manageiqURL            string
+		manageiqInsecure       bool
 		runtimeType            string
 		workerGatewayPort      int
 	)
@@ -201,7 +215,7 @@ func NewAPIServerCmd() *cobra.Command {
 		Use:   "apiserver",
 		Short: "Manage AI Services API server",
 		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
-		Example: `  # Start the API server with default settings
+		Example: ` # Start the API server with default settings
 	 ai-services catalog apiserver --admin-password-hash <PASSWORD_HASH> --runtime podman
 
 	 # Start the API server on a custom port
@@ -223,7 +237,7 @@ Note:
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash, workerGatewayPort)
+			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash, workerGatewayPort, manageiqURL, manageiqInsecure)
 		},
 	}
 
@@ -233,6 +247,11 @@ Note:
 	apiserverCmd.Flags().StringVar(&adminUserName, "admin-username", "admin", "Username for the default admin user")
 	apiserverCmd.Flags().StringVar(&adminPasswordHash, "admin-password-hash", "", "Precomputed hash of the password for the default admin user")
 	apiserverCmd.Flags().IntVar(&workerGatewayPort, "workergateway-port", defaultWorkerGatewayPort, "Port for the gRPC worker gateway (always active, default 9090)")
+	apiserverCmd.Flags().StringVar(&manageiqURL, "manageiq-url", "", "ManageIQ base URL for AuthN/AuthZ, e.g. https://9.20.202.144:8443")
+	apiserverCmd.Flags().BoolVar(&manageiqInsecure, "manageiq-insecure-tls", false, "Skip TLS verification for ManageIQ (self-signed certs)")
+	// Hide the ManageIQ flags
+	_ = apiserverCmd.Flags().MarkHidden("manageiq-url")
+	_ = apiserverCmd.Flags().MarkHidden("manageiq-insecure-tls")
 	common.ConfigureRuntimeFlag(apiserverCmd, &runtimeType)
 
 	return apiserverCmd

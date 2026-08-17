@@ -35,7 +35,7 @@ func NewInMemoryUserRepo() *InMemoryUserRepo {
 // with a precomputed hash.
 func NewInMemoryUserRepoWithAdminHash(id, username, name, passwordHash string) *InMemoryUserRepo {
 	r := NewInMemoryUserRepo()
-	r.add(&models.User{
+	r.Upsert(&models.User{
 		ID:           id,
 		UserName:     username,
 		PasswordHash: passwordHash,
@@ -45,7 +45,10 @@ func NewInMemoryUserRepoWithAdminHash(id, username, name, passwordHash string) *
 	return r
 }
 
-func (r *InMemoryUserRepo) add(u *models.User) {
+// Upsert inserts or replaces a user entry. Safe for concurrent use.
+// Used both for seeding the admin user and for populating entries after a
+// ManageIQ token exchange (Flow B / IBM Power Mission Control passthrough).
+func (r *InMemoryUserRepo) Upsert(u *models.User) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.users[u.ID] = u

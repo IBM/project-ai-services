@@ -791,6 +791,60 @@
                 }
             }
         },
+        "/auth/token": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "**Experimental** — This endpoint is under active development and may change without notice.\nIBM Power Mission Control use this\nendpoint to exchange a pre-existing ManageIQ token for an internal JWT\nwithout supplying username/password credentials.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Exchange a ManageIQ token for a Catalog API JWT",
+                "responses": {
+                    "200": {
+                        "description": "Returns access_token, refresh_token, and token_type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired ManageIQ token",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "ManageIQ token does not have required permissions",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "ManageIQ resource not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "ManageIQ unavailable or returned an unexpected server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/components/{component_type}/providers/{provider_id}/params": {
             "get": {
                 "security": [
