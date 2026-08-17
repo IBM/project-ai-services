@@ -1491,12 +1491,13 @@ def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
 # Connector sync-state recovery helpers
 # ----------------------------------------------------------------------------
 
-def reset_syncing_connectors() -> List[str]:
+def reset_syncing_connectors(error: str = "Service restarted during sync tick") -> List[str]:
     """
     Bulk-set sync_status='out of sync' for every connector currently stuck in
-    'syncing'.  Returns the list of affected connector IDs.
+    'syncing', and stamp ``last_sync_error`` / ``error`` with *error*.
+    Returns the list of affected connector IDs.
     """
-    return db_manager.reset_syncing_connectors()
+    return db_manager.reset_syncing_connectors(error=error)
 
 
 def close_open_sync_log(connector_id: str, error: str) -> bool:

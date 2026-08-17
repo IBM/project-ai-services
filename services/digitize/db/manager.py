@@ -1495,19 +1495,28 @@ class DatabaseManager:
 
 
     @staticmethod
-    def reset_syncing_connectors() -> List[str]:
+    def reset_syncing_connectors(
+        error: str = "Service restarted during sync tick",
+    ) -> List[str]:
         """
         Bulk-reset all connectors stuck in ``'syncing'`` to ``'out of sync'``.
 
         Called on startup to unlock connectors that were mid-tick when the
         service crashed.  Returns the list of connector IDs that were reset.
+
+        Also stamps ``last_sync_error`` and ``error`` on every affected row so
+        that callers can see the crash reason without joining to sync-log rows.
         """
         try:
             with get_db_session() as session:
                 result = session.execute(
                     update(Connector)
                     .where(Connector.sync_status == ConnectorStatus.SYNCING)
-                    .values(sync_status=ConnectorStatus.OUT_OF_SYNC)
+                    .values(
+                        sync_status=ConnectorStatus.OUT_OF_SYNC,
+                        last_sync_error=error,
+                        error=error,
+                    )
                     .returning(Connector.id)
                 )
                 affected = [row[0] for row in result.fetchall()]

@@ -167,7 +167,7 @@ def recover_connector_sync_state() -> int:
     """
     _CRASH_ERROR = "Service restarted during sync tick"
 
-    affected_ids = reset_syncing_connectors()
+    affected_ids = reset_syncing_connectors(error=_CRASH_ERROR)
 
     for connector_id in affected_ids:
         try:
