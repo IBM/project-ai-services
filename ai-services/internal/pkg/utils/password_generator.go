@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 )
 
 const (
+	// DefaultKeyLength is the default byte length for generated AES-256 keys.
+	DefaultKeyLength = 32
 	// DefaultPasswordLength is the default length for generated passwords.
 	DefaultPasswordLength = 16
 	// Character sets for password generation.
@@ -32,6 +35,17 @@ type passwordOptions struct {
 	Upper   bool
 	Digits  bool
 	Special bool
+}
+
+// GenerateRandomKey generates a cryptographically secure random key of the given byte length
+// and returns it base64-encoded. Use keyLen=32 for an AES-256 key.
+func GenerateRandomKey(keyLen int) (string, error) {
+	key := make([]byte, keyLen)
+	if _, err := rand.Read(key); err != nil {
+		return "", fmt.Errorf("failed to generate random key: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(key), nil
 }
 
 // GenerateRandomPassword generates a cryptographically secure random password with default settings.
@@ -287,6 +301,35 @@ func extractGenerateAnnotation(n *yaml.Node) string {
 	return strings.TrimSpace(annotation)
 }
 
+// parseAnnotationOptions splits an @generate annotation into its type keyword and trailing
+// options string, then applies them to opts via parseOptions.
+// Format: @generate:<type> [key=value, ...].
+func parseAnnotationOptions(annotation, typeName string, opts *passwordOptions) error {
+	// Remove @generate: prefix and split the rest
+	if !strings.HasPrefix(annotation, "@generate:") {
+		return fmt.Errorf("invalid annotation format: %s", annotation)
+	}
+
+	// Get everything after @generate:
+	rest := strings.TrimPrefix(annotation, "@generate:")
+	rest = strings.TrimSpace(rest)
+
+	// Split by space to separate the type keyword from options
+	parts := strings.SplitN(rest, " ", maxPasswordTypeParts)
+	if len(parts) == 0 || parts[0] != typeName {
+		return fmt.Errorf("invalid annotation format: %s", annotation)
+	}
+
+	// If there are options, parse them
+	if len(parts) == maxPasswordTypeParts {
+		if err := parseOptions(parts[1], opts); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // parsePasswordOptions parses password options from annotation string.
 // Format: @generate:password length=24, special=true, upper=true.
 func parsePasswordOptions(annotation string) (passwordOptions, error) {
@@ -299,29 +342,23 @@ func parsePasswordOptions(annotation string) (passwordOptions, error) {
 		Special: true,
 	}
 
-	// Remove @generate: prefix and split the rest
-	if !strings.HasPrefix(annotation, "@generate:") {
-		return opts, fmt.Errorf("invalid annotation format: %s", annotation)
-	}
-
-	// Get everything after @generate:
-	rest := strings.TrimPrefix(annotation, "@generate:")
-	rest = strings.TrimSpace(rest)
-
-	// Split by space to separate "password" from options
-	parts := strings.SplitN(rest, " ", maxPasswordTypeParts)
-	if len(parts) == 0 || parts[0] != "password" {
-		return opts, fmt.Errorf("invalid annotation format: %s", annotation)
-	}
-
-	// If there are options, parse them
-	if len(parts) == maxPasswordTypeParts {
-		if err := parseOptions(parts[1], &opts); err != nil {
-			return opts, err
-		}
+	if err := parseAnnotationOptions(annotation, "password", &opts); err != nil {
+		return opts, err
 	}
 
 	return opts, nil
+}
+
+// parseKeyLength parses the optional length from a @generate:key annotation.
+// Format: @generate:key length=32. Defaults to DefaultKeyLength.
+func parseKeyLength(annotation string) (int, error) {
+	opts := passwordOptions{Length: DefaultKeyLength}
+
+	if err := parseAnnotationOptions(annotation, "key", &opts); err != nil {
+		return 0, err
+	}
+
+	return opts.Length, nil
 }
 
 // parseOptions parses key=value pairs and updates password options.
@@ -397,6 +434,16 @@ func generateValue(annotation string) (string, error) {
 		}
 
 		return generateRandomPasswordWithOptions(opts)
+
+	case "key":
+		// Generates a cryptographically secure random key, base64-encoded.
+		// Default length is 32 bytes (AES-256). Override with e.g. @generate:key length=16.
+		keyLen, err := parseKeyLength(annotation)
+		if err != nil {
+			return "", err
+		}
+
+		return GenerateRandomKey(keyLen)
 
 	default:
 		return "", fmt.Errorf("unsupported annotation type: %s", annotationType)

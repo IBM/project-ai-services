@@ -40,6 +40,8 @@ const (
 	CatalogSecretName = "catalog-secret"
 	// CatalogDBSecretName represents the catalog database secret name used in OpenShift deployments.
 	CatalogDBSecretName = "catalog-db-secret"
+	// CatalogConnectorSecretName represents the catalog connector encryption key secret name.
+	CatalogConnectorSecretName = "catalog-connector-secret"
 	// CatalogPodmanAuthSecretName represent the podman auth secret name.
 	CatalogPodmanAuthSecretName = "podman-auth-secret"
 	// CatalogDeploymentName represent the catalog deployment name.

@@ -12,6 +12,8 @@ backend:
   image: icr.io/ai-services-cicd/ai-services:v0.0.242
   runtime: "openshift"
   adminPasswordHash: ""
+  # @generate:key length=32
+  dbEncryptionKey: ""
   resources:
     requests:
       memory: "1Gi"
