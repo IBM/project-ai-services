@@ -47,34 +47,12 @@
   }
 }
 
-// TODO PR 9: move to shared once DynamicSchemaFields is unified
-.dynamicSchemaFields {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: $spacing-06;
-  align-items: start;
-
-  > * {
-    min-width: 0;
-  }
-
-  // Textareas span full width
-  :global(.cds--text-area__wrapper),
-  :global(.cds--text-area) {
-    grid-column: 1 / -1;
-  }
-
-  // UI-only checkbox (e.g. system prompt toggle) spans full width
-  :global(.cds--checkbox-wrapper) {
-    grid-column: 1 / -1;
-    margin-top: $spacing-07;
-    margin-bottom: $spacing-03;
-  }
-
-  // Single-column when a controlled field is present
-  &:has(.systemPromptTextArea) {
-    grid-template-columns: 1fr;
-  }
+// TODO PR 9: unify with Services deployErrorNotification into one shared class
+.customToast {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
 }
 
 // TODO PR 9: move to shared once serviceConfigFieldRow is unified
