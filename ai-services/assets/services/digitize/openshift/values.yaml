@@ -3,6 +3,8 @@ digitize:
   log_level: "INFO"
   database: "digitize_metadata"
   numShards: 1
+  # @generate:password length=32, special=false
+  dbEncryptionKey: ""
   resources:
     requests:
       cpu: "16"

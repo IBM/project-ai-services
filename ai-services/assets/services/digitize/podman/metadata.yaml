@@ -1,7 +1,7 @@
 name: digitize
 version: "1.0.0"
 podTemplateExecutions:
-  - [postgres-secret.yaml.tmpl]
+  - [postgres-secret.yaml.tmpl, digitize-db-encryption-secret.yaml.tmpl]
   - [postgres.yaml.tmpl]
   - [digitize.yaml.tmpl]
 
