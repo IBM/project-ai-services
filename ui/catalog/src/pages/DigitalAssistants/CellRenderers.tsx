@@ -1,190 +1,82 @@
-import { Link, Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
-import {
-  Delete,
-  CheckmarkFilled,
-  PauseOutline,
-  ErrorFilled,
-  InProgress,
-} from "@carbon/icons-react";
-import type { Dispatch } from "react";
+import type { Dispatch, ReactElement } from "react";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
-import styles from "./DigitalAssistants.module.scss";
+import type { SharedTableAction } from "@/components/Table/types";
+import {
+  ActionCell as SharedActionCell,
+  NameCell as SharedNameCell,
+  StatusCell,
+  MessageCell,
+} from "@/components/Table/components/CellRenderers";
 
-// Status configuration
-const STATUS_CONFIG = {
-  Initializing: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  Downloading: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  Deploying: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  Running: {
-    tagType: "green" as const,
-    icon: CheckmarkFilled,
-    className: styles.statusTagSuccess,
-  },
-  Deleting: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  Error: {
-    tagType: "red" as const,
-    icon: ErrorFilled,
-    className: styles.statusTagError,
-  },
-} as const;
+export { StatusCell, MessageCell };
 
-const DEFAULT_STATUS_CONFIG = {
-  tagType: "gray" as const,
-  icon: PauseOutline,
-  className: styles.statusTagSecondary,
-} as const;
-
-// Cell Renderer Components
-interface CellRendererProps {
-  value: unknown;
+interface ActionCellWrapperProps {
   rowId: string;
-  dispatch: Dispatch<AppAction>;
-  rowData?: { status?: string; type?: string };
+  dispatch: Dispatch<AppAction | SharedTableAction>;
+  rowData?: { status?: string };
 }
 
-export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
-  const canDelete = rowData?.status !== "Deleting";
+export const ActionCell = ({
+  rowId,
+  dispatch,
+  rowData,
+}: ActionCellWrapperProps) => (
+  <SharedActionCell
+    rowId={rowId}
+    rowData={rowData}
+    onDelete={(id) =>
+      dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id })
+    }
+    isDeleteEnabled={(status) => status !== "Deleting"}
+  />
+);
 
-  return (
-    <OverflowMenu size="lg" flipped aria-label="Actions">
-      <OverflowMenuItem
-        itemText={
-          <div className={styles.deleteMenuItem}>
-            <span>Delete</span>
-            <Delete size={16} />
-          </div>
-        }
-        isDelete
-        disabled={!canDelete}
-        onClick={() => {
-          dispatch({
-            type: ACTION_TYPES.OPEN_DELETE_DIALOG,
-            payload: rowId,
-          });
-        }}
-      />
-    </OverflowMenu>
-  );
-};
+interface NameCellWrapperProps {
+  value: unknown;
+  rowId: string;
+  dispatch: Dispatch<AppAction | SharedTableAction>;
+  rowData?: { status?: string; type?: string };
+}
 
 export const NameCell = ({
   value,
   rowId,
   dispatch,
   rowData,
-}: CellRendererProps) => {
-  const status = rowData?.status?.toLowerCase() || "";
-  const isRunning = status === "running";
-
-  if (!isRunning) {
-    return <span className={styles.nameText}>{String(value)}</span>;
-  }
-
-  return (
-    <Link
-      href="#"
-      onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-        e.preventDefault();
-        dispatch({
-          type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
-          payload: {
-            id: rowId,
-            name: String(value),
-            status: rowData?.status || "Unknown",
-            type: rowData?.type || "Digital assistant",
-            resources: [],
-          },
-        });
-      }}
-    >
-      {String(value)}
-    </Link>
-  );
-};
-
-export const StatusCell = ({ value }: CellRendererProps) => {
-  const status = String(value);
-  const config =
-    STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ||
-    DEFAULT_STATUS_CONFIG;
-
-  return (
-    <Tag
-      type={config.tagType}
-      size="md"
-      renderIcon={config.icon}
-      className={config.className}
-    >
-      {status}
-    </Tag>
-  );
-};
-
-export const MessageCell = ({ value, rowData }: CellRendererProps) => {
-  const message = String(value || "");
-  const status = rowData?.status || "";
-
-  // Hide message if status is Running or if message is empty
-  if (status === "Running" || !message) {
-    return <span></span>;
-  }
-
-  let MessageIcon;
-  let iconClass;
-
-  // First check row status for accurate icon selection
-  if (status === "Error") {
-    MessageIcon = ErrorFilled;
-    iconClass = styles.messageIconError;
-  } else {
-    // Fall back to checking message content for other statuses
-    const messageLower = message.toLowerCase();
-    const isError =
-      messageLower.includes("error") || messageLower.includes("failed");
-    const isSuccess =
-      messageLower.includes("success") || messageLower.includes("completed");
-
-    if (isError) {
-      MessageIcon = ErrorFilled;
-      iconClass = styles.messageIconError;
-    } else if (isSuccess) {
-      MessageIcon = CheckmarkFilled;
-      iconClass = styles.messageIconSuccess;
-    } else {
-      MessageIcon = InProgress;
-      iconClass = styles.messageIconInfo;
+}: NameCellWrapperProps) => (
+  <SharedNameCell
+    value={value}
+    rowId={rowId}
+    rowData={rowData}
+    isLinkEnabled={rowData?.status === "Running"}
+    onNameClick={(id, name, status, type) =>
+      dispatch({
+        type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+        payload: {
+          id,
+          name,
+          status,
+          type: type || "Digital assistant",
+          resources: [],
+        },
+      })
     }
-  }
+  />
+);
 
-  return (
-    <div className={styles.messageWithIcon}>
-      <MessageIcon size={16} className={iconClass} />
-      <span className={styles.messageText}>{message}</span>
-    </div>
-  );
-};
+interface CellRendererProps {
+  value: unknown;
+  rowId: string;
+  dispatch: Dispatch<AppAction | SharedTableAction>;
+  rowData?: { status?: string; type?: string };
+}
 
-// Cell renderer mapping
-export const CELL_RENDERERS = {
+type CellRendererComponent = (props: CellRendererProps) => ReactElement | null;
+
+export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
   actions: ActionCell,
   name: NameCell,
   status: StatusCell,
   messages: MessageCell,
-} as const;
+};

@@ -12,6 +12,7 @@ import type {
   ApplicationListResponse,
   Application,
   FetchApplicationsParams,
+  PaginationMetadata,
   DeleteApplicationResponse,
   DeployApplicationResponse,
   ResourcesResponse,
@@ -23,6 +24,7 @@ import type {
   DeploymentPayload,
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
+import type { DeployedServicesRow } from "@/components/DeployedServicesTable/types";
 
 // Fetches the list of available digital assistant architectures
 export async function fetchArchitectures(): Promise<ArchitectureSummary[]> {
@@ -381,4 +383,71 @@ export function transformApplicationToRow(
       actions: "actions",
     })),
   };
+}
+
+// Transforms an Application object into a DeployedServicesRow for the services table
+export function transformDeployedServiceToRow(
+  app: Application,
+): DeployedServicesRow {
+  return {
+    id: app.id,
+    name: app.name,
+    status: app.status as DeployedServicesRow["status"],
+    type: app.type,
+    uptime: calculateUptime(app.created_at),
+    service: app.type || "",
+    messages: app.message || "",
+    actions: "actions",
+  };
+}
+
+// Fetches a single page of deployed services (deployment_type=services)
+export async function fetchDeployedServicesPage(params: {
+  page: number;
+  pageSize: number;
+  catalogId?: string;
+}): Promise<{ data: Application[]; pagination: PaginationMetadata }> {
+  const response = await api.get<ApplicationListResponse>(
+    APPLICATION_ENDPOINTS.GET_APPLICATIONS,
+    {
+      params: {
+        deployment_type: "services",
+        page: params.page,
+        page_size: params.pageSize,
+        ...(params.catalogId ? { catalog_id: params.catalogId } : {}),
+      },
+    },
+  );
+  return {
+    data: response.data.data,
+    pagination: response.data.pagination,
+  };
+}
+
+// Fetches all deployed services across all pages — used for CSV export
+export async function fetchAllDeployedServices(
+  catalogId?: string,
+): Promise<Application[]> {
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: Application[] = [];
+
+  while (hasNext) {
+    const response = await api.get<ApplicationListResponse>(
+      APPLICATION_ENDPOINTS.GET_APPLICATIONS,
+      {
+        params: {
+          deployment_type: "services",
+          page: currentPage,
+          page_size: 100,
+          ...(catalogId ? { catalog_id: catalogId } : {}),
+        },
+      },
+    );
+    allData.push(...response.data.data);
+    hasNext = response.data.pagination?.has_next ?? false;
+    currentPage++;
+  }
+
+  return allData;
 }
