@@ -15,7 +15,7 @@ import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
-import { StepOne } from "./steps/StepOne";
+import { StepOne } from "./steps/DAStepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
@@ -64,7 +64,7 @@ export const DeployFlow = ({
   onSubmit,
 }: BaseDeployFlowProps) => {
   const { deployOptions, isLoading, error } = useDeployOptions();
-  const [hasSchemaError, setHasSchemaError] = useState(false);
+  const [hasComponentError, setHasComponentError] = useState(false);
 
   const {
     serviceSummaries,
@@ -192,6 +192,7 @@ export const DeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitialized.current = false;
+    setHasComponentError(false);
     onClose();
   };
 
@@ -207,7 +208,7 @@ export const DeployFlow = ({
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
       isPrimaryDisabled={
-        isLoading || hasSchemaError || (isLastStep && state.isEditing)
+        isLoading || hasComponentError || (isLastStep && state.isEditing)
       }
       onBack={handleBack}
       onNext={() => handleNext(state.formData.name)}
@@ -226,7 +227,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
-          onSchemaError={setHasSchemaError}
+          onComponentError={setHasComponentError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
