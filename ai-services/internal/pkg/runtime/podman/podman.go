@@ -83,8 +83,8 @@ func (pc *PodmanClient) ListImages() ([]types.Image, error) {
 	return toImageList(images), nil
 }
 
-func (pc *PodmanClient) PullImage(image string) error {
-	logger.Infof("Pulling image %s...\n", image)
+func (pc *PodmanClient) PullImage(ctx context.Context, image string) error {
+	logger.InfofCtx(ctx, "Pulling image %s...\n", image)
 
 	// Create pull options with auth file from environment
 	opts := &images.PullOptions{}
@@ -92,11 +92,17 @@ func (pc *PodmanClient) PullImage(image string) error {
 		opts.Authfile = &authFile
 	}
 
-	_, err := images.Pull(pc.Context, image, opts)
+	// podmanCtx merges pc.Context (Podman connection handle) with the caller's
+	// ctx (cancellation signal). We cannot pass ctx directly — the Podman SDK
+	// requires its connection value which only exists in pc.Context.
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	_, err := images.Pull(podCtx, image, opts)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
-	logger.Infof("Successfully pulled image %s\n", image)
+	logger.InfofCtx(ctx, "Successfully pulled image %s\n", image)
 
 	return nil
 }
@@ -489,6 +495,12 @@ func (pc *PodmanClient) UpdateSecret(name, deploymentName string, data map[strin
 	logger.ErrorfCtx(pc.Context, "unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) GetNamespace() (string, error) {
+	logger.ErrorfCtx(pc.Context, "unsupported method called!")
+
+	return "", fmt.Errorf("unsupported method")
 }
 
 // Type returns the runtime type for PodmanClient.

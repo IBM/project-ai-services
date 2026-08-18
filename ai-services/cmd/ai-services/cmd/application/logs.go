@@ -3,13 +3,14 @@ package application
 import (
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
@@ -67,21 +68,27 @@ Arguments:
 		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
+		namespace := applicationName
 
-		// For podman runtime with default mode
-		if !legacyLogs && rt == types.RuntimeTypePodman {
+		if !legacyLogs {
 			appClient, err := catalogClient.NewApplicationClient()
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
 			}
-			if _, err := utils.GetAppByName(appClient, applicationName); err != nil {
+			app, err := utils.GetAppByName(appClient, applicationName)
+			if err != nil {
 				return err
 			}
+			appID, err := uuid.Parse(app.ID)
+			if err != nil {
+				return fmt.Errorf("invalid application ID %q: %w", app.ID, err)
+			}
+			namespace = catalogutils.AppNamespace(appID)
 		}
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		app, err := factory.Create(applicationName)
+		app, err := factory.Create(namespace)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}
@@ -100,7 +107,7 @@ func init() {
 }
 
 func initLogsCommonFlags() {
-	logsCmd.Flags().BoolVar(&legacyLogs, "legacy", false, "Use legacy application logs implementation")
+	logsCmd.Flags().BoolVar(&legacyLogs, appFlags.Logs.Legacy, false, "Use legacy application logs implementation")
 	logsCmd.Flags().StringVar(&podName, appFlags.Logs.Pod, "", "Pod name to show logs from (required)")
 	logsCmd.Flags().StringVar(&containerNameOrID, appFlags.Logs.Container, "", "Container logs to show logs from (Optional)")
 	_ = logsCmd.MarkFlagRequired(appFlags.Logs.Pod)
@@ -115,7 +122,8 @@ func buildLogsFlagValidator() *flagvalidator.FlagValidator {
 	// Register common flags
 	builder.
 		AddCommonFlag(appFlags.Logs.Pod, nil).
-		AddCommonFlag(appFlags.Logs.Container, nil)
+		AddCommonFlag(appFlags.Logs.Container, nil).
+		AddCommonFlag(appFlags.Logs.Legacy, nil)
 
 	return builder.Build()
 }

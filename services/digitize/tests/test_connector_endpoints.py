@@ -12,6 +12,9 @@ Coverage:
   - GET    /v1/connectors                                 (200)
   - GET    /v1/connectors/{id}                            (200, 404)
   - GET    /v1/connectors/{id}/syncs                      (200, 404)
+  - GET    /v1/connectors/{id}/syncs/{sync_seq}           (200, 404)
+  - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
+  - POST   /v1/connectors/{id}/syncs/{sync_seq}/stop      (204 signalled, 409 stale seq, 409 not running, 404)
   - GET    /v1/documents — excludes connector-sourced docs
   - GET    /v1/documents/{doc_id} — 404 for connector-sourced
   - DELETE /v1/documents/{doc_id} — 404 for connector-sourced
@@ -19,11 +22,13 @@ Coverage:
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
+
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 import digitize.app as digitize_app
 import digitize.api.v1.documents as documents_router_module
@@ -72,7 +77,7 @@ def _make_connector(
     connector_id: str = CONNECTOR_ID,
     name: str = CONNECTOR_NAME,
     connector_type: str = CONNECTOR_TYPE,
-    sync_status: str = "up to date",
+    sync_status: str = ConnectorStatus.UP_TO_DATE,
 ) -> MagicMock:
     c = MagicMock()
     c.id = connector_id
@@ -85,13 +90,13 @@ def _make_connector(
     c.last_sync_at = _NOW
     c.sync_status = sync_status
     c.last_sync_error = None
+    c.error = None
     c.total_files = 42
     return c
 
 
-def _make_sync_log(log_id: int = 1, seq: int = 1) -> MagicMock:
+def _make_sync_log(seq: int = 1) -> MagicMock:
     log = MagicMock()
-    log.id = log_id
     log.connector_id = CONNECTOR_ID
     log.seq = seq
     log.started_at = _NOW
@@ -99,8 +104,7 @@ def _make_sync_log(log_id: int = 1, seq: int = 1) -> MagicMock:
     log.total_files = 42
     log.new_files = 2
     log.removed_files = 0
-    log.failed_files = 1
-    log.status = "completed"
+    log.status = SyncLogStatus.COMPLETED
     log.error = ""
     return log
 
@@ -181,6 +185,11 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
     monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
+    # Scheduler stubs — prevent RuntimeError from uninitialised _scheduler
+    import digitize.connectors.scheduler as scheduler_module
+    monkeypatch.setattr(scheduler_module, "register_connector_job", AsyncMock())
+    monkeypatch.setattr(scheduler_module, "remove_connector_job", AsyncMock())
+
     return TestClient(digitize_app.app)
 
 
@@ -193,7 +202,7 @@ class TestPostConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 201
-        assert response.text == ""
+        assert response.json() == {"connector_id": CONNECTOR_ID}
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
         captured = {}
@@ -222,7 +231,9 @@ class TestPostConnector:
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.text == ""
+        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert "private_key" not in response.text
+        assert "password" not in response.text
 
 
 # ===========================================================================
@@ -259,6 +270,10 @@ class TestPutConnector:
 
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
         """PUT with only connector_name must not touch connection_details."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
         upsert_mock = Mock()
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", upsert_mock)
         connector_test_client.put(
@@ -271,6 +286,10 @@ class TestPutConnector:
 
     def test_returns_409_on_name_conflict(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.upsert_connector",
             Mock(side_effect=IntegrityError(None, None, Exception("dup"))),
         )
@@ -280,27 +299,67 @@ class TestPutConnector:
         )
         assert response.status_code == 409
 
+    def test_returns_409_when_delete_pending(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)),
+        )
+        response = connector_test_client.put(
+            f"/v1/connectors/{CONNECTOR_ID}",
+            json={"connector_name": "new-name"},
+        )
+        assert response.status_code == 409
+
 
 # ===========================================================================
 # DELETE /v1/connectors/{connector_id}
 # ===========================================================================
 
 class TestDeleteConnector:
-    def test_returns_204_on_success(self, connector_test_client, monkeypatch):
+    """
+    The DELETE endpoint is non-blocking: it always returns 204 immediately.
+
+    Case A (SYNCING)  — mark DELETE_PENDING, return 204; tick handles teardown.
+    Case B (not SYNCING) — mark DELETE_PENDING, schedule _run_teardown, return 204.
+
+    _run_teardown itself is exercised by TestRunTeardown below.
+    """
+
+    def _patch_mark(self, monkeypatch, return_value=True):
+        mock = Mock(return_value=return_value)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.mark_connector_delete_pending",
+            mock,
+        )
+        return mock
+
+    def test_returns_204_case_b_not_syncing(self, connector_test_client, monkeypatch):
+        """Case B: not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
+        mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
         )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connector_checksums",
-            Mock(return_value=[]),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.delete_active_connector",
-            Mock(return_value=True),
-        )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+        def _consume_coro(coro):
+            coro.close()  # prevent "coroutine never awaited" warning
+        with patch("digitize.api.v1.connectors.asyncio.create_task", side_effect=_consume_coro) as task_mock:
+            response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 204
+        mark_mock.assert_called_once_with(CONNECTOR_ID)
+        task_mock.assert_called_once()
+
+    def test_returns_204_case_a_syncing(self, connector_test_client, monkeypatch):
+        """Case A: syncing → mark DELETE_PENDING, return 204; no teardown task created."""
+        mark_mock = self._patch_mark(monkeypatch)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
+        )
+        with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
+            response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+        assert response.status_code == 204
+        mark_mock.assert_called_once_with(CONNECTOR_ID)
+        task_mock.assert_not_called()
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
@@ -310,20 +369,17 @@ class TestDeleteConnector:
         response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 404
 
-    def test_returns_409_when_sync_in_progress(self, connector_test_client, monkeypatch):
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector(sync_status="syncing")),
-        )
-        response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
-        assert response.status_code == 409
 
-    def test_deletes_document_when_last_owner(self, connector_test_client, monkeypatch):
-        """When remaining_owner_count == 0 after removing a checksum, the doc is deleted."""
+@pytest.mark.asyncio
+class TestRunTeardown:
+    """Unit tests for the _run_teardown background coroutine."""
+
+    async def test_deletes_document_when_last_owner(self, monkeypatch):
+        """remaining_owner_count == 0 → document is deleted."""
         doc_delete_mock = Mock()
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
+            "digitize.api.v1.connectors.db_ops.list_sync_logs",
+            Mock(return_value=([], 0)),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
@@ -338,15 +394,17 @@ class TestDeleteConnector:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
+                from digitize.api.v1.connectors import _run_teardown
+                await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_called_once_with("doc-0001")
 
-    def test_does_not_delete_doc_when_other_owners_remain(self, connector_test_client, monkeypatch):
+    async def test_does_not_delete_doc_when_other_owners_remain(self, monkeypatch):
         """remaining_owner_count > 0 → doc must NOT be deleted."""
         doc_delete_mock = Mock()
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
-            Mock(return_value=_make_connector()),
+            "digitize.api.v1.connectors.db_ops.list_sync_logs",
+            Mock(return_value=([], 0)),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
@@ -361,7 +419,9 @@ class TestDeleteConnector:
             Mock(return_value=True),
         )
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
-            connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
+                from digitize.api.v1.connectors import _run_teardown
+                await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_not_called()
 
 
@@ -462,7 +522,7 @@ class TestGetConnector:
 
 class TestSyncLog:
     def test_returns_paginated_history(self, connector_test_client, monkeypatch):
-        logs = [_make_sync_log(log_id=3, seq=3), _make_sync_log(log_id=2, seq=2)]
+        logs = [_make_sync_log(seq=3), _make_sync_log(seq=2)]
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
@@ -505,6 +565,51 @@ class TestSyncLog:
             f"/v1/connectors/{CONNECTOR_ID}/syncs?limit=999"
         )
         assert response.status_code == 422  # FastAPI validation error
+
+
+class TestGetSync:
+    def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
+        log = _make_sync_log(seq=3)
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log",
+            Mock(return_value=log),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/3"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["seq"] == 3
+        assert data["status"] == SyncLogStatus.COMPLETED
+        assert data["total_files"] == 42
+
+    def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_sync_log",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/999"
+        )
+        assert response.status_code == 404
+
+    def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.get(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/3"
+        )
+        assert response.status_code == 404
 
 
 # ===========================================================================
@@ -568,6 +673,225 @@ class TestDocumentListConnectorFilter:
             Mock(return_value=True),
         )
         response = connector_test_client.delete("/v1/documents/connector-owned-doc")
+        assert response.status_code == 404
+
+# ===========================================================================
+# dispatch_sync  (core logic — no HTTP)
+# ===========================================================================
+
+class TestDispatchSync:
+    """Unit tests for dispatch_sync — verifies the dispatch logic in isolation,
+    without going through the HTTP layer."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_dispatches_task_and_returns_seq_when_lock_acquired(self):
+        """Lock acquired → sync-log opened, task created, seq returned."""
+        from digitize.api.v1.connectors import dispatch_sync
+
+        task_mock = Mock(side_effect=lambda coro: coro.close())
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=None), \
+             patch("digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+                   return_value=True), \
+             patch("digitize.api.v1.connectors.db_ops.init_sync_log_and_update_connector",
+                   return_value=7), \
+             patch("asyncio.create_task", task_mock):
+            seq = self._run(dispatch_sync(CONNECTOR_ID))
+
+        assert seq == 7
+        task_mock.assert_called_once()
+
+    def test_returns_existing_seq_when_already_syncing(self):
+        """Lock not acquired → existing seq returned, no new task."""
+        from digitize.api.v1.connectors import dispatch_sync
+
+        task_mock = Mock()
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=3), \
+             patch("digitize.api.v1.connectors.db_ops.get_sync_log_status",
+                   return_value=SyncLogStatus.STARTED), \
+             patch("digitize.api.v1.connectors.db_ops.try_acquire_sync_lock",
+                   return_value=False), \
+             patch("asyncio.create_task", task_mock):
+            seq = self._run(dispatch_sync(CONNECTOR_ID))
+
+        assert seq == 3
+        task_mock.assert_not_called()
+
+    def test_raises_sync_not_found_when_connector_missing(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncNotFound
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=None):
+            with pytest.raises(SyncNotFound):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+    def test_raises_sync_locked_when_delete_pending(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncLocked
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)):
+            with pytest.raises(SyncLocked):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+    def test_raises_sync_locked_when_cancel_pending(self):
+        from digitize.api.v1.connectors import dispatch_sync, SyncLocked
+
+        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+                   return_value=_make_connector()), \
+             patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+                   return_value=5), \
+             patch("digitize.api.v1.connectors.db_ops.get_sync_log_status",
+                   return_value=SyncLogStatus.CANCEL_PENDING):
+            with pytest.raises(SyncLocked):
+                self._run(dispatch_sync(CONNECTOR_ID))
+
+
+# ===========================================================================
+# POST /v1/connectors/{connector_id}/syncs  (HTTP mapping only)
+# ===========================================================================
+
+class TestTriggerSync:
+    """Tests for the trigger_sync route handler.
+
+    The dispatch logic is tested in TestDispatchSync; these tests only verify
+    that dispatch_sync results and exceptions are mapped to the correct HTTP
+    responses.
+    """
+
+    def test_returns_202_with_sync_seq_when_dispatched(
+        self, connector_test_client, monkeypatch
+    ):
+        """dispatch_sync succeeds → 202 with sync_seq."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(return_value=7),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        assert response.status_code == 202
+        assert response.json()["sync_seq"] == 7
+
+    def test_returns_202_no_op_when_already_syncing(
+        self, connector_test_client, monkeypatch
+    ):
+        """dispatch_sync returns existing seq (no-op) → 202."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(return_value=3),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        assert response.status_code == 202
+        assert response.json()["sync_seq"] == 3
+
+    def test_returns_404_when_connector_not_found(
+        self, connector_test_client, monkeypatch
+    ):
+        """dispatch_sync raises SyncNotFound → 404."""
+        from digitize.api.v1.connectors import SyncNotFound
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(side_effect=SyncNotFound("not found")),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        assert response.status_code == 404
+
+    def test_returns_409_when_sync_locked(
+        self, connector_test_client, monkeypatch
+    ):
+        """dispatch_sync raises SyncLocked → 409."""
+        from digitize.api.v1.connectors import SyncLocked
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.dispatch_sync",
+            AsyncMock(side_effect=SyncLocked("locked")),
+        )
+        response = connector_test_client.post(f"/v1/connectors/{CONNECTOR_ID}/syncs")
+        assert response.status_code == 409
+
+# ===========================================================================
+# POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
+# ===========================================================================
+
+_ACTIVE_SEQ = 7
+
+class TestStopSync:
+    def test_returns_204_when_sync_signalled(
+        self, connector_test_client, monkeypatch
+    ):
+        """Correct sync_seq + mark_sync_cancel_pending True → 204."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=_ACTIVE_SEQ),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.mark_sync_cancel_pending",
+            Mock(return_value=True),
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
+        assert response.status_code == 204
+
+    def test_returns_409_when_stale_sync_seq(
+        self, connector_test_client, monkeypatch
+    ):
+        """sync_seq older than the active one → 409 without calling mark_sync_cancel_pending."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=_ACTIVE_SEQ),
+        )
+        cancel_mock = Mock()
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.mark_sync_cancel_pending",
+            cancel_mock,
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ - 1}/stop"
+        )
+        assert response.status_code == 409
+        cancel_mock.assert_not_called()
+
+    def test_returns_409_when_no_sync_running(
+        self, connector_test_client, monkeypatch
+    ):
+        """get_active_sync_seq returns None (not syncing) → 409."""
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_sync_seq",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
+        assert response.status_code == 409
+
+    def test_returns_404_when_connector_not_found(
+        self, connector_test_client, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=None),
+        )
+        response = connector_test_client.post(
+            f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
+        )
         assert response.status_code == 404
 
 # Made with Bob

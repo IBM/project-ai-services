@@ -314,27 +314,43 @@ export interface ServiceDeployOptions {
   };
 }
 
-export interface ProviderSchemaProperty {
-  default?: string;
-  description?: string;
-  title?: string;
+export interface SchemaProperty {
   type?: string;
+  title?: string;
+  description?: string;
+  default?: unknown;
   format?: string;
-  oneOf?: Array<{
-    const: string;
-    description?: string;
-    title?: string;
-  }>;
+  enum?: string[];
+  oneOf?: Array<{ const: string; title?: string; description?: string }>;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  "x-ui-only"?: boolean;
+  "x-ui-controls"?: string;
+  "x-ui-controlled-by"?: string;
+  properties?: Record<string, SchemaProperty | undefined>;
+  required?: string[];
 }
 
-export interface ProviderSchema {
+export interface ProviderSchemaProperty extends SchemaProperty {
+  default?: string;
+}
+
+export interface JSONSchema {
   $schema?: string;
+  type: string;
+  properties?: Record<string, SchemaProperty | undefined>;
+  required?: string[];
+  [key: string]: unknown;
+}
+
+export interface ProviderSchema extends JSONSchema {
   properties: {
     model?: ProviderSchemaProperty;
     [key: string]: ProviderSchemaProperty | undefined;
   };
-  required?: string[];
-  type: string;
 }
 
 export interface LLMOption {

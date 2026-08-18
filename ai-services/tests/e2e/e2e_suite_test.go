@@ -40,6 +40,7 @@ var (
 	providedTemplate            string
 	appRuntime                  string
 	deleteExistingApp           bool
+	runFailureTests             bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -77,7 +78,9 @@ func init() {
 	flag.StringVar(&providedTemplate, "template", "rag", "Template to use for application creation (rag, summarize, digitize)")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
-
+	flag.BoolVar(&runFailureTests, "run-failure-tests", false,
+		"Opt in to running failure test suites (bootstrap, catalog, similarity). "+
+			"Failure tests are skipped by default to prevent accidental execution during a normal suite run.")
 }
 
 func TestE2E(t *testing.T) {
@@ -587,14 +590,15 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {			if providedAppName != "" {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
 				defer cancel()
-				
+
 				infoOut, infoErr := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
 				gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
-				
+
 				if templateName == "rag" {
 					var ragErr error
 					ragBaseURL, ragErr = cli.GetBaseURL(infoOut, backendPort)
@@ -608,7 +612,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				} else if templateName == "digitize" {
 					logger.Infof("[TEST] Using existing digitize application: %s", appName)
 				}
-	
+
 				ginkgo.Skip("Skipping creation — using existing application")
 			}
 
@@ -617,7 +621,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			// Refresh the catalog token before create — the 15-min TTL may have elapsed.
 			catalogLoginWithDiscovery(ctx, true)
-	
+
 			cliOptions := cli.CreateOptions{
 				SkipModelDownload: false,
 				ImagePullPolicy:   "IfNotPresent",
@@ -1709,6 +1713,124 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
 			logger.Infof("[TEST] ✓ Blank PDF ingestion completed successfully")
 		})
+		// ── Export API ──────────────────────────────────────────────────────────
+
+		ginkgo.It("should export all jobs and documents via /v1/export", func() {
+			ctx, cancel := withTimeout(12 * time.Minute)
+			defer cancel()
+
+			// Seed one completed job so the export payload is non-empty.
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-export-seed")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			createdDocIDs = append(createdDocIDs, finalStatus.Documents[0].ID)
+
+			exportResp, err := digitization.ExportAllData(ctx, digitizeBaseURL, 0)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(exportResp.Status).To(gomega.Equal("completed"))
+			gomega.Expect(exportResp.ExportTimestamp).NotTo(gomega.BeEmpty())
+			gomega.Expect(exportResp.Data.Jobs).NotTo(gomega.BeEmpty())
+			gomega.Expect(exportResp.Summary.Jobs.TotalExported).To(gomega.BeNumerically(">=", 1))
+			gomega.Expect(exportResp.Pagination.TotalRecords).To(gomega.BeNumerically(">=", 1))
+
+			// Confirm seeded job ID appears in the exported payload.
+			found := false
+			for _, job := range exportResp.Data.Jobs {
+				if id, ok := job["job_id"].(string); ok && id == jobResp.JobID {
+					found = true
+					break
+				}
+			}
+			gomega.Expect(found).To(gomega.BeTrue(), "seeded job %s should appear in export response", jobResp.JobID)
+			logger.Infof("[TEST] ✓ Export returned %d job(s) and %d document(s)",
+				exportResp.Summary.Jobs.TotalExported, exportResp.Summary.Documents.TotalExported)
+		})
+
+		ginkgo.It("should honour positive limit in /v1/export pagination", func() {
+			ctx, cancel := withTimeout(3 * time.Minute)
+			defer cancel()
+
+			const limitOne = 1
+			exportResp, err := digitization.ExportAllData(ctx, digitizeBaseURL, limitOne)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(exportResp.Pagination.Limit).To(gomega.Equal(limitOne))
+			gomega.Expect(len(exportResp.Data.Jobs)).To(gomega.BeNumerically("<=", limitOne))
+			logger.Infof("[TEST] ✓ Export limit=%d returned %d job(s) has_more=%v",
+				limitOne, len(exportResp.Data.Jobs), exportResp.Pagination.HasMore)
+		})
+
+		// ── Import API ──────────────────────────────────────────────────────────
+
+		ginkgo.It("should import previously exported data via /v1/import", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			// Create a completed job so there is at least one exportable record.
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-import-roundtrip")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			createdDocIDs = append(createdDocIDs, finalStatus.Documents[0].ID)
+
+			// Export then re-import the same records; existing records must be skipped (idempotent).
+			exportResp, err := digitization.ExportAllData(ctx, digitizeBaseURL, 0)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(exportResp.Data.Jobs).NotTo(gomega.BeEmpty())
+
+			importResp, err := digitization.ImportData(ctx, digitizeBaseURL, map[string]interface{}{
+				"data": map[string]interface{}{
+					"jobs":      exportResp.Data.Jobs,
+					"documents": exportResp.Data.Documents,
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(importResp.Status).To(gomega.Equal("completed"))
+			gomega.Expect(importResp.Summary.Jobs.Imported+importResp.Summary.Jobs.Skipped+
+				importResp.Summary.Documents.Imported+importResp.Summary.Documents.Skipped).
+				To(gomega.BeNumerically(">=", 1), "import should have imported or skipped at least one record")
+			gomega.Expect(importResp.Summary.Jobs.Failed).To(gomega.Equal(0), "no jobs should have failed during import")
+			gomega.Expect(importResp.Summary.Documents.Failed).To(gomega.Equal(0), "no documents should have failed during import")
+
+			logger.Infof("[TEST] ✓ Import round-trip: jobs(imported=%d skipped=%d) docs(imported=%d skipped=%d)",
+				importResp.Summary.Jobs.Imported, importResp.Summary.Jobs.Skipped,
+				importResp.Summary.Documents.Imported, importResp.Summary.Documents.Skipped)
+		})
+
+		// assertImport422 is a shared helper for the two import validation-error specs below.
+		assertImport422 := func(ctx context.Context, payload map[string]interface{}, wantSubstr, label string) {
+			_, err := digitization.ImportDataExpectingError(ctx, digitizeBaseURL, payload)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("422"), "%s: expected HTTP 422", label)
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring(wantSubstr), "%s: expected %q in error body", label, wantSubstr)
+			logger.Infof("[TEST] ✓ %s correctly rejected (422): %v", label, err)
+		}
+
+		ginkgo.It("should return 422 when importing with missing 'data' key", func() {
+			// FastAPI rejects payloads lacking the top-level "data" wrapper with 422.
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+			assertImport422(ctx, map[string]interface{}{
+				"jobs": []interface{}{}, "documents": []interface{}{},
+			}, "data", "missing-data-key")
+		})
+
+		ginkgo.It("should return 422 when importing an empty data payload", func() {
+			// API requires at least one job or document record.
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+			assertImport422(ctx, map[string]interface{}{
+				"data": map[string]interface{}{"jobs": []interface{}{}, "documents": []interface{}{}},
+			}, "At least one", "empty-data-payload")
+		})
 	})
 
 	ginkgo.Context("Summarization Tests", ginkgo.Label("summarization-tests"), func() {
@@ -1735,7 +1857,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
-	
+
 			// Poll for summarize-api URL (WaitForApplicationInfoURLs checks for RAG-specific URLs not in summarize template).
 			const summarizePollInterval = 15 * time.Second
 			var infoOutput string
@@ -2005,7 +2127,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ Verified job no longer exists")
 		})
 	})
-	
+
 	ginkgo.Context("Synchronous Summarization Tests", ginkgo.Label("summarization-tests"), func() {
 		// summarizeBaseURL is resolved fresh in BeforeAll from the running app.
 		var syncSummarizeBaseURL string
@@ -2629,7 +2751,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(resp.Status).NotTo(gomega.BeEmpty())
 				logger.Infof("[TEST] Similarity service health check passed status=%q", resp.Status)
 			})
-		
+
 		// Verify /v1/similarity-search with dense, sparse, and hybrid modes
 		ginkgo.It("Verify /v1/similarity-search endpoint by providing different search mode such as dense, sparse or hybrid",
 			func() {
@@ -2683,8 +2805,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(results).NotTo(gomega.BeEmpty(),
 					"all search modes failed — index may be empty or similarity-api is unreachable")
 			})
-	
-		
+
 		// Timing test — Verify Similarity search API includes time info in response headers or body in podman runtime
 		ginkgo.It("Verify Similarity search API includes time info in response headers or body in podman runtime",
 			func() {
@@ -2711,7 +2832,6 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(errResp.Error.Message).To(gomega.ContainSubstring("mode must be one of"))
 				logger.Infof("[TEST] invalid mode correctly rejected with: %s", errResp.Error)
 			})
-
 
 		// Verify /v1/similarity-search with rerank=true
 		ginkgo.It("Verify /v1/similarity-search endpoint by providing rerank as true",

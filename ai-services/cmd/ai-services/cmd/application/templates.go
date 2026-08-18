@@ -14,8 +14,6 @@ import (
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -46,9 +44,8 @@ var templatesCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		// When legacyTemplates is true and runtime is podman, use the older/stable code path
-		// For openshift runtime, always use the older/stable code path regardless of legacy flag
-		if !legacyTemplates && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		// When legacyTemplates is true, use the older/stable code path
+		if !legacyTemplates {
 			// Use catalog templates listing (architectures and services)
 			return listCatalogTemplates(cmd)
 		}

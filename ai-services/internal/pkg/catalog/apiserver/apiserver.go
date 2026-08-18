@@ -32,10 +32,14 @@
 package apiserver
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
 // APIServerOptions defines the configuration options for the API server such as the port to listen
@@ -46,6 +50,13 @@ type APIServerOptions struct {
 	TokenManager       *auth.TokenManager
 	Blacklist          repository.TokenBlacklist
 	ApplicationService repository.ApplicationServiceInterface
+
+	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
+	// Defaults to 9090 when zero.
+	WorkerGatewayPort int
+	// WorkerRegistry holds the in-memory state of all connected workers and owns
+	// the bootstrap token store.
+	WorkerRegistry *registry.Registry
 }
 
 // APIserver represents the API server instance, holding the configuration and authentication provider.
@@ -55,6 +66,9 @@ type APIserver struct {
 	tokenManager       *auth.TokenManager
 	blacklist          repository.TokenBlacklist
 	applicationService repository.ApplicationServiceInterface
+
+	workerGatewayPort int
+	workerRegistry    *registry.Registry
 }
 
 // NewAPIserver creates a new instance of the API server with the provided options, setting default values where necessary.
@@ -63,6 +77,9 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 	if options.Port == 0 {
 		options.Port = 8080
 	}
+	if options.WorkerGatewayPort == 0 {
+		options.WorkerGatewayPort = 9090
+	}
 
 	return &APIserver{
 		port:               options.Port,
@@ -70,13 +87,38 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		tokenManager:       options.TokenManager,
 		blacklist:          options.Blacklist,
 		applicationService: options.ApplicationService,
+		workerGatewayPort:  options.WorkerGatewayPort,
+		workerRegistry:     options.WorkerRegistry,
 	}
 }
 
 // Start initializes the API server and begins listening for incoming requests on the configured port.
-// It sets up the router with authentication middleware and routes.
-func (a *APIserver) Start() error {
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService)
+// It sets up the router with authentication middleware and routes, and starts the gRPC worker gateway.
+// ctx should be a signal-aware context (e.g. from signal.NotifyContext) so that SIGINT/SIGTERM
+// trigger graceful shutdown of the gateway and sweeper.
+func (a *APIserver) Start(ctx context.Context) error {
+	// Wrap with CancelCause so the gateway can abort the whole process if Serve fails.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
-	return r.Run(fmt.Sprintf(":%d", a.port))
+	// Start the gRPC worker gateway.
+	gw := gateway.New(a.workerRegistry)
+	gatewayAddr := fmt.Sprintf(":%d", a.workerGatewayPort)
+	if err := gw.Start(ctx, cancel, gatewayAddr); err != nil {
+		return fmt.Errorf("failed to start worker gateway: %w", err)
+	}
+	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
+
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry)
+
+	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
+		return err
+	}
+
+	// If ctx was cancelled by a gateway failure, surface that cause.
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+
+	return nil
 }

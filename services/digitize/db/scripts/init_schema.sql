@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     last_sync_at            TIMESTAMPTZ,
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     last_sync_error         TEXT,
+    error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
     CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
 );
@@ -74,7 +75,6 @@ CREATE INDEX IF NOT EXISTS idx_cdc_connector_id
     ON connector_document_checksum (connector_id);
 
 CREATE TABLE IF NOT EXISTS connector_sync_logs (
-    id               BIGSERIAL   PRIMARY KEY,
     connector_id     TEXT        NOT NULL,
     seq              INTEGER     NOT NULL,
     started_at       TIMESTAMPTZ NOT NULL,
@@ -85,11 +85,10 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     failed_files     INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
+    CONSTRAINT pk_csl PRIMARY KEY (connector_id, seq),
     CONSTRAINT fk_csh_connector
         FOREIGN KEY (connector_id)
-        REFERENCES connectors(id) ON DELETE CASCADE,
-    CONSTRAINT uq_csh_connector_seq
-        UNIQUE (connector_id, seq)
+        REFERENCES connectors(id) ON DELETE CASCADE
 );
 
 -- Create indexes with IF NOT EXISTS

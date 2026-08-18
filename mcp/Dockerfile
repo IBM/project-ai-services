@@ -61,5 +61,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["/app/ibmcloud-api-mcp"]
 
 # Default command - can be overridden at runtime
-# Example: docker run ... ibmcloud-api-mcp --description <url> --endpoint <url> --auth-api-key <key> --http
+# HTTP mode requires --auth-passthrough: the server does not authenticate incoming requests, so
+# each caller must supply its own Authorization header. Server-held credentials are stdio-only.
+# Example: docker run ... ibmcloud-api-mcp --description <url> --endpoint <url> --auth-passthrough --http
 CMD ["--help"]

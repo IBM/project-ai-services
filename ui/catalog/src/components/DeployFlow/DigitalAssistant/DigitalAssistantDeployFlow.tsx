@@ -1,69 +1,53 @@
-import { useReducer, useEffect, useCallback, useRef, useMemo } from "react";
-import { Tearsheet } from "@carbon/ibm-products";
-import {
-  ProgressIndicator,
-  ProgressStep,
-  InlineLoading,
-  ActionableNotification,
-} from "@carbon/react";
+import { useReducer, useEffect, useRef, useMemo } from "react";
 import type { DeployFlowState, DeployFlowAction } from "./types.ts";
 import type { BaseDeployFlowProps, DeployFormData } from "../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
 import { ACTION_TYPES } from "./types.ts";
-import { handleUpdateFormData } from "../Shared/utils/formData";
+import {
+  sharedDeployFlowReducer,
+  useDeployFlowReducer,
+} from "../Shared/hooks/useDeployFlowReducer";
 import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
-import { extractDeployError } from "../Shared/utils/deployError";
+import { runDeployment } from "../Shared/utils/runDeployment";
+import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
+import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
 import { dedupe } from "@/utils/requestManager";
-import styles from "./DigitalAssistantDeployFlow.module.scss";
+
+const STEPS = [
+  {
+    label: "Provide assistant details",
+    description: "Configure basic settings",
+  },
+  {
+    label: "Configure services",
+    description: "Select and configure services",
+  },
+];
+const STEP_ONE = 0;
+const LAST_STEP = STEPS.length - 1;
 
 const getInitialState = (formData: DeployFormData): DeployFlowState => ({
-  currentStep: 0,
+  ...BASE_INITIAL_STATE,
   isLoading: false,
-  isDeploying: false,
-  isEditing: false,
-  hasInsufficientResources: false,
   error: null,
-  deployError: null,
-  deployToastOpen: false,
   formData,
-  showStepOneNameError: false,
 });
 
-const deployFlowReducer = (
+const daDeployFlowReducer = (
   state: DeployFlowState,
   action: DeployFlowAction,
 ): DeployFlowState => {
   switch (action.type) {
-    case ACTION_TYPES.SET_CURRENT_STEP:
-      return { ...state, currentStep: action.payload };
     case ACTION_TYPES.SET_IS_LOADING:
       return { ...state, isLoading: action.payload };
-    case ACTION_TYPES.SET_IS_DEPLOYING:
-      return { ...state, isDeploying: action.payload };
-    case ACTION_TYPES.SET_IS_EDITING:
-      return { ...state, isEditing: action.payload };
-    case ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES:
-      return { ...state, hasInsufficientResources: action.payload };
     case ACTION_TYPES.SET_ERROR:
       return { ...state, error: action.payload };
-    case ACTION_TYPES.SET_DEPLOY_ERROR:
-      return { ...state, deployError: action.payload };
-    case ACTION_TYPES.SHOW_DEPLOY_TOAST:
-      return { ...state, deployToastOpen: true };
-    case ACTION_TYPES.HIDE_DEPLOY_TOAST:
-      return { ...state, deployToastOpen: false };
-    case ACTION_TYPES.SET_FORM_DATA:
-      return { ...state, formData: action.payload };
-    case ACTION_TYPES.UPDATE_FORM_DATA:
-      return handleUpdateFormData(state, action.payload);
-    case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
-      return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState({
         name: "Digital assistant (copy)",
@@ -72,7 +56,7 @@ const deployFlowReducer = (
         services: {},
       });
     default:
-      return state;
+      return sharedDeployFlowReducer(state, action);
   }
 };
 
@@ -142,7 +126,7 @@ export const DeployFlow = ({
     });
   }, [deployOptions]);
 
-  const [state, dispatch] = useReducer(deployFlowReducer, initialState);
+  const [state, dispatch] = useReducer(daDeployFlowReducer, initialState);
   const hasInitialized = useRef(false);
 
   useEffect(() => {
@@ -167,61 +151,16 @@ export const DeployFlow = ({
   }, [isLoading]);
 
   useEffect(() => {
-    if (error) {
-      dispatch({ type: ACTION_TYPES.SET_ERROR, payload: error });
-    }
+    dispatch({ type: ACTION_TYPES.SET_ERROR, payload: error ?? null });
   }, [error]);
 
-  const handleFormDataChange = useCallback(
-    (updates: Partial<DeployFormData>) => {
-      dispatch({ type: ACTION_TYPES.UPDATE_FORM_DATA, payload: updates });
-    },
-    [],
-  );
-
-  const handleEditingChange = useCallback((isEditing: boolean) => {
-    dispatch({ type: ACTION_TYPES.SET_IS_EDITING, payload: isEditing });
-  }, []);
-
-  const handleResourceStatusChange = useCallback(
-    (hasInsufficientResources: boolean) => {
-      dispatch({
-        type: ACTION_TYPES.SET_HAS_INSUFFICIENT_RESOURCES,
-        payload: hasInsufficientResources,
-      });
-    },
-    [],
-  );
-
-  const handleNext = () => {
-    if (!state.formData.name.trim()) {
-      dispatch({
-        type: ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
-        payload: true,
-      });
-      return;
-    }
-
-    if (state.currentStep < 1) {
-      dispatch({
-        type: ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
-        payload: false,
-      });
-      dispatch({
-        type: ACTION_TYPES.SET_CURRENT_STEP,
-        payload: state.currentStep + 1,
-      });
-    }
-  };
-
-  const handleBack = () => {
-    if (state.currentStep > 0) {
-      dispatch({
-        type: ACTION_TYPES.SET_CURRENT_STEP,
-        payload: state.currentStep - 1,
-      });
-    }
-  };
+  const {
+    handleNext,
+    handleFormDataChange,
+    handleEditingChange,
+    handleResourceStatusChange,
+    handleBack,
+  } = useDeployFlowReducer(dispatch, state.currentStep, STEP_ONE, LAST_STEP);
 
   const handleSubmit = async () => {
     if (!deployOptions) {
@@ -233,43 +172,31 @@ export const DeployFlow = ({
       return;
     }
 
-    dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: true });
-    dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: null });
-    dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
-
-    try {
-      // Transform cached params to plain data objects (strip fetchedAt timestamps)
-      const providerParamsData: Record<string, ProviderSchema> = {};
-      for (const [key, cache] of Object.entries(providerParams)) {
-        providerParamsData[key] = cache.data;
-      }
-
-      const serviceParamsData: Record<string, Record<string, unknown>> = {};
-      for (const [key, cache] of Object.entries(serviceParams)) {
-        serviceParamsData[key] = cache.data;
-      }
-
-      const deploymentPayload = transformToDeploymentPayload(
-        state.formData,
-        deployOptions,
-        providerParamsData,
-        serviceParamsData,
-      );
-      await deployApplication(deploymentPayload);
-
-      onSubmit();
-      dispatch({ type: ACTION_TYPES.RESET_STATE });
-      onClose();
-    } catch (error: unknown) {
-      dispatch({
-        type: ACTION_TYPES.SET_DEPLOY_ERROR,
-        payload: extractDeployError(error),
-      });
-      dispatch({ type: ACTION_TYPES.SHOW_DEPLOY_TOAST });
-      console.error("Deployment error:", error);
-    } finally {
-      dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
-    }
+    await runDeployment({
+      dispatch,
+      deploy: async () => {
+        const providerParamsData: Record<string, ProviderSchema> = {};
+        for (const [key, cache] of Object.entries(providerParams)) {
+          providerParamsData[key] = cache.data;
+        }
+        const serviceParamsData: Record<string, Record<string, unknown>> = {};
+        for (const [key, cache] of Object.entries(serviceParams)) {
+          serviceParamsData[key] = cache.data;
+        }
+        const deploymentPayload = transformToDeploymentPayload(
+          state.formData,
+          deployOptions,
+          providerParamsData,
+          serviceParamsData,
+        );
+        await deployApplication(deploymentPayload);
+      },
+      onSuccess: () => {
+        onSubmit();
+        dispatch({ type: ACTION_TYPES.RESET_STATE });
+        onClose();
+      },
+    });
   };
 
   const handleClose = () => {
@@ -278,111 +205,47 @@ export const DeployFlow = ({
     onClose();
   };
 
-  const isLastStep = state.currentStep === 1;
-
-  const actions = [
-    {
-      label: "Cancel",
-      kind: "ghost" as const,
-      onClick: handleClose,
-      disabled: state.isDeploying,
-    },
-    {
-      label: "Back",
-      kind: "secondary" as const,
-      onClick: handleBack,
-      disabled: state.currentStep === 0 || state.isDeploying,
-    },
-    {
-      label: isLastStep
-        ? state.isDeploying
-          ? "Deploying..."
-          : "Deploy"
-        : "Next",
-      kind: "primary" as const,
-      onClick: isLastStep ? handleSubmit : handleNext,
-      disabled:
-        state.isLoading || state.isDeploying || (isLastStep && state.isEditing),
-    },
-  ];
+  const isLastStep = state.currentStep === LAST_STEP;
 
   return (
-    <>
-      {state.deployToastOpen && state.deployError && (
-        <ActionableNotification
-          actionButtonLabel="Try again"
-          aria-label="close notification"
-          kind="error"
-          closeOnEscape
-          title="Deployment failed"
-          subtitle={state.deployError}
-          onCloseButtonClick={() => {
-            dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
-          }}
-          onActionButtonClick={async () => {
-            dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
-            await handleSubmit();
-          }}
-          className={styles.customToast}
+    <DeployTearsheetShell
+      open={open}
+      onClose={handleClose}
+      title="Deploy digital assistant"
+      steps={STEPS}
+      currentStep={state.currentStep}
+      isLastStep={isLastStep}
+      isDeploying={state.isDeploying}
+      isPrimaryDisabled={state.isLoading || (isLastStep && state.isEditing)}
+      onBack={handleBack}
+      onNext={() => handleNext(state.formData.name)}
+      onSubmit={handleSubmit}
+      deployError={state.deployError}
+      deployToastOpen={state.deployToastOpen}
+      onRetryDeploy={handleSubmit}
+      onDismissToast={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST })}
+      isLoading={state.isLoading}
+      error={state.error}
+    >
+      {state.currentStep === STEP_ONE && deployOptions && (
+        <StepOne
+          title="Provide assistant details"
+          formData={state.formData}
+          onChange={handleFormDataChange}
+          deployOptions={deployOptions}
+          showNameError={state.showStepOneNameError}
         />
       )}
-      <Tearsheet
-        open={open}
-        onClose={handleClose}
-        title="Deploy digital assistant"
-        actions={actions}
-        className="customTearsheet"
-        influencer={
-          <div className={styles.influencerContent}>
-            <ProgressIndicator currentIndex={state.currentStep} vertical>
-              <ProgressStep
-                label="Provide assistant details"
-                description="Configure basic settings"
-              />
-              <ProgressStep
-                label="Configure services"
-                description="Select and configure services"
-              />
-            </ProgressIndicator>
-          </div>
-        }
-        influencerPosition="left"
-        influencerWidth="narrow"
-      >
-        <div className={styles.stepContent}>
-          {state.isLoading ? (
-            <div className={styles.loadingContainer}>
-              <InlineLoading description="Loading deploy options..." />
-            </div>
-          ) : state.error ? (
-            <div className={styles.errorContainer}>
-              <p>Error: {state.error}</p>
-            </div>
-          ) : (
-            <>
-              {state.currentStep === 0 && deployOptions && (
-                <StepOne
-                  title="Provide assistant details"
-                  formData={state.formData}
-                  onChange={handleFormDataChange}
-                  deployOptions={deployOptions}
-                  showNameError={state.showStepOneNameError}
-                />
-              )}
-              {state.currentStep === 1 && deployOptions && (
-                <StepTwo
-                  title="Configure services"
-                  formData={state.formData}
-                  onChange={handleFormDataChange}
-                  deployOptions={deployOptions}
-                  onEditingChange={handleEditingChange}
-                  onResourceStatusChange={handleResourceStatusChange}
-                />
-              )}
-            </>
-          )}
-        </div>
-      </Tearsheet>
-    </>
+      {state.currentStep === LAST_STEP && deployOptions && (
+        <StepTwo
+          title="Configure services"
+          formData={state.formData}
+          onChange={handleFormDataChange}
+          deployOptions={deployOptions}
+          onEditingChange={handleEditingChange}
+          onResourceStatusChange={handleResourceStatusChange}
+        />
+      )}
+    </DeployTearsheetShell>
   );
 };

@@ -65,7 +65,7 @@ This command performs the following operations:
   - Creates an admin user (if not already present)
   - Initializes directory structure for applications and models
 
-Use --workergateway-port to set the gRPC port that worker agents connect to (default 9090).
+Use --workergateway-port to set the gRPC port that workers connect to (default 9090).
 The worker gateway is always started; only the port number is configurable.
 
 Additional configuration options include base directory customization, domain name setup,
@@ -346,7 +346,7 @@ func initConfigurePodmanDeployFlags() {
 		&workerGatewayPort,
 		"workergateway-port",
 		defaultWorkerGatewayPort,
-		"Port for the gRPC worker gateway that worker agents connect to (always active).\n"+
+		"Port for the gRPC worker gateway that workers connect to (always active).\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --workergateway-port 9090\n",
 	)

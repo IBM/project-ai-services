@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchServiceParams } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
+import type { ProviderSchema } from "@/types/api.types";
 
 interface UseServiceParamsResult {
-  params: Record<string, unknown> | null;
+  params: ProviderSchema | null;
   isLoading: boolean;
   error: string | null;
 }

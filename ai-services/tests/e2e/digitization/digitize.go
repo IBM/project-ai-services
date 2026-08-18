@@ -154,6 +154,67 @@ type ErrorResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// ─── Export / Import response types ─────────────────────────────────────────
+
+// ExportEntitySummary contains per-entity (jobs/documents) summary returned by /v1/export.
+type ExportEntitySummary struct {
+	TotalExported int `json:"total_exported"`
+	Completed     int `json:"completed"`
+	Failed        int `json:"failed"`
+}
+
+// ExportSummary holds both jobs and documents export summaries.
+type ExportSummary struct {
+	Jobs      ExportEntitySummary `json:"jobs"`
+	Documents ExportEntitySummary `json:"documents"`
+}
+
+// ExportPagination holds pagination metadata returned by /v1/export.
+type ExportPagination struct {
+	Limit           int  `json:"limit"`
+	Offset          int  `json:"offset"`
+	HasMore         bool `json:"has_more"`
+	TotalRecords    int  `json:"total_records"`
+	ReturnedRecords int  `json:"returned_records"`
+}
+
+// ExportData holds the raw jobs and documents records returned by /v1/export.
+type ExportData struct {
+	Jobs      []map[string]interface{} `json:"jobs"`
+	Documents []map[string]interface{} `json:"documents"`
+}
+
+// ExportResponse is the top-level response from GET /v1/export.
+type ExportResponse struct {
+	Status          string           `json:"status"`
+	Data            ExportData       `json:"data"`
+	Summary         ExportSummary    `json:"summary"`
+	ExportTimestamp string           `json:"export_timestamp"`
+	DurationSeconds float64          `json:"duration_seconds"`
+	Pagination      ExportPagination `json:"pagination"`
+}
+
+// ImportSummaryEntity holds per-entity (jobs/documents) counters returned by /v1/import.
+type ImportSummaryEntity struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
+	Failed   int `json:"failed"`
+}
+
+// ImportSummary holds the combined import result summary.
+type ImportSummary struct {
+	Jobs      ImportSummaryEntity `json:"jobs"`
+	Documents ImportSummaryEntity `json:"documents"`
+}
+
+// ImportResponse is the top-level response from POST /v1/import.
+type ImportResponse struct {
+	Status   string        `json:"status"`
+	Summary  ImportSummary `json:"summary"`
+	Errors   []interface{} `json:"errors"`
+	Warnings []interface{} `json:"warnings"`
+}
+
 // IsResourceLockedError reports whether err is an HTTP 409 resource-lock error.
 func IsResourceLockedError(err error) bool {
 	return common.IsResourceLockedError(err)
@@ -663,6 +724,85 @@ func IngestTestDocumentViaDigitizeAPI(ctx context.Context, digitizeBaseURL, jobN
 		jobResp.JobID, finalStatus.Status, len(finalStatus.Documents))
 
 	return nil
+}
+
+// ─── Export / Import API helpers ─────────────────────────────────────────────
+
+// doExport issues GET /v1/export and returns the raw (body, statusCode, error).
+func doExport(ctx context.Context, baseURL, limitParam string) ([]byte, int, error) {
+	return doGet(ctx, fmt.Sprintf("%s/v1/export?limit=%s", baseURL, limitParam), docCallTimeout)
+}
+
+// doImport marshals payload and issues POST /v1/import; returns (body, statusCode, error).
+func doImport(ctx context.Context, baseURL string, payload map[string]interface{}) ([]byte, int, error) {
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to marshal import payload: %w", err)
+	}
+
+	return sendJobRequest(ctx, fmt.Sprintf("%s/v1/import", baseURL), bytes.NewBuffer(jsonBody), "application/json")
+}
+
+// ExportAllData calls GET /v1/export; pass limit=0 for all records, positive int for pagination.
+func ExportAllData(ctx context.Context, baseURL string, limit int) (*ExportResponse, error) {
+	limitStr := "-1"
+	if limit > 0 {
+		limitStr = fmt.Sprintf("%d", limit)
+	}
+
+	body, statusCode, err := doExport(ctx, baseURL, limitStr)
+	if err != nil {
+		return nil, err
+	}
+
+	var exportResp ExportResponse
+	if err := common.ValidateStatusAndUnmarshal(body, statusCode, http.StatusOK, &exportResp); err != nil {
+		return nil, err
+	}
+
+	logger.Infof("[DIGITIZE] Export completed: %d job(s), %d document(s) exported",
+		exportResp.Summary.Jobs.TotalExported, exportResp.Summary.Documents.TotalExported)
+
+	return &exportResp, nil
+}
+
+// ImportData calls POST /v1/import with payload {"data":{"jobs":[...],"documents":[...]}} and returns the response.
+func ImportData(ctx context.Context, baseURL string, payload map[string]interface{}) (*ImportResponse, error) {
+	respBody, statusCode, err := doImport(ctx, baseURL, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var importResp ImportResponse
+	if err := common.ValidateStatusAndUnmarshal(respBody, statusCode, http.StatusOK, &importResp); err != nil {
+		return nil, err
+	}
+
+	logger.Infof("[DIGITIZE] Import completed: jobs(imported=%d skipped=%d failed=%d) docs(imported=%d skipped=%d failed=%d)",
+		importResp.Summary.Jobs.Imported, importResp.Summary.Jobs.Skipped, importResp.Summary.Jobs.Failed,
+		importResp.Summary.Documents.Imported, importResp.Summary.Documents.Skipped, importResp.Summary.Documents.Failed)
+
+	return &importResp, nil
+}
+
+// ExportDataExpectingError calls GET /v1/export and returns the parsed error when status != 200.
+func ExportDataExpectingError(ctx context.Context, baseURL, limitParam string) (*ErrorResponse, error) {
+	body, statusCode, err := doExport(ctx, baseURL, limitParam)
+	if err != nil {
+		return nil, err
+	}
+
+	return expectError(body, statusCode, http.StatusOK)
+}
+
+// ImportDataExpectingError calls POST /v1/import and returns the parsed error when status != 200.
+func ImportDataExpectingError(ctx context.Context, baseURL string, payload map[string]interface{}) (*ErrorResponse, error) {
+	respBody, statusCode, err := doImport(ctx, baseURL, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return expectError(respBody, statusCode, http.StatusOK)
 }
 
 // Made with Bob
