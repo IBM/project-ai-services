@@ -154,6 +154,9 @@ async def lifespan(app: FastAPI):
                     f"Error re-registering connector jobs: {exc}", exc_info=True
                 )
 
+            await sched.start_in_background()
+            logger.info("✅ Connector scheduler started")
+
             yield
 
     except Exception as exc:
