@@ -63,8 +63,10 @@ export const DeployFlow = ({
   onClose,
   onSubmit,
 }: BaseDeployFlowProps) => {
-  const { deployOptions, isLoading, error } = useDeployOptions();
-  const [hasSchemaError, setHasSchemaError] = useState(false);
+  const { deployOptions, isLoading, isProviderParamsLoading, error } =
+    useDeployOptions();
+  const [hasStep1SchemaError, setHasStep1SchemaError] = useState(false);
+  const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
 
   const {
     serviceSummaries,
@@ -207,7 +209,9 @@ export const DeployFlow = ({
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
       isPrimaryDisabled={
-        isLoading || hasSchemaError || (isLastStep && state.isEditing)
+        isLoading ||
+        (!isLastStep && (isProviderParamsLoading || hasStep1SchemaError)) ||
+        (isLastStep && (hasStep2SchemaError || state.isEditing))
       }
       onBack={handleBack}
       onNext={() => handleNext(state.formData.name)}
@@ -226,7 +230,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
-          onSchemaError={setHasSchemaError}
+          onSchemaError={setHasStep1SchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -237,6 +241,7 @@ export const DeployFlow = ({
           deployOptions={deployOptions}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
+          onSchemaError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>

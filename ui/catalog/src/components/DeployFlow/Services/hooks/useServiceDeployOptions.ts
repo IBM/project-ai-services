@@ -145,6 +145,7 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
     deployOptions,
     llmModels,
     isLoading: deployOptionsLoading || llmModelsLoading || shouldBeLoading,
-    error: deployOptionsError || llmModelsError,
+    error: deployOptionsError,
+    llmError: llmModelsError,
   };
 };
