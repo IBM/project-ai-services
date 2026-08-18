@@ -45,8 +45,9 @@ export const SHARED_ACTION_TYPES = {
   SET_DEPLOY_ERROR: "SET_DEPLOY_ERROR",
   SET_FORM_DATA: "SET_FORM_DATA",
   UPDATE_FORM_DATA: "UPDATE_FORM_DATA",
-  RESET_STATE: "RESET_STATE",
   SET_SHOW_STEP_ONE_NAME_ERROR: "SET_SHOW_STEP_ONE_NAME_ERROR",
+  SHOW_DEPLOY_TOAST: "SHOW_DEPLOY_TOAST",
+  HIDE_DEPLOY_TOAST: "HIDE_DEPLOY_TOAST",
 } as const;
 
 export type SharedDeployFlowAction =
@@ -70,7 +71,8 @@ export type SharedDeployFlowAction =
       type: typeof SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR;
       payload: boolean;
     }
-  | { type: typeof SHARED_ACTION_TYPES.RESET_STATE };
+  | { type: typeof SHARED_ACTION_TYPES.SHOW_DEPLOY_TOAST }
+  | { type: typeof SHARED_ACTION_TYPES.HIDE_DEPLOY_TOAST };
 
 export interface BaseDeployFlowProps {
   open: boolean;
@@ -84,6 +86,7 @@ export interface BaseDeployFlowState {
   isEditing: boolean;
   hasInsufficientResources: boolean;
   deployError: string | null;
+  deployToastOpen: boolean;
   formData: DeployFormData;
   showStepOneNameError: boolean;
 }
