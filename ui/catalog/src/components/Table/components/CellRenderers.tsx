@@ -46,12 +46,12 @@ export const STATUS_CONFIG = {
     className: sharedStyles.statusTagError,
   },
   // ── Data source connector statuses ──────────────────────────────────────────
-  connected: {
+  Connected: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  offline: {
+  Offline: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
@@ -122,8 +122,8 @@ export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
   let MessageIcon;
   let iconClassName: string;
 
-  // Error and offline both indicate a hard failure — use the error icon
-  if (status === "Error" || status === "offline") {
+  // Error and Offline both indicate a hard failure — use the error icon
+  if (status === "Error" || status === "Offline") {
     MessageIcon = ErrorFilled;
     iconClassName = sharedStyles.messageIconError;
   } else {

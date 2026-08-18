@@ -9,19 +9,24 @@ import {
   setLoading,
 } from "@/components/Table/utils/reducerUtils";
 
-export type ConnectorStatus = "connected" | "offline";
+export type ConnectorStatus = "Connected" | "Offline";
+
+export interface ConnectorProvider {
+  id: string;
+  name: string;
+}
 
 export interface DataSourceConnectorApiResponse {
   id: string;
   name: string;
   type: string;
-  provider: string;
+  provider: ConnectorProvider;
   status: ConnectorStatus;
   message: string;
+  connected_services: number;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  services_count: number;
 }
 
 export interface DataSourceConnectorsListResponse {
@@ -73,8 +78,8 @@ export const HEADERS: DataTableHeader[] = [
 
 // Status column sort order — offline floats to the top
 export const STATUS_SORT_ORDER: Record<ConnectorStatus, number> = {
-  offline: 1,
-  connected: 2,
+  Offline: 1,
+  Connected: 2,
 };
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {

@@ -13,21 +13,14 @@ export const CONNECTORS_ENDPOINTS = {
 export function transformConnectorToRow(
   connector: DataSourceConnectorApiResponse,
 ): DataSourceConnectorRow {
-  const typeLabel =
-    connector.provider === "object_storage"
-      ? "Object storage"
-      : connector.provider === "file_system"
-        ? "File system"
-        : connector.provider;
-
   return {
     id: connector.id,
     name: connector.name,
     status: connector.status,
-    type: typeLabel,
-    services: connector.services_count,
+    type: connector.provider.name,
+    services: connector.connected_services,
     // Suppress the message column for healthy connectors — no warning to show.
-    messages: connector.status === "connected" ? "" : (connector.message ?? ""),
+    messages: connector.status === "Connected" ? "" : (connector.message ?? ""),
     actions: "actions",
   };
 }

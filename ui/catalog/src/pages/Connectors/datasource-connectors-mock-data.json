@@ -4,10 +4,13 @@
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "name": "My S3 Bucket",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 3,
+      "connected_services": 3,
       "metadata": {
         "endpoint_url": "https://s3.us-east-1.amazonaws.com",
         "bucket_name": "my-docs",
@@ -21,29 +24,35 @@
     },
     {
       "id": "661f9511-f30c-52e5-b827-557766551111",
-      "name": "My SSH Share",
+      "name": "Production SSH Share",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
-      "message": "",
-      "services_count": 1,
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Offline",
+      "message": "Permission denied (publickey)",
+      "connected_services": 0,
       "metadata": {
         "host": "192.168.1.100",
         "username": "datauser",
         "remote_path": "/data/documents",
         "allowed_extensions": [".pdf", ".docx"]
       },
-      "created_at": "2026-05-15T08:30:00Z",
-      "updated_at": "2026-05-20T14:15:00Z"
+      "created_at": "2026-06-02T09:00:00Z",
+      "updated_at": "2026-06-02T09:30:00Z"
     },
     {
       "id": "772g0622-g40d-62f5-c938-668877662222",
       "name": "Production Data Lake S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 5,
+      "connected_services": 5,
       "metadata": {
         "endpoint_url": "https://s3.us-west-2.amazonaws.com",
         "bucket_name": "prod-data-lake",
@@ -59,10 +68,13 @@
       "id": "883h1733-h51e-73g6-d049-779988773333",
       "name": "Remote Linux Server - Archive",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "offline",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Offline",
       "message": "connection timeout on remote host: connection refused on port 22",
-      "services_count": 2,
+      "connected_services": 2,
       "metadata": {
         "host": "archive.company.internal",
         "username": "archiveuser",
@@ -76,10 +88,13 @@
       "id": "994i2844-i62f-84h7-e150-880099884444",
       "name": "IBM Cloud Object Storage - Dev",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 0,
+      "connected_services": 0,
       "metadata": {
         "endpoint_url": "https://s3.private.cloud.ibm.com",
         "bucket_name": "dev-documents",
@@ -95,10 +110,13 @@
       "id": "aa5j3955-j73g-95i8-f261-991100995555",
       "name": "Staging SSH Server",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 4,
+      "connected_services": 4,
       "metadata": {
         "host": "staging-srv.company.com",
         "username": "staging_sync",
@@ -112,10 +130,13 @@
       "id": "bb6k4066-k84h-06j9-g372-aa2211aa6666",
       "name": "Analytics S3 Bucket",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 7,
+      "connected_services": 7,
       "metadata": {
         "endpoint_url": "https://s3.eu-west-1.amazonaws.com",
         "bucket_name": "analytics-reports",
@@ -131,10 +152,13 @@
       "id": "cc7l5177-l95i-17k0-h483-bb3322bb7777",
       "name": "Legacy System SSH - Read Only",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "offline",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Offline",
       "message": "permission denied: user 'legacy_user' has no read access to /legacy/data",
-      "services_count": 1,
+      "connected_services": 1,
       "metadata": {
         "host": "legacy-system.internal",
         "username": "legacy_user",
@@ -148,10 +172,13 @@
       "id": "dd8m6288-m06j-28l1-i594-cc4433cc8888",
       "name": "Marketing Assets - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 2,
+      "connected_services": 2,
       "metadata": {
         "endpoint_url": "https://s3.ap-southeast-1.amazonaws.com",
         "bucket_name": "marketing-assets",
@@ -167,10 +194,13 @@
       "id": "ee9n7399-n17k-39m2-j605-dd5544dd9999",
       "name": "Compliance Documents - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 6,
+      "connected_services": 6,
       "metadata": {
         "host": "compliance-vault.secure.internal",
         "username": "compliance_reader",
@@ -184,10 +214,13 @@
       "id": "ff0o8400-o28l-40n3-k716-ee6655ee0000",
       "name": "Customer Data Lake - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 9,
+      "connected_services": 9,
       "metadata": {
         "endpoint_url": "https://s3.ca-central-1.amazonaws.com",
         "bucket_name": "customer-data-lake",
@@ -203,10 +236,13 @@
       "id": "gg1p9511-p39m-51o4-l827-ff7766ff1111",
       "name": "Training Materials - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 3,
+      "connected_services": 3,
       "metadata": {
         "host": "training-server.company.edu",
         "username": "training_sync",
@@ -220,10 +256,13 @@
       "id": "hh2q0622-q40n-62p5-m938-gg8877hh2222",
       "name": "Backup Archive - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "offline",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Offline",
       "message": "invalid credentials: access denied with the provided access key",
-      "services_count": 0,
+      "connected_services": 0,
       "metadata": {
         "endpoint_url": "https://s3.us-east-2.amazonaws.com",
         "bucket_name": "backup-archive",
@@ -239,10 +278,13 @@
       "id": "ii3r1733-r51o-73q6-n049-hh9988ii3333",
       "name": "Development Documents - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 1,
+      "connected_services": 1,
       "metadata": {
         "host": "dev-docs.internal.corp",
         "username": "dev_reader",
@@ -256,10 +298,13 @@
       "id": "jj4s2844-s62o-84r7-o150-ii0099jj4444",
       "name": "Financial Reports - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 4,
+      "connected_services": 4,
       "metadata": {
         "endpoint_url": "https://s3.eu-central-1.amazonaws.com",
         "bucket_name": "financial-reports",
@@ -275,10 +320,13 @@
       "id": "kk5t3955-t73o-95s8-p261-jj1100kk5555",
       "name": "Quality Assurance - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 2,
+      "connected_services": 2,
       "metadata": {
         "host": "qa-systems.test.internal",
         "username": "qa_sync",
@@ -292,10 +340,13 @@
       "id": "ll6u4066-u84o-06t9-q372-kk2211ll6666",
       "name": "HR Documents - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 5,
+      "connected_services": 5,
       "metadata": {
         "endpoint_url": "https://s3.sa-east-1.amazonaws.com",
         "bucket_name": "hr-documents",
@@ -311,10 +362,13 @@
       "id": "mm7v5177-v95o-17u0-r483-ll3322mm7777",
       "name": "Legal Contracts - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "offline",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Offline",
       "message": "host unreachable: network is down or firewall blocking access",
-      "services_count": 3,
+      "connected_services": 3,
       "metadata": {
         "host": "legal-vault.secure.corp",
         "username": "legal_access",
@@ -328,10 +382,13 @@
       "id": "nn8w6288-w06o-28v1-s594-mm4433nn8888",
       "name": "Product Specifications - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 8,
+      "connected_services": 8,
       "metadata": {
         "endpoint_url": "https://s3.ap-northeast-1.amazonaws.com",
         "bucket_name": "product-specs",
@@ -347,10 +404,13 @@
       "id": "oo9x7399-x17o-39v2-t605-nn5544oo9999",
       "name": "IT Infrastructure - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 6,
+      "connected_services": 6,
       "metadata": {
         "host": "it-repo.internal",
         "username": "it_admin",
@@ -364,10 +424,13 @@
       "id": "pp0y8400-y28o-40w3-u716-oo6655pp0000",
       "name": "Research Data - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 2,
+      "connected_services": 2,
       "metadata": {
         "endpoint_url": "https://s3.cn-north-1.amazonaws.com.cn",
         "bucket_name": "research-data",
@@ -383,10 +446,13 @@
       "id": "qq1z9511-z39o-51w4-v827-pp7766qq1111",
       "name": "Marketing Archive - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 1,
+      "connected_services": 1,
       "metadata": {
         "host": "archive-server.marketing.internal",
         "username": "marketing_archive",
@@ -400,10 +466,13 @@
       "id": "rr2a0622-a40o-62x5-w938-qq8877rr2222",
       "name": "Sensor Data Lake - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 0,
+      "connected_services": 0,
       "metadata": {
         "endpoint_url": "https://s3.af-south-1.amazonaws.com",
         "bucket_name": "sensor-data-lake",
@@ -419,10 +488,13 @@
       "id": "ss3b1733-b51o-73x6-x049-rr9988ss3333",
       "name": "Operational Logs - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "offline",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Offline",
       "message": "authentication failed: SSH key verification failed",
-      "services_count": 4,
+      "connected_services": 4,
       "metadata": {
         "host": "logs.ops.internal",
         "username": "logs_reader",
@@ -436,10 +508,13 @@
       "id": "tt4c2844-c62o-84y7-y150-ss0099tt4444",
       "name": "Supply Chain Data - S3",
       "type": "datasource",
-      "provider": "object_storage",
-      "status": "connected",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object storage"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 7,
+      "connected_services": 7,
       "metadata": {
         "endpoint_url": "https://s3.me-south-1.amazonaws.com",
         "bucket_name": "supply-chain",
@@ -455,10 +530,13 @@
       "id": "uu5d3955-d73o-95y8-z261-tt1100uu5555",
       "name": "Customer Support Tickets - SSH",
       "type": "datasource",
-      "provider": "file_system",
-      "status": "connected",
+      "provider": {
+        "id": "file_system",
+        "name": "File system"
+      },
+      "status": "Connected",
       "message": "",
-      "services_count": 3,
+      "connected_services": 3,
       "metadata": {
         "host": "support-db.company.internal",
         "username": "support_sync",
