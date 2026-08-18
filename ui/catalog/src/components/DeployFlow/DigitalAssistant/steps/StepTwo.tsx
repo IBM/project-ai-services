@@ -1,19 +1,18 @@
-import { useReducer, useMemo, useEffect, useState } from "react";
+import { useReducer, useMemo, useEffect } from "react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
-import { getResourceStatus, bytesToGB } from "../../Shared/utils/resources";
-import { ResourceRequirements } from "../components/ResourceRequirements";
+import { ResourceRequirementsPanel } from "../../Shared/components/ResourceRequirementsPanel";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
-import { fetchResources } from "@/api/applications.api";
+import { useResources } from "../../Shared/hooks/useResources";
 import { getResourceSharingKey } from "../utils/resourceSharing";
+import { sumProviderResources } from "../../Shared/utils/resources";
 import { useDeployStore } from "@/store/deploy.store";
 import type {
-  ResourcesResponse,
+  DeployOptionsResponse,
   DeployOptionsComponent as Component,
   ProviderSchema,
 } from "@/types/api.types";
-import type { ResourceItem } from "../../Shared/types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
 // Initial state
@@ -66,6 +65,127 @@ type DAStepProps = Omit<StepProps, "formData"> & {
   };
 };
 
+type DAFormData = DAStepProps["formData"];
+
+const calculateDARequiredResources = (
+  formData: DAFormData,
+  deployOptions: DeployOptionsResponse,
+) => {
+  const uniqueProviders: Record<
+    string,
+    {
+      cpu: number;
+      memory: number;
+      storage: number;
+      accelerators: Record<string, number>;
+    }
+  > = {};
+
+  // First, add global components (shared across all services).
+  // Global components get their resources from service-specific component definitions.
+  deployOptions.global_components.forEach((globalComponent) => {
+    const globalConfig = formData.globalComponents[globalComponent.type];
+    if (!globalConfig?.providerId) return;
+
+    // Find the first service that has this component type to get resource info
+    let resourceProvider = null;
+    for (const service of deployOptions.services) {
+      const serviceComponent = service.components.find(
+        (c) => c.type === globalComponent.type,
+      );
+      if (serviceComponent) {
+        resourceProvider = serviceComponent.providers.find(
+          (p) => p.id === globalConfig.providerId,
+        );
+        if (resourceProvider?.resources) {
+          break;
+        }
+      }
+    }
+
+    if (!resourceProvider?.resources) return;
+
+    const uniqueKey = getResourceSharingKey(
+      "global",
+      globalComponent.type,
+      globalConfig.providerId,
+      globalConfig.params || {},
+    );
+
+    if (!uniqueProviders[uniqueKey]) {
+      uniqueProviders[uniqueKey] = {
+        cpu: resourceProvider.resources.cpu || 0,
+        memory: resourceProvider.resources.memory || 0,
+        storage: resourceProvider.resources.storage || 0,
+        accelerators: { ...(resourceProvider.resources.accelerators || {}) },
+      };
+    }
+  });
+
+  // Then, add service-specific components for each enabled service.
+  Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
+    if (!serviceConfig.enabled) return;
+
+    const service = deployOptions.services.find((s) => s.id === serviceId);
+    if (!service) return;
+
+    // Service-level resources (the service application itself)
+    if (service.resources) {
+      const serviceKey = `service-${serviceId}`;
+      if (!uniqueProviders[serviceKey]) {
+        uniqueProviders[serviceKey] = {
+          cpu: service.resources.cpu || 0,
+          memory: service.resources.memory || 0,
+          storage: service.resources.storage || 0,
+          accelerators: { ...(service.resources.accelerators || {}) },
+        };
+      }
+    }
+
+    service.components.forEach((component) => {
+      // Skip global components — already counted above
+      const isGlobalComponent = deployOptions.global_components.some(
+        (gc) => gc.type === component.type,
+      );
+      if (isGlobalComponent) return;
+
+      const componentConfig = serviceConfig.components[component.type];
+      if (!componentConfig) return;
+
+      // Inference backend overrides provider when set
+      let selectedProviderId = componentConfig.providerId;
+      if (serviceConfig.inferenceBackend) {
+        selectedProviderId = serviceConfig.inferenceBackend;
+      }
+      if (!selectedProviderId) return;
+
+      const provider = component.providers.find(
+        (p) => p.id === selectedProviderId,
+      );
+      if (!provider?.resources) return;
+
+      // Resource sharing is model-aware — same model on same provider counts once
+      const uniqueKey = getResourceSharingKey(
+        serviceId,
+        component.type,
+        selectedProviderId,
+        componentConfig.params || {},
+      );
+
+      if (!uniqueProviders[uniqueKey]) {
+        uniqueProviders[uniqueKey] = {
+          cpu: provider.resources.cpu || 0,
+          memory: provider.resources.memory || 0,
+          storage: provider.resources.storage || 0,
+          accelerators: { ...(provider.resources.accelerators || {}) },
+        };
+      }
+    });
+  });
+
+  return sumProviderResources(uniqueProviders);
+};
+
 export const StepTwo: React.FC<DAStepProps> = ({
   title,
   formData,
@@ -79,282 +199,11 @@ export const StepTwo: React.FC<DAStepProps> = ({
   // Get service description helper from store
   const { getServiceDescription } = useDeployStore();
 
-  // Fetch resources directly without caching
-  const [resources, setResources] = useState<ResourcesResponse | null>(null);
-  const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
-  const [resourcesError, setResourcesError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetchResources()
-      .then((data) => {
-        if (!cancelled) {
-          setResources(data);
-          setResourcesLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const errorMessage =
-            err instanceof Error ? err.message : "Failed to load resources";
-          setResourcesError(errorMessage);
-          setResourcesLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Calculate required resources based on selected services and providers
-  const calculateRequiredResources = useMemo(() => {
-    const uniqueProviders: Record<
-      string,
-      {
-        cpu: number;
-        memory: number;
-        storage: number;
-        accelerators: Record<string, number>;
-      }
-    > = {};
-
-    // First, add global components (shared across all services)
-    // Note: Global components get their resources from service-specific component definitions
-    deployOptions.global_components.forEach((globalComponent) => {
-      const globalConfig = formData.globalComponents[globalComponent.type];
-      if (!globalConfig?.providerId) return;
-
-      // Find the first service that has this component type to get resource info
-      let resourceProvider = null;
-      for (const service of deployOptions.services) {
-        const serviceComponent = service.components.find(
-          (c) => c.type === globalComponent.type,
-        );
-        if (serviceComponent) {
-          resourceProvider = serviceComponent.providers.find(
-            (p) => p.id === globalConfig.providerId,
-          );
-          if (resourceProvider?.resources) {
-            break;
-          }
-        }
-      }
-
-      if (!resourceProvider?.resources) return;
-
-      // Global components are shared across all services, use provider+model as key
-      const uniqueKey = getResourceSharingKey(
-        "global", // Use "global" as serviceId for global components
-        globalComponent.type,
-        globalConfig.providerId,
-        globalConfig.params || {},
-      );
-
-      if (!uniqueProviders[uniqueKey]) {
-        uniqueProviders[uniqueKey] = {
-          cpu: resourceProvider.resources.cpu || 0,
-          memory: resourceProvider.resources.memory || 0,
-          storage: resourceProvider.resources.storage || 0,
-          accelerators: { ...(resourceProvider.resources.accelerators || {}) },
-        };
-      }
-    });
-
-    // Then, iterate through all services for service-specific components
-    Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
-      if (!serviceConfig.enabled) return;
-
-      const service = deployOptions.services.find((s) => s.id === serviceId);
-      if (!service) return;
-
-      // Add service-level resources (the service application itself)
-      if (service.resources) {
-        const serviceKey = `service-${serviceId}`;
-        if (!uniqueProviders[serviceKey]) {
-          uniqueProviders[serviceKey] = {
-            cpu: service.resources.cpu || 0,
-            memory: service.resources.memory || 0,
-            storage: service.resources.storage || 0,
-            accelerators: { ...(service.resources.accelerators || {}) },
-          };
-        }
-      }
-
-      // Iterate through all components in the service
-      service.components.forEach((component) => {
-        // Check if this is a global component (already counted above)
-        const isGlobalComponent = deployOptions.global_components.some(
-          (gc) => gc.type === component.type,
-        );
-
-        // Skip global components as they're already counted
-        if (isGlobalComponent) return;
-
-        const componentConfig = serviceConfig.components[component.type];
-        if (!componentConfig) return;
-
-        // For components that support inference backend, use it if available
-        let selectedProviderId = componentConfig.providerId;
-        if (serviceConfig.inferenceBackend) {
-          selectedProviderId = serviceConfig.inferenceBackend;
-        }
-
-        if (!selectedProviderId) return;
-
-        const provider = component.providers.find(
-          (p) => p.id === selectedProviderId,
-        );
-
-        if (!provider?.resources) return;
-
-        // Use dynamic resource sharing logic
-        // Always use component-level params (which contains the model parameter)
-        // This ensures proper resource sharing based on the model being used
-        const paramsForSharing = componentConfig.params || {};
-
-        const uniqueKey = getResourceSharingKey(
-          serviceId,
-          component.type,
-          selectedProviderId,
-          paramsForSharing,
-        );
-
-        if (!uniqueProviders[uniqueKey]) {
-          uniqueProviders[uniqueKey] = {
-            cpu: provider.resources.cpu || 0,
-            memory: provider.resources.memory || 0,
-            storage: provider.resources.storage || 0,
-            accelerators: { ...(provider.resources.accelerators || {}) },
-          };
-        }
-      });
-    });
-
-    let totalCPU = 0;
-    let totalMemory = 0;
-    let totalStorage = 0;
-    const totalAccelerators: Record<string, number> = {};
-
-    Object.values(uniqueProviders).forEach((resources) => {
-      totalCPU += resources.cpu;
-      totalMemory += resources.memory;
-      totalStorage += resources.storage;
-
-      Object.entries(resources.accelerators).forEach(([key, count]) => {
-        totalAccelerators[key] = (totalAccelerators[key] || 0) + count;
-      });
-    });
-
-    const memoryGB = Math.round(totalMemory / 1024 ** 3);
-    const storageGB = Math.round(totalStorage / 1024 ** 3);
-
-    return {
-      cpu: totalCPU,
-      memory: memoryGB,
-      accelerators: totalAccelerators,
-      storage: storageGB,
-    };
-  }, [
-    formData.services,
-    formData.globalComponents,
-    deployOptions.services,
-    deployOptions.global_components,
-  ]);
-
-  // Format resources for display
-  const resourceRequirements = useMemo((): ResourceItem[] => {
-    if (!resources) {
-      return [];
-    }
-
-    const resourceItems: ResourceItem[] = [];
-
-    // 1. CPU (always present)
-    resourceItems.push({
-      label: "Processors",
-      required: calculateRequiredResources.cpu.toString(),
-      available: Math.floor(resources.cpu.available_cpu).toString(),
-      unit: "vCPUs",
-      type: "cpu",
-    });
-
-    // 2. Memory (always present)
-    resourceItems.push({
-      label: "Memory",
-      required: calculateRequiredResources.memory.toString(),
-      available: bytesToGB(resources.memory.available_bytes).toString(),
-      unit: "GB",
-      type: "memory",
-    });
-
-    // 3. Accelerators (may be empty object or contain multiple types)
-    const acceleratorKeys = Object.keys(resources.accelerators);
-    const totalRequired = Object.values(
-      calculateRequiredResources.accelerators,
-    ).reduce((sum, val) => sum + val, 0);
-
-    if (acceleratorKeys.length > 0) {
-      // Handle each accelerator type separately
-      acceleratorKeys.forEach((acceleratorKey) => {
-        const acceleratorData = resources.accelerators[acceleratorKey];
-        const requiredCount =
-          calculateRequiredResources.accelerators[acceleratorKey] || 0;
-
-        resourceItems.push({
-          label: "Accelerators",
-          required: requiredCount.toString(),
-          available: acceleratorData.available.toString(),
-          unit: "Cards",
-          type: "accelerator",
-          acceleratorType: acceleratorKey,
-        });
-      });
-    } else {
-      // No accelerators available in system - always show with 0 available
-      resourceItems.push({
-        label: "Accelerators",
-        required: totalRequired.toString(),
-        available: "0",
-        unit: "Cards",
-        type: "accelerator",
-      });
-    }
-
-    // 4. Storage (not provided by API, show required only)
-    if (calculateRequiredResources.storage > 0) {
-      resourceItems.push({
-        label: "Disk storage",
-        required: calculateRequiredResources.storage.toString(),
-        available: "N/A",
-        unit: "GB",
-        type: "storage",
-      });
-    }
-
-    return resourceItems;
-  }, [resources, calculateRequiredResources]);
-
-  // Check for insufficient resources and notify parent
-  useEffect(() => {
-    if (!resourcesLoading && !resourcesError && resources) {
-      const hasInsufficientResources = resourceRequirements.some((resource) => {
-        const status = getResourceStatus(resource.required, resource.available);
-        return status === "insufficient";
-      });
-      onResourceStatusChange?.(hasInsufficientResources);
-    } else {
-      // If resources are loading, in error state, or not available, consider it as insufficient
-      onResourceStatusChange?.(true);
-    }
-  }, [
-    resourceRequirements,
-    resourcesLoading,
-    resourcesError,
-    resources,
-    onResourceStatusChange,
-  ]);
+  const { resources, resourcesLoading, resourcesError } = useResources();
+  const calculatedResources = useMemo(
+    () => calculateDARequiredResources(formData, deployOptions),
+    [formData, deployOptions],
+  );
 
   // Extract service version options from API response
   const serviceVersionOptions = useMemo(
@@ -709,11 +558,12 @@ export const StepTwo: React.FC<DAStepProps> = ({
       </div>
 
       {/* Resource Requirements */}
-      <ResourceRequirements
-        resourceRequirements={resourceRequirements}
+      <ResourceRequirementsPanel
+        calculatedResources={calculatedResources}
+        resourceData={resources}
         resourcesLoading={resourcesLoading}
         resourcesError={resourcesError}
-        resourceData={!!resources}
+        onResourceStatusChange={onResourceStatusChange}
       />
 
       {/* Service Configurations - Rendered Dynamically */}

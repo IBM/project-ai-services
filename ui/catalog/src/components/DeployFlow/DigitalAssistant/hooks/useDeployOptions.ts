@@ -41,7 +41,6 @@ export const useDeployOptions = () => {
   useEffect(() => {
     if (!selectedArchitectureId) return;
 
-    // Check if cache is stale (older than 15 minutes) for this specific architecture
     const isStale = isDeployOptionsStale(selectedArchitectureId);
 
     if ((!deployOptions || isStale) && !deployOptionsLoading) {
@@ -51,7 +50,9 @@ export const useDeployOptions = () => {
       const requestKey = `deployOptions:${selectedArchitectureId}`;
       dedupe(requestKey, () => fetchDeployOptions(selectedArchitectureId))
         .then((data) => {
-          setDeployOptions(selectedArchitectureId, data);
+          useDeployStore
+            .getState()
+            .setDeployOptions(selectedArchitectureId, data);
         })
         .catch((err) => {
           setDeployOptionsError(
