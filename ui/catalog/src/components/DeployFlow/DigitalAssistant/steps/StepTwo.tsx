@@ -194,7 +194,7 @@ export const StepTwo: React.FC<DAStepProps> = ({
   deployOptions,
   onEditingChange,
   onResourceStatusChange,
-  onSchemaError,
+  onComponentError,
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
 
@@ -213,8 +213,8 @@ export const StepTwo: React.FC<DAStepProps> = ({
 
   // Notify parent so it can gate the Deploy button.
   useEffect(() => {
-    onSchemaError?.(failedServiceNames.length > 0);
-  }, [failedServiceNames, onSchemaError]);
+    onComponentError?.(failedServiceNames.length > 0);
+  }, [failedServiceNames, onComponentError]);
 
   const { resources, resourcesLoading, resourcesError } = useResources();
   const calculatedResources = useMemo(
