@@ -2,7 +2,11 @@
 -- +goose StatementBegin
 
 -- Worker runtime type enum
+-- 'unknown' is the initial value set at pre-registration time; it is
+-- replaced by the real runtime ('podman' | 'openshift') when the worker
+-- connects and calls Register via gRPC.
 CREATE TYPE worker_runtime_type AS ENUM (
+    'unknown',
     'podman',
     'openshift'
 );
@@ -15,9 +19,10 @@ CREATE TYPE worker_status AS ENUM (
 );
 
 -- ── workers ────────────────────────────────────────────────────────────────────
--- One row per registered worker agent.
+-- One row per registered worker.
 --
--- runtime_type:   execution environment the worker runs on (podman | openshift).
+-- runtime_type:   execution environment the worker runs on.
+--                 'unknown' until the worker connects and declares its runtime.
 -- status:         lifecycle state of the worker (pending | ready | disconnected).
 -- last_heartbeat: timestamp of the most recent heartbeat received from the worker;
 --                 NULL until the first heartbeat arrives.
@@ -27,7 +32,7 @@ CREATE TYPE worker_status AS ENUM (
 CREATE TABLE workers (
     id             UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
     name           TEXT                NOT NULL UNIQUE,
-    runtime_type   worker_runtime_type NOT NULL DEFAULT 'podman',
+    runtime_type   worker_runtime_type NOT NULL DEFAULT 'unknown',
     status         worker_status       NOT NULL DEFAULT 'pending',
     last_heartbeat TIMESTAMPTZ,
     metadata       JSONB,

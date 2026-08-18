@@ -104,15 +104,16 @@ type Resources struct {
 
 // Service represents a deployable AI service.
 type Service struct {
-	ID            string                `yaml:"id" json:"id"`
-	Name          string                `yaml:"name" json:"name"`
-	Description   string                `yaml:"description" json:"description"`
-	Type          string                `yaml:"type" json:"type"` // "service"
-	CertifiedBy   string                `yaml:"certified_by" json:"certified_by"`
-	Architectures []string              `yaml:"architectures" json:"architectures"`
-	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
-	Standalone    bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
-	About         *yaml.Node            `yaml:"-" json:"-"`
+	ID                string                `yaml:"id" json:"id"`
+	Name              string                `yaml:"name" json:"name"`
+	Description       string                `yaml:"description" json:"description"`
+	Type              string                `yaml:"type" json:"type"` // "service"
+	CertifiedBy       string                `yaml:"certified_by" json:"certified_by"`
+	Architectures     []string              `yaml:"architectures" json:"architectures"`
+	Dependencies      []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	Standalone        bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
+	AcceptsDatasource bool                  `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"`
+	About             *yaml.Node            `yaml:"-" json:"-"`
 }
 
 // UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors.
@@ -179,6 +180,16 @@ type ComponentSummary struct {
 	ComponentType string `json:"component_type"`
 }
 
+// Connector holds the metadata loaded from a connector's metadata.yaml file.
+type Connector struct {
+	Type          string `yaml:"type" json:"type"`                     // always "connector"
+	ID            string `yaml:"id" json:"id"`                         // e.g. "object_storage", "file_system"
+	Name          string `yaml:"name" json:"name"`                     // display name
+	Description   string `yaml:"description" json:"description"`       // short description
+	ConnectorType string `yaml:"connector_type" json:"connector_type"` // e.g. "datasource"
+	ConnectorName string `yaml:"connector_name" json:"connector_name"` // display label for connector_type
+}
+
 // RuntimeMetadata contains runtime-specific metadata.
 type RuntimeMetadata struct {
 	Name    string `yaml:"name" json:"name"`
@@ -205,12 +216,13 @@ type DeployOptionsComponent struct {
 
 // DeployOptionsService represents a service with its components.
 type DeployOptionsService struct {
-	ID         string                   `json:"id"`
-	Name       string                   `json:"name"`
-	Version    string                   `json:"version,omitempty"`
-	Schema     string                   `json:"schema,omitempty"`
-	Components []DeployOptionsComponent `json:"components"`
-	Resources  *Resources               `json:"resources,omitempty"`
+	ID                string                   `json:"id"`
+	Name              string                   `json:"name"`
+	Version           string                   `json:"version,omitempty"`
+	Schema            string                   `json:"schema,omitempty"`
+	Components        []DeployOptionsComponent `json:"components"`
+	Resources         *Resources               `json:"resources,omitempty"`
+	AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.

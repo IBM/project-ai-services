@@ -246,7 +246,7 @@ func (d *PodmanDeployer) pullImagesForDeployment(ctx context.Context, plan *Depl
 		return nil
 	}
 
-	if err := d.pullImages(imageSet); err != nil {
+	if err := d.pullImages(ctx, imageSet); err != nil {
 		return err
 	}
 
@@ -313,7 +313,7 @@ func (d *PodmanDeployer) extractImagesFromService(ctx context.Context, svc *Serv
 
 // pullImages pulls only missing images from the provided set using the runtime.
 // Images that are already present locally are skipped.
-func (d *PodmanDeployer) pullImages(imageSet map[string]bool) error {
+func (d *PodmanDeployer) pullImages(ctx context.Context, imageSet map[string]bool) error {
 	// Convert map to slice
 	images := make([]string, 0, len(imageSet))
 	for img := range imageSet {
@@ -325,7 +325,7 @@ func (d *PodmanDeployer) pullImages(imageSet map[string]bool) error {
 		Runtime: d.runtime,
 	}
 
-	if err := imgHelper.IfNotPresent(images); err != nil {
+	if err := imgHelper.IfNotPresent(ctx, images); err != nil {
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 

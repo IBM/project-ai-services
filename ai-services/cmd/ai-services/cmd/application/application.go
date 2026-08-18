@@ -54,7 +54,7 @@ func init() {
 	ApplicationCmd.AddCommand(backupCmd)
 
 	// Add runtime flag as required
-	ApplicationCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	ApplicationCmd.PersistentFlags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = ApplicationCmd.MarkPersistentFlagRequired("runtime")
 
 	ApplicationCmd.PersistentFlags().StringVar(&vars.ToolImage, "tool-image", vars.ToolImage, "Tool image to use for downloading the model(only for the development purpose)")
