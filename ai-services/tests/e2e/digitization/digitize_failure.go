@@ -1,0 +1,190 @@
+package digitization
+
+// digitize_failure.go — validator helpers and polling utilities for the
+// digitize failure test suite.
+//
+// These helpers are intentionally separate from digitize.go so that the
+// failure-test compilation surface stays self-contained and easy to review.
+// They follow the same validation style used in tests/e2e/similarity/similarity.go
+// (check HTTP status → parse body → check code → check message substring).
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+)
+
+// ListDocumentsExpectingError calls GET /v1/documents with the provided query
+// string (e.g. "limit=10&offset=0&status=bogus") and returns the parsed
+// ErrorResponse when the service replies with any non-200 status code.
+// If the service unexpectedly returns 200, a descriptive error is returned.
+func ListDocumentsExpectingError(ctx context.Context, baseURL, queryString string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/documents?%s", baseURL, queryString)
+
+	body, statusCode, err := doGet(ctx, url, getCallTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return expectError(body, statusCode, http.StatusOK)
+}
+
+// WaitForJobInProgress polls GET /v1/jobs/{jobID} every pollInterval until the
+// job transitions into "in_progress" status, or until timeout expires.
+//
+// Returns the most-recent JobStatusResponse (which will have Status == "in_progress")
+// on success, or a descriptive error on timeout or terminal failure state.
+//
+// Use this in failure tests that must attempt a disruptive action (delete job,
+// delete document) while the Spyre worker is actively processing.
+func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, pollInterval time.Duration) (*JobStatusResponse, error) {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for job %s to reach in_progress after %s", jobID, timeout)
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		status, err := GetJobStatus(ctx, baseURL, jobID)
+		if err != nil {
+			logger.Warningf("[DIGITIZE] WaitForJobInProgress: error polling job %s: %v — retrying in %s",
+				jobID, err, pollInterval)
+		} else {
+			logger.Infof("[DIGITIZE] WaitForJobInProgress: job %s status = %q", jobID, status.Status)
+
+			switch status.Status {
+			case "in_progress":
+				return status, nil
+			case "completed", "failed":
+				return nil, fmt.Errorf("job %s reached terminal state %q before entering in_progress", jobID, status.Status)
+			}
+			// accepted / pending / unknown: keep polling
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// cleanupTimeout is the per-cleanup budget: long enough for a slow Spyre job
+// to finish, short enough to avoid blocking the test runner indefinitely.
+const cleanupTimeout = 5 * time.Minute //nolint:mnd
+
+// CleanupJobAndDocuments is the repeatable-safe cleanup helper used by all
+// digitize failure tests.  It:
+//   1. Waits for the job to reach a terminal state (completed / failed / 404)
+//   2. Fetches the final job status to collect document IDs
+//   3. Deletes each document individually
+//   4. Deletes the job record
+//
+// Important: DeleteJob only removes the job record — documents survive
+// independently (confirmed in jobs.py L415).  Omitting step 3 leaves document
+// hashes in the DB, causing the next run's CreateJob to return 409 immediately.
+//
+// tcLabel is used only for log messages (e.g. "TC-2").
+func CleanupJobAndDocuments(baseURL, jobID, tcLabel string) {
+	cleanCtx, cleanCancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cleanCancel()
+
+	// Step 1: wait for terminal state so DeleteJob won't be rejected with 409.
+	finalStatus, _ := WaitForJobCompletion(cleanCtx, baseURL, jobID, cleanupTimeout)
+
+	// Step 2: collect document IDs — prefer the final status; fall back to a
+	// fresh GetJobStatus call if WaitForJobCompletion returned nil status.
+	if finalStatus == nil {
+		finalStatus, _ = GetJobStatus(cleanCtx, baseURL, jobID)
+	}
+
+	// Step 3: delete each document.
+	if finalStatus != nil {
+		for _, doc := range finalStatus.Documents {
+			if doc.ID == "" {
+				continue
+			}
+			if delErr := DeleteDocument(cleanCtx, baseURL, doc.ID); delErr != nil {
+				logger.Warningf(
+					"[FAILURE-TEST][Digitize][%s] cleanup: failed to delete document %s: %v",
+					tcLabel, doc.ID, delErr,
+				)
+			}
+		}
+	}
+
+	// Step 4: delete the job record.
+	if delErr := DeleteJob(cleanCtx, baseURL, jobID); delErr != nil {
+		logger.Warningf(
+			"[FAILURE-TEST][Digitize][%s] cleanup: failed to delete job %s: %v",
+			tcLabel, jobID, delErr,
+		)
+	}
+}
+
+// ValidateDigitizeInvalidRequestError asserts that the service rejected a
+// request with HTTP 400 and error code INVALID_REQUEST, and that the error
+// message contains msgSubstring.
+//
+// Use this for input-validation failures (e.g. unsupported query-parameter
+// value) where the service fires before touching the database.
+func ValidateDigitizeInvalidRequestError(errorResp *ErrorResponse, msgSubstring string) error {
+	if errorResp == nil {
+		return fmt.Errorf("expected an INVALID_REQUEST error response, got nil")
+	}
+
+	if errorResp.Error.Status != http.StatusBadRequest {
+		return fmt.Errorf("expected HTTP status 400 (INVALID_REQUEST), got %d — code: %q message: %q",
+			errorResp.Error.Status, errorResp.Error.Code, errorResp.Error.Message)
+	}
+
+	if errorResp.Error.Code != "INVALID_REQUEST" {
+		return fmt.Errorf("expected error code INVALID_REQUEST, got %q — message: %q",
+			errorResp.Error.Code, errorResp.Error.Message)
+	}
+
+	if !strings.Contains(errorResp.Error.Message, msgSubstring) {
+		return fmt.Errorf("expected error message to contain %q, got %q",
+			msgSubstring, errorResp.Error.Message)
+	}
+
+	return nil
+}
+
+// ValidateDigitizeResourceLockedError asserts that the service rejected a
+// request with HTTP 409 and error code RESOURCE_LOCKED, and that the error
+// message contains msgSubstring.
+//
+// Use this for attempts to modify a resource that is currently being
+// processed (active job deletion, duplicate file submission, document delete
+// while job is in progress).
+func ValidateDigitizeResourceLockedError(errorResp *ErrorResponse, msgSubstring string) error {
+	if errorResp == nil {
+		return fmt.Errorf("expected a RESOURCE_LOCKED error response, got nil")
+	}
+
+	if errorResp.Error.Status != http.StatusConflict {
+		return fmt.Errorf("expected HTTP status 409 (RESOURCE_LOCKED), got %d — code: %q message: %q",
+			errorResp.Error.Status, errorResp.Error.Code, errorResp.Error.Message)
+	}
+
+	if errorResp.Error.Code != "RESOURCE_LOCKED" {
+		return fmt.Errorf("expected error code RESOURCE_LOCKED, got %q — message: %q",
+			errorResp.Error.Code, errorResp.Error.Message)
+	}
+
+	if !strings.Contains(errorResp.Error.Message, msgSubstring) {
+		return fmt.Errorf("expected error message to contain %q, got %q",
+			msgSubstring, errorResp.Error.Message)
+	}
+
+	return nil
+}
