@@ -87,6 +87,18 @@ async def create_connector(body: ConnectorCreateRequest):
 
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
+        # Register the connector with the scheduler so it starts ticking
+        # immediately (fire_immediately=True for the first-ever sync).
+        try:
+            import digitize.connectors.scheduler as _sched
+            await _sched.register_connector_job(
+                connector_id, sync_interval, fire_immediately=True
+            )
+        except Exception as sched_exc:
+            logger.warning(
+                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
+            )
+
         db_ops.insert_connector(
             connector_id=connector_id,
             name=body.connector_name,
@@ -100,18 +112,6 @@ async def create_connector(body: ConnectorCreateRequest):
             f"Connector {connector_id!r} ({body.connector_name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
-
-        # Register the connector with the scheduler so it starts ticking
-        # immediately (fire_immediately=True for the first-ever sync).
-        try:
-            import digitize.connectors.scheduler as _sched
-            await _sched.register_connector_job(
-                connector_id, sync_interval, fire_immediately=True
-            )
-        except Exception as sched_exc:
-            logger.warning(
-                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
-            )
 
         return Response(
             content=f'{{"connector_id": "{connector_id}"}}',
