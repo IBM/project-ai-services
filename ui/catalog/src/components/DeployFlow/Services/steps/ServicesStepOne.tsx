@@ -60,10 +60,7 @@ export const StepOne: React.FC<StepProps> = ({
           const hasModelParameter =
             providerSchemas[schemaKey]?.properties?.model !== undefined;
 
-          const models = getComponentModels(
-            selectedServiceId,
-            component.type,
-          );
+          const models = getComponentModels(selectedServiceId, component.type);
           const modelOptions = models.map((m) => ({
             id: m.id,
             text: m.text,
@@ -171,10 +168,7 @@ export const StepOne: React.FC<StepProps> = ({
     if (!currentComponent) return;
 
     // Resolve the provider that owns this model from the store.
-    const models = getComponentModels(
-      selectedServiceId,
-      componentType,
-    );
+    const models = getComponentModels(selectedServiceId, componentType);
     const selectedModelOption = models.find((m) => m.id === model);
     if (!selectedModelOption) return;
 
