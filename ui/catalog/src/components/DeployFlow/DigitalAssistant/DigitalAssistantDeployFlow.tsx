@@ -1,8 +1,12 @@
-import { useReducer, useEffect, useRef, useMemo } from "react";
-import type { DeployFlowState, DeployFlowAction } from "./types.ts";
-import type { BaseDeployFlowProps, DeployFormData } from "../Shared/types";
+import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import type { DeployFlowAction } from "./types";
+import type {
+  BaseDeployFlowProps,
+  BaseDeployFlowState,
+  DeployFormData,
+} from "../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
-import { ACTION_TYPES } from "./types.ts";
+import { ACTION_TYPES } from "./types";
 import {
   sharedDeployFlowReducer,
   useDeployFlowReducer,
@@ -32,22 +36,16 @@ const STEPS = [
 const STEP_ONE = 0;
 const LAST_STEP = STEPS.length - 1;
 
-const getInitialState = (formData: DeployFormData): DeployFlowState => ({
+const getInitialState = (formData: DeployFormData): BaseDeployFlowState => ({
   ...BASE_INITIAL_STATE,
-  isLoading: false,
-  error: null,
   formData,
 });
 
 const daDeployFlowReducer = (
-  state: DeployFlowState,
+  state: BaseDeployFlowState,
   action: DeployFlowAction,
-): DeployFlowState => {
+): BaseDeployFlowState => {
   switch (action.type) {
-    case ACTION_TYPES.SET_IS_LOADING:
-      return { ...state, isLoading: action.payload };
-    case ACTION_TYPES.SET_ERROR:
-      return { ...state, error: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState({
         name: "Digital assistant (copy)",
@@ -66,6 +64,7 @@ export const DeployFlow = ({
   onSubmit,
 }: BaseDeployFlowProps) => {
   const { deployOptions, isLoading, error } = useDeployOptions();
+  const [hasSchemaError, setHasSchemaError] = useState(false);
 
   const {
     serviceSummaries,
@@ -102,7 +101,6 @@ export const DeployFlow = ({
               ? err.message
               : "Failed to load service descriptions";
           setServiceSummariesError(errorMessage);
-          console.error("Error fetching service summaries:", err);
         });
     }
   }, [
@@ -145,14 +143,6 @@ export const DeployFlow = ({
       });
     }
   }, [open, deployOptions]);
-
-  useEffect(() => {
-    dispatch({ type: ACTION_TYPES.SET_IS_LOADING, payload: isLoading });
-  }, [isLoading]);
-
-  useEffect(() => {
-    dispatch({ type: ACTION_TYPES.SET_ERROR, payload: error ?? null });
-  }, [error]);
 
   const {
     handleNext,
@@ -216,7 +206,9 @@ export const DeployFlow = ({
       currentStep={state.currentStep}
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
-      isPrimaryDisabled={state.isLoading || (isLastStep && state.isEditing)}
+      isPrimaryDisabled={
+        isLoading || hasSchemaError || (isLastStep && state.isEditing)
+      }
       onBack={handleBack}
       onNext={() => handleNext(state.formData.name)}
       onSubmit={handleSubmit}
@@ -224,8 +216,8 @@ export const DeployFlow = ({
       deployToastOpen={state.deployToastOpen}
       onRetryDeploy={handleSubmit}
       onDismissToast={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST })}
-      isLoading={state.isLoading}
-      error={state.error}
+      isLoading={isLoading}
+      error={error}
     >
       {state.currentStep === STEP_ONE && deployOptions && (
         <StepOne
@@ -234,6 +226,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
+          onSchemaError={setHasSchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (

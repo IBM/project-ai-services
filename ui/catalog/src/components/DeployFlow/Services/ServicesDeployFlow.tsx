@@ -71,10 +71,11 @@ export const ServicesDeployFlow = ({
   onSubmit,
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
-  const [state, dispatch] = useReducer(
-    servicesDeployFlowReducer,
-    getInitialState(),
-  );
+  const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
+    ...getInitialState(),
+    selectedServiceId: preSelectedServiceId ?? null,
+    currentStep: preSelectedServiceId ? STEP_ONE : 0,
+  });
 
   // Track if form data has been initialized for the current service to prevent re-initialization
   const hasInitializedFormData = useRef<string | null>(null);
