@@ -74,6 +74,11 @@
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+
+  &:focus-visible {
+    outline: 2px solid $focus;
+    outline-offset: 2px;
+  }
 }
 
 .resourceGrid {
@@ -189,6 +194,40 @@
   }
 }
 
+.dynamicSchemaFields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-06;
+  align-items: start;
+
+  > * {
+    min-width: 0;
+  }
+
+  :global {
+    .cds--text-input,
+    .cds--text-input__field-wrapper input,
+    .cds--text-area {
+      background-color: $field-02 !important;
+    }
+
+    .cds--text-area__wrapper,
+    .cds--text-area {
+      grid-column: 1 / -1;
+    }
+  }
+
+  :global(.cds--checkbox-wrapper) {
+    grid-column: 1 / -1;
+    margin-top: $spacing-07;
+    margin-bottom: $spacing-03;
+  }
+
+  &:has(.systemPromptTextArea) {
+    grid-template-columns: 1fr;
+  }
+}
+
 .systemPromptTextArea {
   margin-top: 0;
   grid-column: 1 / -1 !important;
@@ -284,6 +323,14 @@
   .formField {
     max-width: 100%;
   }
+}
+
+.deployErrorNotification {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
+  max-width: 400px;
 }
 
 // Required field indicators

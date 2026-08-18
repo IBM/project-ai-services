@@ -37,7 +37,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -55,12 +54,9 @@ type APIServerOptions struct {
 	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
 	// Defaults to 9090 when zero.
 	WorkerGatewayPort int
-	// WorkerRegistry holds the in-memory state of all connected workers.
+	// WorkerRegistry holds the in-memory state of all connected workers and owns
+	// the bootstrap token store.
 	WorkerRegistry *registry.Registry
-	// WorkerTokenStore issues and validates single-use bootstrap tokens for workers.
-	WorkerTokenStore *registry.TokenStore
-	// WorkerRepository is used by the gateway for heartbeat updates and the stale-worker sweeper.
-	WorkerRepository dbrepo.WorkerRepository
 }
 
 // APIserver represents the API server instance, holding the configuration and authentication provider.
@@ -73,8 +69,6 @@ type APIserver struct {
 
 	workerGatewayPort int
 	workerRegistry    *registry.Registry
-	workerTokenStore  *registry.TokenStore
-	workerRepository  dbrepo.WorkerRepository
 }
 
 // NewAPIserver creates a new instance of the API server with the provided options, setting default values where necessary.
@@ -95,8 +89,6 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		applicationService: options.ApplicationService,
 		workerGatewayPort:  options.WorkerGatewayPort,
 		workerRegistry:     options.WorkerRegistry,
-		workerTokenStore:   options.WorkerTokenStore,
-		workerRepository:   options.WorkerRepository,
 	}
 }
 
@@ -110,14 +102,14 @@ func (a *APIserver) Start(ctx context.Context) error {
 	defer cancel(nil)
 
 	// Start the gRPC worker gateway.
-	gw := gateway.New(a.workerRegistry, a.workerTokenStore, a.workerRepository)
+	gw := gateway.New(a.workerRegistry)
 	gatewayAddr := fmt.Sprintf(":%d", a.workerGatewayPort)
 	if err := gw.Start(ctx, cancel, gatewayAddr); err != nil {
 		return fmt.Errorf("failed to start worker gateway: %w", err)
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

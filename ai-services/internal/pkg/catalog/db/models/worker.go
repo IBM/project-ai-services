@@ -10,6 +10,9 @@ import (
 type WorkerRuntimeType string
 
 const (
+	// WorkerRuntimeTypeUnknown is the initial value stored at pre-registration
+	// time, before the worker connects and declares its runtime.
+	WorkerRuntimeTypeUnknown   WorkerRuntimeType = "unknown"
 	WorkerRuntimeTypePodman    WorkerRuntimeType = "podman"
 	WorkerRuntimeTypeOpenShift WorkerRuntimeType = "openshift"
 )

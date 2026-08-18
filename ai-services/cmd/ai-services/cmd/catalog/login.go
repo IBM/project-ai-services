@@ -22,6 +22,7 @@ func NewLoginCmd() *cobra.Command {
 		serverURL     string
 		username      string
 		passwordStdin bool
+		miqToken      string
 		insecure      bool
 		runtimeType   string
 	)
@@ -40,22 +41,23 @@ valid. It is refreshed automatically only when it is about to expire, avoiding
 unnecessary round-trips to the server.
 
 To get the Catalog backend endpoint, use: ai-services catalog info`,
-		Example: `  # Interactive login (password is prompted securely)
+		Example: ` # Interactive login (password is prompted securely)
   ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
 
   # Non-interactive login via stdin pipe (password not recorded in shell history)
   echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
 
-  # Login with insecure TLS (skip certificate verification)
+   # Login with insecure TLS (skip certificate verification)
   ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
-				return err
-			}
 
-			return validateServerURL(serverURL)
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return validateLoginFlags(runtimeType, serverURL, username, miqToken, passwordStdin)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if miqToken != "" {
+				return runLoginWithMIQToken(serverURL, miqToken, insecure)
+			}
+
 			return runLogin(serverURL, username, passwordStdin, insecure)
 		},
 	}
@@ -63,16 +65,34 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
 	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog backend endpoint (required)")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
+	cmd.Flags().StringVar(&miqToken, "miq-token", "", "ManageIQ token for token passthrough login")
+	_ = cmd.Flags().MarkHidden("miq-token")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	_ = cmd.MarkFlagRequired("server")
-	_ = cmd.MarkFlagRequired("username")
 
 	return cmd
 }
 
-// runLogin executes the login flow with the provided parameters.
+// runLoginWithMIQToken executes Flow B: exchange a ManageIQ token for a Catalog API JWT.
+func runLoginWithMIQToken(serverURL, miqToken string, insecure bool) error {
+	if insecure {
+		logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
+	}
+
+	logger.Infof("Logging in to %s using ManageIQ token...\n", serverURL)
+
+	if _, err := client.NewWithMIQToken(serverURL, miqToken, insecure); err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	logger.Infoln("Login successful.")
+
+	return nil
+}
+
+// runLogin executes Flow A: authenticate with username and password.
 func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
 	password, err := promptPassword(passwordStdin)
 	if err != nil {
@@ -122,6 +142,25 @@ func promptPassword(passwordStdin bool) (string, error) {
 	}
 
 	return password, nil
+}
+
+// validateLoginFlags validates all PreRunE checks for the login command.
+func validateLoginFlags(runtimeType, serverURL, username, miqToken string, passwordStdin bool) error {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+	if err := validateServerURL(serverURL); err != nil {
+		return err
+	}
+	// Exactly one auth method must be provided.
+	if miqToken == "" && username == "" {
+		return fmt.Errorf("one of --username or --miq-token is required")
+	}
+	if miqToken != "" && (username != "" || passwordStdin) {
+		return fmt.Errorf("--miq-token cannot be used with --username or --password-stdin")
+	}
+
+	return nil
 }
 
 // validateServerURL returns an error if raw is not a valid http or https URL.

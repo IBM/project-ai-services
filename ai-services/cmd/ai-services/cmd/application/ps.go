@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
@@ -83,8 +82,7 @@ Arguments:
 		}
 
 		// When legacyPs is true and runtime is podman, use the older/stable code path
-		// For openshift runtime, always use the older/stable code path regardless of legacy flag
-		if legacyPs && rt == types.RuntimeTypePodman {
+		if legacyPs {
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)
@@ -101,24 +99,7 @@ Arguments:
 		}
 
 		// Default: use new implementation via catalog
-		// For openshift runtime, always use the older/stable code path
-		if rt == types.RuntimeTypePodman {
-			return renderApplicationPS(opts)
-		}
-
-		// OpenShift runtime uses the older implementation
-		factory := application.NewFactory(rt)
-		app, err := factory.Create(applicationName)
-		if err != nil {
-			return fmt.Errorf("failed to create application instance: %w", err)
-		}
-
-		_, err = app.List(opts)
-		if err != nil {
-			return fmt.Errorf("failed to fetch application: %w", err)
-		}
-
-		return nil
+		return renderApplicationPS(opts)
 	},
 }
 
@@ -129,7 +110,7 @@ func init() {
 func initPsCommonFlags() {
 	psCmd.Flags().BoolVar(
 		&legacyPs,
-		"legacy",
+		appFlags.Ps.Legacy,
 		false,
 		"Use legacy application ps implementation",
 	)
@@ -151,7 +132,8 @@ func buildPsFlagValidator() *flagvalidator.FlagValidator {
 
 	// Register common flags
 	builder.
-		AddCommonFlag(appFlags.Ps.Output, nil)
+		AddCommonFlag(appFlags.Ps.Output, nil).
+		AddCommonFlag(appFlags.Ps.Legacy, nil)
 
 	return builder.Build()
 }

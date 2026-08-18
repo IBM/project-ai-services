@@ -164,8 +164,11 @@ type RegisterRequest struct {
 	WorkerName     string                 `protobuf:"bytes,1,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`
 	PreSharedToken string                 `protobuf:"bytes,2,opt,name=pre_shared_token,json=preSharedToken,proto3" json:"pre_shared_token,omitempty"`
 	Metadata       map[string]string      `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// runtime_type declares the execution environment of the worker
+	// (e.g. "podman", "openshift"). The control plane persists this to the DB.
+	RuntimeType   string `protobuf:"bytes,4,opt,name=runtime_type,json=runtimeType,proto3" json:"runtime_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
@@ -217,6 +220,13 @@ func (x *RegisterRequest) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *RegisterRequest) GetRuntimeType() string {
+	if x != nil {
+		return x.RuntimeType
+	}
+	return ""
 }
 
 type RegisterResponse struct {
@@ -428,12 +438,13 @@ var File_internal_pkg_worker_proto_worker_proto protoreflect.FileDescriptor
 
 const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\n" +
-	"&internal/pkg/worker/proto/worker.proto\x12\tworker.v1\"\xdf\x01\n" +
+	"&internal/pkg/worker/proto/worker.proto\x12\tworker.v1\"\x82\x02\n" +
 	"\x0fRegisterRequest\x12\x1f\n" +
 	"\vworker_name\x18\x01 \x01(\tR\n" +
 	"workerName\x12(\n" +
 	"\x10pre_shared_token\x18\x02 \x01(\tR\x0epreSharedToken\x12D\n" +
-	"\bmetadata\x18\x03 \x03(\v2(.worker.v1.RegisterRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x03 \x03(\v2(.worker.v1.RegisterRequest.MetadataEntryR\bmetadata\x12!\n" +
+	"\fruntime_type\x18\x04 \x01(\tR\vruntimeType\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"u\n" +

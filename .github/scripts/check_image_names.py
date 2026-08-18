@@ -25,6 +25,7 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "backend"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "backend"),
         ("ai-services/assets/services/chat/podman/values.yaml", "backend"),
+        ("ai-services/assets/services/chat/openshift/values.yaml", "backend"),
     ],
     "services/digitize/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "digitize"),
@@ -33,6 +34,7 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitize"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitize"),
         ("ai-services/assets/services/digitize/podman/values.yaml", "digitize"),
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "digitize"),
     ],
     "services/summarize/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "summarize"),
@@ -41,6 +43,7 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "summarize"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "summarize"),
         ("ai-services/assets/services/summarize/podman/values.yaml", "summarize"),
+        ("ai-services/assets/services/summarize/openshift/values.yaml", "summarize"),
     ],
     "services/similarity/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "similarity"),
@@ -49,6 +52,15 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "similarity"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "similarity"),
         ("ai-services/assets/services/similarity/podman/values.yaml", "similarity"),
+        ("ai-services/assets/services/similarity/openshift/values.yaml", "similarity")
+    ],
+    "services/extract/Makefile": [
+        ("ai-services/assets/services/extract/podman/values.yaml", "extract"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "extract")
+    ],
+    "services/translate/Makefile": [
+        ("ai-services/assets/services/translate/podman/values.yaml", "translate"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "translate")
     ],
     "ui/chatbot/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
@@ -56,6 +68,8 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
+        ("ai-services/assets/services/chat/podman/values.yaml", "ui"),
+        ("ai-services/assets/services/chat/openshift/values.yaml", "ui"),
     ],
     "ui/digitize/Makefile": [
         ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
@@ -63,20 +77,29 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitizeUi"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitizeUi"),
+        ("ai-services/assets/services/digitize/podman/values.yaml", "digitizeUi"),
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "digitizeUi"),
     ],
     "ui/catalog/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "ui"),
+        ("ai-services/assets/catalog/openshift/values.yaml", "ui"),
     ],
     "ai-services/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "backend"),
+        ("ai-services/assets/catalog/openshift/values.yaml", "backend"),
     ],
     "images/postgres/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "db"),
+        ("ai-services/assets/catalog/openshift/values.yaml", "db"),
         ("ai-services/assets/applications/rag/podman/values.yaml", "postgres"),
         ("ai-services/assets/applications/rag/openshift/values.yaml", "postgres"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "postgres"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "postgres"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/summarize/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/summarize/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/services/digitize/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres")
     ],
     "images/litellm/Makefile": [
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),

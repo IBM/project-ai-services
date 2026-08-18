@@ -797,6 +797,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/token": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "**Experimental** — This endpoint is under active development and may change without notice.\nIBM Power Mission Control use this\nendpoint to exchange a pre-existing ManageIQ token for an internal JWT\nwithout supplying username/password credentials.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Exchange a ManageIQ token for a Catalog API JWT",
+                "responses": {
+                    "200": {
+                        "description": "Returns access_token, refresh_token, and token_type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired ManageIQ token",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "ManageIQ token does not have required permissions",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "ManageIQ resource not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "ManageIQ unavailable or returned an unexpected server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/components/{component_type}/providers/{provider_id}/params": {
             "get": {
                 "security": [
@@ -1204,6 +1258,144 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/workers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all registered workers and their current status from the database.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workers"
+                ],
+                "summary": "List all workers",
+                "responses": {
+                    "200": {
+                        "description": "List of workers",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (` + "`" + `worker start --token \u003ctoken\u003e` + "`" + `).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workers"
+                ],
+                "summary": "Register a new worker",
+                "parameters": [
+                    {
+                        "description": "Worker registration request",
+                        "name": "worker",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.createWorkerReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Worker registered; token valid for 24 hours",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.createWorkerResp"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid payload",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/workers/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Permanently removes a worker from the registry and the database.\nIf the worker is currently connected its gRPC stream is also cleaned up.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workers"
+                ],
+                "summary": "Deregister a worker",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Worker deleted"
+                    },
+                    "400": {
+                        "description": "Invalid worker ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Worker not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -1306,6 +1498,62 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "last_heartbeat": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registered_at": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType": {
+            "type": "string",
+            "enum": [
+                "unknown",
+                "podman",
+                "openshift"
+            ],
+            "x-enum-varnames": [
+                "WorkerRuntimeTypeUnknown",
+                "WorkerRuntimeTypePodman",
+                "WorkerRuntimeTypeOpenShift"
+            ]
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "ready",
+                "disconnected"
+            ],
+            "x-enum-varnames": [
+                "WorkerStatusPending",
+                "WorkerStatusReady",
+                "WorkerStatusDisconnected"
+            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
@@ -1992,6 +2240,30 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 3
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.createWorkerReq": {
+            "type": "object",
+            "required": [
+                "worker_name"
+            ],
+            "properties": {
+                "worker_name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.createWorkerResp": {
+            "type": "object",
+            "properties": {
+                "token": {
+                    "type": "string"
+                },
+                "worker_name": {
+                    "type": "string"
                 }
             }
         },
