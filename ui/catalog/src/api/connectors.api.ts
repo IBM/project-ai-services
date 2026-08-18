@@ -4,12 +4,6 @@ import type {
   DataSourceConnectorRow,
 } from "@/components/DataSourceConnectorsTable/types";
 
-export const CONNECTORS_ENDPOINTS = {
-  LIST_CONNECTORS: "/connectors/datasources",
-  GET_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
-  DELETE_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
-};
-
 export function transformConnectorToRow(
   connector: DataSourceConnectorApiResponse,
 ): DataSourceConnectorRow {
