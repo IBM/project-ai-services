@@ -167,7 +167,9 @@ def _detect_majority_vote(text: str, min_confidence: float) -> Optional[str]:
         return None
 
     best_code = max(votes, key=lambda c: votes[c])
-    return best_code  # return best-vote candidate; caller filters by confidence
+    if votes[best_code] >= 2:
+        return best_code
+    return None  # no majority — fall back to LLM auto-detect
 
 
 # ---------------------------------------------------------------------------

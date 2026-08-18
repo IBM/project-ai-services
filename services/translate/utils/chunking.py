@@ -10,7 +10,6 @@ Splits text into ``TranslationChunk`` objects that fit within ``CHUNK_TOKEN_BUDG
 """
 
 import asyncio
-from functools import partial
 from typing import Optional
 
 from sentence_splitter import SentenceSplitter
@@ -19,9 +18,12 @@ from common.lang_utils import to_sentence_splitter_lang
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
 from translate.models import TranslationChunk
-from translate.settings import settings
+from translate.utils.llm import get_chunk_token_budget
 
 logger = get_logger("chunking")
+
+# Conservative upper-bound token cost for each "\n\n" separator added by join().
+_SEPARATOR_TOKEN_ESTIMATE = 2
 
 
 def _is_table_block(block: str) -> bool:
@@ -39,10 +41,7 @@ def _count_tokens_sync(text: str, llm_endpoint: str) -> int:
 
 async def _count_tokens(text: str, llm_endpoint: str) -> int:
     """Async wrapper: runs the blocking tokenise call in the default thread-pool."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, partial(_count_tokens_sync, text, llm_endpoint)
-    )
+    return await asyncio.to_thread(_count_tokens_sync, text, llm_endpoint)
 
 
 async def _pack_sentences_greedily(
@@ -115,7 +114,7 @@ async def build_translation_chunks(
     Returns:
         Ordered list of ``TranslationChunk`` objects (index 0 … N-1).
     """
-    budget = settings.translate.chunk_token_budget
+    budget = get_chunk_token_budget()
     splitter_lang = to_sentence_splitter_lang(source_language_code or "EN")
 
     # Step 1 — split on paragraph boundaries
@@ -129,6 +128,7 @@ async def build_translation_chunks(
     current_blocks: list[str] = []
     running_tokens = 0
     chunk_index = 0
+    splitter = SentenceSplitter(language=splitter_lang)
 
     for block in blocks:
         is_table = _is_table_block(block)
@@ -139,12 +139,13 @@ async def build_translation_chunks(
             # --- Oversized block path ---
             # Close whatever is in the current running chunk first.
             if current_blocks:
+                separator_tokens = _SEPARATOR_TOKEN_ESTIMATE * (len(current_blocks) - 1)
                 chunks.append(
                     TranslationChunk(
                         index=chunk_index,
                         text="\n\n".join(current_blocks),
                         join_after="paragraph",
-                        token_count=running_tokens,
+                        token_count=running_tokens + separator_tokens,
                     )
                 )
                 chunk_index += 1
@@ -164,7 +165,6 @@ async def build_translation_chunks(
                 chunk_index += 1
             else:
                 # Step 3 — sentence-level fallback for oversized prose blocks.
-                splitter = SentenceSplitter(language=splitter_lang)
                 sentences = splitter.split(text=block)
                 sentence_chunks = await _pack_sentences_greedily(
                     sentences=sentences,
@@ -178,14 +178,18 @@ async def build_translation_chunks(
                     chunk_index += 1
                 chunks.extend(sentence_chunks)
         else:
-            # Normal packing: would this block overflow the running chunk?
-            if running_tokens + block_tokens > budget and current_blocks:
+            # Normal packing: would adding this block overflow the running chunk?
+            # Account for the one "\n\n" separator that join() will insert between
+            # the existing content and the new block.
+            separator_cost = _SEPARATOR_TOKEN_ESTIMATE if current_blocks else 0
+            if running_tokens + separator_cost + block_tokens > budget and current_blocks:
+                separator_tokens = _SEPARATOR_TOKEN_ESTIMATE * (len(current_blocks) - 1)
                 chunks.append(
                     TranslationChunk(
                         index=chunk_index,
                         text="\n\n".join(current_blocks),
                         join_after="paragraph",
-                        token_count=running_tokens,
+                        token_count=running_tokens + separator_tokens,
                     )
                 )
                 chunk_index += 1
@@ -197,12 +201,13 @@ async def build_translation_chunks(
 
     # Flush the final open chunk.
     if current_blocks:
+        separator_tokens = _SEPARATOR_TOKEN_ESTIMATE * (len(current_blocks) - 1)
         chunks.append(
             TranslationChunk(
                 index=chunk_index,
                 text="\n\n".join(current_blocks),
                 join_after="paragraph",
-                token_count=running_tokens,
+                token_count=running_tokens + separator_tokens,
             )
         )
 

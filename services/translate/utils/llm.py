@@ -1,18 +1,49 @@
 """
-Async LLM client for translation calls.
+Async LLM client and runtime model-length resolution for translation calls.
 
-Provides ``query_vllm_translate``, a thin ``httpx.AsyncClient`` wrapper that
-posts to ``POST {llm_endpoint}/v1/chat/completions`` and returns
-``(translated_text, input_tokens, output_tokens)`` (§9.3).
-
-The function is fully async — it does not block the event loop.
+Provides:
+- ``get_llm_max_model_len()``  — resolves the model's real context window at runtime
+                                  (cached after the first call).
+- ``get_chunk_token_budget()`` — derives chunk budget as 40% of the resolved max len,
+                                  falling back to ``settings.translate.chunk_token_budget``
+                                  if resolution fails.
+- ``query_vllm_translate()``   — async vLLM chat/completions wrapper.
 """
 
 import httpx
 
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, resolve_model_max_len
+from translate.settings import settings
 
 logger = get_logger("llm")
+
+
+def get_llm_max_model_len() -> int:
+    """
+    Resolve the configured model's real context window length.
+
+    Tries ``/model/info`` (LiteLLM) then ``/v1/models`` (vLLM) in order,
+    falling back to ``settings.common.llm.max_model_len`` if neither responds.
+    Result is cached in-process — no repeated network calls.
+    """
+    return resolve_model_max_len(
+        settings.common.llm.endpoint,
+        settings.common.llm.model,
+        settings.common.llm.max_model_len,
+        settings.common.llm.api_key or None,
+    )
+
+
+def get_chunk_token_budget() -> int:
+    """
+    Return the effective chunk token budget for the current model.
+
+    Resolves the real ``max_model_len`` at runtime and returns
+    ``CHUNK_BUDGET_RATIO × max_model_len``. Falls back to
+    ``settings.translate.chunk_token_budget`` only if resolution fails
+    and the fallback is returned by ``get_llm_max_model_len``.
+    """
+    return int(get_llm_max_model_len() * settings.translate.chunk_budget_ratio)
 
 
 async def query_vllm_translate(
@@ -68,7 +99,6 @@ async def query_vllm_translate(
     if not choices:
         raise ValueError("vLLM returned an empty 'choices' array")
 
-    logger.info(f"vLLM choices: {choices}")
     content: str = (choices[0].get("message", {}).get("content") or "").strip()
     usage = data.get("usage", {})
     input_tokens: int = usage.get("prompt_tokens", 0)

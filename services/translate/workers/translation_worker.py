@@ -10,7 +10,7 @@ Background translation worker.
   4  Chunk the document via ``build_translation_chunks``; run per-chunk guard
   5  DB → ``phase=translating``; dispatch all chunks via ``asyncio.gather``
      (each chunk acquires ``chunk_semaphore`` then ``vllm_semaphore``)
-  6  ``join_after``-aware assembly → ``translated_markdown``
+  6  ``join_after``-aware assembly → ``translated_text``
   7  Write ``/var/cache/translate/results/{job_id}_result.json``
   8  DB → ``completed`` / ``failed``; delete staging dir; release ``job_limiter``
 """
@@ -28,7 +28,7 @@ from translate.db.manager import db_manager
 from translate.models import JobStatus, TranslationChunk
 from translate.settings import settings
 from translate.utils.chunking import build_translation_chunks
-from translate.utils.llm import query_vllm_translate
+from translate.utils.llm import get_llm_max_model_len, query_vllm_translate
 from translate.utils.prompt import build_messages, resolve_source_language
 from translate.utils.storage import storage_manager
 from translate.workers.concurrency import concurrency_manager
@@ -92,7 +92,7 @@ def _assemble_translation(
                  index order (as returned by ``asyncio.gather``).
 
     Returns:
-        ``(translated_markdown, total_input_tokens, total_output_tokens)``
+        ``(translated_text, total_input_tokens, total_output_tokens)``
     """
     results.sort(key=lambda result: result[0].index)
 
@@ -196,10 +196,11 @@ async def run_translation_job(
                 f"[{job_id}] Chunked into {len(chunks)} chunk(s) in {chunking_secs}s"
             )
 
-            # Compute max_tokens for each chunk: remaining context after chunk tokens + overhead.
-            # Fail the job early if any chunk leaves no room for output rather than
-            # passing a nonsensical max_tokens value to vLLM.
-            max_model_len = settings.common.llm.max_model_len
+            # Compute max_tokens for each chunk.
+            # Cap at 2× the chunk's own token count — translation output is
+            # approximately 1:1 with input; 2× gives generous headroom for any
+            # language pair without asking vLLM for the entire context window.
+            max_model_len = get_llm_max_model_len()
             prompt_overhead = settings.translate.prompt_overhead_tokens
             chunk_max_tokens: dict[int, int] = {}
             for chunk in chunks:
@@ -211,7 +212,7 @@ async def run_translation_job(
                         f"leaves no room for output in a {max_model_len}-token context window. "
                         f"Reduce CHUNK_TOKEN_BUDGET."
                     )
-                chunk_max_tokens[chunk.index] = available
+                chunk_max_tokens[chunk.index] = min(available, chunk.token_count * 2)
 
             # ------------------------------------------------------------------
             # Step 5 — Transition to translating; dispatch chunks concurrently
@@ -269,7 +270,7 @@ async def run_translation_job(
             # ------------------------------------------------------------------
             # Step 6 — join_after-aware assembly
             # ------------------------------------------------------------------
-            translated_markdown, total_in_tok, total_out_tok = _assemble_translation(
+            translated_text, total_in_tok, total_out_tok = _assemble_translation(
                 results
             )
 
@@ -281,7 +282,7 @@ async def run_translation_job(
             result_payload = {
                 "job_id": job_id,
                 "data": {
-                    "translation": translated_markdown,
+                    "translation": translated_text,
                     "source_language": resolved_name.lower() if resolved_name else source_language.lower(),
                     "target_language": target_language.lower(),
                     "input_type": input_type,

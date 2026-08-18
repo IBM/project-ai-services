@@ -11,7 +11,7 @@ GET    /v1/translate/jobs/{job_id}/result/download — download translated file
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
@@ -42,6 +42,7 @@ from translate.utils.jobs import (
     validate_file_content,
     validate_file_extension,
 )
+from translate.utils.storage import storage_manager
 from translate.workers.concurrency import concurrency_manager
 from translate.workers.translation_worker import run_translation_job
 
@@ -189,13 +190,14 @@ async def create_translation_job(
     # 3. Validate languages.
     norm_source, norm_target = _validate_languages(source_language, target_language)
 
-    # 4. Check file size.
-    content = await file.read()
+    # 4. Check file size — read at most max_bytes + 1 so we never allocate
+    # more than the limit in memory. If we get more than max_bytes back,
+    # the file is over the limit.
     max_bytes = settings.translate.max_upload_size_mb * 1024 * 1024
+    content = await file.read(max_bytes + 1)
     if len(content) > max_bytes:
         _raise_file_too_large(
-            f"File size {len(content) // 1024} KB exceeds the "
-            f"{settings.translate.max_upload_size_mb} MB limit."
+            f"File exceeds the {settings.translate.max_upload_size_mb} MB limit."
         )
 
     # 5. Check job admission semaphore — non-blocking try.
@@ -215,7 +217,7 @@ async def create_translation_job(
     )
 
     # 7. Insert DB row with status=accepted.
-    db_manager.create_job(
+    created = db_manager.create_job(
         job_id=job_id,
         source_language=norm_source,
         target_language=norm_target,
@@ -224,6 +226,14 @@ async def create_translation_job(
         document_name=filename,
         submitted_at=datetime.now(timezone.utc),
     )
+    if created is None:
+        # DB insert failed (duplicate job_id or DB error); clean up the staged
+        # file so we don't leave an orphan, then surface a 500 to the caller.
+        storage_manager.cleanup_staging(job_id)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            "Failed to create translation job record. Please try again.",
+        )
 
     # 8. Launch background worker.
     background_tasks.add_task(
@@ -260,21 +270,10 @@ async def create_translation_job(
     },
 )
 async def list_jobs(
-    limit: int = 20,
-    offset: int = 0,
-    status_filter: Optional[str] = None,
+    limit: int = Query(default=20, ge=1, le=100, description="Records per page"),
+    offset: int = Query(default=0, ge=0, description="Records to skip"),
+    status_filter: Optional[str] = Query(default=None, description="Filter by job status"),
 ) -> JobsListResponse:
-    if limit < 1 or limit > 100:
-        APIError.raise_error(
-            ErrorCode.INVALID_PARAMETER,
-            "limit must be between 1 and 100.",
-        )
-    if offset < 0:
-        APIError.raise_error(
-            ErrorCode.INVALID_PARAMETER,
-            "offset must be >= 0.",
-        )
-
     job_status: Optional[JobStatus] = None
     if status_filter is not None:
         try:
