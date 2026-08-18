@@ -114,46 +114,6 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker:
-    properties:
-      id:
-        type: string
-      last_heartbeat:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      registered_at:
-        type: string
-      runtime_type:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType'
-      status:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus'
-      updated_at:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType:
-    enum:
-    - unknown
-    - podman
-    - openshift
-    type: string
-    x-enum-varnames:
-    - WorkerRuntimeTypeUnknown
-    - WorkerRuntimeTypePodman
-    - WorkerRuntimeTypeOpenShift
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus:
-    enum:
-    - pending
-    - ready
-    - disconnected
-    type: string
-    x-enum-varnames:
-    - WorkerStatusPending
-    - WorkerStatusReady
-    - WorkerStatusDisconnected
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       catalog_id:

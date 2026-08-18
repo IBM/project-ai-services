@@ -1909,62 +1909,6 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "last_heartbeat": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "registered_at": {
-                    "type": "string"
-                },
-                "runtime_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType"
-                },
-                "status": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType": {
-            "type": "string",
-            "enum": [
-                "unknown",
-                "podman",
-                "openshift"
-            ],
-            "x-enum-varnames": [
-                "WorkerRuntimeTypeUnknown",
-                "WorkerRuntimeTypePodman",
-                "WorkerRuntimeTypeOpenShift"
-            ]
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus": {
-            "type": "string",
-            "enum": [
-                "pending",
-                "ready",
-                "disconnected"
-            ],
-            "x-enum-varnames": [
-                "WorkerStatusPending",
-                "WorkerStatusReady",
-                "WorkerStatusDisconnected"
-            ]
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
             "properties": {

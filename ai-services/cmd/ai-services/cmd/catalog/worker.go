@@ -124,13 +124,12 @@ func newWorkerDeregisterCmd() *cobra.Command {
 	var runtimeType string
 
 	cmd := &cobra.Command{
-		Use:   "deregister <id>",
+		Use:   "deregister <name>",
 		Short: "Permanently deregister a worker",
-		Long: `Permanently removes a worker from the catalog by its UUID.
+		Long: `Permanently removes a worker from the catalog by name.
 
-If the worker is currently connected its gRPC stream is also cleaned up.
-Use 'ai-services catalog worker list' to find the worker's ID.`,
-		Example: `  ai-services catalog worker deregister 4b3e1f2a-8c7d-4e5b-9f6a-1d2e3f4a5b6c --runtime podman`,
+If the worker is currently connected its gRPC stream is also cleaned up.`,
+		Example: `  ai-services catalog worker deregister node-1 --runtime podman`,
 		Args:    cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
@@ -143,11 +142,11 @@ Use 'ai-services catalog worker list' to find the worker's ID.`,
 				return err
 			}
 
-			if err := c.DeleteWorker(args[0]); err != nil {
+			if err := c.DeleteWorkerByName(args[0]); err != nil {
 				return err
 			}
 
-			logger.Infof("Worker %s deregistered.\n", args[0])
+			logger.Infof("Worker %q deregistered.\n", args[0])
 
 			return nil
 		},

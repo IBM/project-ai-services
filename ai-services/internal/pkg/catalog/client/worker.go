@@ -60,8 +60,25 @@ func (c *Client) ListWorkers() ([]catalogtypes.Worker, error) {
 	return result, nil
 }
 
-// DeleteWorker permanently removes a worker by its UUID.
-func (c *Client) DeleteWorker(id string) error {
+// DeleteWorkerByName resolves a worker name to its UUID and permanently removes it.
+// Returns an error if no worker with that name is registered.
+func (c *Client) DeleteWorkerByName(name string) error {
+	workers, err := c.ListWorkers()
+	if err != nil {
+		return err
+	}
+
+	for _, w := range workers {
+		if string(w.Name) == name {
+			return c.deleteWorkerByID(w.ID)
+		}
+	}
+
+	return fmt.Errorf("worker %q not found", name)
+}
+
+// deleteWorkerByID permanently removes a worker by its UUID string.
+func (c *Client) deleteWorkerByID(id string) error {
 	resp, err := c.httpClient.R().
 		Delete(fmt.Sprintf(workerByIDRoute, id))
 	if err != nil {
