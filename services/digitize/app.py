@@ -118,7 +118,7 @@ async def lifespan(app: FastAPI):
     from digitize.db.connection import engine as db_engine
 
     try:
-        data_store = SQLAlchemyDataStore(db_engine)
+        data_store = SQLAlchemyDataStore(db_engine, schema="scheduler")
         async with AsyncScheduler(data_store=data_store) as sched:
             scheduler_module._scheduler = sched
 
