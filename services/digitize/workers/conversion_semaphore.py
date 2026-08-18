@@ -7,8 +7,8 @@ before starting and releases them when done.  The total capacity mirrors
 ``ProcessPoolExecutor`` agree on the available parallelism budget.
 
 Weight rule:
-  - Normal file (page_count <= heavy_doc_page_threshold):  weight = 1
-  - Large file  (page_count >  heavy_doc_page_threshold):  weight = 2
+  - Normal file (page_count < heavy_doc_page_threshold):   weight = 1
+  - Large file  (page_count >= heavy_doc_page_threshold):  weight = 2
 """
 
 import asyncio

@@ -184,7 +184,7 @@ async def create_job(
                 "Only 1 file allowed for digitization.",
             )
 
-        # 3. Per-operation queue quota gate (SELECT FOR UPDATE to prevent races).
+        # 3. Per-operation queue quota gate — atomic advisory-lock check.
         #    The gate requires at least one free slot — it does NOT require all N
         #    new tasks to fit.
         op_key = operation.value  # "ingestion" | "digitization"
@@ -193,9 +193,8 @@ async def create_job(
         else:
             quota = settings.digitize.digitization_queue_quota
 
-        queued_counts = db_manager.get_queued_counts()
-        queued_for_op = queued_counts.get(op_key, 0)
-        if queued_for_op >= quota:
+        quota_ok, queued_for_op = db_manager.check_quota_atomic(op_key, quota)
+        if not quota_ok:
             APIError.raise_error(
                 ErrorCode.RATE_LIMIT_EXCEEDED,
                 f"The {operation.value} conversion queue is full "
