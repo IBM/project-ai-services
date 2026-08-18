@@ -70,7 +70,7 @@ export const ServicesDeployFlow = ({
   onSubmit,
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
-  const [hasComponentError, setHasComponentError] = useState(false);
+  const [hasSchemaError, setHasSchemaError] = useState(false);
   const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId ?? null,
@@ -83,14 +83,17 @@ export const ServicesDeployFlow = ({
   // Only fetch deploy options when on step 1 or later (after user clicks Next)
   const shouldFetchDeployOptions =
     state.currentStep >= STEP_ONE && state.selectedServiceId;
-  const { deployOptions, llmModels, isLoading, error } =
+  const { deployOptions, llmModels, isLoading, error, llmError } =
     useServiceDeployOptions(
       shouldFetchDeployOptions ? state.selectedServiceId : null,
     );
 
-  // Get component models loading state from store
+  // Get component models loading and error state from store
   const componentModelsLoading = useServiceDeployStore(
     (state) => state.componentModelsLoading,
+  );
+  const componentModelsError = useServiceDeployStore(
+    (state) => state.componentModelsError,
   );
 
   // Get services from store to access service description
@@ -101,22 +104,31 @@ export const ServicesDeployFlow = ({
     (service) => service.id === state.selectedServiceId,
   );
 
-  // Check if any Step 1 components are still loading their models
-  const isStep1ComponentsLoading = useMemo(() => {
-    if (!state.selectedServiceId || !deployOptions) return false;
-
-    // Get Step 1 components (all except llm and reranker)
-    const step1Components =
+  // Check if any Step 1 components are still loading or have errored
+  const step1Components = useMemo(() => {
+    if (!deployOptions) return [];
+    return (
       deployOptions.components?.filter(
         (c) => c.type !== "llm" && c.type !== "reranker",
-      ) || [];
+      ) || []
+    );
+  }, [deployOptions]);
 
-    // Check if any of these components are still loading
+  const isStep1ComponentsLoading = useMemo(() => {
+    if (!state.selectedServiceId || !step1Components.length) return false;
     return step1Components.some((component) => {
       const key = `${state.selectedServiceId}:${component.type}`;
       return componentModelsLoading[key] === true;
     });
-  }, [state.selectedServiceId, deployOptions, componentModelsLoading]);
+  }, [state.selectedServiceId, step1Components, componentModelsLoading]);
+
+  const hasStep1ComponentsError = useMemo(() => {
+    if (!state.selectedServiceId || !step1Components.length) return false;
+    return step1Components.some((component) => {
+      const key = `${state.selectedServiceId}:${component.type}`;
+      return !!componentModelsError[key];
+    });
+  }, [state.selectedServiceId, step1Components, componentModelsError]);
 
   useEffect(() => {
     if (open && preSelectedServiceId) {
@@ -239,7 +251,7 @@ export const ServicesDeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitializedFormData.current = null;
-    setHasComponentError(false);
+    setHasSchemaError(false);
     onClose();
   };
 
@@ -250,12 +262,14 @@ export const ServicesDeployFlow = ({
     onLoadingStep &&
     ((!deployOptions && isLoading) || isStep1ComponentsLoading);
   const shellError = onLoadingStep ? error : null;
+  const hasLlmError = onLoadingStep ? !!llmError : false;
 
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
-    (state.currentStep === STEP_ONE && hasComponentError) ||
+    (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
     (isLastStep && state.isEditing) ||
-    (isLastStep && !areAllRequiredFieldsFilled);
+    (isLastStep && !areAllRequiredFieldsFilled) ||
+    (isLastStep && (hasSchemaError || hasLlmError));
 
   const steps = [
     { ...STEPS[0], complete: !!state.selectedServiceId },
@@ -298,7 +312,7 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
-          onComponentError={setHasComponentError}
+          onComponentError={setHasSchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -313,6 +327,7 @@ export const ServicesDeployFlow = ({
           llmModelsWithProviders={llmModels}
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
+          onSchemaError={setHasSchemaError}
         />
       )}
     </DeployTearsheetShell>

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import {
   fetchDeployOptions,
@@ -20,11 +20,19 @@ export const useDeployOptions = () => {
     setDeployOptionsError,
     getProviderParams,
     setProviderParams,
+    setProviderParamsError,
+    clearProviderParamsError,
     isProviderParamsStale,
     getServiceParams,
     setServiceParams,
+    setServiceParamsError,
+    clearServiceParamsError,
     isServiceParamsStale,
   } = useDeployStore();
+
+  // Tracks keys currently in-flight so StepOne can distinguish loading from failed.
+  const inFlightKeys = useRef<Set<string>>(new Set());
+  const [inflightCount, setInflightCount] = useState(0);
 
   // Get deploy options for the selected architecture
   const deployOptions = selectedArchitectureId
@@ -98,47 +106,96 @@ export const useDeployOptions = () => {
 
     const pairsToFetch = pairs.filter(({ componentType, providerId }) => {
       const cached = getProviderParams(componentType, providerId);
-      return !cached || isProviderParamsStale(componentType, providerId);
+      // Re-fetch if missing, stale, or previously errored
+      const hasError =
+        !!useDeployStore.getState().providerParamsError[
+          `${componentType}:${providerId}`
+        ];
+      return (
+        !cached || isProviderParamsStale(componentType, providerId) || hasError
+      );
     });
 
     // Collect service IDs that need their service-level schema fetched
     const serviceIds = deployOptions.services.map((s) => s.id);
     const serviceIdsToFetch = serviceIds.filter((serviceId) => {
       const cached = getServiceParams(serviceId);
-      return !cached || isServiceParamsStale(serviceId);
+      const hasError =
+        !!useDeployStore.getState().serviceParamsError[serviceId];
+      return !cached || isServiceParamsStale(serviceId) || hasError;
     });
 
     if (pairsToFetch.length === 0 && serviceIdsToFetch.length === 0) return;
 
-    Promise.allSettled([
-      ...pairsToFetch.map(({ componentType, providerId }) =>
-        dedupe(`providerParams:${componentType}:${providerId}`, () =>
+    const markDone = (key: string) => {
+      inFlightKeys.current.delete(key);
+      setInflightCount(inFlightKeys.current.size);
+    };
+
+    // Mark all provider pairs as in-flight before kicking off fetches.
+    pairsToFetch.forEach(({ componentType, providerId }) => {
+      inFlightKeys.current.add(`${componentType}:${providerId}`);
+    });
+    setInflightCount(inFlightKeys.current.size);
+
+    void Promise.allSettled([
+      ...pairsToFetch.map(({ componentType, providerId }) => {
+        const key = `${componentType}:${providerId}`;
+        // Clear any stale error before retrying so the banner doesn't flash while in-flight
+        clearProviderParamsError(componentType, providerId);
+        return dedupe(`providerParams:${key}`, () =>
           fetchProviderSchema(componentType, providerId),
-        ).then((schema) => {
-          setProviderParams(componentType, providerId, schema);
-        }),
-      ),
-      ...serviceIdsToFetch.map((serviceId) =>
-        dedupe(`serviceParams:${serviceId}`, () =>
+        )
+          .then((schema) => {
+            setProviderParams(componentType, providerId, schema);
+          })
+          .catch((err) => {
+            setProviderParamsError(
+              componentType,
+              providerId,
+              err instanceof Error ? err.message : "Failed to load schema",
+            );
+          })
+          .finally(() => markDone(key));
+      }),
+      ...serviceIdsToFetch.map((serviceId) => {
+        clearServiceParamsError(serviceId);
+        return dedupe(`serviceParams:${serviceId}`, () =>
           fetchServiceParams(serviceId),
-        ).then((data) => {
-          setServiceParams(serviceId, data);
-        }),
-      ),
+        )
+          .then((data) => {
+            setServiceParams(serviceId, data);
+          })
+          .catch((err) => {
+            setServiceParamsError(
+              serviceId,
+              err instanceof Error
+                ? err.message
+                : "Failed to load service schema",
+            );
+          });
+      }),
     ]);
   }, [
     deployOptions,
     getProviderParams,
     setProviderParams,
+    setProviderParamsError,
+    clearProviderParamsError,
     isProviderParamsStale,
     getServiceParams,
     setServiceParams,
+    setServiceParamsError,
+    clearServiceParamsError,
     isServiceParamsStale,
   ]);
+
+  const isProviderParamsLoading = inflightCount > 0;
 
   return {
     deployOptions,
     isLoading: deployOptionsLoading || shouldBeLoading,
+    isProviderParamsLoading,
     error: deployOptionsError,
   };
 };

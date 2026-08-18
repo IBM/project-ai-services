@@ -1,4 +1,4 @@
-name: Check Makefile Version Bump
+name: Check Image Version Bump
 
 on:
   pull_request:
@@ -11,8 +11,9 @@ on:
       - 'images/**'
       - 'ui/**'
       - 'ai-services/**'
-      - '.github/workflows/bump-makefile-version.yml'
+      - '.github/workflows/bump-image-version.yml'
       - '.github/scripts/check_make_version_tag.py'
+      - .github/scripts/check_image_names.py
     branches:
       - main
       - 'release-*'
@@ -41,5 +42,8 @@ jobs:
       - name: Check version bumps for all components
         run: |
           python3 .github/scripts/check_makefile_version_bump.py ${{ github.base_ref }}
+      
+      - name: Run image name consistency check
+        run: python3 .github/scripts/check_image_names.py
 
 # Made with Bob

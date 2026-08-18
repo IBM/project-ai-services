@@ -17,6 +17,9 @@ export const StepOne: React.FC<StepProps> = ({
   onComponentError,
 }) => {
   const providerParams = useDeployStore((state) => state.providerParams);
+  const providerParamsError = useDeployStore(
+    (state) => state.providerParamsError,
+  );
 
   // Provider schemas from store, keyed by componentType → providerId.
   const paramsByType = useMemo(() => {
@@ -31,16 +34,23 @@ export const StepOne: React.FC<StepProps> = ({
     return result;
   }, [deployOptions.global_components, providerParams]);
 
-  // Component types whose schemas failed to load (at least one provider missing).
+  // Use the selected provider; fall back to the default so cold-open failures are still surfaced.
   const failedComponentTypes = useMemo(() => {
     return deployOptions.global_components
-      .filter((component) =>
-        component.providers.some(
-          (provider) => !providerParams[`${component.type}:${provider.id}`],
-        ),
-      )
+      .filter((component) => {
+        const selectedProviderId =
+          formData.globalComponents[component.type]?.providerId ||
+          component.providers.find((p) => p.default)?.id ||
+          component.providers[0]?.id;
+        if (!selectedProviderId) return false;
+        return !!providerParamsError[`${component.type}:${selectedProviderId}`];
+      })
       .map((c) => c.name);
-  }, [deployOptions.global_components, providerParams]);
+  }, [
+    deployOptions.global_components,
+    formData.globalComponents,
+    providerParamsError,
+  ]);
 
   // Extract model names from provider schemas for display in the dropdown labels.
   const modelNames = useMemo(() => {

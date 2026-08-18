@@ -1,4 +1,5 @@
 import { useReducer, useMemo, useEffect } from "react";
+import { InlineNotification } from "@carbon/react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
@@ -193,11 +194,27 @@ export const StepTwo: React.FC<DAStepProps> = ({
   deployOptions,
   onEditingChange,
   onResourceStatusChange,
+  onSchemaError,
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
 
   // Get service description helper from store
   const { getServiceDescription } = useDeployStore();
+  const serviceParamsError = useDeployStore(
+    (state) => state.serviceParamsError,
+  );
+
+  // Check if any service's schema failed to load
+  const failedServiceNames = useMemo(() => {
+    return deployOptions.services
+      .filter((s) => !!serviceParamsError[s.id])
+      .map((s) => s.name || s.id);
+  }, [deployOptions.services, serviceParamsError]);
+
+  // Notify parent so it can gate the Deploy button.
+  useEffect(() => {
+    onSchemaError?.(failedServiceNames.length > 0);
+  }, [failedServiceNames, onSchemaError]);
 
   const { resources, resourcesLoading, resourcesError } = useResources();
   const calculatedResources = useMemo(
@@ -565,6 +582,16 @@ export const StepTwo: React.FC<DAStepProps> = ({
         resourcesError={resourcesError}
         onResourceStatusChange={onResourceStatusChange}
       />
+
+      {failedServiceNames.length > 0 && (
+        <InlineNotification
+          kind="error"
+          title={`Failed to load configuration for ${failedServiceNames.join(", ")}.`}
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
 
       {/* Service Configurations - Rendered Dynamically */}
       <div className={styles.formSection}>

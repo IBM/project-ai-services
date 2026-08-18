@@ -77,6 +77,8 @@ export interface NameCellProps {
     status: string,
     type: string,
   ) => void;
+  /** When true, the name renders as a clickable link; otherwise plain text. */
+  isLinkEnabled?: boolean;
 }
 
 export const StatusCell = ({ value }: SharedCellRendererProps) => {
@@ -156,10 +158,9 @@ export const NameCell = ({
   rowId,
   rowData,
   onNameClick,
+  isLinkEnabled,
 }: NameCellProps) => {
-  const isRunning = rowData?.status === "Running";
-
-  if (!isRunning || !onNameClick) {
+  if (!isLinkEnabled || !onNameClick) {
     return <span>{String(value)}</span>;
   }
 
