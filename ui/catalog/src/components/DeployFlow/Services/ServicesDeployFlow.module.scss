@@ -34,7 +34,11 @@
 
 // Services owns the top-spacing for credentials (shared rule is intentionally empty).
 .cloudCredentialsSection {
-  margin-top: $spacing-05;
+  margin-top: $spacing-07;
+}
+
+.modelDescriptionSection {
+  margin-top: $spacing-07;
 }
 
 // TODO PR 9: remove once StepTwo imports from shared — defined in shared but @use does not re-export class names
@@ -46,10 +50,9 @@
 // TODO PR 9: unify with DA customToast into one shared class
 .deployErrorNotification {
   position: fixed;
-  top: $spacing-07;
+  top: $spacing-10;
   right: $spacing-07;
-  z-index: 9999;
-  max-width: 400px;
+  z-index: 10000;
 }
 
 // StepZero — service selection
