@@ -43,17 +43,11 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 
 
 # ------------------------------------------------------------------ #
-# Lifespan                                                            #
+# Startup / shutdown helpers                                          #
 # ------------------------------------------------------------------ #
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan events (startup and shutdown)."""
-    filtered_paths = ["/health", "/v1/jobs"]
-    configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    logger.info("Application starting up...")
-
-    # Language detector for document processing.
+def _init_language_detector():
+    """Initialize the language detector used for document processing."""
     try:
         setup_language_detector(
             [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH]
@@ -62,7 +56,13 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"Error initializing language detector: {exc}", exc_info=True)
 
-    # Database connection — required for all operations.
+
+def _init_database():
+    """Verify the database connection and initialize the schema.
+
+    Raises RuntimeError if the database is unavailable or schema init fails,
+    since the service requires a database to operate.
+    """
     try:
         if check_db_connection():
             logger.info("✅ Database connection established")
@@ -98,7 +98,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Database check failed: {exc}", exc_info=True)
         raise RuntimeError(f"Database connection required but failed: {exc}")
 
-    # Orphan / zombie job recovery on startup.
+
+def _recover_zombie_jobs():
+    """Recover orphan / zombie jobs left over from a previous app server run."""
     try:
         zombie_count = recover_zombie_jobs()
         if zombie_count > 0:
@@ -108,9 +110,30 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"Error during zombie job recovery: {exc}", exc_info=True)
 
-    # ------------------------------------------------------------------ #
-    # Connector scheduler                                                  #
-    # ------------------------------------------------------------------ #
+
+def _shutdown():
+    """Release resources on application shutdown."""
+    logger.info("Application shutting down...")
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as exc:
+        logger.error(f"Error closing database connections: {exc}", exc_info=True)
+
+    stderr_monitor.stop()
+
+
+# ------------------------------------------------------------------ #
+# Connector scheduler                                                 #
+# ------------------------------------------------------------------ #
+
+@asynccontextmanager
+async def _connector_scheduler_lifespan():
+    """Start the connector scheduler and keep it running for the app's lifetime.
+
+    Wraps `yield` in an `async with AsyncScheduler(...)` block so the scheduler
+    stays open until the application shuts down.
+    """
     import digitize.connectors.scheduler as scheduler_module
     from digitize.utils.db import list_connectors
     from apscheduler import AsyncScheduler
@@ -166,15 +189,33 @@ async def lifespan(app: FastAPI):
         # Yield anyway so the service stays up even if the scheduler fails.
         yield
 
-    # Shutdown.
-    logger.info("Application shutting down...")
-    try:
-        close_db_connections()
-        logger.info("Database connections closed")
-    except Exception as exc:
-        logger.error(f"Error closing database connections: {exc}", exc_info=True)
 
-    stderr_monitor.stop()
+# ------------------------------------------------------------------ #
+# Lifespan                                                            #
+# ------------------------------------------------------------------ #
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events (startup and shutdown)."""
+    filtered_paths = ["/health", "/v1/jobs"]
+    configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
+    logger.info("Application starting up...")
+
+    # Language detector for document processing.
+    _init_language_detector()
+
+    # Database connection.
+    _init_database()
+
+    # Orphan / zombie job recovery on startup.
+    _recover_zombie_jobs()
+
+    # Connector scheduler.
+    async with _connector_scheduler_lifespan():
+        yield
+
+    # Shutdown.
+    _shutdown()
 
 
 
