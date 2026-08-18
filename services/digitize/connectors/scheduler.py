@@ -28,7 +28,7 @@ Usage
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -77,18 +77,16 @@ async def register_connector_job(
     """
     from digitize.api.v1.connectors import dispatch_sync
 
+    now = datetime.now(timezone.utc)
+    start_time = now if fire_immediately else now + timedelta(seconds=interval_seconds)
+
     sched = _get_scheduler()
-    kwargs: dict = dict(
+    await sched.add_schedule(
         func_or_task_id=dispatch_sync,
-        trigger=IntervalTrigger(seconds=interval_seconds),
+        trigger=IntervalTrigger(seconds=interval_seconds, start_time=start_time),
         args=[connector_id],
         id=connector_id,
-        max_running_jobs=1,
     )
-    if fire_immediately:
-        kwargs["next_fire_time"] = datetime.now(timezone.utc)
-
-    await sched.add_schedule(**kwargs)
     logger.info(
         f"Registered scheduler job for connector {connector_id!r} "
         f"(interval={interval_seconds}s, fire_immediately={fire_immediately})"

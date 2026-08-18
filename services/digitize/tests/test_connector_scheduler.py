@@ -6,8 +6,8 @@ Coverage
 --------
 scheduler.register_connector_job
   - calls sched.add_schedule with correct kwargs
-  - passes next_fire_time when fire_immediately=True
-  - omits next_fire_time when fire_immediately=False
+  - fire_immediately=True  → trigger.start_time is ~now (fires on first tick)
+  - fire_immediately=False → trigger.start_time is ~now+interval (deferred)
   - raises RuntimeError when _scheduler is None
 
 scheduler.remove_connector_job
@@ -24,6 +24,7 @@ recover_connector_sync_state
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -55,35 +56,46 @@ class TestRegisterConnectorJob:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_add_schedule_called_without_fire_immediately(self):
-        """register_connector_job should call add_schedule without next_fire_time."""
+    async def test_add_schedule_deferred_when_not_fire_immediately(self):
+        """fire_immediately=False → trigger.start_time is ~now + interval_seconds."""
         mock_sched = AsyncMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
         try:
+            before = datetime.now(timezone.utc)
             from digitize.connectors.scheduler import register_connector_job
             await register_connector_job("conn-A", 600, fire_immediately=False)
+            after = datetime.now(timezone.utc)
+
             mock_sched.add_schedule.assert_awaited_once()
             _, kwargs = mock_sched.add_schedule.await_args
             assert kwargs["id"] == "conn-A"
-            assert kwargs["max_running_jobs"] == 1
-            assert "next_fire_time" not in kwargs
+            trigger = kwargs["trigger"]
+            # start_time should be ~now + 600s (deferred by one full interval)
+            expected_lo = before + timedelta(seconds=600)
+            expected_hi = after + timedelta(seconds=600)
+            assert expected_lo <= trigger.start_time <= expected_hi
         finally:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_add_schedule_called_with_fire_immediately(self):
-        """register_connector_job should include next_fire_time when fire_immediately=True."""
+    async def test_add_schedule_fires_immediately_when_requested(self):
+        """fire_immediately=True → trigger.start_time is ~now (fires on first tick)."""
         mock_sched = AsyncMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
         try:
+            before = datetime.now(timezone.utc)
             from digitize.connectors.scheduler import register_connector_job
             await register_connector_job("conn-B", 300, fire_immediately=True)
+            after = datetime.now(timezone.utc)
+
             _, kwargs = mock_sched.add_schedule.await_args
-            assert "next_fire_time" in kwargs
+            trigger = kwargs["trigger"]
+            # start_time should be ~now (within the call window)
+            assert before <= trigger.start_time <= after
         finally:
             sched_mod._scheduler = original
 
