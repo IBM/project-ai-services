@@ -304,11 +304,13 @@ export const ServicesDeployFlow = ({
         type: ACTION_TYPES.SET_DEPLOY_ERROR,
         payload: "Deploy options not loaded",
       });
+      dispatch({ type: ACTION_TYPES.SHOW_DEPLOY_TOAST });
       return;
     }
 
     dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: true });
     dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: null });
+    dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
 
     try {
       const deploymentPayload = await transformToDeploymentPayload(
@@ -328,6 +330,7 @@ export const ServicesDeployFlow = ({
         type: ACTION_TYPES.SET_DEPLOY_ERROR,
         payload: extractDeployError(error),
       });
+      dispatch({ type: ACTION_TYPES.SHOW_DEPLOY_TOAST });
     } finally {
       dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
     }
@@ -376,17 +379,21 @@ export const ServicesDeployFlow = ({
 
   return (
     <>
-      {/* Deployment Error Notification - Positioned in top right */}
-      {state.deployError && (
+      {state.deployToastOpen && state.deployError && (
         <ActionableNotification
           kind="error"
           title="Deployment failed"
           subtitle={state.deployError}
           actionButtonLabel="Try again"
-          onActionButtonClick={handleSubmit}
-          onClose={() =>
-            dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: null })
-          }
+          closeOnEscape
+          aria-label="close notification"
+          onActionButtonClick={async () => {
+            dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
+            await handleSubmit();
+          }}
+          onCloseButtonClick={() => {
+            dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
+          }}
           className={styles.deployErrorNotification}
         />
       )}

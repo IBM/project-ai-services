@@ -50,10 +50,9 @@
 // TODO PR 9: unify with DA customToast into one shared class
 .deployErrorNotification {
   position: fixed;
-  top: $spacing-07;
+  top: $spacing-10;
   right: $spacing-07;
-  z-index: 9999;
-  max-width: 400px;
+  z-index: 10000;
 }
 
 // StepZero — service selection
