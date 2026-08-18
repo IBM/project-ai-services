@@ -6,12 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
-
-// Ensure dbmodels is imported for Swagger documentation.
-var _ dbmodels.Worker
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
@@ -86,7 +83,7 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 //	@Description	Returns all registered workers and their current status from the database.
 //	@Tags			Workers
 //	@Produce		json
-//	@Success		200	{array}		dbmodels.Worker			"List of workers"
+//	@Success		200	{array}		catalogtypes.Worker		"List of workers"
 //	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [get]
@@ -98,7 +95,21 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, workers)
+	result := make([]catalogtypes.Worker, len(workers))
+	for i, w := range workers {
+		result[i] = catalogtypes.Worker{
+			ID:            w.ID.String(),
+			Name:          w.Name,
+			RuntimeType:   catalogtypes.WorkerRuntimeType(w.RuntimeType),
+			Status:        catalogtypes.WorkerStatus(w.Status),
+			LastHeartbeat: w.LastHeartbeat,
+			Metadata:      w.Metadata,
+			RegisteredAt:  w.RegisteredAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     w.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		}
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // DeleteWorker godoc
