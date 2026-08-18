@@ -2,19 +2,19 @@ import React, { useState } from "react";
 import { Button } from "@carbon/react";
 import { View, ViewOff } from "@carbon/icons-react";
 import type { ProviderSchema } from "@/types/api.types";
-import styles from "../../Shared/DeployFlow.shared.module.scss";
+import styles from "../DeployFlow.shared.module.scss";
 
-interface ServiceCredentialDisplayProps {
-  providerId: string;
+interface ProviderCredentialDisplayProps {
+  /** ID used to namespace the show/hide toggle state — typically serviceId or componentType. */
+  contextId: string;
   providerSchema: ProviderSchema | null;
   values: Record<string, unknown>;
-  serviceId: string;
   className?: string;
 }
 
-export const ServiceCredentialDisplay: React.FC<
-  ServiceCredentialDisplayProps
-> = ({ providerSchema, values, serviceId, className }) => {
+export const ProviderCredentialDisplay: React.FC<
+  ProviderCredentialDisplayProps
+> = ({ contextId, providerSchema, values, className }) => {
   const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({});
 
   if (!providerSchema || !providerSchema.properties) {
@@ -44,7 +44,7 @@ export const ServiceCredentialDisplay: React.FC<
         if (!fieldValue && !field.required) return null;
 
         const isPasswordField = field.format === "password";
-        const fieldKey = `${serviceId}-${field.key}`;
+        const fieldKey = `${contextId}-${field.key}`;
 
         return (
           <div

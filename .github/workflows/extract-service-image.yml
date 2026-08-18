@@ -1,0 +1,32 @@
+name: Extract Service
+
+on:
+  push:
+    paths:
+      - 'services/extract/**'
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      service: 'extract'
+      working-directory: 'services'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'services'
+      service: 'extract'
+      image: 'extract-service'
+    secrets:
+      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
