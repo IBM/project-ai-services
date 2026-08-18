@@ -95,9 +95,10 @@ async def create_connector(body: ConnectorCreateRequest):
                 connector_id, sync_interval, fire_immediately=True
             )
         except Exception as sched_exc:
-            logger.warning(
+            logger.error(
                 f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
             )
+            raise
 
         db_ops.insert_connector(
             connector_id=connector_id,
