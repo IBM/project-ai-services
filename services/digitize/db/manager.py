@@ -1669,8 +1669,8 @@ class DatabaseManager:
         """
         Return the number of 'queued' tasks for both operation types in a single query.
 
-        The result is used by the admission gate inside a SELECT … FOR UPDATE
-        transaction to prevent races.
+        Non-locking read — used for logging/metrics only.
+        For admission decisions use check_quota_atomic() instead.
         """
         try:
             with get_db_session() as session:
@@ -1687,6 +1687,61 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             logger.error(f"DB error counting queued tasks: {e}", exc_info=True)
             return {"ingestion": 0, "digitization": 0}
+
+    @staticmethod
+    def check_quota_atomic(operation: str, quota: int) -> tuple[bool, int]:
+        """
+        Atomically check whether at least one free queue slot exists for
+        ``operation`` by counting tasks with ``status='queued'`` under a
+        session-level advisory lock to prevent concurrent over-admission races.
+
+        The quota guards the **queue** (``queued`` status only).  Running tasks
+        have already left the queue and freed their slot — a new submission may
+        legitimately take that freed slot.  The semaphore is the hard
+        execution-time resource limit managed exclusively by the dispatcher;
+        it is never consulted at admission time.
+
+        Because PostgreSQL does not support SELECT FOR UPDATE with aggregate
+        functions, we serialise concurrent POST /v1/jobs calls via a
+        session-level advisory lock keyed on the operation string hash so that
+        two concurrent requests cannot both read ``queued=9 < 10`` and both
+        proceed.
+
+        Args:
+            operation: ``"ingestion"`` or ``"digitization"``.
+            quota:     Maximum allowed queued tasks for this operation.
+
+        Returns:
+            Tuple of (quota_ok: bool, current_queued_count: int).
+            quota_ok is True when ``current_queued_count < quota``.
+        """
+        from sqlalchemy import text
+
+        # Numeric key for the advisory lock: hash operation string to an int32
+        lock_key = hash(operation) & 0x7FFFFFFF
+
+        try:
+            with get_db_session() as session:
+                # Acquire a session-level advisory lock so concurrent requests
+                # for the same operation type are serialised through this block.
+                session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+
+                queued = session.scalar(
+                    select(func.count()).where(
+                        ConversionTask.status == "queued",
+                        ConversionTask.operation == operation,
+                    )
+                ) or 0
+
+                return queued < quota, queued
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in check_quota_atomic({operation}, {quota}): {e}",
+                exc_info=True,
+            )
+            # Fail-open: return 0 so the gate passes if we can't count.
+            # The dispatcher's semaphore is the hard execution-time limit.
+            return True, 0
 
     @staticmethod
     def update_task_status(

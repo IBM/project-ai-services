@@ -8,6 +8,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from common.settings import Settings as CommonSettings
 
+
 class DigitizeConfig(BaseSettings):
     """Digitize service configuration."""
 

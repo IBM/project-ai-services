@@ -43,7 +43,8 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # This must be set before TestClient is created so the patched reference is
     # seen by every request handler.
     mock_db_manager = Mock()
-    mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+    # check_quota_atomic returns (quota_ok=True, queued_count=0) by default → always admitted.
+    mock_db_manager.check_quota_atomic = Mock(return_value=(True, 0))
     mock_db_manager.create_conversion_task = Mock(return_value=None)
     # find_completed_document_by_hash returns None → every file is treated as novel.
     mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
@@ -151,7 +152,8 @@ class TestCreateJobs:
 
     def test_rejects_when_ingestion_queue_full(self, digitize_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router
-        monkeypatch.setattr(jobs_router.db_manager, "get_queued_counts", Mock(return_value={"ingestion": 10, "digitization": 0}))
+        # check_quota_atomic returns (False, 10) → quota full → 429
+        monkeypatch.setattr(jobs_router.db_manager, "check_quota_atomic", Mock(return_value=(False, 10)))
 
         response = digitize_test_client.post(
             "/v1/jobs?operation=ingestion",
@@ -278,7 +280,7 @@ class TestCreateJobs:
 
         # First file already exists; second is novel.
         mock_hash_db = Mock()
-        mock_hash_db.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.find_completed_document_by_hash = Mock(
             side_effect=[existing_doc, None]
         )

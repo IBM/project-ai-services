@@ -371,3 +371,41 @@ class TestPromotePending:
 
         promoted = DatabaseManager.promote_pending("digitization", quota=5)
         assert promoted == 0
+
+
+@pytest.mark.unit
+class TestCheckQuotaAtomic:
+    def test_returns_true_when_below_quota(self, session):
+        from digitize.db.manager import DatabaseManager
+        from sqlalchemy import text
+
+        # Advisory lock execute + scalar count query
+        session.execute.return_value = Mock()  # pg_advisory_xact_lock
+        session.scalar.return_value = 3        # 3 queued tasks
+
+        ok, count = DatabaseManager.check_quota_atomic("ingestion", quota=10)
+        assert ok is True
+        assert count == 3
+
+    def test_returns_false_when_at_quota(self, session):
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.return_value = Mock()
+        session.scalar.return_value = 10       # exactly at quota
+
+        ok, count = DatabaseManager.check_quota_atomic("digitization", quota=10)
+        assert ok is False
+        assert count == 10
+
+    def test_returns_true_on_db_error_fail_open(self, session):
+        """On DB error the gate fails open so the semaphore remains the hard limit."""
+        from sqlalchemy.exc import SQLAlchemyError
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.side_effect = SQLAlchemyError("advisory lock failed")
+
+        ok, count = DatabaseManager.check_quota_atomic("ingestion", quota=5)
+        assert ok is True
+        assert count == 0
+
+

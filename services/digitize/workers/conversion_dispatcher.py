@@ -68,10 +68,21 @@ def _try_claim_if_fits(operation: str, available: int) -> ConversionTask | None:
     return db_manager.claim_head(operation)
 
 
+def _safe_remove(file_path: str) -> None:
+    """Delete a file best-effort — logs but never raises."""
+    try:
+        p = Path(file_path)
+        if p.exists():
+            p.unlink()
+    except Exception as exc:
+        logger.warning(f"Could not remove cached file {file_path!r}: {exc}")
+
+
 async def _run_conversion(task: ConversionTask, weight: int) -> None:
     """
     Execute a single conversion task inside the shared process pool.
     Releases the semaphore unconditionally in the finally block.
+    Deletes the staged input file on completion or failure (best-effort).
     """
     from digitize.utils.db import get_status_manager
     from digitize.models import DocStatus, JobStatus
@@ -108,15 +119,15 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         db_manager.update_task_status(task.task_id, "completed", result_path=result_path)
         logger.info(f"Task {task.task_id} completed → {result_path}")
 
-        # For digitization: update job/doc to completed
+        # For digitization: update job/doc to completed.
+        # page_count is read from the task row (stored at enqueue time) so we
+        # do not need to re-open the file after it may already be deleted.
         if task.operation == "digitization" and task.job_id and task.doc_id:
-            from digitize.parsing.pdf import get_document_page_count
             from common.misc_utils import get_utc_timestamp
-            page_count = get_document_page_count(task.cached_file)
             status_mgr = get_status_manager(task.job_id)
             status_mgr.update_doc_metadata(task.doc_id, {
                 "status": DocStatus.COMPLETED,
-                "pages": page_count,
+                "pages": task.page_count or 0,
                 "completed_at": get_utc_timestamp(),
             })
             status_mgr.update_job_progress(task.doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
@@ -140,6 +151,8 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
                 error=f"Conversion failed: {exc}",
             )
     finally:
+        # Delete the staged input file — result_path is kept until user exports.
+        _safe_remove(task.cached_file)
         await conversion_semaphore.release(weight)
 
 

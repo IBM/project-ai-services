@@ -32,6 +32,7 @@ def _make_task(
     output_format="json",
     result_path=None,
     error=None,
+    page_count=5,
 ):
     t = Mock()
     t.task_id = task_id
@@ -44,6 +45,7 @@ def _make_task(
     t.output_format = output_format
     t.result_path = result_path
     t.error = error
+    t.page_count = page_count
     return t
 
 
@@ -369,7 +371,6 @@ class TestRunConversion:
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock) as mock_release, \
                  patch("digitize.utils.db.get_status_manager") as mock_gsm, \
                  patch("asyncio.get_running_loop") as mock_loop, \
-                 patch("digitize.parsing.pdf.get_document_page_count", return_value=5), \
                  patch("common.misc_utils.get_utc_timestamp",
                        return_value="2024-01-01T00:00:00Z"):
 
@@ -454,3 +455,162 @@ class TestRunConversion:
             mock_rel.assert_awaited_once_with(2)
 
         asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# _safe_remove()
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestSafeRemove:
+    def test_deletes_existing_file(self, tmp_path):
+        from digitize.workers.conversion_dispatcher import _safe_remove
+
+        f = tmp_path / "staged.pdf"
+        f.write_bytes(b"%PDF")
+        assert f.exists()
+
+        _safe_remove(str(f))
+        assert not f.exists()
+
+    def test_silently_ignores_missing_file(self, tmp_path):
+        from digitize.workers.conversion_dispatcher import _safe_remove
+
+        missing = str(tmp_path / "ghost.pdf")
+        # Must not raise
+        _safe_remove(missing)
+
+    def test_silently_ignores_permission_error(self, tmp_path):
+        from digitize.workers.conversion_dispatcher import _safe_remove
+        from unittest.mock import patch
+
+        with patch("pathlib.Path.unlink", side_effect=PermissionError("no write")):
+            # Must not propagate
+            _safe_remove(str(tmp_path / "locked.pdf"))
+
+
+# ---------------------------------------------------------------------------
+# _run_conversion() — page_count from task row + file cleanup
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestRunConversionUpdated:
+    def test_uses_task_page_count_not_file_read(self, tmp_path):
+        """
+        _run_conversion for digitization must use task.page_count from the DB
+        row (stored at enqueue time) rather than re-reading the cached file.
+        The old code called get_document_page_count(task.cached_file) AFTER
+        conversion — which is wrong if the file has already been deleted.
+        """
+        import digitize.workers.conversion_dispatcher as mod
+
+        task = _make_task(
+            cached_file=str(tmp_path / "file.pdf"),
+            operation="digitization",
+        )
+        task.page_count = 42  # pre-stored at enqueue time
+        (tmp_path / "file.pdf").write_bytes(b"%PDF-1.4")
+
+        result_path = str(tmp_path / "output.json")
+        metadata_updates = []
+
+        async def _run():
+            with patch.object(mod.db_manager, "update_task_status"), \
+                 patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
+                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
+                 patch("asyncio.get_running_loop") as mock_loop, \
+                 patch("common.misc_utils.get_utc_timestamp",
+                       return_value="2024-01-01T00:00:00Z"):
+
+                mock_event_loop = MagicMock()
+                mock_event_loop.run_in_executor = AsyncMock(return_value=(result_path, 1.0))
+                mock_loop.return_value = mock_event_loop
+
+                mock_sm = Mock()
+                mock_sm.update_doc_metadata = Mock(
+                    side_effect=lambda doc_id, upd, **kw: metadata_updates.append(upd)
+                )
+                mock_sm.update_job_progress = Mock()
+                mock_gsm.return_value = mock_sm
+
+                await mod._run_conversion(task, weight=1)
+
+        asyncio.run(_run())
+
+        # The metadata update for COMPLETED must carry pages=42 (from task.page_count)
+        completed_update = next(
+            (u for u in metadata_updates if u.get("status") is not None
+             and str(u.get("status")) in ("completed", "DocStatus.COMPLETED", "DocStatus.completed")),
+            None,
+        )
+        # Verify via pages value — must be 42, not whatever get_document_page_count would return
+        pages_value = next(
+            (u.get("pages") for u in metadata_updates if "pages" in u),
+            None,
+        )
+        assert pages_value == 42
+
+    def test_cached_file_deleted_on_success(self, tmp_path):
+        """After successful conversion the staged input file must be removed."""
+        import digitize.workers.conversion_dispatcher as mod
+
+        cached = tmp_path / "file.pdf"
+        cached.write_bytes(b"%PDF-1.4")
+        task = _make_task(
+            cached_file=str(cached),
+            operation="digitization",
+        )
+        task.page_count = 5
+
+        result_path = str(tmp_path / "output.json")
+
+        async def _run():
+            with patch.object(mod.db_manager, "update_task_status"), \
+                 patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
+                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
+                 patch("asyncio.get_running_loop") as mock_loop, \
+                 patch("common.misc_utils.get_utc_timestamp", return_value="ts"):
+
+                mock_event_loop = MagicMock()
+                mock_event_loop.run_in_executor = AsyncMock(return_value=(result_path, 1.0))
+                mock_loop.return_value = mock_event_loop
+                mock_gsm.return_value = Mock()
+                mock_gsm.return_value.update_doc_metadata = Mock()
+                mock_gsm.return_value.update_job_progress = Mock()
+
+                await mod._run_conversion(task, weight=1)
+
+        asyncio.run(_run())
+        assert not cached.exists(), "Staged input file should be deleted after success"
+
+    def test_cached_file_deleted_on_failure(self, tmp_path):
+        """The staged file is removed even when the conversion raises."""
+        import digitize.workers.conversion_dispatcher as mod
+
+        cached = tmp_path / "file.pdf"
+        cached.write_bytes(b"%PDF-1.4")
+        task = _make_task(
+            cached_file=str(cached),
+            operation="ingestion",
+        )
+        task.page_count = 10
+
+        async def _run():
+            with patch.object(mod.db_manager, "update_task_status"), \
+                 patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
+                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
+                 patch("asyncio.get_running_loop") as mock_loop:
+
+                mock_event_loop = MagicMock()
+                mock_event_loop.run_in_executor = AsyncMock(
+                    side_effect=RuntimeError("conversion crashed")
+                )
+                mock_loop.return_value = mock_event_loop
+                mock_gsm.return_value = Mock()
+                mock_gsm.return_value.update_doc_metadata = Mock()
+                mock_gsm.return_value.update_job_progress = Mock()
+
+                await mod._run_conversion(task, weight=1)
+
+        asyncio.run(_run())
+        assert not cached.exists(), "Staged file should be deleted even on conversion failure"
