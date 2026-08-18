@@ -14,8 +14,11 @@ This file is responsible only for:
   - Router registration
 """
 
+import os
 import uuid
 from contextlib import asynccontextmanager
+
+os.environ.setdefault("TZ", "UTC")
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
