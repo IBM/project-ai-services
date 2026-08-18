@@ -3,9 +3,6 @@ import { useDeployStore } from "@/store/deploy.store";
 import { fetchDeployOptions } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 
-// Fetches deploy options for the selected architecture, cached in Zustand for 15 minutes.
-// Keyed per architecture so switching architectures always gets fresh data.
-// dedupe() prevents duplicate in-flight requests when multiple components trigger the hook simultaneously.
 export const useDeployOptions = () => {
   const selectedArchitectureId = useDeployStore(
     (s) => s.selectedArchitectureId,

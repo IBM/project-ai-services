@@ -320,6 +320,39 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	return schema, nil
 }
 
+// GetConnectorProviderParams returns the JSON schema for a specific connector provider's configuration.
+// If the schema file is not present, returns an empty schema instead of failing.
+func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connectorType, providerID string) (map[string]any, error) {
+	// Verify connector exists and get its path
+	_, err := p.LoadConnector(connectorType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("connector provider not found: %w", err)
+	}
+
+	// Get the connector's catalog path
+	connectorKey := fmt.Sprintf("%s/%s", connectorType, providerID)
+	connectorPath, err := p.GetCatalogItemPath(connectorKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connector path: %w", err)
+	}
+
+	schemaPath := filepath.Join(connectorPath, "schema.json")
+	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
+	if err != nil {
+		// If schema file doesn't exist, return empty schema instead of failing
+		logger.WarningfCtx(ctx, "schema file not found at '%s': %v", schemaPath, err)
+
+		return map[string]any{}, nil
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(schemaData, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse schema: %w", err)
+	}
+
+	return schema, nil
+}
+
 // GetServiceParams returns the JSON schema for a specific service's configuration.
 // If the schema file is not present, returns an empty schema instead of failing.
 func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {

@@ -7,6 +7,7 @@ type CreateFlags struct {
 	Template       string
 	Params         string
 	Values         string
+	Legacy         string
 
 	// Podman-specific flags
 	SkipImageDownload string
@@ -24,6 +25,7 @@ var Create = CreateFlags{
 	Template:       "template",
 	Params:         "params",
 	Values:         "values",
+	Legacy:         "legacy",
 
 	// Podman-specific flags
 	SkipImageDownload: "skip-image-download",
@@ -39,6 +41,7 @@ type DeleteFlags struct {
 	// Common flags - valid for all runtimes
 	SkipCleanup string
 	AutoYes     string
+	Legacy      string
 
 	// OpenShift-specific flags
 	Timeout string
@@ -49,6 +52,7 @@ var Delete = DeleteFlags{
 	// Common flags
 	SkipCleanup: "skip-cleanup",
 	AutoYes:     "yes",
+	Legacy:      "legacy",
 
 	// OpenShift-specific flags
 	Timeout: "timeout",
@@ -59,23 +63,27 @@ type LogsFlags struct {
 	// Common flags - valid for all runtimes
 	Pod       string
 	Container string
+	Legacy    string
 }
 
 // Logs holds the flag constants for the 'application logs' command.
 var Logs = LogsFlags{
 	Pod:       "pod",
 	Container: "container",
+	Legacy:    "legacy",
 }
 
 // PsFlags contains all flag names for the 'application ps' command.
 type PsFlags struct {
 	// Common flags - valid for all runtimes
 	Output string
+	Legacy string
 }
 
 // Ps holds the flag constants for the 'application ps' command.
 var Ps = PsFlags{
 	Output: "output",
+	Legacy: "legacy",
 }
 
 // Made with Bob

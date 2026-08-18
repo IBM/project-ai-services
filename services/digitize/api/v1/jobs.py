@@ -12,7 +12,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses
@@ -146,7 +146,6 @@ async def _validate_files(
     response_description="Job accepted. `job_id` can be used to poll status.",
 )
 async def create_job(
-    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(
         ...,
         description="Document files (PDF or DOCX) to process",
@@ -287,7 +286,7 @@ async def create_job(
         # 6. Acquire semaphore slot.
         await concurrency_manager.acquire(op_key)
 
-        # 7. Stage files and schedule background task.
+        # 7. Stage files and dispatch async task.
         try:
             await dg_util.stage_upload_files(
                 job_id,
@@ -300,15 +299,13 @@ async def create_job(
                 already_exists_files=already_exists_files,
             )
             if operation == models.OperationType.INGESTION:
-                background_tasks.add_task(
-                    _run_ingest, job_id, filenames, doc_id_dict, file_checksum_dict
-                )
+                asyncio.create_task(_run_ingest(job_id, filenames, doc_id_dict, file_checksum_dict))
             else:
-                background_tasks.add_task(_run_digitize, job_id, doc_id_dict, output_format, file_checksum_dict)
+                asyncio.create_task(_run_digitize(job_id, doc_id_dict, output_format, file_checksum_dict))
         except Exception as exc:
             concurrency_manager.release(op_key)
             logger.error(
-                f"Failed to schedule background task for job {job_id}, "
+                f"Failed to dispatch task for job {job_id}, "
                 f"semaphore released: {exc}"
             )
             APIError.raise_error("INTERNAL_SERVER_ERROR", str(exc))

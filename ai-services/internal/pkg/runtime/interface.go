@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"io"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
@@ -11,11 +12,11 @@ import (
 type Runtime interface {
 	// Image operations
 	ListImages() ([]types.Image, error)
-	PullImage(image string) error
+	PullImage(ctx context.Context, image string) error
 
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)
-	CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error)
+	CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error)
 	DeletePod(id string, force *bool) error
 	StopPod(id string) error
 	StartPod(id string) error
@@ -23,6 +24,7 @@ type Runtime interface {
 	PodExists(nameOrID string) (bool, error)
 	PodLogs(nameOrID string) error
 	GetPodResources(nameOrID string) (*types.PodResources, error)
+	GetNamespace() (string, error)
 
 	// Secret operations
 	ListSecrets(filters map[string][]string) ([]string, error)

@@ -9,15 +9,24 @@
 //
 // Labels
 //
-//	failure-test   – all tests in this file
-//	registry       – Test 1
-//	catalog        – Test 2 (both sub-cases)
-//	validation     – Test 3 and Test 4
-//	spyre          – Test 4 specifically
+//	failure-test       – all tests in this file (umbrella label, shared with all failure suites)
+//	bootstrap-failure  – all tests in this file (domain label)
+//	registry           – Test 1
+//	catalog            – Test 2 (both sub-cases)
+//	validation         – Test 3 and Test 4
+//	spyre              – Test 4 specifically
 //
-// Running only failure tests:
+// Running ALL failure tests together (all three failure suites):
 //
 //	ginkgo -r --label-filter="failure-test" ./tests/e2e
+//
+// Excluding ALL failure tests from the normal run:
+//
+//	ginkgo -r --label-filter="!failure-test" ./tests/e2e
+//
+// Running only bootstrap failure tests:
+//
+//	ginkgo -r --label-filter="bootstrap-failure" ./tests/e2e
 //
 // Running a specific category:
 //
@@ -25,10 +34,6 @@
 //	ginkgo -r --label-filter="failure-test && catalog"    ./tests/e2e
 //	ginkgo -r --label-filter="failure-test && validation" ./tests/e2e
 //	ginkgo -r --label-filter="failure-test && spyre"      ./tests/e2e
-//
-// Excluding failure tests from the normal run:
-//
-//	ginkgo -r --label-filter="!failure-test" ./tests/e2e
 package e2e
 
 import (
@@ -78,6 +83,19 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 	// self-contained and must not depend on the result of a preceding test.
 	func() {
 
+		// ── Default-exclusion guard ───────────────────────────────────────────
+		//
+		// Failure tests are skipped unless --run-failure-tests is explicitly
+		// passed.  This mirrors the --app-name guard used by Language Support
+		// Tests and prevents accidental execution during a normal suite run.
+		ginkgo.BeforeEach(func() {
+			if !runFailureTests {
+				ginkgo.Skip(
+					"[FAILURE-TEST][Bootstrap] Skipping — pass --run-failure-tests to opt in to failure test execution",
+				)
+			}
+		})
+
 		// ── Test 1: Invalid Registry Credentials ─────────────────────────────
 		//
 		// Rationale: An operator who sets the wrong REGISTRY_PASSWORD should
@@ -95,7 +113,7 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 			func() {
 				ginkgo.It(
 					"fails gracefully with invalid registry credentials",
-					ginkgo.Label("failure-test", "registry", "spyre-independent"),
+					ginkgo.Label("failure-test", "bootstrap-failure", "registry", "spyre-independent"),
 					func() {
 						// This test has only been validated on the podman runtime.
 						// Skip explicitly on openshift until ported and verified.
@@ -176,7 +194,7 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 				// 2a ── Invalid catalog credentials ───────────────────────────
 				ginkgo.It(
 					"fails gracefully with invalid catalog credentials",
-					ginkgo.Label("failure-test", "catalog", "spyre-independent"),
+					ginkgo.Label("failure-test", "bootstrap-failure", "catalog", "spyre-independent"),
 					func() {
 						if appRuntime != "podman" {
 							ginkgo.Skip(
@@ -250,7 +268,7 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 				// 2b ── Unreachable catalog server ─────────────────────────
 				ginkgo.It(
 					"fails gracefully when catalog server is unreachable",
-					ginkgo.Label("failure-test", "catalog", "spyre-independent"),
+					ginkgo.Label("failure-test", "bootstrap-failure", "catalog", "spyre-independent"),
 					func() {
 						if appRuntime != "podman" {
 							ginkgo.Skip(
@@ -315,7 +333,7 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 			func() {
 				ginkgo.It(
 					"bootstrap validate rejects an invalid --runtime flag value",
-					ginkgo.Label("failure-test", "validation", "spyre-independent"),
+					ginkgo.Label("failure-test", "bootstrap-failure", "validation", "spyre-independent"),
 					func() {
 						ctx, cancel := context.WithTimeout(
 							context.Background(),
@@ -378,7 +396,7 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 				//     GHW_CHROOT is restored in a deferred cleanup.
 				ginkgo.It(
 					"bootstrap validate reports missing Spyre accelerator card",
-					ginkgo.Label("failure-test", "validation", "spyre"),
+					ginkgo.Label("failure-test", "bootstrap-failure", "validation", "spyre"),
 					func() {
 						if appRuntime != "podman" {
 							ginkgo.Skip(

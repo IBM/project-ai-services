@@ -234,6 +234,73 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 	c.JSON(http.StatusOK, schema)
 }
 
+// ListConnectorProviders godoc
+//
+//	@Summary		List connector providers
+//	@Description	Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			connector_type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
+//	@Success		200				{array}		types.Connector	"List of providers"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse	"Connector type not found"
+//	@Router			/connectors [get]
+func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
+	connectorType := c.Query("connector_type")
+
+	var providers []*types.Connector
+	if connectorType == "" {
+		providers = h.provider.ListAllConnectors()
+	} else {
+		var err error
+		providers, err = h.provider.ListConnectors(connectorType)
+		if err != nil {
+			c.JSON(http.StatusNotFound, ErrorResponse{
+				Error: fmt.Sprintf("connector type %q not found", connectorType),
+			})
+
+			return
+		}
+	}
+
+	// Return an empty array rather than null when no providers are registered yet.
+	if providers == nil {
+		providers = []*types.Connector{}
+	}
+
+	c.JSON(http.StatusOK, providers)
+}
+
+// GetConnectorProviderParams godoc
+//
+//	@Summary		Get connector provider parameters
+//	@Description	Returns the JSON Schema for the configuration parameters of a specific connector provider.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			connector_type	path		string					true	"Connector type (e.g. 'datasource')"
+//	@Param			provider_id		path		string					true	"Provider identifier (e.g. 'object_storage', 'file_system')"
+//	@Success		200				{object}	map[string]interface{}	"JSON Schema for the provider's configuration"
+//	@Failure		401				{object}	ErrorResponse			"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse			"Connector type or provider not found"
+//	@Router			/connectors/{connector_type}/providers/{provider_id}/params [get]
+func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
+	connectorType := c.Param("connector_type")
+	providerID := c.Param("provider_id")
+
+	schema, err := h.provider.GetConnectorProviderParams(c.Request.Context(), connectorType, providerID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", connectorType, providerID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, schema)
+}
+
 // GetServiceParams godoc
 //
 //	@Summary		Get service parameters

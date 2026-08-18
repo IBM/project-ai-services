@@ -16,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/miq"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
@@ -25,6 +26,9 @@ const (
 
 type Service interface {
 	Login(ctx context.Context, username, password string) (accessToken, refreshToken string, err error)
+	// LoginWithToken exchanges a pre-existing ManageIQ token (e.g. from IBM Power
+	// Mission Control) for an internal Catalog API JWT without requiring credentials.
+	LoginWithToken(ctx context.Context, miqToken string) (accessToken, refreshToken string, err error)
 	Logout(ctx context.Context, accessToken, refreshToken string) error
 	RefreshTokens(ctx context.Context, refreshToken string) (newAccess, newRefresh string, err error)
 	GetUser(ctx context.Context, id string) (*models.User, error)
@@ -34,10 +38,17 @@ type service struct {
 	users     repository.UserRepository
 	tokens    *TokenManager
 	blacklist repository.TokenBlacklist
+	miqClient miq.Client
 }
 
+// NewAuthService creates an auth service without a ManageIQ client (local password mode).
 func NewAuthService(users repository.UserRepository, tokens *TokenManager, blacklist repository.TokenBlacklist) Service {
 	return &service{users: users, tokens: tokens, blacklist: blacklist}
+}
+
+// NewAuthServiceWithMIQ creates an auth service backed by ManageIQ for token passthrough.
+func NewAuthServiceWithMIQ(users repository.UserRepository, tokens *TokenManager, blacklist repository.TokenBlacklist, miqClient miq.Client) Service {
+	return &service{users: users, tokens: tokens, blacklist: blacklist, miqClient: miqClient}
 }
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
@@ -55,6 +66,41 @@ func (s *service) Login(ctx context.Context, username, password string) (string,
 		return "", "", err
 	}
 	refresh, _, err := s.tokens.GenerateRefreshToken(u.ID)
+	if err != nil {
+		return "", "", err
+	}
+
+	return access, refresh, nil
+}
+
+// LoginWithToken validates a ManageIQ token by calling the MIQ API, resolves the caller's
+// identity and group membership, and issues an internal Catalog API JWT pair.
+// This is Flow B: used by IBM Power Mission Control which already holds a MIQ token.
+func (s *service) LoginWithToken(ctx context.Context, miqToken string) (string, string, error) {
+	if s.miqClient == nil {
+		return "", "", errors.New("ManageIQ client not configured")
+	}
+
+	info, err := s.miqClient.GetUserByToken(ctx, miqToken)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Seed the in-memory user repo so /auth/me works after token exchange.
+	// ID must match the JWT subject (info.ExternalID) so GetByID resolves correctly.
+	if repo, ok := s.users.(*repository.InMemoryUserRepo); ok {
+		repo.Upsert(&models.User{
+			ID:       info.ExternalID,
+			UserName: info.UserName,
+			Name:     info.FullName,
+		})
+	}
+
+	access, _, err := s.tokens.GenerateAccessToken(info.ExternalID)
+	if err != nil {
+		return "", "", err
+	}
+	refresh, _, err := s.tokens.GenerateRefreshToken(info.ExternalID)
 	if err != nil {
 		return "", "", err
 	}
