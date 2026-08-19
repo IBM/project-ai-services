@@ -80,12 +80,12 @@ func registerBundleRoutes(v1 *gin.RouterGroup, h *handlers.BundleHandler, authMw
 		g.POST("/validate", h.ValidateBundle)
 		// GET /api/v1/catalog/bundles — list all bundles
 		g.GET("", h.ListBundles)
-		// GET /api/v1/catalog/bundles/:bundle_id — get a single bundle
-		g.GET("/:bundle_id", h.GetBundle)
-		// PUT /api/v1/catalog/bundles/:bundle_id — replace an existing bundle
-		g.PUT("/:bundle_id", h.UpdateBundle)
-		// DELETE /api/v1/catalog/bundles/:bundle_id — delete a bundle
-		g.DELETE("/:bundle_id", h.DeleteBundle)
+		// GET /api/v1/catalog/bundles/:id — get a single bundle
+		g.GET("/:id", h.GetBundle)
+		// PUT /api/v1/catalog/bundles/:id — replace an existing bundle
+		g.PUT("/:id", h.UpdateBundle)
+		// DELETE /api/v1/catalog/bundles/:id — delete a bundle
+		g.DELETE("/:id", h.DeleteBundle)
 	}
 }
 

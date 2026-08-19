@@ -36,7 +36,7 @@ func NewBundleService(repo repository.BundleRepository) BundleServiceInterface {
 //  8. Construct and return the appropriate ValidationResult:
 //     - *ServiceValidationResult for catalog_type="service"
 //     - *ComponentValidationResult for catalog_type="component"
-func (s *bundleService) ValidateBundle(_ context.Context, _ io.Reader) (ValidationResult, error) {
+func (s *bundleService) ValidateBundle(_ context.Context, _ io.Reader) (any, error) {
 	// TODO: implement
 	panic("not implemented")
 }

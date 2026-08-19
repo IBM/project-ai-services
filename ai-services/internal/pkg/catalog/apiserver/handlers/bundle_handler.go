@@ -65,36 +65,36 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
 	// TODO: call h.bundleService.ValidateBundle(c.Request.Context(), file)
-	// TODO: serialise the returned ValidationResult (ServiceValidationResult or ComponentValidationResult) as 200
-	// TODO: map ValidationError.Code to 422
+	// TODO: type-switch result: *bundlesvc.ServiceValidationResult or *bundlesvc.ComponentValidationResult; return as 200
+	// TODO: map *bundlesvc.ValidationError.Code to 422
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 // UpdateBundle godoc
 //
 //	@Summary		Replace an existing bundle
-//	@Description	Replaces the bundle identified by bundle_id with a new archive. catalog_id and catalog_type are resolved from the DB record.
+//	@Description	Replaces the bundle identified by id with a new archive. catalog_id and catalog_type are resolved from the DB record.
 //	@Tags			Bundles
 //	@Accept			multipart/form-data
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			bundle_id	path		string	true	"Internal bundle UUID"
-//	@Param			file		formData	file	true	"Replacement .tar.gz archive"
-//	@Success		200			{object}	bundlesvc.BundleResponse
-//	@Failure		400			{object}	ErrorResponse
-//	@Failure		401			{object}	ErrorResponse
-//	@Failure		403			{object}	ErrorResponse
-//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
-//	@Failure		422			{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
-//	@Router			/catalog/bundles/{bundle_id} [put]
+//	@Param			id		path		string	true	"Internal bundle UUID"
+//	@Param			file	formData	file	true	"Replacement .tar.gz archive"
+//	@Success		200		{object}	bundlesvc.BundleResponse
+//	@Failure		400		{object}	ErrorResponse
+//	@Failure		401		{object}	ErrorResponse
+//	@Failure		403		{object}	ErrorResponse
+//	@Failure		404		{object}	ErrorResponse	"Bundle not found"
+//	@Failure		422		{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
+//	@Router			/catalog/bundles/{id} [put]
 func (h *BundleHandler) UpdateBundle(c *gin.Context) {
-	// TODO: read bundle_id path param
+	// TODO: read id path param via c.Param("id")
 	// TODO: call h.bundleService.GetByBundleID — return 404 if nil
 	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
 	// TODO: extract userID from context via middleware.CtxUserIDKey
 	// TODO: call h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
 	// TODO: set Location header and return 200 with updated BundleResponse
-	bundleID := c.Param("bundle_id")
+	bundleID := c.Param("id")
 	_ = fmt.Sprintf("/api/v1/catalog/bundles/%s", bundleID)
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
@@ -105,14 +105,14 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 //	@Description	Marks the bundle deleting, removes the on-disk directory, reloads CatalogProvider, and removes the DB row.
 //	@Tags			Bundles
 //	@Security		BearerAuth
-//	@Param			bundle_id	path	string	true	"Internal bundle UUID"
-//	@Success		204			"No Content"
-//	@Failure		401			{object}	ErrorResponse
-//	@Failure		403			{object}	ErrorResponse
-//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
-//	@Router			/catalog/bundles/{bundle_id} [delete]
+//	@Param			id	path	string	true	"Internal bundle UUID"
+//	@Success		204	"No Content"
+//	@Failure		401	{object}	ErrorResponse
+//	@Failure		403	{object}	ErrorResponse
+//	@Failure		404	{object}	ErrorResponse	"Bundle not found"
+//	@Router			/catalog/bundles/{id} [delete]
 func (h *BundleHandler) DeleteBundle(c *gin.Context) {
-	// TODO: read bundle_id path param
+	// TODO: read id path param via c.Param("id")
 	// TODO: call h.bundleService.GetByBundleID — return 404 if nil
 	// TODO: call h.bundleService.DeleteBundle(c.Request.Context(), existing)
 	// TODO: return 204 on success
@@ -143,13 +143,13 @@ func (h *BundleHandler) ListBundles(c *gin.Context) {
 //	@Tags			Bundles
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			bundle_id	path		string	true	"Internal bundle UUID"
-//	@Success		200			{object}	bundlesvc.BundleResponse
-//	@Failure		401			{object}	ErrorResponse
-//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
-//	@Router			/catalog/bundles/{bundle_id} [get]
+//	@Param			id	path		string	true	"Internal bundle UUID"
+//	@Success		200	{object}	bundlesvc.BundleResponse
+//	@Failure		401	{object}	ErrorResponse
+//	@Failure		404	{object}	ErrorResponse	"Bundle not found"
+//	@Router			/catalog/bundles/{id} [get]
 func (h *BundleHandler) GetBundle(c *gin.Context) {
-	// TODO: read bundle_id path param
+	// TODO: read id path param via c.Param("id")
 	// TODO: call h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
 	// TODO: return 404 if nil, else 200 with BundleResponse
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})

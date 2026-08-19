@@ -1274,14 +1274,14 @@ paths:
       summary: Create a new catalog bundle
       tags:
       - Bundles
-  /catalog/bundles/{bundle_id}:
+  /catalog/bundles/{id}:
     delete:
       description: Marks the bundle deleting, removes the on-disk directory, reloads
         CatalogProvider, and removes the DB row.
       parameters:
       - description: Internal bundle UUID
         in: path
-        name: bundle_id
+        name: id
         required: true
         type: string
       responses:
@@ -1309,7 +1309,7 @@ paths:
       parameters:
       - description: Internal bundle UUID
         in: path
-        name: bundle_id
+        name: id
         required: true
         type: string
       produces:
@@ -1335,12 +1335,12 @@ paths:
     put:
       consumes:
       - multipart/form-data
-      description: Replaces the bundle identified by bundle_id with a new archive.
-        catalog_id and catalog_type are resolved from the DB record.
+      description: Replaces the bundle identified by id with a new archive. catalog_id
+        and catalog_type are resolved from the DB record.
       parameters:
       - description: Internal bundle UUID
         in: path
-        name: bundle_id
+        name: id
         required: true
         type: string
       - description: Replacement .tar.gz archive

@@ -1008,7 +1008,7 @@
                 }
             }
         },
-        "/catalog/bundles/{bundle_id}": {
+        "/catalog/bundles/{id}": {
             "get": {
                 "security": [
                     {
@@ -1027,7 +1027,7 @@
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -1059,7 +1059,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces the bundle identified by bundle_id with a new archive. catalog_id and catalog_type are resolved from the DB record.",
+                "description": "Replaces the bundle identified by id with a new archive. catalog_id and catalog_type are resolved from the DB record.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1074,7 +1074,7 @@
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -1140,7 +1140,7 @@
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }

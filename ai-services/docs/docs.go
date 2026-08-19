@@ -1014,7 +1014,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/catalog/bundles/{bundle_id}": {
+        "/catalog/bundles/{id}": {
             "get": {
                 "security": [
                     {
@@ -1033,7 +1033,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -1065,7 +1065,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces the bundle identified by bundle_id with a new archive. catalog_id and catalog_type are resolved from the DB record.",
+                "description": "Replaces the bundle identified by id with a new archive. catalog_id and catalog_type are resolved from the DB record.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1080,7 +1080,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
@@ -1146,7 +1146,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Internal bundle UUID",
-                        "name": "bundle_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }

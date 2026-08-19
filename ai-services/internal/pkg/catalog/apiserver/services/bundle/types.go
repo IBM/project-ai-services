@@ -16,7 +16,8 @@ type BundleServiceInterface interface {
 	// steps.md, and relevant file contents) without permanent extraction.
 	// No DB row is written and no CatalogProvider reload is triggered.
 	// Returns a ServiceValidationResult or ComponentValidationResult (both implement ValidationResult).
-	ValidateBundle(ctx context.Context, file io.Reader) (ValidationResult, error)
+	// Returns *ServiceValidationResult or *ComponentValidationResult.
+	ValidateBundle(ctx context.Context, file io.Reader) (any, error)
 
 	// ProcessBundle is the synchronous POST bundle creation path.
 	// Reads minimal identity metadata from the archive, checks for a conflict
@@ -119,18 +120,6 @@ func (m *ComponentMetadata) ComponentType() string { return m.componentType }
 // Validation result types (returned by ValidateBundle)
 // -----------------------------------------------------------------------
 
-// ValidationResult is the interface returned by ValidateBundle and serialised as the
-// 200 OK body for POST /catalog/bundles/validate.
-// Concrete types: ServiceValidationResult, ComponentValidationResult.
-type ValidationResult interface {
-	IsValid() bool
-	GetCatalogType() string
-	// GetCatalogID returns the bare id for services and "<component_type>--<id>" for components.
-	GetCatalogID() string
-	GetVersion() string
-	GetDisplayName() string
-}
-
 // ServiceValidationResult is the JSON body for a successfully validated service bundle.
 type ServiceValidationResult struct {
 	Valid       bool   `json:"valid"`
@@ -139,12 +128,6 @@ type ServiceValidationResult struct {
 	Version     string `json:"version"`
 	Name        string `json:"name,omitempty"`
 }
-
-func (r *ServiceValidationResult) IsValid() bool          { return r.Valid }
-func (r *ServiceValidationResult) GetCatalogType() string { return r.CatalogType }
-func (r *ServiceValidationResult) GetCatalogID() string   { return r.CatalogID }
-func (r *ServiceValidationResult) GetVersion() string     { return r.Version }
-func (r *ServiceValidationResult) GetDisplayName() string { return r.Name }
 
 // ComponentValidationResult is the JSON body for a successfully validated component bundle.
 type ComponentValidationResult struct {
@@ -155,12 +138,6 @@ type ComponentValidationResult struct {
 	Version       string `json:"version"`
 	Name          string `json:"name,omitempty"`
 }
-
-func (r *ComponentValidationResult) IsValid() bool          { return r.Valid }
-func (r *ComponentValidationResult) GetCatalogType() string { return r.CatalogType }
-func (r *ComponentValidationResult) GetCatalogID() string   { return r.CatalogID }
-func (r *ComponentValidationResult) GetVersion() string     { return r.Version }
-func (r *ComponentValidationResult) GetDisplayName() string { return r.Name }
 
 // ValidationError carries an HTTP status code alongside its error message.
 // It is returned by ValidateBundle, ProcessBundle, and ReplaceBundle so that
