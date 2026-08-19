@@ -88,9 +88,9 @@ func TestBundleDirPath_UnknownTypeUsesPlural(t *testing.T) {
 
 func TestCatalogTypeToDir(t *testing.T) {
 	tests := []struct{ input, want string }{
-		{CatalogTypeService, bundleDirServices},
-		{CatalogTypeComponent, bundleDirComponents},
-		{"architecture", "architectures"}, // fallback
+		{CatalogTypeService, "services"},
+		{CatalogTypeComponent, "components"},
+		{"architecture", "architectures"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, catalogTypeToDir(tt.input), "input=%s", tt.input)
@@ -479,43 +479,6 @@ func TestExtractAndMeasure_FileContentCorrect(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(destDir, "podman", "templates", "svc.yaml.tmpl"))
 	require.NoError(t, err)
 	assert.Equal(t, wantContent, string(got))
-}
-
-// -----------------------------------------------------------------------
-// newBytesReader
-// -----------------------------------------------------------------------
-
-func TestNewBytesReader_ReadAll(t *testing.T) {
-	data := []byte("hello, world")
-	r := newBytesReader(data)
-	got, err := io.ReadAll(r)
-	require.NoError(t, err)
-	assert.Equal(t, data, got)
-}
-
-func TestNewBytesReader_ReadInChunks(t *testing.T) {
-	data := []byte("abcdefghij")
-	r := newBytesReader(data)
-
-	chunk := make([]byte, 3)
-	var result []byte
-	for {
-		n, err := r.Read(chunk)
-		result = append(result, chunk[:n]...)
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-	}
-	assert.Equal(t, data, result)
-}
-
-func TestNewBytesReader_EmptySlice(t *testing.T) {
-	r := newBytesReader([]byte{})
-	p := make([]byte, 4)
-	n, err := r.Read(p)
-	assert.Zero(t, n)
-	assert.Equal(t, io.EOF, err)
 }
 
 // -----------------------------------------------------------------------

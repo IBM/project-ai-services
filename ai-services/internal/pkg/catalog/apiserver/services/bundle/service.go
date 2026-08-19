@@ -84,6 +84,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 	destDir := bundleDirPath(meta.CatalogType(), meta.CatalogID(), meta.Version())
 	sizeBytes, err := extractAndMeasure(archiveBytes, destDir)
 	if err != nil {
+		_ = os.RemoveAll(destDir) // best-effort cleanup of any partially-extracted files
 		return nil, err
 	}
 

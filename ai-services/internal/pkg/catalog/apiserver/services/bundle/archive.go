@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -18,12 +19,6 @@ import (
 const (
 	// bundleStorageRoot is the mount path for the dedicated catalog-bundles volume.
 	bundleStorageRoot = "/data/catalog-bundles"
-
-	// bundleDirServices is the subdirectory under bundleStorageRoot for service bundles.
-	bundleDirServices = "services"
-
-	// bundleDirComponents is the subdirectory under bundleStorageRoot for component bundles.
-	bundleDirComponents = "components"
 
 	// maxExtractedFileSize is the total uncompressed size limit enforced during extraction
 	// (50 MB). Any single file — or the aggregate of all files written — whose declared
@@ -65,17 +60,9 @@ func bundleDirPath(catalogType, catalogID, version string) string {
 	return filepath.Join(bundleStorageRoot, subdir, catalogID+"-"+version)
 }
 
-// catalogTypeToDir maps the catalog_type value to its plural on-disk subdirectory name.
+// catalogTypeToDir returns the plural on-disk subdirectory name for a catalog type.
 func catalogTypeToDir(catalogType string) string {
-	switch catalogType {
-	case CatalogTypeService:
-		return bundleDirServices
-	case CatalogTypeComponent:
-		return bundleDirComponents
-	default:
-		// Fallback: append 's' so unknown future types degrade gracefully.
-		return catalogType + "s"
-	}
+	return catalogType + "s"
 }
 
 // peekMetadata reads the entire archive into memory, locates the root metadata.yaml,
@@ -107,7 +94,7 @@ func peekMetadata(r io.Reader) ([]byte, BundleMetadata, error) {
 // finds the root metadata.yaml (either at the top level or one directory deep),
 // and delegates to parseMetadataYAML.
 func parseMetadataFromBytes(data []byte) (BundleMetadata, error) {
-	gr, err := gzip.NewReader(newBytesReader(data))
+	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, &validators.ValidationError{
 			Code:    http.StatusBadRequest,
@@ -255,7 +242,7 @@ func parseMetadataYAML(data []byte) (BundleMetadata, error) {
 // Only regular files and directories are extracted; symlinks and other special
 // entry types are silently skipped.
 func extractAndMeasure(data []byte, destDir string) (int64, error) {
-	gr, err := gzip.NewReader(newBytesReader(data))
+	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return 0, &validators.ValidationError{
 			Code:    http.StatusBadRequest,
@@ -385,24 +372,3 @@ func writeFile(path string, r io.Reader, mode int64) (int64, error) {
 	return n, nil
 }
 
-// newBytesReader returns an io.Reader that reads from b without any
-// string conversion or extra allocation.
-func newBytesReader(b []byte) io.Reader {
-	return &bytesReader{b: b}
-}
-
-// bytesReader is a minimal io.Reader over a byte slice.
-type bytesReader struct {
-	b   []byte
-	pos int
-}
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-
-	return n, nil
-}
