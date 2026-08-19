@@ -60,7 +60,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, catalogConstants.PodmanAuthSecret)
+	secretsToDelete = append(secretsToDelete, catalogConstants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName)
 
 	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
 

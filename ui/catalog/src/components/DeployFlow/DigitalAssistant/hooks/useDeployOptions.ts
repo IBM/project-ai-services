@@ -80,41 +80,76 @@ export const useDeployOptions = () => {
     setDeployOptionsError,
   ]);
 
-  // Step 2 — eagerly fetch all provider schemas once deploy options land
+  // Step 2 — eagerly fetch all provider schemas once deploy options land.
+  // In-flight tracking (and therefore isProviderParamsLoading) is scoped to
+  // global-component providers only — those are the schemas StepOne reads.
+  // Service-component and service-level schemas are fetched in the background
+  // without blocking the StepOne Next button.
   useEffect(() => {
     if (!deployOptions) return;
 
     const seen = new Set<string>();
-    const pairs: Array<{ componentType: string; providerId: string }> = [];
+    const globalPairs: Array<{ componentType: string; providerId: string }> =
+      [];
+    const backgroundPairs: Array<{
+      componentType: string;
+      providerId: string;
+    }> = [];
 
-    const visit = (componentType: string, providerId: string) => {
+    const visitGlobal = (componentType: string, providerId: string) => {
       const key = `${componentType}:${providerId}`;
       if (!seen.has(key)) {
         seen.add(key);
-        pairs.push({ componentType, providerId });
+        globalPairs.push({ componentType, providerId });
+      }
+    };
+
+    const visitBackground = (componentType: string, providerId: string) => {
+      const key = `${componentType}:${providerId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        backgroundPairs.push({ componentType, providerId });
       }
     };
 
     deployOptions.global_components.forEach((c) =>
-      c.providers.forEach((p) => visit(c.type, p.id)),
+      c.providers.forEach((p) => visitGlobal(c.type, p.id)),
     );
     deployOptions.services.forEach((s) =>
       s.components.forEach((c) =>
-        c.providers.forEach((p) => visit(c.type, p.id)),
+        c.providers.forEach((p) => visitBackground(c.type, p.id)),
       ),
     );
 
-    const pairsToFetch = pairs.filter(({ componentType, providerId }) => {
-      const cached = getProviderParams(componentType, providerId);
-      // Re-fetch if missing, stale, or previously errored
-      const hasError =
-        !!useDeployStore.getState().providerParamsError[
-          `${componentType}:${providerId}`
-        ];
-      return (
-        !cached || isProviderParamsStale(componentType, providerId) || hasError
-      );
-    });
+    const globalPairsToFetch = globalPairs.filter(
+      ({ componentType, providerId }) => {
+        const cached = getProviderParams(componentType, providerId);
+        const hasError =
+          !!useDeployStore.getState().providerParamsError[
+            `${componentType}:${providerId}`
+          ];
+        return (
+          !cached ||
+          isProviderParamsStale(componentType, providerId) ||
+          hasError
+        );
+      },
+    );
+
+    const backgroundPairsToFetch = backgroundPairs.filter(
+      ({ componentType, providerId }) => {
+        const cached = getProviderParams(componentType, providerId);
+        const hasError =
+          !!useDeployStore.getState().providerParamsError[
+            `${componentType}:${providerId}`
+          ];
+        return (
+          !cached ||
+          isProviderParamsStale(componentType, providerId) ||
+          hasError
+        );
+      },
+    );
 
     // Collect service IDs that need their service-level schema fetched
     const serviceIds = deployOptions.services.map((s) => s.id);
@@ -125,21 +160,27 @@ export const useDeployOptions = () => {
       return !cached || isServiceParamsStale(serviceId) || hasError;
     });
 
-    if (pairsToFetch.length === 0 && serviceIdsToFetch.length === 0) return;
+    if (
+      globalPairsToFetch.length === 0 &&
+      backgroundPairsToFetch.length === 0 &&
+      serviceIdsToFetch.length === 0
+    )
+      return;
 
     const markDone = (key: string) => {
       inFlightKeys.current.delete(key);
       setInflightCount(inFlightKeys.current.size);
     };
 
-    // Mark all provider pairs as in-flight before kicking off fetches.
-    pairsToFetch.forEach(({ componentType, providerId }) => {
+    // Only global-component pairs enter the in-flight set so isProviderParamsLoading
+    // reflects only what StepOne needs, not the full schema set.
+    globalPairsToFetch.forEach(({ componentType, providerId }) => {
       inFlightKeys.current.add(`${componentType}:${providerId}`);
     });
     setInflightCount(inFlightKeys.current.size);
 
     void Promise.allSettled([
-      ...pairsToFetch.map(({ componentType, providerId }) => {
+      ...globalPairsToFetch.map(({ componentType, providerId }) => {
         const key = `${componentType}:${providerId}`;
         // Clear any stale error before retrying so the banner doesn't flash while in-flight
         clearProviderParamsError(componentType, providerId);
@@ -157,6 +198,23 @@ export const useDeployOptions = () => {
             );
           })
           .finally(() => markDone(key));
+      }),
+      ...backgroundPairsToFetch.map(({ componentType, providerId }) => {
+        const key = `${componentType}:${providerId}`;
+        clearProviderParamsError(componentType, providerId);
+        return dedupe(`providerParams:${key}`, () =>
+          fetchProviderSchema(componentType, providerId),
+        )
+          .then((schema) => {
+            setProviderParams(componentType, providerId, schema);
+          })
+          .catch((err) => {
+            setProviderParamsError(
+              componentType,
+              providerId,
+              err instanceof Error ? err.message : "Failed to load schema",
+            );
+          });
       }),
       ...serviceIdsToFetch.map((serviceId) => {
         clearServiceParamsError(serviceId);

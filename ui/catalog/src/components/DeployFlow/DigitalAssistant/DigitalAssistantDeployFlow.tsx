@@ -201,6 +201,12 @@ export const DeployFlow = ({
 
   const isLastStep = state.currentStep === LAST_STEP;
 
+  // Show the shell spinner while the top-level options load or while the
+  // global-component provider schemas (needed by StepOne) are in-flight.
+  // This mirrors ServicesDeployFlow's isStep1ComponentsLoading pattern so the
+  // user sees a spinner rather than a populated step with a grey Next button.
+  const shellIsLoading = isLoading || isProviderParamsLoading;
+
   return (
     <DeployTearsheetShell
       open={open}
@@ -211,8 +217,8 @@ export const DeployFlow = ({
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
       isPrimaryDisabled={
-        isLoading ||
-        (!isLastStep && (isProviderParamsLoading || hasStep1SchemaError)) ||
+        shellIsLoading ||
+        (!isLastStep && hasStep1SchemaError) ||
         (isLastStep && (hasStep2SchemaError || state.isEditing))
       }
       onBack={handleBack}
@@ -222,7 +228,7 @@ export const DeployFlow = ({
       deployToastOpen={state.deployToastOpen}
       onRetryDeploy={handleSubmit}
       onDismissToast={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST })}
-      isLoading={isLoading}
+      isLoading={shellIsLoading}
       error={error}
     >
       {state.currentStep === STEP_ONE && deployOptions && (
@@ -232,7 +238,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
-          onComponentError={setHasStep1SchemaError}
+          onSchemaError={setHasStep1SchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -243,7 +249,7 @@ export const DeployFlow = ({
           deployOptions={deployOptions}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
-          onComponentError={setHasStep2SchemaError}
+          onSchemaError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>
