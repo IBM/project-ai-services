@@ -127,7 +127,7 @@ async def create_connector(body: ConnectorCreateRequest):
     Validates connector settings, encrypts credentials, persists the new connector
     configuration in the database, and schedules the background worker.
     """
-    connector_id = body.connector_id or str(uuid.uuid4())
+    connector_id = body.id or str(uuid.uuid4())
     try:
         encrypted_details = encrypt_secrets(body.type, body.connection_details)
 
@@ -149,7 +149,7 @@ async def create_connector(body: ConnectorCreateRequest):
 
         db_ops.insert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connector_type=body.type,
             connection_details=encrypted_details,
             allowed_extensions=body.allowed_extensions,
@@ -166,12 +166,12 @@ async def create_connector(body: ConnectorCreateRequest):
         )
 
         logger.info(
-            f"Connector {connector_id!r} ({body.connector_name!r}) attached "
+            f"Connector {connector_id!r} ({body.name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
 
         return Response(
-            content=f'{{"connector_id": "{connector_id}"}}',
+            content=f'{{"id": "{connector_id}"}}',
             status_code=201,
             media_type="application/json",
         )
@@ -180,7 +180,7 @@ async def create_connector(body: ConnectorCreateRequest):
         # id or name already exists
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector {connector_id!r} or name {body.connector_name!r} already exists",
+            f"Connector {connector_id!r} or name {body.name!r} already exists",
         )
     except RuntimeError as exc:
         # encryption key not found
@@ -222,7 +222,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     """
     try:
         # Nothing to update — treat as success
-        if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
+        if body.name is None and body.allowed_extensions is None and body.connection_details is None:
             return Response(status_code=200)
 
         existing = db_ops.get_active_connector(connector_id)
@@ -249,7 +249,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
 
         db_ops.upsert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connection_details=merged_details,
             allowed_extensions=body.allowed_extensions,
         )
@@ -278,7 +278,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     except IntegrityError:
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector name {body.connector_name!r} is already in use",
+            f"Connector name {body.name!r} is already in use",
         )
     except RuntimeError as exc:
         logger.error(f"Encryption key error: {exc}")
@@ -497,8 +497,8 @@ async def list_connectors():
         connectors = db_ops.list_connectors()
         return [
             ConnectorListItem(
-                connector_id=c.id,
-                connector_name=c.name,
+                id=c.id,
+                name=c.name,
                 type=c.type,
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
@@ -547,8 +547,8 @@ async def get_connector(connector_id: str):
             )
 
         return ConnectorDetailResponse(
-            connector_id=connector.id,
-            connector_name=connector.name,
+            id=connector.id,
+            name=connector.name,
             type=connector.type,
             allowed_extensions=list(connector.allowed_extensions or []),
             sync_interval_seconds=connector.sync_interval_seconds,

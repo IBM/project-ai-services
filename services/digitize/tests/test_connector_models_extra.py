@@ -116,7 +116,7 @@ class TestConnectorError:
 class TestConnectorCreateRequest:
     def _valid_payload(self, **overrides):
         base = {
-            "connector_name": "my-connector",
+            "name": "my-connector",
             "type": "s3",
             "allowed_extensions": [".pdf", ".docx"],
             "connection_details": {"bucket": "my-bucket"},
@@ -126,24 +126,24 @@ class TestConnectorCreateRequest:
 
     def test_valid_payload_accepted(self):
         req = ConnectorCreateRequest(**self._valid_payload())
-        assert req.connector_name == "my-connector"
+        assert req.name == "my-connector"
 
-    def test_none_connector_id_accepted(self):
-        req = ConnectorCreateRequest(**self._valid_payload(connector_id=None))
-        assert req.connector_id is None
+    def test_none_id_accepted(self):
+        req = ConnectorCreateRequest(**self._valid_payload(id=None))
+        assert req.id is None
 
-    def test_valid_uuid_connector_id_accepted(self):
+    def test_valid_uuid_id_accepted(self):
         uid = "123e4567-e89b-12d3-a456-426614174000"
-        req = ConnectorCreateRequest(**self._valid_payload(connector_id=uid))
-        assert req.connector_id == uid
+        req = ConnectorCreateRequest(**self._valid_payload(id=uid))
+        assert req.id == uid
 
-    def test_invalid_connector_id_raises(self):
+    def test_invalid_id_raises(self):
         with pytest.raises(ValidationError, match="valid UUID"):
-            ConnectorCreateRequest(**self._valid_payload(connector_id="not-a-uuid"))
+            ConnectorCreateRequest(**self._valid_payload(id="not-a-uuid"))
 
-    def test_missing_connector_name_raises(self):
+    def test_missing_name_raises(self):
         payload = self._valid_payload()
-        del payload["connector_name"]
+        del payload["name"]
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
 
@@ -165,11 +165,11 @@ class TestConnectorCreateRequest:
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
 
-    def test_connector_id_string_coerced(self):
+    def test_id_string_coerced(self):
         """A valid UUID passed as a stringified UUID object must be accepted."""
         uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        req = ConnectorCreateRequest(**self._valid_payload(connector_id=str(uid)))
-        assert req.connector_id == uid
+        req = ConnectorCreateRequest(**self._valid_payload(id=str(uid)))
+        assert req.id == uid
 
 
 # ---------------------------------------------------------------------------
@@ -179,13 +179,13 @@ class TestConnectorCreateRequest:
 class TestConnectorUpdateRequest:
     def test_empty_body_accepted(self):
         req = ConnectorUpdateRequest()
-        assert req.connector_name is None
+        assert req.name is None
         assert req.allowed_extensions is None
         assert req.connection_details is None
 
     def test_partial_name_only(self):
-        req = ConnectorUpdateRequest(connector_name="new-name")
-        assert req.connector_name == "new-name"
+        req = ConnectorUpdateRequest(name="new-name")
+        assert req.name == "new-name"
         assert req.allowed_extensions is None
 
     def test_partial_connection_details(self):
@@ -194,11 +194,11 @@ class TestConnectorUpdateRequest:
 
     def test_all_fields_supplied(self):
         req = ConnectorUpdateRequest(
-            connector_name="updated",
+            name="updated",
             allowed_extensions=[".pdf"],
             connection_details={"host": "h", "port": 22},
         )
-        assert req.connector_name == "updated"
+        assert req.name == "updated"
         assert req.allowed_extensions == [".pdf"]
         assert req.connection_details["port"] == 22
 
@@ -210,8 +210,8 @@ class TestConnectorUpdateRequest:
 class TestConnectorListItem:
     def test_construction(self):
         item = ConnectorListItem(
-            connector_id="c1",
-            connector_name="my-conn",
+            id="c1",
+            name="my-conn",
             type="s3",
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
@@ -226,8 +226,8 @@ class TestConnectorListItem:
 class TestConnectorDetailResponse:
     def test_construction(self):
         resp = ConnectorDetailResponse(
-            connector_id="c1",
-            connector_name="my-conn",
+            id="c1",
+            name="my-conn",
             type="ssh",
             allowed_extensions=[".pdf"],
             sync_interval_seconds=300,
