@@ -15,7 +15,7 @@ from common.misc_utils import get_logger
 from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus, ConnectorError
 
 logger = get_logger("db_repository")
 
@@ -1281,6 +1281,10 @@ class DatabaseManager:
 
         ``error`` is written when provided (failure/cancel paths); it is cleared
         to NULL on a successful completion so a past error does not persist.
+
+        If the connector already shows ConnectorError.CREDENTIAL_ERROR_MSG, a sync-tick failure
+        will NOT overwrite it — the credential error is the root cause and must
+        only be cleared by a successful _probe_connector_credentials call.
         """
         try:
             with get_db_session() as session:
@@ -1296,7 +1300,15 @@ class DatabaseManager:
                 if status == SyncLogStatus.COMPLETED:
                     values["error"] = None
                 elif error is not None:
-                    values["error"] = error
+                    # Don't overwrite a credential error with a sync-tick error —
+                    # the credential error is the root cause and stays until a
+                    # successful probe clears it.
+                    current_error_row = session.execute(
+                        select(Connector.error).where(Connector.id == connector_id)
+                    ).one_or_none()
+                    current_error = current_error_row[0] if current_error_row else None
+                    if current_error != ConnectorError.CREDENTIAL_ERROR_MSG:
+                        values["error"] = error
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)

@@ -67,6 +67,23 @@ class SyncLogStatus(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Error message constants
+# ---------------------------------------------------------------------------
+
+class ConnectorError(str, Enum):
+    """String enum of well-known error messages stored on the Connector row.
+
+    Inherits from str so values can be compared directly against DB strings.
+    """
+
+    CREDENTIAL_ERROR_MSG = "Authentication failed: unable to connect with the provided credentials"
+    """Sentinel written by _probe_connector_credentials on auth failure.
+
+    Only cleared when a subsequent successful probe shows the credentials are valid.
+    Sync-tick failures must never overwrite this message so the root cause stays visible.
+    """
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
