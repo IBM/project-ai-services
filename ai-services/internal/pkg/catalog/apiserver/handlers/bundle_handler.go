@@ -52,12 +52,14 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+
 		return
 	}
 
@@ -66,6 +68,7 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 	resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
 	if err != nil {
 		h.mapServiceError(c, err)
+
 		return
 	}
 
@@ -186,6 +189,7 @@ func (h *BundleHandler) GetBundle(c *gin.Context) {
 func (h *BundleHandler) mapServiceError(c *gin.Context, err error) {
 	if valErr, ok := err.(*validators.ValidationError); ok {
 		c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
 		return
 	}
 	c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})

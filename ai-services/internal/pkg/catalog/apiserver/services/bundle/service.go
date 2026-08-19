@@ -97,6 +97,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 	}
 	if err := s.repo.Insert(ctx, row); err != nil {
 		_ = os.RemoveAll(destDir) // best-effort cleanup of the extracted directory
+
 		return nil, fmt.Errorf("failed to insert bundle record: %w", err)
 	}
 
@@ -113,6 +114,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 		Version:   &version,
 	}); updateErr != nil {
 		s.markFailed(ctx, row.ID, updateErr.Error())
+
 		return nil, fmt.Errorf("failed to activate bundle: %w", updateErr)
 	}
 

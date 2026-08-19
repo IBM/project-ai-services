@@ -29,6 +29,15 @@ const (
 	// (50 MB). Any single file — or the aggregate of all files written — whose declared
 	// tar header Size exceeds this value is rejected before any bytes are written to disk.
 	maxExtractedFileSize int64 = 50 * 1024 * 1024
+
+	// splitTwo is the n argument for strings.SplitN when splitting on the first slash.
+	splitTwo = 2
+
+	// dirPerm is the permission bits used when creating directories during extraction.
+	// 0o750: owner=rwx, group=rx, other=none. The bundle volume is a container-private
+	// mount; world access is blocked while group read/execute is retained for any
+	// supplementary GID the container runtime assigns to the apiserver process.
+	dirPerm = 0o750
 )
 
 // rawMetadataYAML holds the minimal set of fields decoded from root metadata.yaml.
@@ -52,6 +61,7 @@ type rawMetadataYAML struct {
 //	component llm--my-prov    1.0.0  → /data/catalog-bundles/components/llm--my-prov-1.0.0
 func bundleDirPath(catalogType, catalogID, version string) string {
 	subdir := catalogTypeToDir(catalogType)
+
 	return filepath.Join(bundleStorageRoot, subdir, catalogID+"-"+version)
 }
 
@@ -104,10 +114,16 @@ func parseMetadataFromBytes(data []byte) (BundleMetadata, error) {
 			Message: fmt.Sprintf("invalid gzip archive: %s", err),
 		}
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 
+	return scanArchiveForMetadata(tr)
+}
+
+// scanArchiveForMetadata walks tar entries looking for a root metadata.yaml
+// and delegates parsing to parseMetadataYAML.
+func scanArchiveForMetadata(tr *tar.Reader) (BundleMetadata, error) {
 	// topDir is inferred from the first archive entry that contains a slash.
 	// The directory name is never validated — it is only used to locate
 	// <topDir>/metadata.yaml. A flat archive (no top-level directory) is also
@@ -127,32 +143,50 @@ func parseMetadataFromBytes(data []byte) (BundleMetadata, error) {
 		}
 
 		if topDir == "" && strings.Contains(hdr.Name, "/") {
-			topDir = strings.SplitN(hdr.Name, "/", 2)[0]
+			topDir = strings.SplitN(hdr.Name, "/", splitTwo)[0]
 		}
 
-		name := filepath.ToSlash(hdr.Name)
-		isRootMeta := name == "metadata.yaml" ||
-			(topDir != "" && name == topDir+"/metadata.yaml")
-
-		if !isRootMeta || hdr.Typeflag == tar.TypeDir {
-			continue
-		}
-
-		yamlBytes, err := io.ReadAll(tr)
+		meta, done, err := tryReadMetadataEntry(tr, hdr, topDir)
 		if err != nil {
-			return nil, &validators.ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("failed to read metadata.yaml: %s", err),
-			}
+			return nil, err
 		}
-
-		return parseMetadataYAML(yamlBytes)
+		if done {
+			return meta, nil
+		}
 	}
 
 	return nil, &validators.ValidationError{
 		Code:    http.StatusBadRequest,
 		Message: "metadata.yaml not found in archive root",
 	}
+}
+
+// tryReadMetadataEntry checks whether hdr is the root metadata.yaml entry and,
+// if so, reads and parses it. Returns (meta, true, nil) on success,
+// (nil, false, nil) when hdr is not the target entry, and (nil, false, err) on error.
+func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (BundleMetadata, bool, error) {
+	name := filepath.ToSlash(hdr.Name)
+	isRootMeta := name == "metadata.yaml" ||
+		(topDir != "" && name == topDir+"/metadata.yaml")
+
+	if !isRootMeta || hdr.Typeflag == tar.TypeDir {
+		return nil, false, nil
+	}
+
+	yamlBytes, err := io.ReadAll(tr)
+	if err != nil {
+		return nil, false, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("failed to read metadata.yaml: %s", err),
+		}
+	}
+
+	meta, err := parseMetadataYAML(yamlBytes)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return meta, true, nil
 }
 
 // parseMetadataYAML decodes raw YAML bytes into the appropriate BundleMetadata
@@ -194,6 +228,7 @@ func parseMetadataYAML(data []byte) (BundleMetadata, error) {
 				Message: "metadata.yaml: 'component_type' is required for type=component",
 			}
 		}
+
 		return &ComponentMetadata{
 			id:            raw.ID,
 			componentType: raw.ComponentType,
@@ -227,10 +262,16 @@ func extractAndMeasure(data []byte, destDir string) (int64, error) {
 			Message: fmt.Sprintf("invalid gzip archive: %s", err),
 		}
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 
+	return extractEntries(tr, destDir)
+}
+
+// extractEntries iterates over all tar entries and writes regular files and
+// directories to destDir, returning the total uncompressed bytes written.
+func extractEntries(tr *tar.Reader, destDir string) (int64, error) {
 	var topDir string
 	var totalSize int64
 
@@ -243,55 +284,88 @@ func extractAndMeasure(data []byte, destDir string) (int64, error) {
 			return 0, fmt.Errorf("error reading archive entry: %w", err)
 		}
 
-		// Strip the top-level directory prefix (e.g. "my-bundle/") on the first
-		// entry that contains a slash, then apply it to all subsequent entries.
-		name := filepath.ToSlash(hdr.Name)
-		if topDir == "" && strings.Contains(name, "/") {
-			topDir = strings.SplitN(name, "/", 2)[0] + "/"
+		n, err := processEntry(tr, hdr, destDir, &topDir)
+		if err != nil {
+			return 0, err
 		}
-		relName := strings.TrimPrefix(name, topDir)
-		if relName == "" || relName == "." {
-			continue
-		}
-
-		// Path-traversal guard: the resolved destination must remain inside destDir.
-		destPath := filepath.Join(destDir, relName)
-		if !strings.HasPrefix(
-			filepath.Clean(destPath)+string(os.PathSeparator),
-			filepath.Clean(destDir)+string(os.PathSeparator),
-		) {
-			return 0, &validators.ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("path traversal detected in archive entry %q", hdr.Name),
-			}
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if mkErr := os.MkdirAll(destPath, 0o755); mkErr != nil {
-				return 0, fmt.Errorf("failed to create directory %q: %w", destPath, mkErr)
-			}
-
-		case tar.TypeReg, tar.TypeRegA:
-			if hdr.Size > maxExtractedFileSize {
-				return 0, &validators.ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("archive entry %q exceeds the 50 MB uncompressed size limit", hdr.Name),
-				}
-			}
-			if mkErr := os.MkdirAll(filepath.Dir(destPath), 0o755); mkErr != nil {
-				return 0, fmt.Errorf("failed to create parent directory for %q: %w", destPath, mkErr)
-			}
-			n, writeErr := writeFile(destPath, tr, hdr.Mode)
-			if writeErr != nil {
-				return 0, writeErr
-			}
-			totalSize += n
-		}
-		// Symlinks and other special types are intentionally skipped.
+		totalSize += n
 	}
 
 	return totalSize, nil
+}
+
+// processEntry handles a single tar entry: it strips the top-level directory
+// prefix, enforces path-traversal and size guards, and writes the entry to disk.
+// Returns the number of bytes written (0 for directories and skipped entries).
+func processEntry(tr *tar.Reader, hdr *tar.Header, destDir string, topDir *string) (int64, error) {
+	// Strip the top-level directory prefix (e.g. "my-bundle/") on the first
+	// entry that contains a slash, then apply it to all subsequent entries.
+	name := filepath.ToSlash(hdr.Name)
+	if *topDir == "" && strings.Contains(name, "/") {
+		*topDir = strings.SplitN(name, "/", splitTwo)[0] + "/"
+	}
+
+	relName := strings.TrimPrefix(name, *topDir)
+	if relName == "" || relName == "." {
+		return 0, nil
+	}
+
+	destPath, err := resolveDestPath(destDir, relName, hdr.Name)
+	if err != nil {
+		return 0, err
+	}
+
+	return writeEntry(tr, hdr, destPath)
+}
+
+// resolveDestPath joins destDir and relName, then checks that the result stays
+// inside destDir (path-traversal guard). Returns the resolved path or an error.
+func resolveDestPath(destDir, relName, entryName string) (string, error) {
+	destPath := filepath.Join(destDir, relName)
+	if !strings.HasPrefix(
+		filepath.Clean(destPath)+string(os.PathSeparator),
+		filepath.Clean(destDir)+string(os.PathSeparator),
+	) {
+		return "", &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("path traversal detected in archive entry %q", entryName),
+		}
+	}
+
+	return destPath, nil
+}
+
+// writeEntry writes a single tar entry (directory or regular file) to destPath.
+// Symlinks and other special types are silently skipped.
+// Returns the number of bytes written (0 for directories and skipped entries).
+func writeEntry(tr *tar.Reader, hdr *tar.Header, destPath string) (int64, error) {
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		if mkErr := os.MkdirAll(destPath, dirPerm); mkErr != nil {
+			return 0, fmt.Errorf("failed to create directory %q: %w", destPath, mkErr)
+		}
+
+	case tar.TypeReg:
+		return writeRegularFile(tr, hdr, destPath)
+	}
+	// Symlinks and other special types are intentionally skipped.
+
+	return 0, nil
+}
+
+// writeRegularFile enforces the size limit and writes a regular tar file entry to destPath.
+func writeRegularFile(tr *tar.Reader, hdr *tar.Header, destPath string) (int64, error) {
+	if hdr.Size > maxExtractedFileSize {
+		return 0, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("archive entry %q exceeds the 50 MB uncompressed size limit", hdr.Name),
+		}
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(destPath), dirPerm); mkErr != nil {
+		return 0, fmt.Errorf("failed to create parent directory for %q: %w", destPath, mkErr)
+	}
+
+	return writeFile(destPath, tr, hdr.Mode)
 }
 
 // writeFile creates (or truncates) the file at path and streams content from r.
@@ -301,7 +375,7 @@ func writeFile(path string, r io.Reader, mode int64) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to create file %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	n, err := io.Copy(f, r)
 	if err != nil {
@@ -329,5 +403,6 @@ func (r *bytesReader) Read(p []byte) (int, error) {
 	}
 	n := copy(p, r.b[r.pos:])
 	r.pos += n
+
 	return n, nil
 }
