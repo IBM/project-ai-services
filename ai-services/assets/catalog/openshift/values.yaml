@@ -22,6 +22,9 @@ backend:
       memory: "1Gi"
       cpu: "1000m"
 
+bundles:
+  storage: 5Gi
+
 db:
   image: icr.io/ai-services-cicd/postgres:18-5
   user: "postgres"
