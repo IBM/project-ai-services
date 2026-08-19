@@ -196,10 +196,8 @@ async def run_translation_job(
                 f"[{job_id}] Chunked into {len(chunks)} chunk(s) in {chunking_secs}s"
             )
 
-            # Compute max_tokens for each chunk.
-            # Cap at 2× the chunk's own token count — translation output is
-            # approximately 1:1 with input; 2× gives generous headroom for any
-            # language pair without asking vLLM for the entire context window.
+            # Compute max_tokens for each chunk; cap at 2× chunk tokens (generous 1:1 headroom).
+            # Guard below only fires for oversized GFM tables, which the chunker emits above budget rather than split.
             max_model_len = get_llm_max_model_len()
             prompt_overhead = settings.translate.prompt_overhead_tokens
             chunk_max_tokens: dict[int, int] = {}

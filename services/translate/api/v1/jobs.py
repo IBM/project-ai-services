@@ -8,14 +8,16 @@ GET    /v1/translate/jobs/{job_id}/result          — get result JSON
 GET    /v1/translate/jobs/{job_id}/result/download — download translated file
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import get_logger, get_utc_timestamp
+from common.validation_utils import validate_file_content, validate_file_extension
 from translate.utils.errors import (
     _raise_file_too_large,
     _raise_invalid_language,
@@ -39,8 +41,6 @@ from translate.utils.jobs import (
     generate_uuid,
     read_result_file,
     stage_uploaded_file,
-    validate_file_content,
-    validate_file_extension,
 )
 from translate.utils.storage import storage_manager
 from translate.workers.concurrency import concurrency_manager
@@ -164,7 +164,6 @@ def _job_to_state(job) -> JobState:
     },
 )
 async def create_translation_job(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="The .txt or .md file to translate (UTF-8)"),
     target_language: str = Form(..., description="Target language (e.g. 'English')"),
     source_language: str = Form(
@@ -185,14 +184,15 @@ async def create_translation_job(
         _raise_unsupported_file_type(str(exc))
 
     # 2. Validate file content (UTF-8, not binary, not PDF-disguised-as-text).
-    await validate_file_content(file)
+    try:
+        await validate_file_content(file)
+    except ValueError as exc:
+        _raise_unsupported_file_type(str(exc))
 
     # 3. Validate languages.
     norm_source, norm_target = _validate_languages(source_language, target_language)
 
-    # 4. Check file size — read at most max_bytes + 1 so we never allocate
-    # more than the limit in memory. If we get more than max_bytes back,
-    # the file is over the limit.
+    # 4. Check file size (txt/md only — revisit when PDF/Word support is added via digitize integration).
     max_bytes = settings.translate.max_upload_size_mb * 1024 * 1024
     content = await file.read(max_bytes + 1)
     if len(content) > max_bytes:
@@ -236,14 +236,15 @@ async def create_translation_job(
         )
 
     # 8. Launch background worker.
-    background_tasks.add_task(
-        run_translation_job,
-        job_id=job_id,
-        staged_file_path=staged_path,
-        source_language=norm_source,
-        target_language=norm_target.capitalize(),
-        document_name=filename,
-        input_type=input_type,
+    asyncio.create_task(
+        run_translation_job(
+            job_id=job_id,
+            staged_file_path=staged_path,
+            source_language=norm_source,
+            target_language=norm_target.capitalize(),
+            document_name=filename,
+            input_type=input_type,
+        )
     )
 
     logger.info(
@@ -446,4 +447,3 @@ async def download_job_result(job_id: str):
             "Content-Disposition": f'attachment; filename="{download_filename}"',
         },
     )
-

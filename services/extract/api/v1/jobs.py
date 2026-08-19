@@ -13,6 +13,7 @@ import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
@@ -278,7 +279,7 @@ def _validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
     filename = (file.filename or "").lower()
     is_valid, ext = validate_file_extension(filename)
     if not is_valid:
-        raw_ext = os.path.splitext(filename)[1] or "unknown"
+        raw_ext = Path(filename).suffix or "unknown"
         raise ExtractException(
             415, "UNSUPPORTED_FILE_TYPE",
             f"Only .txt and .md files are accepted. Received: {raw_ext}",
