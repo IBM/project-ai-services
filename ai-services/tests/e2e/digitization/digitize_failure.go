@@ -33,16 +33,24 @@ func ListDocumentsExpectingError(ctx context.Context, baseURL, queryString strin
 	return expectError(body, statusCode, http.StatusOK)
 }
 
+// maxConsecutiveErrors is the number of consecutive GetJobStatus network
+// failures that triggers an early-exit in WaitForJobInProgress.  A
+// temporary blip is expected occasionally; 5 in a row indicates the service
+// is down and further waiting would only waste the test slot.
+const maxConsecutiveErrors = 5 //nolint:mnd
+
 // WaitForJobInProgress polls GET /v1/jobs/{jobID} every pollInterval until the
 // job transitions into "in_progress" status, or until timeout expires.
 //
 // Returns the most-recent JobStatusResponse (which will have Status == "in_progress")
-// on success, or a descriptive error on timeout or terminal failure state.
+// on success, or a descriptive error on timeout, terminal state, or too many
+// consecutive network errors.
 //
 // Use this in failure tests that must attempt a disruptive action (delete job,
 // delete document) while the Spyre worker is actively processing.
 func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, pollInterval time.Duration) (*JobStatusResponse, error) {
 	deadline := time.Now().Add(timeout)
+	consecutiveErrors := 0
 
 	for {
 		if time.Now().After(deadline) {
@@ -55,9 +63,15 @@ func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, p
 
 		status, err := GetJobStatus(ctx, baseURL, jobID)
 		if err != nil {
-			logger.Warningf("[DIGITIZE] WaitForJobInProgress: error polling job %s: %v — retrying in %s",
-				jobID, err, pollInterval)
+			consecutiveErrors++
+			logger.Warningf("[DIGITIZE] WaitForJobInProgress: error polling job %s (%d/%d): %v",
+				jobID, consecutiveErrors, maxConsecutiveErrors, err)
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return nil, fmt.Errorf("WaitForJobInProgress: aborting after %d consecutive errors polling job %s: %w",
+					maxConsecutiveErrors, jobID, err)
+			}
 		} else {
+			consecutiveErrors = 0
 			logger.Infof("[DIGITIZE] WaitForJobInProgress: job %s status = %q", jobID, status.Status)
 
 			switch status.Status {
@@ -75,6 +89,29 @@ func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, p
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// DeleteStaleDocumentsByName lists all documents matching the given filename
+// and deletes each one.  Use this to clear leftover documents from a previous
+// interrupted test run before retrying a job submission that would otherwise
+// be rejected with 409 RESOURCE_LOCKED due to hash deduplication.
+//
+// Returns an error if the list call fails; individual delete failures are
+// logged as warnings and do not stop processing the remaining documents.
+func DeleteStaleDocumentsByName(ctx context.Context, baseURL, filename string) error {
+	docs, err := ListDocuments(ctx, baseURL, 100, 0, "", filename)
+	if err != nil {
+		return fmt.Errorf("DeleteStaleDocumentsByName: failed to list documents named %q: %w", filename, err)
+	}
+
+	for _, doc := range docs.Data {
+		logger.Warningf("[DIGITIZE] DeleteStaleDocumentsByName: deleting stale document %s (%s)", doc.ID, doc.Name)
+		if delErr := DeleteDocument(ctx, baseURL, doc.ID); delErr != nil {
+			logger.Warningf("[DIGITIZE] DeleteStaleDocumentsByName: failed to delete document %s: %v", doc.ID, delErr)
+		}
+	}
+
+	return nil
 }
 
 // cleanupTimeout is the per-cleanup budget: long enough for a slow Spyre job

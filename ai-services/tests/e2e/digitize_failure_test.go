@@ -25,24 +25,7 @@
 //	digitize-active-job      – TC-3, TC-4
 //	digitize-active-doc      – TC-5
 //
-// Running ALL failure tests together (all failure suites):
-//
-//	ginkgo -r --label-filter="failure-test" ./tests/e2e
-//
-// Excluding ALL failure tests from the normal run:
-//
-//	ginkgo -r --label-filter="!failure-test" ./tests/e2e
-//
-// Running only digitize failure tests:
-//
-//	ginkgo -r --label-filter="digitize-failure" ./tests/e2e
-//
-// Running by sub-category:
-//
-//	ginkgo -r --label-filter="failure-test && digitize-input"          ./tests/e2e
-//	ginkgo -r --label-filter="failure-test && digitize-deduplication"  ./tests/e2e
-//	ginkgo -r --label-filter="failure-test && digitize-active-job"     ./tests/e2e
-//	ginkgo -r --label-filter="failure-test && digitize-active-doc"     ./tests/e2e
+// For run commands see: tests/e2e/README.md — "Running Failure Tests"
 package e2e
 
 import (
@@ -64,11 +47,15 @@ const digitizeFailureTestTimeout = 20 * time.Minute //nolint:mnd
 
 // digitizeFailureIngestionWaitTimeout caps how long TC-2 waits for the first
 // ingestion job to complete before attempting the duplicate submission.
-const digitizeFailureIngestionWaitTimeout = 15 * time.Minute //nolint:mnd
+// Kept at 12 min (not the full 20 min spec timeout) so there is an 8 min
+// buffer for the second submit and assertion within digitizeFailureTestTimeout.
+const digitizeFailureIngestionWaitTimeout = 12 * time.Minute //nolint:mnd
 
 // digitizeFailureInProgressPollInterval is how often TC-4 and TC-5 poll for
-// the job's in_progress transition.
-const digitizeFailureInProgressPollInterval = 5 * time.Second //nolint:mnd
+// the job's in_progress transition.  15 s matches WaitForJobCompletion's
+// poll cadence (digitize.go L403) — the Spyre state transition happens on the
+// order of seconds-to-minutes so polling more frequently only adds noise.
+const digitizeFailureInProgressPollInterval = 15 * time.Second //nolint:mnd
 
 // digitizeFailureInProgressTimeout caps how long we wait for a job to enter
 // in_progress before considering the poll a failure.
@@ -96,18 +83,9 @@ var _ = ginkgo.Describe("Digitize Service Failure Scenarios",
 			}
 		})
 
-		// digitizeBaseURL is resolved once per Context block by the shared
-		// BeforeEach below and then used across all It() blocks in that Context.
 		var digitizeBaseURL string
 
-		// resolveDigitizeURL is the shared BeforeEach that resolves the
-		// digitize-backend URL from application info.  It skips immediately
-		// (zero wait) when --app-name was not provided rather than polling
-		// for 2 minutes against a non-existent application.
 		resolveDigitizeURL := func() {
-			// providedAppName is the raw value of --app-name.  appName is always
-			// non-empty (BeforeSuite generates one), so check providedAppName to
-			// detect whether the caller targeted a real deployed application.
 			if providedAppName == "" {
 				ginkgo.Skip(
 					"[FAILURE-TEST][Digitize] Skipping — " +
@@ -254,26 +232,16 @@ var _ = ginkgo.Describe("Digitize Service Failure Scenarios",
 							"e2e-failure-dedup-first",
 						)
 						if firstJobErr != nil {
-							if !digitization.IsResourceLockedError(firstJobErr) {
-								// Unexpected error — not a dedup 409; fail immediately.
-								gomega.Expect(firstJobErr).NotTo(gomega.HaveOccurred(),
-									"First ingestion job should be accepted (unexpected error)")
-							}
-							// 409 → stale document from a previous interrupted run.
-							// List documents by name and delete them, then retry.
-							logger.Warningf(
-								"[FAILURE-TEST][Digitize][TC-2] First submit returned 409 — stale state detected. "+
-									"Attempting self-heal by listing and deleting existing test_doc documents.",
+							gomega.Expect(digitization.IsResourceLockedError(firstJobErr)).To(
+								gomega.BeTrue(),
+								"First ingestion job should be accepted (unexpected non-409 error)",
 							)
-							// List documents and delete any named test_doc.pdf.
-							docs, listErr := digitization.ListDocuments(ctx, digitizeBaseURL, 100, 0, "", "test_doc.pdf")
-							gomega.Expect(listErr).NotTo(gomega.HaveOccurred(),
-								"self-heal: failed to list documents to clean up stale state")
-							for _, doc := range docs.Data {
-								logger.Warningf("[FAILURE-TEST][Digitize][TC-2] self-heal: deleting stale document %s (%s)", doc.ID, doc.Name)
-								_ = digitization.DeleteDocument(ctx, digitizeBaseURL, doc.ID)
-							}
-							// Retry the job submission.
+							// 409 → stale document from a previous interrupted run.
+							// Delete it and retry.
+							logger.Warningf("[FAILURE-TEST][Digitize][TC-2] First submit returned 409 — self-healing stale state")
+							gomega.Expect(
+								digitization.DeleteStaleDocumentsByName(ctx, digitizeBaseURL, "test_doc.pdf"),
+							).To(gomega.Succeed(), "self-heal: failed to delete stale documents")
 							firstJob, firstJobErr = digitization.CreateJob(
 								ctx, digitizeBaseURL, pdfPath,
 								"ingestion", "json",
