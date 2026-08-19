@@ -1,8 +1,8 @@
 import type {
   DataSourceConnectorApiResponse,
   DataSourceConnectorsListResponse,
-  DataSourceConnectorRow,
-} from "@/components/DataSourceConnectorsTable/types";
+} from "@/types/api.types";
+import type { DataSourceConnectorRow } from "@/components/DataSourceConnectorsTable/types";
 
 export function transformConnectorToRow(
   connector: DataSourceConnectorApiResponse,

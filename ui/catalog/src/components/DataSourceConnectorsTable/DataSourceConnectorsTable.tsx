@@ -179,8 +179,6 @@ const DataSourceConnectorsTable = ({
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
-  const paginatedRows = filteredRows;
-
   return (
     <>
       {/* Toasts — rendered outside the grid to stay fixed-position */}
@@ -209,11 +207,7 @@ const DataSourceConnectorsTable = ({
                 columnCount={HEADERS.length}
               />
             ) : (
-              <DataTable
-                rows={paginatedRows}
-                headers={visibleHeaders}
-                size="lg"
-              >
+              <DataTable rows={filteredRows} headers={visibleHeaders} size="lg">
                 {({
                   rows,
                   headers,
