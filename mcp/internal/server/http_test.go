@@ -142,7 +142,7 @@ func createTestAggregator() *tool.Aggregator {
 
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, _ := tool.NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, _ := tool.NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	return aggregator
 }
 
