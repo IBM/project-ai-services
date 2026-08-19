@@ -91,6 +91,11 @@ func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, p
 	}
 }
 
+// maxStaleDocListLimit is the page size used by DeleteStaleDocumentsByName.
+// A single test fixture (test_doc.pdf) will never have more than a handful
+// of stale copies, so 100 is a safe upper bound.
+const maxStaleDocListLimit = 100 //nolint:mnd
+
 // DeleteStaleDocumentsByName lists all documents matching the given filename
 // and deletes each one.  Use this to clear leftover documents from a previous
 // interrupted test run before retrying a job submission that would otherwise
@@ -99,7 +104,7 @@ func WaitForJobInProgress(ctx context.Context, baseURL, jobID string, timeout, p
 // Returns an error if the list call fails; individual delete failures are
 // logged as warnings and do not stop processing the remaining documents.
 func DeleteStaleDocumentsByName(ctx context.Context, baseURL, filename string) error {
-	docs, err := ListDocuments(ctx, baseURL, 100, 0, "", filename)
+	docs, err := ListDocuments(ctx, baseURL, maxStaleDocListLimit, 0, "", filename)
 	if err != nil {
 		return fmt.Errorf("DeleteStaleDocumentsByName: failed to list documents named %q: %w", filename, err)
 	}
