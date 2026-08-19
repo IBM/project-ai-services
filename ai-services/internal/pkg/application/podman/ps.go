@@ -1,6 +1,8 @@
 package podman
 
 import (
+	"context"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/application/common"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -9,8 +11,9 @@ import (
 
 // List returns information about running applications.
 func (p *PodmanApplication) List(opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
+	ctx := context.Background()
 	// filter and fetch pods based on appName
-	pods, err := common.FetchFilteredPods(p.runtime, opts.ApplicationName)
+	pods, err := common.FetchFilteredPods(ctx, p.runtime, opts.ApplicationName)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +30,7 @@ func (p *PodmanApplication) List(opts appTypes.ListOptions) ([]appTypes.Applicat
 	defer printer.CloseTableWriter()
 
 	// set table headers and rows
-	common.PopulateTable(p.runtime, opts, pods)
+	common.PopulateTable(ctx, p.runtime, opts, pods)
 
 	return nil, nil
 }

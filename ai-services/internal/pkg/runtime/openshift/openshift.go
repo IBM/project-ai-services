@@ -176,7 +176,7 @@ func getKubeConfig() (*rest.Config, error) {
 }
 
 // ListImages lists container images.
-func (kc *OpenshiftClient) ListImages() ([]types.Image, error) {
+func (kc *OpenshiftClient) ListImages(_ context.Context) ([]types.Image, error) {
 	logger.Warningln("ListImages is not implemented for OpenshiftClient. Returning empty list.")
 
 	return []types.Image{}, nil
@@ -190,8 +190,8 @@ func (kc *OpenshiftClient) PullImage(_ context.Context, image string) error {
 }
 
 // GetNamespace fetches the namespace details.
-func (kc *OpenshiftClient) GetNamespace() (string, error) {
-	ns, err := kc.KubeClient.CoreV1().Namespaces().Get(kc.Ctx, kc.Namespace, metav1.GetOptions{})
+func (kc *OpenshiftClient) GetNamespace(ctx context.Context) (string, error) {
+	ns, err := kc.KubeClient.CoreV1().Namespaces().Get(ctx, kc.Namespace, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return "", fmt.Errorf("%w: %s", ErrNamespaceNotFound, kc.Namespace)
@@ -204,7 +204,7 @@ func (kc *OpenshiftClient) GetNamespace() (string, error) {
 }
 
 // ListPods lists pods with optional filters.
-func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
+func (kc *OpenshiftClient) ListPods(ctx context.Context, filters map[string][]string) ([]types.Pod, error) {
 	labels := client.MatchingLabels{}
 	if labelFilters, exists := filters["label"]; exists {
 		for _, lf := range labelFilters {
@@ -216,7 +216,7 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 	}
 
 	podList := &corev1.PodList{}
-	err := kc.Client.List(kc.Ctx, podList, client.InNamespace(kc.Namespace), labels)
+	err := kc.Client.List(ctx, podList, client.InNamespace(kc.Namespace), labels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -232,21 +232,21 @@ func (kc *OpenshiftClient) CreatePod(_ context.Context, body io.Reader, opts map
 }
 
 // DeletePod deletes a pod by ID or name.
-func (kc *OpenshiftClient) DeletePod(id string, force *bool) error {
+func (kc *OpenshiftClient) DeletePod(_ context.Context, id string, force *bool) error {
 	logger.Warningln("Not implemented")
 
 	return nil
 }
 
 // InspectPod inspects a pod and returns detailed information.
-func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
+func (kc *OpenshiftClient) InspectPod(ctx context.Context, nameOrID string) (*types.Pod, error) {
 	podName, err := getPodNameWithPrefix(kc, nameOrID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
 
 	pod := &corev1.Pod{}
-	err = kc.Client.Get(kc.Ctx, client.ObjectKey{
+	err = kc.Client.Get(ctx, client.ObjectKey{
 		Name:      podName,
 		Namespace: kc.Namespace,
 	}, pod)
@@ -258,7 +258,7 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 }
 
 // PodExists checks if a pod exists.
-func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
+func (kc *OpenshiftClient) PodExists(_ context.Context, nameOrID string) (bool, error) {
 	// Since OpenShift pod names have a random string added to it we cannot use Get() here.
 	_, err := getPodNameWithPrefix(kc, nameOrID)
 	if err != nil {
@@ -269,21 +269,21 @@ func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
 }
 
 // StopPod stops a pod.
-func (kc *OpenshiftClient) StopPod(id string) error {
+func (kc *OpenshiftClient) StopPod(_ context.Context, id string) error {
 	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
 
 // StartPod starts a pod.
-func (kc *OpenshiftClient) StartPod(id string) error {
+func (kc *OpenshiftClient) StartPod(_ context.Context, id string) error {
 	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
 
 // PodLogs retrieves logs from a pod.
-func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
+func (kc *OpenshiftClient) PodLogs(_ context.Context, podNameOrID string) error {
 	podName, err := getPodNameWithPrefix(kc, podNameOrID)
 	if err != nil {
 		return fmt.Errorf("failed to get the pod: %w", err)
@@ -298,9 +298,9 @@ func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
 }
 
 // InspectContainer inspects a container.
-func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, error) {
+func (kc *OpenshiftClient) InspectContainer(ctx context.Context, nameOrID string) (*types.Container, error) {
 	pods := &corev1.PodList{}
-	err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace))
+	err := kc.Client.List(ctx, pods, client.InNamespace(kc.Namespace))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -317,10 +317,10 @@ func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, 
 }
 
 // ContainerExists checks if a container exists.
-func (kc *OpenshiftClient) ContainerExists(nameOrID string) (bool, error) {
+func (kc *OpenshiftClient) ContainerExists(ctx context.Context, nameOrID string) (bool, error) {
 	// In Openshift, we check if any pod contains this container
 	pods := &corev1.PodList{}
-	err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace))
+	err := kc.Client.List(ctx, pods, client.InNamespace(kc.Namespace))
 	if err != nil {
 		return false, fmt.Errorf("failed to check container: %w", err)
 	}
@@ -337,14 +337,14 @@ func (kc *OpenshiftClient) ContainerExists(nameOrID string) (bool, error) {
 }
 
 // ContainerLogs retrieves logs from a specific container.
-func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
+func (kc *OpenshiftClient) ContainerLogs(ctx context.Context, containerNameOrID string) error {
 	if containerNameOrID == "" {
 		return fmt.Errorf("container name is required to fetch logs")
 	}
 
 	// In Openshift, we check if any pod contains this container
 	pods := &corev1.PodList{}
-	if err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace)); err != nil {
+	if err := kc.Client.List(ctx, pods, client.InNamespace(kc.Namespace)); err != nil {
 		return fmt.Errorf("failed to check container: %w", err)
 	}
 
@@ -367,7 +367,7 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 
 // ListCRD populates list resources based on input
 // resources in the client namespace that carry every label key in filters["label"].
-func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
+func (kc *OpenshiftClient) ListCRD(ctx context.Context, list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
 	labelKeys := []string{}
 	if labelFilters, exists := filters["label"]; exists {
 		labelKeys = append(labelKeys, labelFilters...)
@@ -378,7 +378,7 @@ func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters 
 		client.HasLabels(labelKeys),
 	}
 
-	if err := kc.Client.List(kc.Ctx, list, opts...); err != nil {
+	if err := kc.Client.List(ctx, list, opts...); err != nil {
 		return nil, fmt.Errorf("failed to list CRD resources : %w", err)
 	}
 
@@ -395,8 +395,8 @@ func (kc *OpenshiftClient) ListCRD(list *unstructured.UnstructuredList, filters 
 
 // ListRoutes lists all routes in the namespace.
 // ListRoutes lists routes in the namespace. Pass an empty string to list all routes.
-func (kc *OpenshiftClient) ListRoutes(labelSelector string) ([]types.Route, error) {
-	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+func (kc *OpenshiftClient) ListRoutes(ctx context.Context, labelSelector string) ([]types.Route, error) {
+	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -407,8 +407,8 @@ func (kc *OpenshiftClient) ListRoutes(labelSelector string) ([]types.Route, erro
 }
 
 // DeletePVCs deletes all PVCs matching the given application label.
-func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
-	pvcs, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+func (kc *OpenshiftClient) DeletePVCs(ctx context.Context, appLabel string) error {
+	pvcs, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: appLabel,
 	})
 	if err != nil {
@@ -416,7 +416,7 @@ func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
 	}
 
 	for _, pvc := range pvcs.Items {
-		if err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Delete(kc.Ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
+		if err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Delete(ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
 			logger.Warningf("Failed to delete PVC '%s': %v\n", pvc.Name, err)
 
 			continue
@@ -434,7 +434,7 @@ func (kc *OpenshiftClient) Type() types.RuntimeType {
 }
 
 func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
-	pods, err := kc.ListPods(nil)
+	pods, err := kc.ListPods(kc.Ctx, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -484,20 +484,20 @@ func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions)
 	return nil
 }
 
-func (kc *OpenshiftClient) ListSecrets(filters map[string][]string) ([]string, error) {
+func (kc *OpenshiftClient) ListSecrets(_ context.Context, filters map[string][]string) ([]string, error) {
 	logger.Warningln("Not implemented")
 
 	return nil, nil
 }
 
-func (kc *OpenshiftClient) DeleteSecret(name string) error {
+func (kc *OpenshiftClient) DeleteSecret(_ context.Context, name string) error {
 	logger.Warningln("Not implemented")
 
 	return nil
 }
 
-func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
-	_, err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+func (kc *OpenshiftClient) SecretExists(ctx context.Context, nameOrID string) (bool, error) {
+	_, err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Get(ctx, nameOrID, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return false, nil
@@ -509,10 +509,10 @@ func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
 	return true, nil
 }
 
-func (kc *OpenshiftClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
+func (kc *OpenshiftClient) UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error {
 	secretClient := kc.KubeClient.CoreV1().Secrets(kc.Namespace)
 
-	existing, err := secretClient.Get(kc.Ctx, name, metav1.GetOptions{})
+	existing, err := secretClient.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get existing secret: %w", err)
 	}
@@ -521,7 +521,7 @@ func (kc *OpenshiftClient) UpdateSecret(name, deploymentName string, data map[st
 		existing.Data[k] = v
 	}
 
-	_, err = secretClient.Update(kc.Ctx, existing, metav1.UpdateOptions{})
+	_, err = secretClient.Update(ctx, existing, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update secret: %w", err)
 	}
@@ -550,14 +550,14 @@ func (kc *OpenshiftClient) UpdateSecret(name, deploymentName string, data map[st
 	return fmt.Errorf("timed out waiting for deployment %q to become ready after secret update", deploymentName)
 }
 
-func (kc *OpenshiftClient) DeleteVolume(name string) error {
+func (kc *OpenshiftClient) DeleteVolume(_ context.Context, name string) error {
 	logger.Warningln("Not implemented")
 
 	return nil
 }
 
-func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
-	_, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+func (kc *OpenshiftClient) VolumeExists(ctx context.Context, nameOrID string) (bool, error) {
+	_, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Get(ctx, nameOrID, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return false, nil
@@ -578,18 +578,18 @@ func (kc *OpenshiftClient) VolumeExists(nameOrID string) (bool, error) {
 //   - Available mem : sum(kube_node_status_allocatable{resource="memory"})
 //
 // Spyre card counts are read directly from the Kubernetes API — see getSpyreCardInfo.
-func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
+func (kc *OpenshiftClient) GetSystemInfo(ctx context.Context) (*models.SystemInfo, error) {
 	sysInfo := &models.SystemInfo{
 		Accelerators: make(map[string]*models.AcceleratorInfo),
 	}
 
 	// --- CPU ---
-	totalCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="cpu"})`)
+	totalCPU, err := queryThanos(ctx, `sum(kube_node_status_capacity{resource="cpu"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query total CPU capacity: %w", err)
 	}
 
-	availCPU, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="cpu"})`)
+	availCPU, err := queryThanos(ctx, `sum(kube_node_status_allocatable{resource="cpu"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allocatable CPU: %w", err)
 	}
@@ -600,12 +600,12 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// --- Memory ---
-	totalMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_capacity{resource="memory"})`)
+	totalMem, err := queryThanos(ctx, `sum(kube_node_status_capacity{resource="memory"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query total memory capacity: %w", err)
 	}
 
-	availMem, err := queryThanos(kc.Ctx, `sum(kube_node_status_allocatable{resource="memory"})`)
+	availMem, err := queryThanos(ctx, `sum(kube_node_status_allocatable{resource="memory"})`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allocatable memory: %w", err)
 	}
@@ -707,9 +707,9 @@ func (kc *OpenshiftClient) sumSpyreInUse() (int64, error) {
 //
 // Spyre card PCI addresses are read from the PCIDEVICE_IBM_COM_AIU_PF environment variable
 // set on each container in the pod spec (same convention as the Podman runtime).
-func (kc *OpenshiftClient) GetPodResources(podName string) (*types.PodResources, error) {
+func (kc *OpenshiftClient) GetPodResources(ctx context.Context, podName string) (*types.PodResources, error) {
 	// Fetch the full pod spec to read container env vars for Spyre cards.
-	pod, err := kc.KubeClient.CoreV1().Pods(kc.Namespace).Get(kc.Ctx, podName, metav1.GetOptions{})
+	pod, err := kc.KubeClient.CoreV1().Pods(kc.Namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod %s: %w", podName, err)
 	}
@@ -725,7 +725,7 @@ func (kc *OpenshiftClient) GetPodResources(podName string) (*types.PodResources,
 		kc.Namespace, podName,
 	)
 
-	cpuCores, err := queryThanos(kc.Ctx, cpuQuery)
+	cpuCores, err := queryThanos(ctx, cpuQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query CPU usage for pod %s: %w", podName, err)
 	}
@@ -736,7 +736,7 @@ func (kc *OpenshiftClient) GetPodResources(podName string) (*types.PodResources,
 		kc.Namespace, podName,
 	)
 
-	memBytes, err := queryThanos(kc.Ctx, memQuery)
+	memBytes, err := queryThanos(ctx, memQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query memory usage for pod %s: %w", podName, err)
 	}
@@ -763,7 +763,7 @@ func collectSpyreCardsFromPod(kc *OpenshiftClient, pod *corev1.Pod, spyreCards *
 	for i := range pod.Spec.Containers {
 		containerName := pod.Spec.Containers[i].Name
 
-		output, err := kc.ExecInContainerWithCmd(pod.Name, containerName, []string{"env"})
+		output, err := kc.ExecInContainerWithCmd(kc.Ctx, pod.Name, containerName, []string{"env"})
 		if err != nil {
 			logger.Warningf("collectSpyreCardsFromPod: exec failed for container %s in pod %s/%s: %v", containerName, pod.Namespace, pod.Name, err)
 
@@ -779,7 +779,7 @@ func collectSpyreCardsFromPod(kc *OpenshiftClient, pod *corev1.Pod, spyreCards *
 // the Kubernetes API server pod/exec subresource and returns the combined stdout.
 // This works from inside the cluster without requiring the `oc` binary to be
 // present in the catalog-backend pod.
-func (kc *OpenshiftClient) ExecInContainerWithCmd(podName, containerName string, command []string) (string, error) {
+func (kc *OpenshiftClient) ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error) {
 	req := kc.KubeClient.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -804,7 +804,7 @@ func (kc *OpenshiftClient) ExecInContainerWithCmd(podName, containerName string,
 
 	var stdout bytes.Buffer
 
-	if err = executor.StreamWithContext(kc.Ctx, remotecommand.StreamOptions{
+	if err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdout: &stdout,
 	}); err != nil {
 		return "", fmt.Errorf("exec stream failed for %s/%s: %w", podName, containerName, err)
@@ -871,20 +871,20 @@ func (kc *OpenshiftClient) rolloutRestartDeployment(name string) error {
 	return nil
 }
 
-func (kc *OpenshiftClient) DeleteNamespace(name string) error {
+func (kc *OpenshiftClient) DeleteNamespace(ctx context.Context, name string) error {
 	gracePeriod := deleteNamespaceGracePeriod
 	propagation := metav1.DeletePropagationBackground
 
-	ctx, cancel := context.WithTimeout(kc.Ctx, deleteNamespaceTimeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, deleteNamespaceTimeout)
 	defer cancel()
 
-	err := kc.KubeClient.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{
+	err := kc.KubeClient.CoreV1().Namespaces().Delete(timeoutCtx, name, metav1.DeleteOptions{
 		GracePeriodSeconds: &gracePeriod,
 		PropagationPolicy:  &propagation,
 	})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			logger.DebugfCtx(kc.Ctx, "Ignoring '%s' namespace deletion error: no namespace found\n", name)
+			logger.DebugfCtx(ctx, "Ignoring '%s' namespace deletion error: no namespace found\n", name)
 
 			return nil
 		}

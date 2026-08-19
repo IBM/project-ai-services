@@ -89,7 +89,7 @@ func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, app
 }
 
 // populatePodValues -> populates the host values within the params.
-func populateHostValues(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populateHostValues(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
 		switch host.Type {
 		case "ip":
@@ -100,7 +100,7 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 			}
 			params["HOST_IP"] = hostIP
 		case "route":
-			route, err := runtime.ListRoutes("")
+			route, err := runtime.ListRoutes(ctx, "")
 			if err != nil {
 				return fmt.Errorf("unable to fetch the route: %w", err)
 			}
@@ -118,9 +118,9 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 	return nil
 }
 
-func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populatePodInfo(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, pod := range varsData.Pods {
-		exists, err := runtime.PodExists(pod.Name)
+		exists, err := runtime.PodExists(ctx, pod.Name)
 		if err != nil {
 			return fmt.Errorf("failed to check if pod exists: %w", err)
 		}
@@ -131,7 +131,7 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 			continue
 		}
 
-		pInfo, err := runtime.InspectPod(pod.Name)
+		pInfo, err := runtime.InspectPod(ctx, pod.Name)
 		if err != nil {
 			return fmt.Errorf("failed to inspect Pod '%s': %w", pod.Name, err)
 		}
@@ -154,9 +154,9 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 	return nil
 }
 
-func populateContainerInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populateContainerInfo(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, container := range varsData.Containers {
-		exists, err := runtime.ContainerExists(container.Name)
+		exists, err := runtime.ContainerExists(ctx, container.Name)
 		if err != nil {
 			return fmt.Errorf("failed to check if container exists: %w", err)
 		}
@@ -167,7 +167,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 			continue
 		}
 
-		cInfo, err := runtime.InspectContainer(container.Name)
+		cInfo, err := runtime.InspectContainer(ctx, container.Name)
 		if err != nil {
 			return fmt.Errorf("failed to inspect Container '%s': %w", container.Name, err)
 		}
@@ -234,18 +234,20 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 		return fmt.Errorf("failed to load vars file: %w", err)
 	}
 
+	ctx := context.Background()
+
 	// populate the host values set in vars file
-	if err := populateHostValues(runtime, params, varsData); err != nil {
+	if err := populateHostValues(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate host values: %w", err)
 	}
 
 	// populate the pod info set in vars file
-	if err := populatePodInfo(runtime, params, varsData); err != nil {
+	if err := populatePodInfo(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate pod values: %w", err)
 	}
 
 	// populate the container info set in vars file
-	if err := populateContainerInfo(runtime, params, varsData); err != nil {
+	if err := populateContainerInfo(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate container values: %w", err)
 	}
 
@@ -254,7 +256,6 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 		return fmt.Errorf("failed to execute info.md: %w", err)
 	}
 
-	ctx := context.Background()
 	logger.InfolnCtx(ctx, title+":")
 	logger.InfolnCtx(ctx, "-------")
 	logger.InfolnCtx(ctx, rendered.String())

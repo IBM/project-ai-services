@@ -2,6 +2,7 @@ package caddy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,8 +44,8 @@ func ComputeDomainConfig(sslCertPath, sslKeyPath, domainName string) (string, er
 }
 
 // getCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func getCaddyAdminPort(runtime *podman.PodmanClient, podName string) (string, error) {
-	pod, err := runtime.InspectPod(podName)
+func getCaddyAdminPort(ctx context.Context, runtime *podman.PodmanClient, podName string) (string, error) {
+	pod, err := runtime.InspectPod(ctx, podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
@@ -63,9 +64,9 @@ func getCaddyAdminPort(runtime *podman.PodmanClient, podName string) (string, er
 }
 
 // getHTTPSPort retrieves the HTTPS port from the Caddy pod.
-func getHTTPSPort(runtime *podman.PodmanClient, caddyPodName string) (string, error) {
+func getHTTPSPort(ctx context.Context, runtime *podman.PodmanClient, caddyPodName string) (string, error) {
 	// Get pod details
-	pod, err := runtime.InspectPod(caddyPodName)
+	pod, err := runtime.InspectPod(ctx, caddyPodName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}

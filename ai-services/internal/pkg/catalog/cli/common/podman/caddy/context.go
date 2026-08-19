@@ -3,6 +3,7 @@
 package caddy
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -43,7 +44,7 @@ func (c *Context) GetHostAdminURL() (string, error) {
 		return "", fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	adminPort, err := getCaddyAdminPort(rt, c.podName)
+	adminPort, err := getCaddyAdminPort(context.Background(), rt, c.podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Caddy admin port: %w", err)
 	}
@@ -65,8 +66,8 @@ func (c *Context) GetContainerAdminURL() string {
 }
 
 // GetHTTPSPort retrieves the Caddy HTTPS port.
-func (c *Context) GetHTTPSPort(rt *podman.PodmanClient) (string, error) {
-	return getHTTPSPort(rt, c.podName)
+func (c *Context) GetHTTPSPort(ctx context.Context, rt *podman.PodmanClient) (string, error) {
+	return getHTTPSPort(ctx, rt, c.podName)
 }
 
 // CreateProxyManager creates a Caddy proxy manager.

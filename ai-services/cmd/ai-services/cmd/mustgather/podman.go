@@ -76,7 +76,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 
-	catalogInstalled, err := checkCatalogInstalled(rt)
+	catalogInstalled, err := checkCatalogInstalled(ctx, rt)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
@@ -106,8 +106,8 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 // ai-services.io/application=ai-services label is present, confirming that
 // the catalog has been installed (covers catalog, db, and caddy pods — any one
 // of them is sufficient).
-func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
-	pods, err := rt.ListPods(map[string][]string{
+func checkCatalogInstalled(ctx context.Context, rt *podmanRuntime.PodmanClient) (bool, error) {
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
 func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.PodmanClient) {
 	g.baseDir = pkgutils.GetBaseDir() // safe fallback
 
-	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
 			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")

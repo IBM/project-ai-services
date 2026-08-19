@@ -43,7 +43,7 @@ type OpenShiftConfigureOptions struct {
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.
 // It extracts environment variables like AI_SERVICES_BASE_DIR, DOMAIN_SUFFIX, and CADDY_HTTPS_PORT.
-func GetCatalogPodConfig(rt runtime.Runtime) (*PodmanConfigureOptions, string, error) {
+func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime) (*PodmanConfigureOptions, string, error) {
 	// Build filter to find all pods using the catalog secret via label
 	logger.Debugf("Getting catalog pod configuration")
 	filter := map[string][]string{
@@ -55,7 +55,7 @@ func GetCatalogPodConfig(rt runtime.Runtime) (*PodmanConfigureOptions, string, e
 	}
 
 	// List all pods that reference the catalog secret
-	pods, err := rt.ListPods(filter)
+	pods, err := rt.ListPods(ctx, filter)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -65,7 +65,7 @@ func GetCatalogPodConfig(rt runtime.Runtime) (*PodmanConfigureOptions, string, e
 
 	// Inspect catalog pod
 	pod := pods[0]
-	pInfo, err := rt.InspectPod(pod.ID)
+	pInfo, err := rt.InspectPod(ctx, pod.ID)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
 	}
@@ -74,7 +74,7 @@ func GetCatalogPodConfig(rt runtime.Runtime) (*PodmanConfigureOptions, string, e
 
 	for _, container := range pInfo.Containers {
 		// Inspect container to get environment variables
-		cInfo, err := rt.InspectContainer(container.ID)
+		cInfo, err := rt.InspectContainer(ctx, container.ID)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}

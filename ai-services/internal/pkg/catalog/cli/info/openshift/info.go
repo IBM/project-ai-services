@@ -27,7 +27,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 		"label": {fmt.Sprintf("%s=%s", aiconst.ApplicationAnnotationKey, constants.CatalogAppName)},
 	}
 
-	pods, err := runtime.ListPods(listFilters)
+	pods, err := runtime.ListPods(ctx, listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}

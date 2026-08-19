@@ -32,7 +32,7 @@ func DeployPodAndReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec
 
 	// ---- Pod Readiness Checks ----
 	for _, pod := range pods {
-		pInfo, err := rt.InspectPod(pod.ID)
+		pInfo, err := rt.InspectPod(ctx, pod.ID)
 		if err != nil {
 			return fmt.Errorf("failed to do pod inspect for podID: '%s' with error: %w", pod.ID, err)
 		}
@@ -69,7 +69,7 @@ func doContainersCreationCheck(ctx context.Context, rt runtime.Runtime, podSpec 
 
 	logger.InfofCtx(ctx, "'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
 	// wait for all containers for a given pod are created
-	if err := helpers.WaitForContainersCreation(rt, podID, expectedContainerCount, containerCreationTimeout); err != nil {
+	if err := helpers.WaitForContainersCreation(ctx, rt, podID, expectedContainerCount, containerCreationTimeout); err != nil {
 		return fmt.Errorf("containers creation check failed for pod: '%s' with error: %w", podName, err)
 	}
 
@@ -79,7 +79,7 @@ func doContainersCreationCheck(ctx context.Context, rt runtime.Runtime, podSpec 
 }
 
 func doContainerReadinessCheck(ctx context.Context, rt runtime.Runtime, podTemplateName, podName, containerID string) error {
-	cInfo, err := rt.InspectContainer(containerID)
+	cInfo, err := rt.InspectContainer(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
 	}
@@ -87,7 +87,7 @@ func doContainerReadinessCheck(ctx context.Context, rt runtime.Runtime, podTempl
 	logger.InfofCtx(ctx, "'%s', '%s', '%s': Performing Container Readiness check...\n", podTemplateName, podName, cInfo.Name)
 
 	// getting the Start Period set for a container
-	startPeriod, err := helpers.FetchContainerStartPeriod(rt, containerID)
+	startPeriod, err := helpers.FetchContainerStartPeriod(ctx, rt, containerID)
 	if err != nil {
 		return fmt.Errorf("fetching container: '%s' start period failed: %w", cInfo.Name, err)
 	}
@@ -103,7 +103,7 @@ func doContainerReadinessCheck(ctx context.Context, rt runtime.Runtime, podTempl
 
 	logger.InfofCtx(ctx, "'%s', '%s', '%s': Waiting for Container Readiness... Timeout set: %s\n", podTemplateName, podName, cInfo.Name, readinessTimeout)
 
-	if err := helpers.WaitForContainerReadiness(rt, containerID, readinessTimeout); err != nil {
+	if err := helpers.WaitForContainerReadiness(ctx, rt, containerID, readinessTimeout); err != nil {
 		return fmt.Errorf("readiness check failed for container: '%s'!: %w", cInfo.Name, err)
 	}
 	logger.InfofCtx(ctx, "'%s', '%s', '%s': Readiness Check for the container is completed!\n", podTemplateName, podName, cInfo.Name)

@@ -17,8 +17,8 @@ const certsDirName = "certs"
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
-func getExistingConfigFromCatalogBackend(rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(rt)
+func getExistingConfigFromCatalogBackend(ctx context.Context, rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -47,9 +47,9 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 
 // validateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
 // This function performs all validation checks including certificate validation.
-func validateReconfigureParameters(rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
+func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
 	// Get existing configuration from catalog-backend pod
-	existingOpts, err := getExistingConfigFromCatalogBackend(rt)
+	existingOpts, err := getExistingConfigFromCatalogBackend(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("failed to get existing configuration from catalog-backend: %w", err)
 	}
@@ -127,8 +127,8 @@ func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, 
 }
 
 // IsCatalogServiceRunning checks if the catalog service is configured and running.
-func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
-	_, _, err := catalogUtils.GetCatalogPodConfig(rt)
+func IsCatalogServiceRunning(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
 			logger.InfolnCtx(context.Background(), "Catalog service is not configured or running.")
@@ -145,9 +145,9 @@ func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
 
 // validateCatalogServiceAndConfirmReset validates that the catalog service is running
 // and confirms the reset action with the user. Returns true if the operation should proceed.
-func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string) (bool, error) {
+func validateCatalogServiceAndConfirmReset(ctx context.Context, rt runtime.Runtime, resetType string) (bool, error) {
 	// Validate catalog service is running
-	isCatalogRunning, err := IsCatalogServiceRunning(rt)
+	isCatalogRunning, err := IsCatalogServiceRunning(ctx, rt)
 	if err != nil {
 		return false, err
 	}
