@@ -238,7 +238,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
-          onSchemaError={setHasStep1SchemaError}
+          onComponentError={setHasStep1SchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -249,7 +249,7 @@ export const DeployFlow = ({
           deployOptions={deployOptions}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
-          onSchemaError={setHasStep2SchemaError}
+          onComponentError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>

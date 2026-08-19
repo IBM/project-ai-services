@@ -23,5 +23,4 @@ export type DeployFlowAction =
 
 export interface StepProps extends BaseStepProps {
   deployOptions: DeployOptionsResponse;
-  onSchemaError?: (hasError: boolean) => void;
 }
