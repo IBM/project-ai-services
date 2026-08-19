@@ -410,16 +410,12 @@ func TestExtractAndMeasure_PathTraversal(t *testing.T) {
 	assertValidationError(t, err, http.StatusBadRequest, "path traversal")
 }
 
-func TestExtractAndMeasure_FileTooLarge(t *testing.T) {
+func TestExtractAndMeasure_AggregateLimitExceeded_SingleFile(t *testing.T) {
+	// A single file whose size exceeds the aggregate limit must be rejected.
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 
-	// Declare a size exceeding the limit and write exactly that many bytes so
-	// tar.Writer.Close() does not complain about a size mismatch.
-	// We use a bytes.Repeat to avoid a 200 MB allocation — instead we write
-	// the header with size=maxExtractedFileSize+1 and supply the data via
-	// io.LimitReader so the tar writer is satisfied.
 	oversizedLen := maxExtractedFileSize + 1
 	require.NoError(t, tw.WriteHeader(&tar.Header{
 		Name:     "bundle/big.bin",
@@ -427,14 +423,36 @@ func TestExtractAndMeasure_FileTooLarge(t *testing.T) {
 		Size:     oversizedLen,
 		Mode:     0o644,
 	}))
-	// Write the declared number of bytes using a zero-filled reader.
 	_, err := io.Copy(tw, io.LimitReader(zeroReader{}, oversizedLen))
 	require.NoError(t, err)
 	require.NoError(t, tw.Close())
 	require.NoError(t, gw.Close())
 
-	destDir := t.TempDir()
-	_, err = extractAndMeasure(buf.Bytes(), destDir)
+	_, err = extractAndMeasure(buf.Bytes(), t.TempDir())
+	assertValidationError(t, err, http.StatusBadRequest, "50 MB")
+}
+
+func TestExtractAndMeasure_AggregateLimitExceeded_MultipleSmallFiles(t *testing.T) {
+	// Two files each just above half the limit — individually fine, collectively over.
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	halfPlus := maxExtractedFileSize/2 + 1
+	for _, name := range []string{"bundle/a.bin", "bundle/b.bin"} {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     name,
+			Typeflag: tar.TypeReg,
+			Size:     halfPlus,
+			Mode:     0o644,
+		}))
+		_, err := io.Copy(tw, io.LimitReader(zeroReader{}, halfPlus))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+
+	_, err := extractAndMeasure(buf.Bytes(), t.TempDir())
 	assertValidationError(t, err, http.StatusBadRequest, "50 MB")
 }
 

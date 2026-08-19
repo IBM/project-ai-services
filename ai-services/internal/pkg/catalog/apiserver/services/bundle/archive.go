@@ -20,9 +20,9 @@ const (
 	// bundleStorageRoot is the mount path for the dedicated catalog-bundles volume.
 	bundleStorageRoot = "/data/catalog-bundles"
 
-	// maxExtractedFileSize is the total uncompressed size limit enforced during extraction
-	// (50 MB). Any single file — or the aggregate of all files written — whose declared
-	// tar header Size exceeds this value is rejected before any bytes are written to disk.
+	// maxExtractedFileSize is the aggregate uncompressed size limit enforced during
+	// extraction (50 MB). If the total bytes written across all files exceeds this
+	// value the extraction is aborted.
 	maxExtractedFileSize int64 = 50 * 1024 * 1024
 
 	// splitTwo is the n argument for strings.SplitN when splitting on the first slash.
@@ -276,6 +276,12 @@ func extractEntries(tr *tar.Reader, destDir string) (int64, error) {
 			return 0, err
 		}
 		totalSize += n
+		if totalSize > maxExtractedFileSize {
+			return 0, &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: "archive exceeds the 50 MB uncompressed size limit",
+			}
+		}
 	}
 
 	return totalSize, nil
@@ -340,14 +346,8 @@ func writeEntry(tr *tar.Reader, hdr *tar.Header, destPath string) (int64, error)
 	return 0, nil
 }
 
-// writeRegularFile enforces the size limit and writes a regular tar file entry to destPath.
+// writeRegularFile writes a regular tar file entry to destPath.
 func writeRegularFile(tr *tar.Reader, hdr *tar.Header, destPath string) (int64, error) {
-	if hdr.Size > maxExtractedFileSize {
-		return 0, &validators.ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("archive entry %q exceeds the 50 MB uncompressed size limit", hdr.Name),
-		}
-	}
 	if mkErr := os.MkdirAll(filepath.Dir(destPath), dirPerm); mkErr != nil {
 		return 0, fmt.Errorf("failed to create parent directory for %q: %w", destPath, mkErr)
 	}
