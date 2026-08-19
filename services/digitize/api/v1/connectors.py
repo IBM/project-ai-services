@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from common.error_utils import APIError, ErrorCode, http_error_responses
+from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.connectors.models import (
     ConnectorCreateRequest,
     ConnectorDetailResponse,
@@ -53,10 +54,56 @@ logger = get_logger("connectors_router")
 
 _KEY_PATH = None  # resolved lazily via _get_key_path()
 
+_CREDENTIAL_ERROR_MSG = "Authentication failed: unable to connect with the provided credentials"
+
 
 def _get_key_path() -> str:
     """Return the encryption key path from settings."""
     return settings.digitize.connector.encryption_key_path
+
+
+async def _probe_connector_credentials(
+    connector_id: str,
+    connector_type: str,
+    encrypted_details: dict,
+    allowed_extensions: list,
+    current_error: Optional[str] = None,
+) -> None:
+    """
+    Attempt a real connection using the supplied (encrypted) credentials.
+
+    On failure: the connector's error field is set to a generic auth-failure message.
+
+    On success: if the connector previously had an auth-failure error (i.e. the error
+    was set by a prior probe), it is cleared so the connector no longer shows a stale
+    credential warning.  Unrelated errors (e.g. sync errors) are left untouched.
+    """
+    class _Row:
+        """Minimal duck-type accepted by build_scanner."""
+        def __init__(self, ctype: str, details: dict, extensions: list) -> None:
+            self.type = ctype
+            self.connection_details = details
+            self.allowed_extensions = extensions
+
+    scanner = build_scanner(_Row(connector_type, encrypted_details, allowed_extensions))
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, scanner.connect)
+        await loop.run_in_executor(None, scanner.close)
+        logger.info(f"Credential probe succeeded for connector {connector_id!r}")
+        # Clear the error only if it was previously set by a credential probe —
+        # leave any sync-related error intact.
+        if current_error == _CREDENTIAL_ERROR_MSG:
+            db_ops.set_connector_error(connector_id, None)
+    except Exception as exc:
+        logger.warning(
+            f"Credential probe failed for connector {connector_id!r}: {exc}"
+        )
+        db_ops.set_connector_error(connector_id, _CREDENTIAL_ERROR_MSG)
+        try:
+            await loop.run_in_executor(None, scanner.close)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +159,15 @@ async def create_connector(body: ConnectorCreateRequest):
             connection_details=encrypted_details,
             allowed_extensions=body.allowed_extensions,
             sync_interval_seconds=sync_interval,
+        )
+
+        asyncio.create_task(
+            _probe_connector_credentials(
+                connector_id,
+                body.type,
+                encrypted_details,
+                body.allowed_extensions,
+            )
         )
 
         logger.info(
@@ -205,6 +261,19 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
             connection_details=merged_details,
             allowed_extensions=body.allowed_extensions,
         )
+
+        if merged_details is not None:
+            # Connection details changed — probe the new credentials.
+            probe_extensions = body.allowed_extensions or existing.allowed_extensions or []
+            asyncio.create_task(
+                _probe_connector_credentials(
+                    connector_id,
+                    existing.type,
+                    merged_details,
+                    probe_extensions,
+                    current_error=existing.error,
+                )
+            )
 
         logger.info(f"Connector {connector_id!r} updated")
         return Response(status_code=200)
