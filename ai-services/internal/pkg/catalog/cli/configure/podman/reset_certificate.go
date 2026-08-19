@@ -23,7 +23,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Validate catalog service is running
-	isCatalogRunning, err := IsCatalogServiceRunning(deployCtx.Runtime)
+	isCatalogRunning, err := IsCatalogServiceRunning(context.Background(), deployCtx.Runtime)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Get existing catalog pod details
-	opts, _, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
+	opts, _, err := catalogUtils.GetCatalogPodConfig(context.Background(), deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get catalog pod details: %w", err)
 	}

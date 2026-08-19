@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -16,6 +17,7 @@ import (
 
 // DisplayCatalogInfo displays detailed information about the catalog service.
 func DisplayCatalogInfo() error {
+	ctx := context.Background()
 	// Initialize runtime
 	runtime, err := rt.NewPodmanClient()
 	if err != nil {
@@ -27,7 +29,7 @@ func DisplayCatalogInfo() error {
 		"label": {fmt.Sprintf("ai-services.io/application=%s", constants.CatalogAppName)},
 	}
 
-	pods, err := runtime.ListPods(listFilters)
+	pods, err := runtime.ListPods(ctx, listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -76,7 +78,8 @@ func DisplayCatalogInfo() error {
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 // This orchestrates: deployContext gets pod name and route info from templates,
 // caddy.Context queries Caddy for route domains and HTTPS port.
-func GetCatalogRouteInfo(rt *rt.PodmanClient) (map[string]string, string, error) {
+func GetCatalogRouteInfo(rt *rt.PodmanClient) (map[string]string, string, error) { //nolint:revive
+	ctx := context.Background()
 	// Create deployment context to access templates
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
@@ -99,7 +102,7 @@ func GetCatalogRouteInfo(rt *rt.PodmanClient) (map[string]string, string, error)
 	caddyCtx := caddy.NewContext(caddyPodName, "")
 
 	// Use caddy package to get route info
-	return caddy.GetCatalogRouteInfo(caddyCtx, rt, routeInfos)
+	return caddy.GetCatalogRouteInfo(ctx, caddyCtx, rt, routeInfos)
 }
 
 // Made with Bob

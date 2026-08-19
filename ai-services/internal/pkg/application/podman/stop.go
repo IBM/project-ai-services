@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,7 +14,8 @@ import (
 
 // Stop stops a running application.
 func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
-	pods, err := p.listApplicationPods(opts)
+	ctx := context.Background()
+	pods, err := p.listApplicationPods(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -57,14 +59,14 @@ func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
 
 	logger.Infof("Proceeding to stop pods...\n")
 
-	return p.stopPods(podsToStop)
+	return p.stopPods(ctx, podsToStop)
 }
 
 // listApplicationPods retrieves pods for the given application.
-func (p *PodmanApplication) listApplicationPods(opts appTypes.StopOptions) ([]types.Pod, error) {
+func (p *PodmanApplication) listApplicationPods(ctx context.Context, opts appTypes.StopOptions) ([]types.Pod, error) {
 	// if legacy flag is set, get pods from runtime; otherwise use catalog API
 	if opts.Legacy {
-		pods, err := p.runtime.ListPods(map[string][]string{
+		pods, err := p.runtime.ListPods(ctx, map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
 		})
 		if err != nil {
@@ -108,12 +110,12 @@ func (p *PodmanApplication) fetchPodsToStop(pods []types.Pod, podNames []string,
 	return podsToStop, nil
 }
 
-func (p *PodmanApplication) stopPods(podsToStop []types.Pod) error {
+func (p *PodmanApplication) stopPods(ctx context.Context, podsToStop []types.Pod) error {
 	var errors []string
 	for _, pod := range podsToStop {
 		logger.Infof("Stopping the pod: %s\n", pod.Name)
 
-		if err := p.runtime.StopPod(pod.ID); err != nil {
+		if err := p.runtime.StopPod(ctx, pod.ID); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
 

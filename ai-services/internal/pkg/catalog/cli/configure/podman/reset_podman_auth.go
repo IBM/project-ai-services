@@ -19,7 +19,7 @@ func ResetPodmanAuth() error {
 	}
 
 	// Validate catalog service and confirm reset action
-	shouldProceed, err := validateCatalogServiceAndConfirmReset(deployCtx.Runtime, "podman auth")
+	shouldProceed, err := validateCatalogServiceAndConfirmReset(context.Background(), deployCtx.Runtime, "podman auth")
 	if err != nil {
 		return err
 	}
@@ -30,18 +30,18 @@ func ResetPodmanAuth() error {
 
 	// Delete podman auth secret.
 	logger.InfofCtx(context.Background(), "Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
-	err = deployCtx.Runtime.DeleteSecret(catalogConstant.CatalogPodmanAuthSecretName)
+	err = deployCtx.Runtime.DeleteSecret(context.Background(), catalogConstant.CatalogPodmanAuthSecretName)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}
 
-	opts, podID, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
+	opts, podID, err := catalogUtils.GetCatalogPodConfig(context.Background(), deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
 
 	logger.InfofCtx(context.Background(), "Deleting existing catalog pod %s", podID)
-	err = deployCtx.Runtime.DeletePod(podID, utils.BoolPtr(true))
+	err = deployCtx.Runtime.DeletePod(context.Background(), podID, utils.BoolPtr(true))
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}

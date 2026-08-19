@@ -1,6 +1,7 @@
 package openshift
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
@@ -9,11 +10,12 @@ import (
 
 // Logs displays logs from an application pod.
 func (o *OpenshiftApplication) Logs(opts types.LogsOptions) error {
+	ctx := context.Background()
 	logger.Warningln("Press Ctrl+C to exit the logs and return to the terminal.")
 	logger.Infof("Fetching logs for application pod: %s", opts.PodName)
 
 	if opts.ContainerNameOrID == "" {
-		if err := o.runtime.PodLogs(opts.PodName); err != nil {
+		if err := o.runtime.PodLogs(ctx, opts.PodName); err != nil {
 			return fmt.Errorf("failed to fetch pod: %s logs; err: %w", opts.PodName, err)
 		}
 
@@ -21,7 +23,7 @@ func (o *OpenshiftApplication) Logs(opts types.LogsOptions) error {
 	}
 
 	// Fetch container logs
-	exists, err := o.runtime.ContainerExists(opts.ContainerNameOrID)
+	exists, err := o.runtime.ContainerExists(ctx, opts.ContainerNameOrID)
 	if err != nil {
 		return err
 	}
@@ -30,7 +32,7 @@ func (o *OpenshiftApplication) Logs(opts types.LogsOptions) error {
 	}
 
 	logger.Infof("Fetching logs for container: %s", opts.ContainerNameOrID)
-	if err := o.runtime.ContainerLogs(opts.ContainerNameOrID); err != nil {
+	if err := o.runtime.ContainerLogs(ctx, opts.ContainerNameOrID); err != nil {
 		return fmt.Errorf("failed to fetch container: %s logs; err: %w", opts.ContainerNameOrID, err)
 	}
 

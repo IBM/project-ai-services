@@ -32,7 +32,7 @@ func newPodmanSync(catalogProvider *catalogpkg.CatalogProvider) *podmanSync {
 // FetchPodStatuses fetches all pods labelled with the given templateID and returns their statuses.
 // It uses InspectPod and InspectContainer (via common.ProcessPod) to derive state and health.
 func (s *podmanSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	filteredPods, err := common.FetchFilteredPods(rt, templateID)
+	filteredPods, err := common.FetchFilteredPods(context.Background(), rt, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pods: %w", err)
 	}
@@ -43,7 +43,7 @@ func (s *podmanSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]
 
 	var podStatuses []*PodStatus
 	for _, pod := range filteredPods {
-		processedPod, err := common.ProcessPod(rt, pod)
+		processedPod, err := common.ProcessPod(context.Background(), rt, pod)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process pod: %w", err)
 		}
@@ -91,11 +91,14 @@ func validateResourceExistenceChecks(ctx context.Context, expectedSecretNames, e
 
 	var errorMessages []string
 
-	if msg := validateResourceExistence(ctx, expectedSecretNames, "secret", rt.SecretExists); msg != "" {
+	secretExistsFn := func(nameOrID string) (bool, error) { return rt.SecretExists(ctx, nameOrID) }
+	volumeExistsFn := func(nameOrID string) (bool, error) { return rt.VolumeExists(ctx, nameOrID) }
+
+	if msg := validateResourceExistence(ctx, expectedSecretNames, "secret", secretExistsFn); msg != "" {
 		errorMessages = append(errorMessages, msg)
 	}
 
-	if msg := validateResourceExistence(ctx, expectedVolumeNames, "volume", rt.VolumeExists); msg != "" {
+	if msg := validateResourceExistence(ctx, expectedVolumeNames, "volume", volumeExistsFn); msg != "" {
 		errorMessages = append(errorMessages, msg)
 	}
 

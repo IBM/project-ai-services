@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -37,8 +38,8 @@ func HashPasswordPBKDF2(password string, iteration int) (string, error) {
 
 // CollectAndHashPassword collects the password from user and returns the hashed password.
 // Returns empty string if the secret already exists (no password needed).
-func CollectAndHashPassword(rt runtime.Runtime) (string, error) {
-	secretExists, err := rt.SecretExists(catalogConstants.CatalogSecretName)
+func CollectAndHashPassword(ctx context.Context, rt runtime.Runtime) (string, error) {
+	secretExists, err := rt.SecretExists(ctx, catalogConstants.CatalogSecretName)
 	if err != nil {
 		return "", fmt.Errorf("failed to check existing secrets: %w", err)
 	}

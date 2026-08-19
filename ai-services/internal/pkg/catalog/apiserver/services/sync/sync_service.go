@@ -192,7 +192,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 
 	// Fail early if the namespace does not exist
 	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
-		if _, err := rt.GetNamespace(); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
+		if _, err := rt.GetNamespace(ctx); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
 			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
 		}
 	}
