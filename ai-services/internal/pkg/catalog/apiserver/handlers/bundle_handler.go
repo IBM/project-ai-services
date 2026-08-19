@@ -157,12 +157,12 @@ func (h *BundleHandler) DeleteBundle(c *gin.Context) {
 //	@Tags			Bundles
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			page		query	int	false	"Page number (1-indexed)"				default(1)
-//	@Param			page_size	query	int	false	"Number of items per page (max: 100)"	default(20)
-//	@Success		200	{object}	bundlesvc.BundleListResponse
-//	@Failure		400	{object}	ErrorResponse	"Invalid pagination parameters"
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		500	{object}	ErrorResponse
+//	@Param			page		query		int	false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int	false	"Number of items per page (max: 100)"	default(20)
+//	@Success		200			{object}	bundlesvc.BundleListResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid pagination parameters"
+//	@Failure		401			{object}	ErrorResponse
+//	@Failure		500			{object}	ErrorResponse
 //	@Router			/catalog/bundles [get]
 func (h *BundleHandler) ListBundles(c *gin.Context) {
 	page, _ := strconv.Atoi(c.Query("page"))

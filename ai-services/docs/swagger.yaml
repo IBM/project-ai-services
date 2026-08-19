@@ -75,6 +75,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse'
         type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse:
     properties:
@@ -1209,7 +1211,19 @@ paths:
       - Authentication
   /catalog/bundles:
     get:
-      description: Returns all registered bundles ordered by created_at DESC.
+      description: Returns a paginated list of all registered bundles ordered by created_at
+        DESC.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:
@@ -1217,6 +1231,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleListResponse'
+        "400":
+          description: Invalid pagination parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized
           schema:

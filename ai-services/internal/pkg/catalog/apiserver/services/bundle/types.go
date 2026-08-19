@@ -184,6 +184,6 @@ type BundleResponse struct {
 
 // BundleListResponse is the paginated JSON wrapper for the list endpoint.
 type BundleListResponse struct {
-	Bundles    []BundleResponse       `json:"bundles"`
+	Bundles    []BundleResponse         `json:"bundles"`
 	Pagination types.PaginationMetadata `json:"pagination"`
 }
