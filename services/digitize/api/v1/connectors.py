@@ -36,6 +36,7 @@ from digitize.connectors.models import (
     ConnectorStatus,
     SyncLogStatus,
     SyncTriggerResponse,
+    ConnectorError,
 )
 from digitize.connectors.encryption import (
     encrypt_secrets,
@@ -54,7 +55,7 @@ logger = get_logger("connectors_router")
 
 _KEY_PATH = None  # resolved lazily via _get_key_path()
 
-_CREDENTIAL_ERROR_MSG = "Authentication failed: unable to connect with the provided credentials"
+_CREDENTIAL_ERROR_MSG = ConnectorError.CREDENTIAL_ERROR_MSG  # canonical value lives in connectors.models
 
 
 def _get_key_path() -> str:
