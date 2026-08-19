@@ -1,4 +1,4 @@
-// Package utils provides helpers for managing datasource connector credentials.
+// Package utils provides helpers functions for encrypting and decrypting connector (datasource) credentials.
 package utils
 
 import (
@@ -22,6 +22,10 @@ func deriveKey(secret string) []byte {
 // The nonce is prepended to the ciphertext and the result is base64-encoded.
 // secret is any non-empty string; a 32-byte AES key is derived from it via SHA-256.
 func Encrypt(plaintext string, secret string) (string, error) {
+	if secret == "" {
+		return "", fmt.Errorf("secret must not be empty")
+	}
+
 	key := deriveKey(secret)
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -47,6 +51,10 @@ func Encrypt(plaintext string, secret string) (string, error) {
 // Decrypt decodes a base64-encoded value produced by Encrypt and returns the original plaintext.
 // secret is any non-empty string; the same SHA-256-derived key used during Encrypt must be supplied.
 func Decrypt(ciphertext string, secret string) (string, error) {
+	if secret == "" {
+		return "", fmt.Errorf("secret must not be empty")
+	}
+
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("failed to base64-decode ciphertext: %w", err)
