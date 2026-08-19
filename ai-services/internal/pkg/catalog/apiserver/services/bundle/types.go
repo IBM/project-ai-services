@@ -194,16 +194,16 @@ type BundleRecord struct {
 // BundleResponse is the JSON representation returned to the caller on success.
 // It maps directly to the BundleResponse JSON shape documented in the proposal.
 type BundleResponse struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name,omitempty"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	SizeBytes   *int64     `json:"size_bytes,omitempty"`
-	CatalogType string     `json:"catalog_type"`
-	CatalogID   string     `json:"catalog_id"`
-	Version     string     `json:"version"`
-	CreatedBy   string     `json:"created_by,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name,omitempty"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	SizeBytes   *int64    `json:"size_bytes,omitempty"`
+	CatalogType string    `json:"catalog_type"`
+	CatalogID   string    `json:"catalog_id"`
+	Version     string    `json:"version"`
+	CreatedBy   string    `json:"created_by,omitempty"`
 }
 
 // BundleListResponse is the JSON wrapper for the list endpoint.

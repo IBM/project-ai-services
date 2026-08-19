@@ -28,12 +28,12 @@ func NewBundleHandler(svc bundlesvc.BundleServiceInterface) *BundleHandler {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			file	formData	file	true	".tar.gz archive containing the catalog item assets"
-//	@Success		201	{object}	bundlesvc.BundleResponse
-//	@Failure		400	{object}	ErrorResponse	"Missing file, wrong content-type, exceeds size limit, or metadata.yaml malformed"
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
-//	@Failure		403	{object}	ErrorResponse	"Forbidden — admin role required"
-//	@Failure		409	{object}	ErrorResponse	"Conflict — bundle with same catalog_id already exists"
-//	@Failure		422	{object}	ErrorResponse	"Unprocessable Entity — validation failed"
+//	@Success		201		{object}	bundlesvc.BundleResponse
+//	@Failure		400		{object}	ErrorResponse	"Missing file, wrong content-type, exceeds size limit, or metadata.yaml malformed"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"Forbidden — admin role required"
+//	@Failure		409		{object}	ErrorResponse	"Conflict — bundle with same catalog_id already exists"
+//	@Failure		422		{object}	ErrorResponse	"Unprocessable Entity — validation failed"
 //	@Router			/catalog/bundles [post]
 func (h *BundleHandler) CreateBundle(c *gin.Context) {
 	// TODO: enforce MAX_BUNDLE_SIZE via http.MaxBytesReader
@@ -56,11 +56,11 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			file	formData	file	true	".tar.gz archive to validate"
-//	@Success		200	{object}	bundlesvc.ServiceValidationResult
-//	@Failure		400	{object}	ErrorResponse
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		403	{object}	ErrorResponse
-//	@Failure		422	{object}	ErrorResponse	"Validation failed"
+//	@Success		200		{object}	bundlesvc.ServiceValidationResult
+//	@Failure		400		{object}	ErrorResponse
+//	@Failure		401		{object}	ErrorResponse
+//	@Failure		403		{object}	ErrorResponse
+//	@Failure		422		{object}	ErrorResponse	"Validation failed"
 //	@Router			/catalog/bundles/validate [post]
 func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
@@ -80,12 +80,12 @@ func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			bundle_id	path		string	true	"Internal bundle UUID"
 //	@Param			file		formData	file	true	"Replacement .tar.gz archive"
-//	@Success		200	{object}	bundlesvc.BundleResponse
-//	@Failure		400	{object}	ErrorResponse
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		403	{object}	ErrorResponse
-//	@Failure		404	{object}	ErrorResponse	"Bundle not found"
-//	@Failure		422	{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
+//	@Success		200			{object}	bundlesvc.BundleResponse
+//	@Failure		400			{object}	ErrorResponse
+//	@Failure		401			{object}	ErrorResponse
+//	@Failure		403			{object}	ErrorResponse
+//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
+//	@Failure		422			{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
 //	@Router			/catalog/bundles/{bundle_id} [put]
 func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 	// TODO: read bundle_id path param
@@ -106,10 +106,10 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 //	@Tags			Bundles
 //	@Security		BearerAuth
 //	@Param			bundle_id	path	string	true	"Internal bundle UUID"
-//	@Success		204	"No Content"
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		403	{object}	ErrorResponse
-//	@Failure		404	{object}	ErrorResponse	"Bundle not found"
+//	@Success		204			"No Content"
+//	@Failure		401			{object}	ErrorResponse
+//	@Failure		403			{object}	ErrorResponse
+//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
 //	@Router			/catalog/bundles/{bundle_id} [delete]
 func (h *BundleHandler) DeleteBundle(c *gin.Context) {
 	// TODO: read bundle_id path param
@@ -143,10 +143,10 @@ func (h *BundleHandler) ListBundles(c *gin.Context) {
 //	@Tags			Bundles
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			bundle_id	path	string	true	"Internal bundle UUID"
-//	@Success		200	{object}	bundlesvc.BundleResponse
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		404	{object}	ErrorResponse	"Bundle not found"
+//	@Param			bundle_id	path		string	true	"Internal bundle UUID"
+//	@Success		200			{object}	bundlesvc.BundleResponse
+//	@Failure		401			{object}	ErrorResponse
+//	@Failure		404			{object}	ErrorResponse	"Bundle not found"
 //	@Router			/catalog/bundles/{bundle_id} [get]
 func (h *BundleHandler) GetBundle(c *gin.Context) {
 	// TODO: read bundle_id path param
