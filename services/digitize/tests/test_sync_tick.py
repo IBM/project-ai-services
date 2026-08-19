@@ -396,8 +396,36 @@ class TestRunTick:
         return scanner
 
     def test_aborts_when_connector_not_found(self):
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=None):
+        with patch(f"{DB_MODULE}.get_active_connector", return_value=None), \
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_fail:
             asyncio.run(run_tick("missing", sync_seq=1))
+
+        # sync log must be closed as FAILED so the row doesn't stay open forever
+        args = mock_fail.call_args.kwargs
+        assert args["status"] == SyncLogStatus.FAILED
+        assert "missing" in args["error"]
+
+    def test_scanner_close_failure_is_logged_not_raised(self):
+        """scanner.close() raising in the finally block must not propagate."""
+        connector = _connector()
+        mock_scanner = self._make_scanner(scan_result=[])
+        mock_scanner.close.side_effect = RuntimeError("close boom")
+
+        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+             patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.update_sync_log"), \
+             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
+             patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
+             patch("digitize.connectors.sync_tick._process_new_files",
+                   new_callable=AsyncMock, return_value=None), \
+             patch("digitize.connectors.sync_tick._delete_orphans",
+                   new_callable=AsyncMock, return_value=0):
+            # must not raise despite close() failing
+            asyncio.run(run_tick("conn-1", sync_seq=1))
 
     def test_happy_path_calls_phases_in_order(self):
         connector = _connector()

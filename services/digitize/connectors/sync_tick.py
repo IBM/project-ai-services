@@ -124,6 +124,7 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
     config = get_active_connector(connector_id)
     if config is None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
+        _fail_tick(sync_seq, connector_id, RuntimeError(f"Connector {connector_id!r} not found"))
         return
 
     scanner = build_scanner(config)
@@ -174,7 +175,12 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         _fail_tick(sync_seq, connector_id, exc)
 
     finally:
-        await asyncio.to_thread(scanner.close)
+        try:
+            await asyncio.to_thread(scanner.close)
+        except Exception as close_exc:
+            logger.warning(
+                f"scanner.close() failed for connector {connector_id!r}: {close_exc}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +343,7 @@ async def _process_new_files(
             raise
 
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 f"Failed to ingest batch {batch_number} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )

@@ -979,6 +979,24 @@ class TestProbeConnectorCredentials:
 
         set_error_mock.assert_not_called()
 
+    async def test_close_failure_after_connect_failure_is_swallowed(self, monkeypatch):
+        """scanner.close() raising after a connect failure must not propagate."""
+        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect.side_effect = ConnectionError("bad credentials")
+        mock_scanner.close.side_effect = RuntimeError("close also broken")
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        # must not raise even though both connect and close fail
+        await _probe_connector_credentials(CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"])
+
+        # error still persisted despite close() blowing up
+        set_error_mock.assert_called_once_with(CONNECTOR_ID, _CREDENTIAL_ERROR_MSG)
+
     async def test_put_probes_credentials_when_connection_details_changed(
         self, monkeypatch
     ):

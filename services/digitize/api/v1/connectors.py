@@ -97,8 +97,9 @@ async def _probe_connector_credentials(
         if current_error == _CREDENTIAL_ERROR_MSG:
             db_ops.set_connector_error(connector_id, None)
     except Exception as exc:
-        logger.warning(
-            f"Credential probe failed for connector {connector_id!r}: {exc}"
+        logger.error(
+            f"Credential probe failed for connector {connector_id!r}: {exc}",
+            exc_info=True,
         )
         db_ops.set_connector_error(connector_id, _CREDENTIAL_ERROR_MSG)
         try:
@@ -149,7 +150,8 @@ async def create_connector(body: ConnectorCreateRequest):
             )
         except Exception as sched_exc:
             logger.error(
-                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
+                f"Scheduler registration failed for {connector_id!r}: {sched_exc}",
+                exc_info=True,
             )
             raise
 
