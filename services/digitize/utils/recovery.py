@@ -5,9 +5,16 @@ Implements a fast single-query recovery strategy: on startup a single
 database query locates all zombie jobs (accepted / in_progress at the
 time of the previous crash) and marks them as failed.
 
+Also sweeps the ``conversion_tasks`` table to recover tasks that were
+left in ``running`` state when the service crashed, and verifies that
+``queued``/``pending`` tasks still have their cached input files.
+
 This mirrors the pattern introduced in digitize-api-sample where
 recovery logic is isolated from the general utility bag.
 """
+
+import shutil
+from pathlib import Path
 
 from common.misc_utils import get_logger, cleanup_staging_directory
 from digitize.models import JobStatus, DocStatus
@@ -194,3 +201,83 @@ def recover_connector_sync_state() -> int:
         logger.debug("No stuck connector syncs found on startup")
 
     return len(affected_ids)
+
+
+def recover_conversion_tasks() -> int:
+    """
+    On startup, sweep the ``conversion_tasks`` table:
+
+    - ``running``  → ``failed``  (process died mid-conversion; chunk state unknown)
+    - ``queued``   → keep if cached file present; else ``failed``
+    - ``pending``  → keep if cached file present; else ``failed``
+
+    Returns:
+        Number of tasks that were recovered (status changed).
+    """
+    from digitize.db.manager import db_manager
+
+    recovered = 0
+
+    try:
+        # 1. running → failed
+        running_tasks = db_manager.get_conversion_tasks(status="running")
+        for task in running_tasks:
+            # Best-effort: clean chunk directories left over from the crashed run
+            try:
+                chunk_dir = Path(task.cached_file).parent / "chunks"
+                if chunk_dir.exists():
+                    shutil.rmtree(chunk_dir)
+            except Exception as clean_err:
+                logger.warning(
+                    f"Could not clean chunk dir for task {task.task_id}: {clean_err}"
+                )
+            db_manager.update_task_status(
+                task.task_id, "failed",
+                error="Service restarted during conversion",
+            )
+            logger.warning(f"Recovery: task {task.task_id} running→failed")
+            recovered += 1
+
+        # 2. queued — verify cached file
+        queued_tasks = db_manager.get_conversion_tasks(status="queued")
+        for task in queued_tasks:
+            if not Path(task.cached_file).exists():
+                db_manager.update_task_status(
+                    task.task_id, "failed",
+                    error="Cached input file lost during restart",
+                )
+                logger.warning(
+                    f"Recovery: task {task.task_id} queued→failed (file lost)"
+                )
+                recovered += 1
+            else:
+                logger.info(
+                    f"Recovery: task {task.task_id} remains queued (file intact)"
+                )
+
+        # 3. pending — verify cached file
+        pending_tasks = db_manager.get_conversion_tasks(status="pending")
+        for task in pending_tasks:
+            if not Path(task.cached_file).exists():
+                db_manager.update_task_status(
+                    task.task_id, "failed",
+                    error="Cached input file lost during restart",
+                )
+                logger.warning(
+                    f"Recovery: task {task.task_id} pending→failed (file lost)"
+                )
+                recovered += 1
+            else:
+                logger.info(
+                    f"Recovery: task {task.task_id} stays pending (file intact)"
+                )
+
+    except Exception as exc:
+        logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
+
+    if recovered:
+        logger.info(f"🔄 Recovered {recovered} conversion task(s) on startup")
+    else:
+        logger.debug("✅ No stale conversion tasks found on startup")
+
+    return recovered

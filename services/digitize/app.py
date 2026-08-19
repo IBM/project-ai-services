@@ -34,9 +34,11 @@ from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
+import asyncio
+
 from digitize.db.connection import check_db_connection, close_db_connections
 import digitize.utils.jobs as dg_util
-from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state
+from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state, recover_conversion_tasks
 
 logger = get_logger("digitize_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -110,17 +112,16 @@ def _recover_zombie_jobs():
     except Exception as exc:
         logger.error(f"Error during zombie job recovery: {exc}", exc_info=True)
 
-
-def _shutdown():
-    """Release resources on application shutdown."""
-    logger.info("Application shutting down...")
+def _recover_conversion_tasks():
+    """Recover stale conversion tasks left over from a previous app server run."""
     try:
-        close_db_connections()
-        logger.info("Database connections closed")
+        ct_count = recover_conversion_tasks()
+        if ct_count > 0:
+            logger.info(
+                f"Recovered {ct_count} stale conversion task(s) from previous run"
+            )
     except Exception as exc:
-        logger.error(f"Error closing database connections: {exc}", exc_info=True)
-
-    stderr_monitor.stop()
+        logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
 
 
 # ------------------------------------------------------------------ #
@@ -210,12 +211,33 @@ async def lifespan(app: FastAPI):
     # Orphan / zombie job recovery on startup.
     _recover_zombie_jobs()
 
+    # Stale conversion task recovery on startup.
+    _recover_conversion_tasks()
+
+    # Start conversion dispatcher.
+    from digitize.workers.conversion_dispatcher import dispatch_loop
+    dispatcher_task = asyncio.create_task(dispatch_loop())
+    logger.info("✅ Conversion dispatcher started")
+
     # Connector scheduler.
     async with _connector_scheduler_lifespan():
         yield
 
-    # Shutdown.
-    _shutdown()
+    # Shutdown — cancel dispatcher then release DB connections.
+    dispatcher_task.cancel()
+    try:
+        await dispatcher_task
+    except asyncio.CancelledError:
+        pass
+
+    logger.info("Application shutting down...")
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as exc:
+        logger.error(f"Error closing database connections: {exc}", exc_info=True)
+
+    stderr_monitor.stop()
 
 
 
