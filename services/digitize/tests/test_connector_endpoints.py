@@ -120,7 +120,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     Patches:
       - settings → fake dirs and fast-path values
       - encrypt_secrets / merge_and_encrypt_partial → return input unchanged
-      - _get_key_path → /dev/null (never touched because encryption is mocked)
       - db_ops.insert_connector, upsert_connector, etc.
     """
     from digitize.workers.concurrency import concurrency_manager
@@ -139,7 +138,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
             ingestion_concurrency_limit=1,
             connector=SimpleNamespace(
                 sync_interval_seconds=300,
-                encryption_key_path="/dev/null",
             ),
         ),
     )
@@ -165,11 +163,11 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     # Encryption: pass-through (no real key needed)
     monkeypatch.setattr(
         "digitize.api.v1.connectors.encrypt_secrets",
-        lambda connector_type, details, key_path: dict(details),
+        lambda connector_type, details: dict(details),
     )
     monkeypatch.setattr(
         "digitize.api.v1.connectors.merge_and_encrypt_partial",
-        lambda connector_type, existing, partial, key_path: {**existing, **partial},
+        lambda connector_type, existing, partial: {**existing, **partial},
     )
     monkeypatch.setattr(
         "digitize.api.v1.connectors.strip_secrets",
@@ -1011,11 +1009,7 @@ class TestProbeConnectorCredentials:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
         monkeypatch.setattr(
             "digitize.api.v1.connectors.merge_and_encrypt_partial",
-            lambda ctype, existing, partial, key_path: {**existing, **partial},
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors._get_key_path",
-            lambda: "/dev/null",
+            lambda ctype, existing, partial: {**existing, **partial},
         )
 
         tasks_created = []
@@ -1041,10 +1035,6 @@ class TestProbeConnectorCredentials:
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors._get_key_path",
-            lambda: "/dev/null",
-        )
 
         tasks_created = []
 
