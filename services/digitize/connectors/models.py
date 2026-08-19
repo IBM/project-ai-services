@@ -126,7 +126,6 @@ class ConnectorListItem(BaseModel):
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    last_sync_error: Optional[str]
     error: Optional[str]
     total_files: int
 
@@ -142,7 +141,6 @@ class ConnectorDetailResponse(BaseModel):
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    last_sync_error: Optional[str]
     error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int
