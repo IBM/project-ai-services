@@ -85,6 +85,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 	sizeBytes, err := extractAndMeasure(archiveBytes, destDir)
 	if err != nil {
 		_ = os.RemoveAll(destDir) // best-effort cleanup of any partially-extracted files
+
 		return nil, err
 	}
 

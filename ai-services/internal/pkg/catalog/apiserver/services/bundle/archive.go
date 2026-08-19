@@ -371,4 +371,3 @@ func writeFile(path string, r io.Reader, mode int64) (int64, error) {
 
 	return n, nil
 }
-
