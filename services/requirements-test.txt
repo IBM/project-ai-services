@@ -49,3 +49,5 @@ pdfplumber==0.11.9
 RapidFuzz==3.14.5
 docling==2.95.0
 sentence-splitter==1.4
+
+apscheduler[sqlalchemy]==4.0.0a6

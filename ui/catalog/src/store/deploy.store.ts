@@ -14,7 +14,7 @@ interface ProviderParamsCache {
 }
 
 interface ServiceParamsCache {
-  data: Record<string, unknown>;
+  data: ProviderSchema;
   fetchedAt: number;
 }
 
@@ -100,8 +100,8 @@ interface DeployState {
   clearProviderParams: () => void;
 
   // Service params actions
-  setServiceParams: (serviceId: string, data: Record<string, unknown>) => void;
-  getServiceParams: (serviceId: string) => Record<string, unknown> | null;
+  setServiceParams: (serviceId: string, data: ProviderSchema) => void;
+  getServiceParams: (serviceId: string) => ProviderSchema | null;
   clearServiceParams: () => void;
 
   // Check if cache is stale
