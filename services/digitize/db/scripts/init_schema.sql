@@ -81,7 +81,6 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
-    failed_files     INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
     CONSTRAINT pk_csl PRIMARY KEY (connector_id, seq),
