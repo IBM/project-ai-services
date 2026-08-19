@@ -86,7 +86,9 @@ export const DeployTearsheetShell = ({
           title="Deployment failed"
           subtitle={deployError}
           onCloseButtonClick={onDismissToast}
-          onActionButtonClick={onRetryDeploy}
+          onActionButtonClick={() => {
+            if (!isDeploying) onRetryDeploy();
+          }}
           className={styles.deployErrorNotification}
         />
       )}

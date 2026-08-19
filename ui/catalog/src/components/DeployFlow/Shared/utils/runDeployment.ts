@@ -19,13 +19,14 @@ export async function runDeployment({
 
   try {
     await deploy();
-    onSuccess(); // onSuccess dispatches RESET_STATE which clears isDeploying via state reset
+    onSuccess();
   } catch (error: unknown) {
     dispatch({
       type: SHARED_ACTION_TYPES.SET_DEPLOY_ERROR,
       payload: extractDeployError(error),
     });
     dispatch({ type: SHARED_ACTION_TYPES.SHOW_DEPLOY_TOAST });
+  } finally {
     dispatch({ type: SHARED_ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
   }
 }

@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+// Catalog type constants used throughout the bundle pipeline.
+const (
+	CatalogTypeService   = "service"
+	CatalogTypeComponent = "component"
+)
+
 // BundleServiceInterface is the interface fulfilled by bundleService.
 // It is the only dependency injected into BundleHandler.
 type BundleServiceInterface interface {
@@ -15,7 +21,6 @@ type BundleServiceInterface interface {
 	// archive (structure, metadata, values/schema consistency, templates, labels, annotations,
 	// steps.md, and relevant file contents) without permanent extraction.
 	// No DB row is written and no CatalogProvider reload is triggered.
-	// Returns a ServiceValidationResult or ComponentValidationResult (both implement ValidationResult).
 	// Returns *ServiceValidationResult or *ComponentValidationResult.
 	ValidateBundle(ctx context.Context, file io.Reader) (any, error)
 
@@ -88,7 +93,7 @@ type ServiceMetadata struct {
 }
 
 func (m *ServiceMetadata) CatalogID() string   { return m.id }
-func (m *ServiceMetadata) CatalogType() string { return "service" }
+func (m *ServiceMetadata) CatalogType() string { return CatalogTypeService }
 func (m *ServiceMetadata) Version() string     { return m.version }
 func (m *ServiceMetadata) DisplayName() string { return m.displayName }
 
@@ -108,7 +113,7 @@ type ComponentMetadata struct {
 
 // CatalogID returns "<component_type>--<id>", e.g. "llm--my-provider".
 func (m *ComponentMetadata) CatalogID() string   { return m.componentType + "--" + m.id }
-func (m *ComponentMetadata) CatalogType() string { return "component" }
+func (m *ComponentMetadata) CatalogType() string { return CatalogTypeComponent }
 func (m *ComponentMetadata) Version() string     { return m.version }
 func (m *ComponentMetadata) DisplayName() string { return m.displayName }
 
@@ -117,7 +122,7 @@ func (m *ComponentMetadata) DisplayName() string { return m.displayName }
 func (m *ComponentMetadata) ComponentType() string { return m.componentType }
 
 // -----------------------------------------------------------------------
-// Validation result types (returned by ValidateBundle)
+// Validation result types (returned by ValidateBundle — to be implemented)
 // -----------------------------------------------------------------------
 
 // ServiceValidationResult is the JSON body for a successfully validated service bundle.
