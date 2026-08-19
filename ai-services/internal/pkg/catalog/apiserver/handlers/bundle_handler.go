@@ -40,7 +40,7 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
 	// TODO: extract userID from context via middleware.CtxUserIDKey
 	// TODO: call h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
-	// TODO: map ValidationError.Code to 409 / 422 / 500
+	// TODO: map errors to 409 / 422 / 500
 	// TODO: set Location header and return 201 with BundleResponse body
 	userID := c.GetString(middleware.CtxUserIDKey)
 	_ = userID
@@ -66,7 +66,7 @@ func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
 	// TODO: call h.bundleService.ValidateBundle(c.Request.Context(), file)
 	// TODO: type-switch result: *bundlesvc.ServiceValidationResult or *bundlesvc.ComponentValidationResult; return as 200
-	// TODO: map *bundlesvc.ValidationError.Code to 422
+	// TODO: return 422 on validation error
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 

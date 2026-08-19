@@ -139,16 +139,6 @@ type ComponentValidationResult struct {
 	Name          string `json:"name,omitempty"`
 }
 
-// ValidationError carries an HTTP status code alongside its error message.
-// It is returned by ValidateBundle, ProcessBundle, and ReplaceBundle so that
-// BundleHandler can map it directly to the appropriate HTTP status code.
-type ValidationError struct {
-	Code    int
-	Message string
-}
-
-func (e *ValidationError) Error() string { return e.Message }
-
 // -----------------------------------------------------------------------
 // Service-layer record and response types
 // -----------------------------------------------------------------------
