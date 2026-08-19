@@ -44,8 +44,8 @@ CONNECTOR_NAME = "prod-sftp-reports"
 CONNECTOR_TYPE = "ssh"
 
 SSH_PAYLOAD = {
-    "connector_id": CONNECTOR_ID,
-    "connector_name": CONNECTOR_NAME,
+    "id": CONNECTOR_ID,
+    "name": CONNECTOR_NAME,
     "type": "ssh",
     "allowed_extensions": [".pdf", ".docx"],
     "connection_details": {
@@ -57,8 +57,8 @@ SSH_PAYLOAD = {
 }
 
 S3_PAYLOAD = {
-    "connector_id": "a1b2c3d4-0000-0000-0000-000000000002",
-    "connector_name": "prod-s3-rag-docs",
+    "id": "a1b2c3d4-0000-0000-0000-000000000002",
+    "name": "prod-s3-rag-docs",
     "type": "s3",
     "allowed_extensions": [".pdf"],
     "connection_details": {
@@ -199,7 +199,7 @@ class TestPostConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 201
-        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert response.json() == {"id": CONNECTOR_ID}
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
         captured = {}
@@ -228,7 +228,7 @@ class TestPostConnector:
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert response.json() == {"id": CONNECTOR_ID}
         assert "private_key" not in response.text
         assert "password" not in response.text
 
@@ -261,12 +261,12 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "new-name"},
+            json={"name": "new-name"},
         )
         assert response.status_code == 404
 
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
-        """PUT with only connector_name must not touch connection_details."""
+        """PUT with only name must not touch connection_details."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
@@ -275,7 +275,7 @@ class TestPutConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", upsert_mock)
         connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "renamed"},
+            json={"name": "renamed"},
         )
         # connection_details kwarg should be None (not supplied)
         call_kwargs = upsert_mock.call_args.kwargs if upsert_mock.called else {}
@@ -292,7 +292,7 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "taken-name"},
+            json={"name": "taken-name"},
         )
         assert response.status_code == 409
 
@@ -303,7 +303,7 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "new-name"},
+            json={"name": "new-name"},
         )
         assert response.status_code == 409
 
@@ -436,7 +436,7 @@ class TestListConnectors:
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
-        assert data[0]["connector_id"] == CONNECTOR_ID
+        assert data[0]["id"] == CONNECTOR_ID
 
     def test_never_returns_secret_fields(self, connector_test_client, monkeypatch):
         c = _make_connector()
@@ -475,7 +475,7 @@ class TestGetConnector:
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 200
         data = response.json()
-        assert data["connector_id"] == CONNECTOR_ID
+        assert data["id"] == CONNECTOR_ID
         assert data["total_files"] == 42
         assert data["connection_details"] == {
             "host": "sftp.example.com",
@@ -1026,7 +1026,7 @@ class TestProbeConnectorCredentials:
         assert len(tasks_created) == 1
 
     async def test_put_does_not_probe_when_only_name_changed(self, monkeypatch):
-        """PUT with only connector_name → no credential probe scheduled."""
+        """PUT with only name → no credential probe scheduled."""
         from digitize.api.v1.connectors import update_connector
         from digitize.connectors.models import ConnectorUpdateRequest
 
@@ -1044,7 +1044,7 @@ class TestProbeConnectorCredentials:
 
         monkeypatch.setattr("digitize.api.v1.connectors.asyncio.create_task", capture_task)
 
-        body = ConnectorUpdateRequest.model_validate({"connector_name": "new-name"})
+        body = ConnectorUpdateRequest.model_validate({"name": "new-name"})
         await update_connector(CONNECTOR_ID, body)
 
         assert len(tasks_created) == 0
