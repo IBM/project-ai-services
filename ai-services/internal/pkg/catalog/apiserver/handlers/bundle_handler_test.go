@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,8 +25,10 @@ import (
 // -----------------------------------------------------------------------
 
 type mockBundleService struct {
-	processBundle func(ctx context.Context, file io.Reader, userID string) (*bundlesvc.BundleResponse, error)
+	processBundle  func(ctx context.Context, file io.Reader, userID string) (*bundlesvc.BundleResponse, error)
 	validateBundle func(ctx context.Context, file io.Reader) (any, error)
+	getBundleByID  func(ctx context.Context, id string) (*bundlesvc.BundleResponse, error)
+	listBundles    func(ctx context.Context, params bundlesvc.BundleListRequest) (*bundlesvc.BundleListResponse, error)
 }
 
 func (m *mockBundleService) ProcessBundle(ctx context.Context, file io.Reader, userID string) (*bundlesvc.BundleResponse, error) {
@@ -40,16 +43,19 @@ func (m *mockBundleService) ValidateBundle(ctx context.Context, file io.Reader) 
 func (m *mockBundleService) ReplaceBundle(_ context.Context, _ *bundlesvc.BundleRecord, _ io.Reader, _ string) (*bundlesvc.BundleResponse, error) {
 	panic("ReplaceBundle not set")
 }
-func (m *mockBundleService) GetByBundleID(_ context.Context, _ string) (*bundlesvc.BundleRecord, error) {
-	panic("GetByBundleID not set")
-}
-func (m *mockBundleService) GetBundleByID(_ context.Context, _ string) (*bundlesvc.BundleResponse, error) {
+func (m *mockBundleService) GetBundleByID(ctx context.Context, id string) (*bundlesvc.BundleResponse, error) {
+	if m.getBundleByID != nil {
+		return m.getBundleByID(ctx, id)
+	}
 	panic("GetBundleByID not set")
 }
 func (m *mockBundleService) DeleteBundle(_ context.Context, _ *bundlesvc.BundleRecord) error {
 	panic("DeleteBundle not set")
 }
-func (m *mockBundleService) ListBundles(_ context.Context) (*bundlesvc.BundleListResponse, error) {
+func (m *mockBundleService) ListBundles(ctx context.Context, params bundlesvc.BundleListRequest) (*bundlesvc.BundleListResponse, error) {
+	if m.listBundles != nil {
+		return m.listBundles(ctx, params)
+	}
 	panic("ListBundles not set")
 }
 
@@ -57,12 +63,15 @@ func (m *mockBundleService) ListBundles(_ context.Context) (*bundlesvc.BundleLis
 // Helpers
 // -----------------------------------------------------------------------
 
-// setupBundleRouter wires a BundleHandler backed by svc into a test gin engine.
+// setupBundleRouter wires a BundleHandler backed by svc into a test gin engine
+// with all bundle routes registered.
 func setupBundleRouter(svc bundlesvc.BundleServiceInterface) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	h := NewBundleHandler(svc)
 	r.POST("/api/v1/catalog/bundles", h.CreateBundle)
+	r.GET("/api/v1/catalog/bundles", h.ListBundles)
+	r.GET("/api/v1/catalog/bundles/:id", h.GetBundle)
 	return r
 }
 
@@ -298,4 +307,190 @@ func TestCreateBundle_UserIDPropagated(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	assert.Equal(t, wantUserID, gotUserID)
+}
+
+// -----------------------------------------------------------------------
+// TestListBundles
+// -----------------------------------------------------------------------
+
+func TestListBundles(t *testing.T) {
+	sz := int64(286720)
+	id1 := "550e8400-e29b-41d4-a716-446655440000"
+	id2 := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+	defaultPagination := catalogtypes.PaginationMetadata{Page: 1, PageSize: 20, TotalItems: 2, TotalPages: 1}
+
+	tests := []struct {
+		name            string
+		query           string
+		stubResp        *bundlesvc.BundleListResponse
+		stubErr         error
+		wantStatus      int
+		wantLen         int
+		wantPage        int
+		wantPageSize    int
+		wantErrContains string
+	}{
+		{
+			name:         "200 — default pagination, two bundles",
+			query:        "",
+			wantStatus:   http.StatusOK,
+			wantLen:      2,
+			wantPage:     1,
+			wantPageSize: 20,
+			stubResp: &bundlesvc.BundleListResponse{
+				Bundles: []bundlesvc.BundleResponse{
+					{ID: id1, Status: "active", CatalogType: "service", CatalogID: "my-service", Version: "1.0.0", SizeBytes: &sz},
+					{ID: id2, Status: "active", CatalogType: "component", CatalogID: "llm--my-provider", Version: "1.0.0"},
+				},
+				Pagination: defaultPagination,
+			},
+		},
+		{
+			name:         "200 — explicit page and page_size forwarded to service",
+			query:        "?page=2&page_size=10",
+			wantStatus:   http.StatusOK,
+			wantLen:      0,
+			wantPage:     2,
+			wantPageSize: 10,
+			stubResp:     &bundlesvc.BundleListResponse{Bundles: []bundlesvc.BundleResponse{}, Pagination: catalogtypes.PaginationMetadata{Page: 2, PageSize: 10}},
+		},
+		{
+			name:            "400 — page_size exceeds maximum",
+			query:           "?page_size=101",
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "invalid page_size",
+		},
+		{
+			name:            "400 — negative page",
+			query:           "?page=-1",
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "invalid page",
+		},
+		{
+			name:            "500 — service error",
+			query:           "",
+			stubErr:         assert.AnError,
+			wantStatus:      http.StatusInternalServerError,
+			wantErrContains: assert.AnError.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &mockBundleService{
+				listBundles: func(_ context.Context, params bundlesvc.BundleListRequest) (*bundlesvc.BundleListResponse, error) {
+					if tt.wantPage > 0 {
+						assert.Equal(t, tt.wantPage, params.Page)
+						assert.Equal(t, tt.wantPageSize, params.PageSize)
+					}
+					return tt.stubResp, tt.stubErr
+				},
+			}
+			router := setupBundleRouter(svc)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/bundles"+tt.query, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantStatus, w.Code)
+
+			if tt.wantErrContains != "" {
+				var body map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Contains(t, body["error"], tt.wantErrContains)
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var resp bundlesvc.BundleListResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Len(t, resp.Bundles, tt.wantLen)
+				if tt.wantLen > 0 {
+					assert.Equal(t, id1, resp.Bundles[0].ID)
+					assert.Equal(t, "service", resp.Bundles[0].CatalogType)
+					assert.Equal(t, id2, resp.Bundles[1].ID)
+					assert.Equal(t, "component", resp.Bundles[1].CatalogType)
+				}
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------
+// TestGetBundle
+// -----------------------------------------------------------------------
+
+func TestGetBundle(t *testing.T) {
+	fixedID := "550e8400-e29b-41d4-a716-446655440000"
+	sz := int64(286720)
+
+	tests := []struct {
+		name            string
+		id              string
+		stubResp        *bundlesvc.BundleResponse
+		stubErr         error
+		wantStatus      int
+		wantErrContains string
+	}{
+		{
+			name:       "200 — found",
+			id:         fixedID,
+			wantStatus: http.StatusOK,
+			stubResp: &bundlesvc.BundleResponse{
+				ID: fixedID, Name: "My Custom Service", Status: "active",
+				CatalogType: "service", CatalogID: "my-service", Version: "1.0.0",
+				SizeBytes: &sz,
+			},
+		},
+		{
+			name:            "404 — not found",
+			id:              fixedID,
+			stubResp:        nil,
+			wantStatus:      http.StatusNotFound,
+			wantErrContains: "not found",
+		},
+		{
+			name:            "400 — invalid UUID",
+			id:              fixedID,
+			stubErr:         &validators.ValidationError{Code: http.StatusBadRequest, Message: "invalid bundle id"},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "invalid bundle id",
+		},
+		{
+			name:            "500 — service error",
+			id:              fixedID,
+			stubErr:         assert.AnError,
+			wantStatus:      http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &mockBundleService{
+				getBundleByID: func(_ context.Context, id string) (*bundlesvc.BundleResponse, error) {
+					assert.Equal(t, tt.id, id)
+					return tt.stubResp, tt.stubErr
+				},
+			}
+			router := setupBundleRouter(svc)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/bundles/"+tt.id, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantStatus, w.Code)
+
+			if tt.wantErrContains != "" {
+				var body map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Contains(t, body["error"], tt.wantErrContains)
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var resp bundlesvc.BundleResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, fixedID, resp.ID)
+				assert.Equal(t, "service", resp.CatalogType)
+				assert.Equal(t, "active", resp.Status)
+			}
+		})
+	}
 }

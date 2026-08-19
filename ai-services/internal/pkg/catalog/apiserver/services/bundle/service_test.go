@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,8 @@ type mockBundleRepo struct {
 	getActiveByCatalogID func(ctx context.Context, catalogType, catalogID string) (*models.CatalogBundle, error)
 	update               func(ctx context.Context, id uuid.UUID, upd models.BundleUpdate) error
 	delete               func(ctx context.Context, id uuid.UUID) error
-	listAll              func(ctx context.Context) ([]models.CatalogBundle, error)
+	getCount             func(ctx context.Context) (int, error)
+	getAll               func(ctx context.Context, filters *repository.BundleFilters) ([]models.CatalogBundle, error)
 }
 
 func (m *mockBundleRepo) Insert(ctx context.Context, b *models.CatalogBundle) error {
@@ -42,8 +44,11 @@ func (m *mockBundleRepo) Update(ctx context.Context, id uuid.UUID, upd models.Bu
 func (m *mockBundleRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.delete(ctx, id)
 }
-func (m *mockBundleRepo) ListAll(ctx context.Context) ([]models.CatalogBundle, error) {
-	return m.listAll(ctx)
+func (m *mockBundleRepo) GetCount(ctx context.Context) (int, error) {
+	return m.getCount(ctx)
+}
+func (m *mockBundleRepo) GetAll(ctx context.Context, filters *repository.BundleFilters) ([]models.CatalogBundle, error) {
+	return m.getAll(ctx, filters)
 }
 
 // -----------------------------------------------------------------------
@@ -275,6 +280,104 @@ func TestGetBundleByID_Found(t *testing.T) {
 	assert.Equal(t, "admin", resp.CreatedBy)
 	assert.Equal(t, &sz, resp.SizeBytes)
 	assert.Equal(t, now.UTC(), resp.CreatedAt.UTC())
+}
+
+// -----------------------------------------------------------------------
+// ListBundles
+// -----------------------------------------------------------------------
+
+func TestListBundles_InvalidPage(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{})
+	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 0, PageSize: 20})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "page must be greater than 0")
+}
+
+func TestListBundles_InvalidPageSize(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{})
+	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 0})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pageSize must be greater than 0")
+}
+
+func TestListBundles_GetCountError(t *testing.T) {
+	repo := &mockBundleRepo{
+		getCount: func(_ context.Context) (int, error) { return 0, assert.AnError },
+	}
+	_, err := NewBundleService(repo).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get bundle count")
+}
+
+func TestListBundles_GetAllError(t *testing.T) {
+	repo := &mockBundleRepo{
+		getCount: func(_ context.Context) (int, error) { return 5, nil },
+		getAll:   func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) { return nil, assert.AnError },
+	}
+	_, err := NewBundleService(repo).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to retrieve bundles")
+}
+
+func TestListBundles_Empty(t *testing.T) {
+	// totalPages = 0 when totalCount = 0, matching ListApplications behaviour.
+	repo := &mockBundleRepo{
+		getCount: func(_ context.Context) (int, error) { return 0, nil },
+		getAll:   func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) { return nil, nil },
+	}
+	resp, err := NewBundleService(repo).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.Bundles)
+	assert.Equal(t, 1, resp.Pagination.Page)
+	assert.Equal(t, 20, resp.Pagination.PageSize)
+	assert.Equal(t, 0, resp.Pagination.TotalItems)
+	assert.Equal(t, 0, resp.Pagination.TotalPages) // 0 when empty — matches ListApplications
+	assert.False(t, resp.Pagination.HasNext)
+	assert.False(t, resp.Pagination.HasPrev)
+}
+
+func TestListBundles_PaginationMetadata(t *testing.T) {
+	// 25 total items, page_size=10 → 3 pages; requesting page 2.
+	id1 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440001")
+	id2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440002")
+	sz := int64(1024)
+	now := time.Now()
+
+	repo := &mockBundleRepo{
+		getCount: func(_ context.Context) (int, error) { return 25, nil },
+		getAll: func(_ context.Context, filters *repository.BundleFilters) ([]models.CatalogBundle, error) {
+			assert.Equal(t, 10, filters.Limit)
+			assert.Equal(t, 10, filters.Offset) // (page 2 - 1) * 10
+			return []models.CatalogBundle{
+				{ID: id1, Name: "My Custom Service", Status: models.BundleStatusActive,
+					CatalogType: CatalogTypeService, CatalogID: "my-service", Version: "1.0.0",
+					CreatedBy: "admin", SizeBytes: &sz, CreatedAt: now, UpdatedAt: now},
+				{ID: id2, Name: "My Custom LLM Provider", Status: models.BundleStatusActive,
+					CatalogType: CatalogTypeComponent, CatalogID: "llm--my-provider", Version: "1.0.0",
+					CreatedBy: "admin", CreatedAt: now, UpdatedAt: now},
+			}, nil
+		},
+	}
+
+	resp, err := NewBundleService(repo).ListBundles(context.Background(), BundleListRequest{Page: 2, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, resp.Bundles, 2)
+
+	assert.Equal(t, id1.String(), resp.Bundles[0].ID)
+	assert.Equal(t, CatalogTypeService, resp.Bundles[0].CatalogType)
+	assert.Equal(t, &sz, resp.Bundles[0].SizeBytes)
+
+	assert.Equal(t, id2.String(), resp.Bundles[1].ID)
+	assert.Equal(t, CatalogTypeComponent, resp.Bundles[1].CatalogType)
+	assert.Nil(t, resp.Bundles[1].SizeBytes)
+
+	assert.Equal(t, 2, resp.Pagination.Page)
+	assert.Equal(t, 10, resp.Pagination.PageSize)
+	assert.Equal(t, 25, resp.Pagination.TotalItems)
+	assert.Equal(t, 3, resp.Pagination.TotalPages)
+	assert.True(t, resp.Pagination.HasNext)
+	assert.True(t, resp.Pagination.HasPrev)
 }
 
 // -----------------------------------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
@@ -145,15 +146,9 @@ func (s *bundleService) ReplaceBundle(_ context.Context, _ *BundleRecord, _ io.R
 	panic("not implemented")
 }
 
-// GetByBundleID retrieves the BundleRecord for the given string UUID.
-// Returns (nil, nil) when not found.
-func (s *bundleService) GetByBundleID(_ context.Context, _ string) (*BundleRecord, error) {
-	// TODO: parse bundleID string to uuid.UUID
-	// TODO: call s.repo.GetByID and map models.CatalogBundle → BundleRecord
-	panic("not implemented")
-}
-
 // GetBundleByID returns the full BundleResponse for the given string UUID.
+// Used by the GET /:id handler, by ProcessBundle for its final re-fetch, and as
+// the pre-flight existence check in UpdateBundle and DeleteBundle.
 // Returns (nil, nil) when not found.
 func (s *bundleService) GetBundleByID(ctx context.Context, bundleID string) (*BundleResponse, error) {
 	id, err := uuid.Parse(bundleID)
@@ -189,10 +184,53 @@ func (s *bundleService) DeleteBundle(_ context.Context, _ *BundleRecord) error {
 	panic("not implemented")
 }
 
-// ListBundles returns all bundle rows ordered by created_at DESC.
-func (s *bundleService) ListBundles(_ context.Context) (*BundleListResponse, error) {
-	// TODO: call s.repo.ListAll and map []models.CatalogBundle → BundleListResponse
-	panic("not implemented")
+// ListBundles returns one page of bundle rows ordered by created_at DESC.
+// The pattern mirrors ListApplications: guard inputs, call GetCount, call GetAll with filters,
+// build pagination metadata.
+func (s *bundleService) ListBundles(ctx context.Context, req BundleListRequest) (*BundleListResponse, error) {
+	if req.Page < 1 {
+		return nil, fmt.Errorf("page must be greater than 0")
+	}
+	if req.PageSize < 1 {
+		return nil, fmt.Errorf("pageSize must be greater than 0")
+	}
+
+	filters := &repository.BundleFilters{
+		Limit:  req.PageSize,
+		Offset: (req.Page - 1) * req.PageSize,
+	}
+
+	totalCount, err := s.repo.GetCount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bundle count: %w", err)
+	}
+
+	rows, err := s.repo.GetAll(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve bundles: %w", err)
+	}
+
+	bundles := make([]BundleResponse, 0, len(rows))
+	for i := range rows {
+		bundles = append(bundles, *rowToResponse(&rows[i]))
+	}
+
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
+	}
+
+	return &BundleListResponse{
+		Bundles: bundles,
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			TotalItems: totalCount,
+			TotalPages: totalPages,
+			HasNext:    req.Page < totalPages,
+			HasPrev:    req.Page > 1,
+		},
+	}, nil
 }
 
 // -----------------------------------------------------------------------
