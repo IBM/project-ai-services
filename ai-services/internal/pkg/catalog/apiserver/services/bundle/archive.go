@@ -1,0 +1,333 @@
+package bundle
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"go.yaml.in/yaml/v3"
+)
+
+const (
+	// bundleStorageRoot is the mount path for the dedicated catalog-bundles volume.
+	bundleStorageRoot = "/data/catalog-bundles"
+
+	// bundleDirServices is the subdirectory under bundleStorageRoot for service bundles.
+	bundleDirServices = "services"
+
+	// bundleDirComponents is the subdirectory under bundleStorageRoot for component bundles.
+	bundleDirComponents = "components"
+
+	// maxExtractedFileSize is the total uncompressed size limit enforced during extraction
+	// (50 MB). Any single file — or the aggregate of all files written — whose declared
+	// tar header Size exceeds this value is rejected before any bytes are written to disk.
+	maxExtractedFileSize int64 = 50 * 1024 * 1024
+)
+
+// rawMetadataYAML holds the minimal set of fields decoded from root metadata.yaml.
+// Only these fields are read during peekMetadata; full semantic validation is deferred
+// to ValidateBundle (not yet implemented).
+type rawMetadataYAML struct {
+	ID            string `yaml:"id"`
+	Type          string `yaml:"type"`
+	Name          string `yaml:"name"`
+	Version       string `yaml:"version"`
+	ComponentType string `yaml:"component_type"`
+}
+
+// bundleDirPath returns the canonical on-disk directory for a bundle.
+//
+// Layout: <bundleStorageRoot>/<type-plural>/<catalog_id>-<version>
+//
+// Examples:
+//
+//	service   my-service      1.0.0  → /data/catalog-bundles/services/my-service-1.0.0
+//	component llm--my-prov    1.0.0  → /data/catalog-bundles/components/llm--my-prov-1.0.0
+func bundleDirPath(catalogType, catalogID, version string) string {
+	subdir := catalogTypeToDir(catalogType)
+	return filepath.Join(bundleStorageRoot, subdir, catalogID+"-"+version)
+}
+
+// catalogTypeToDir maps the catalog_type value to its plural on-disk subdirectory name.
+func catalogTypeToDir(catalogType string) string {
+	switch catalogType {
+	case CatalogTypeService:
+		return bundleDirServices
+	case CatalogTypeComponent:
+		return bundleDirComponents
+	default:
+		// Fallback: append 's' so unknown future types degrade gracefully.
+		return catalogType + "s"
+	}
+}
+
+// peekMetadata reads the entire archive into memory, locates the root metadata.yaml,
+// parses the minimal identity fields, and returns:
+//   - the raw archive bytes (so callers can hand the same bytes to extractAndMeasure
+//     without re-reading the original io.Reader), and
+//   - the parsed BundleMetadata.
+//
+// Returns *ValidationError{Code:400} on I/O or archive errors and
+// *ValidationError{Code:422} on missing/invalid metadata fields.
+func peekMetadata(r io.Reader) ([]byte, BundleMetadata, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("failed to read archive: %s", err),
+		}
+	}
+
+	meta, err := parseMetadataFromBytes(data)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return data, meta, nil
+}
+
+// parseMetadataFromBytes walks the gzip-compressed tar archive stored in data,
+// finds the root metadata.yaml (either at the top level or one directory deep),
+// and delegates to parseMetadataYAML.
+func parseMetadataFromBytes(data []byte) (BundleMetadata, error) {
+	gr, err := gzip.NewReader(newBytesReader(data))
+	if err != nil {
+		return nil, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("invalid gzip archive: %s", err),
+		}
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+
+	// topDir is inferred from the first archive entry that contains a slash.
+	// The directory name is never validated — it is only used to locate
+	// <topDir>/metadata.yaml. A flat archive (no top-level directory) is also
+	// handled via the name == "metadata.yaml" branch below.
+	var topDir string
+
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("error reading archive: %s", err),
+			}
+		}
+
+		if topDir == "" && strings.Contains(hdr.Name, "/") {
+			topDir = strings.SplitN(hdr.Name, "/", 2)[0]
+		}
+
+		name := filepath.ToSlash(hdr.Name)
+		isRootMeta := name == "metadata.yaml" ||
+			(topDir != "" && name == topDir+"/metadata.yaml")
+
+		if !isRootMeta || hdr.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		yamlBytes, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("failed to read metadata.yaml: %s", err),
+			}
+		}
+
+		return parseMetadataYAML(yamlBytes)
+	}
+
+	return nil, &validators.ValidationError{
+		Code:    http.StatusBadRequest,
+		Message: "metadata.yaml not found in archive root",
+	}
+}
+
+// parseMetadataYAML decodes raw YAML bytes into the appropriate BundleMetadata
+// concrete type based on the `type` field.
+//
+// Accepted types: "service", "component".
+// Returns *ValidationError{Code:422} for missing required fields or unknown types.
+func parseMetadataYAML(data []byte) (BundleMetadata, error) {
+	var raw rawMetadataYAML
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("failed to parse metadata.yaml: %s", err),
+		}
+	}
+
+	if raw.ID == "" {
+		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'id' is required"}
+	}
+	if raw.Type == "" {
+		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'type' is required"}
+	}
+	if raw.Version == "" {
+		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'version' is required"}
+	}
+
+	switch raw.Type {
+	case CatalogTypeService:
+		return &ServiceMetadata{
+			id:          raw.ID,
+			version:     raw.Version,
+			displayName: raw.Name,
+		}, nil
+
+	case CatalogTypeComponent:
+		if raw.ComponentType == "" {
+			return nil, &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: "metadata.yaml: 'component_type' is required for type=component",
+			}
+		}
+		return &ComponentMetadata{
+			id:            raw.ID,
+			componentType: raw.ComponentType,
+			version:       raw.Version,
+			displayName:   raw.Name,
+		}, nil
+
+	default:
+		return nil, &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("metadata.yaml: unsupported type %q (expected %q or %q)", raw.Type, CatalogTypeService, CatalogTypeComponent),
+		}
+	}
+}
+
+// extractAndMeasure extracts data (a gzip-compressed tar archive) into destDir,
+// stripping the single top-level directory prefix that most tools add when
+// creating archives. Returns the total uncompressed size in bytes.
+//
+// Safety guarantees:
+//   - Path-traversal guard: any entry whose resolved path escapes destDir is rejected.
+//   - Per-file size guard: regular files larger than maxExtractedFileSize are rejected.
+//
+// Only regular files and directories are extracted; symlinks and other special
+// entry types are silently skipped.
+func extractAndMeasure(data []byte, destDir string) (int64, error) {
+	gr, err := gzip.NewReader(newBytesReader(data))
+	if err != nil {
+		return 0, &validators.ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("invalid gzip archive: %s", err),
+		}
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+
+	var topDir string
+	var totalSize int64
+
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return 0, fmt.Errorf("error reading archive entry: %w", err)
+		}
+
+		// Strip the top-level directory prefix (e.g. "my-bundle/") on the first
+		// entry that contains a slash, then apply it to all subsequent entries.
+		name := filepath.ToSlash(hdr.Name)
+		if topDir == "" && strings.Contains(name, "/") {
+			topDir = strings.SplitN(name, "/", 2)[0] + "/"
+		}
+		relName := strings.TrimPrefix(name, topDir)
+		if relName == "" || relName == "." {
+			continue
+		}
+
+		// Path-traversal guard: the resolved destination must remain inside destDir.
+		destPath := filepath.Join(destDir, relName)
+		if !strings.HasPrefix(
+			filepath.Clean(destPath)+string(os.PathSeparator),
+			filepath.Clean(destDir)+string(os.PathSeparator),
+		) {
+			return 0, &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("path traversal detected in archive entry %q", hdr.Name),
+			}
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if mkErr := os.MkdirAll(destPath, 0o755); mkErr != nil {
+				return 0, fmt.Errorf("failed to create directory %q: %w", destPath, mkErr)
+			}
+
+		case tar.TypeReg, tar.TypeRegA:
+			if hdr.Size > maxExtractedFileSize {
+				return 0, &validators.ValidationError{
+					Code:    http.StatusBadRequest,
+					Message: fmt.Sprintf("archive entry %q exceeds the 50 MB uncompressed size limit", hdr.Name),
+				}
+			}
+			if mkErr := os.MkdirAll(filepath.Dir(destPath), 0o755); mkErr != nil {
+				return 0, fmt.Errorf("failed to create parent directory for %q: %w", destPath, mkErr)
+			}
+			n, writeErr := writeFile(destPath, tr, hdr.Mode)
+			if writeErr != nil {
+				return 0, writeErr
+			}
+			totalSize += n
+		}
+		// Symlinks and other special types are intentionally skipped.
+	}
+
+	return totalSize, nil
+}
+
+// writeFile creates (or truncates) the file at path and streams content from r.
+// Returns the number of bytes written.
+func writeFile(path string, r io.Reader, mode int64) (int64, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file %q: %w", path, err)
+	}
+	defer f.Close()
+
+	n, err := io.Copy(f, r)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write file %q: %w", path, err)
+	}
+
+	return n, nil
+}
+
+// newBytesReader returns an io.Reader that reads from b without any
+// string conversion or extra allocation.
+func newBytesReader(b []byte) io.Reader {
+	return &bytesReader{b: b}
+}
+
+// bytesReader is a minimal io.Reader over a byte slice.
+type bytesReader struct {
+	b   []byte
+	pos int
+}
+
+func (r *bytesReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.b) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.b[r.pos:])
+	r.pos += n
+	return n, nil
+}

@@ -3,10 +3,20 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+)
+
+const (
+	// maxBundleSizeBytes is the maximum allowed compressed (.tar.gz) upload size (20 MB).
+	// The uncompressed on-disk limit is enforced separately by maxExtractedFileSize in
+	// archive.go (50 MB). A 20 MB compressed ceiling is sufficient because catalog bundles
+	// consist mainly of YAML and Go templates which compress at 5–10×.
+	maxBundleSizeBytes = 20 * 1024 * 1024
 )
 
 // BundleHandler handles catalog bundle creation, replacement, deletion, and listing.
@@ -36,15 +46,31 @@ func NewBundleHandler(svc bundlesvc.BundleServiceInterface) *BundleHandler {
 //	@Failure		422		{object}	ErrorResponse	"Unprocessable Entity — validation failed"
 //	@Router			/catalog/bundles [post]
 func (h *BundleHandler) CreateBundle(c *gin.Context) {
-	// TODO: enforce MAX_BUNDLE_SIZE via http.MaxBytesReader
-	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
-	// TODO: extract userID from context via middleware.CtxUserIDKey
-	// TODO: call h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
-	// TODO: map errors to 409 / 422 / 500
-	// TODO: set Location header and return 201 with BundleResponse body
+	// Enforce MAX_BUNDLE_SIZE before form parsing.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+		return
+	}
+
 	userID := c.GetString(middleware.CtxUserIDKey)
-	_ = userID
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+
+	resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
+	if err != nil {
+		h.mapServiceError(c, err)
+		return
+	}
+
+	c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
+	c.JSON(http.StatusCreated, resp)
 }
 
 // ValidateBundle godoc
@@ -153,4 +179,14 @@ func (h *BundleHandler) GetBundle(c *gin.Context) {
 	// TODO: call h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
 	// TODO: return 404 if nil, else 200 with BundleResponse
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+}
+
+// mapServiceError translates a validators.ValidationError into the appropriate
+// HTTP status, and falls back to 500 for all other errors.
+func (h *BundleHandler) mapServiceError(c *gin.Context, err error) {
+	if valErr, ok := err.(*validators.ValidationError); ok {
+		c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 }

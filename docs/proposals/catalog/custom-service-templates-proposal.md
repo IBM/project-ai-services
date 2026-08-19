@@ -361,7 +361,7 @@ Custom catalog assets are delivered by creating a bundle from a `.tar.gz` archiv
 | Independent bundles | Each created bundle exists separately; multiple bundles for different `catalog_id` values are all active simultaneously |
 | Authenticated | Uses the existing JWT `BearerAuth` middleware; only admin-role tokens are accepted |
 | Consistent across runtimes | Same API endpoint works for Podman and OpenShift; only the storage backend differs |
-| Bounded size | Configurable `MAX_BUNDLE_SIZE` (default 50 MB); enforced at the HTTP layer before extraction |
+| Bounded size | `MAX_BUNDLE_SIZE` 20 MB compressed (enforced at the HTTP layer before extraction); 50 MB uncompressed per-file limit enforced during extraction |
 
 ---
 
@@ -407,7 +407,7 @@ Authorization: Bearer <admin-jwt>
 
 Form fields:
   file  (required)  — .tar.gz archive containing the catalog item assets;
-                      max 50 MB compressed.
+                      max 20 MB compressed; 50 MB uncompressed limit enforced during extraction.
                       id, type, and version are read from metadata.yaml inside the archive.
 ```
 
@@ -628,7 +628,7 @@ Extracted on-disk as `component/llm--my-provider-1.0.0/` — directory is `<cata
 - Paths containing `..` or absolute paths are rejected immediately (path-traversal guard).
 - The archive must contain exactly one top-level directory; multiple items per archive are not supported.
 - The top-level directory name is **not validated** — it is stripped and discarded. Identity comes from `metadata.yaml` alone.
-- Total uncompressed size must not exceed 200 MB.
+- Total uncompressed size must not exceed 50 MB (enforced per-file via `maxExtractedFileSize`).
 - `meta.CatalogID()` must not match any built-in item already present in `assets.CatalogFS` — if it does, validation returns `422` and the extracted directory is deleted.
 - All `metadata.yaml` files must pass validation for the declared `type` before the bundle is marked `active`.
 - Validation is performed directly from the archive and covers archive structure, root and runtime metadata parsing, `values.yaml` and schema/metadata consistency checks, template parsing, service label checks, annotation checks, `steps.md` inspection, and line-by-line scanning of relevant files.
@@ -678,7 +678,7 @@ flowchart TD
     PEEK["Peek root metadata.yaml<br/>validate meta.CatalogID() + meta.CatalogType() unchanged<br/>→ 422 on mismatch"]
     VALIDATE["Validate directly from uploaded archive<br/>• archive structure + path checks<br/>• root/runtime metadata parsing<br/>• values.yaml + schema consistency<br/>• template parsing, labels, annotations<br/>• steps.md + line-by-line file scanning<br/>→ 422 if invalid<br/>(no extraction to disk)"]
     MARKPROC["Mark existing row processing<br/>clear prior error"]
-    EXTRACT["extractAndMeasure: extract to staging dir &lt;catalog_id&gt;-&lt;version&gt;-new<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 200 MB size guard"]
+    EXTRACT["extractAndMeasure: extract to staging dir &lt;catalog_id&gt;-&lt;version&gt;-new<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 50 MB uncompressed size guard"]
     SWAP["Remove current final dir if present<br/>rename staging dir into final &lt;catalog_id&gt;-&lt;version&gt;/ path"]
     DBUPDATE["UPDATE existing row in-place<br/>status=active, version, name, size_bytes<br/>single UPDATE — no unique index conflict"]
     RELOAD["CatalogProvider.Reload()"]
