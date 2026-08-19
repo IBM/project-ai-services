@@ -1414,8 +1414,11 @@ def update_connector_total_files(connector_id: str, total_files: int) -> None:
     db_manager.update_connector(connector_id=connector_id, total_files=total_files)
 
 
-def set_connector_error(connector_id: str, error: str) -> None:
-    """Persist an error message on the connector row (best-effort; logs on failure)."""
+def set_connector_error(connector_id: str, error: Optional[str]) -> None:
+    """Persist or clear an error message on the connector row (best-effort; logs on failure).
+
+    Pass ``None`` to clear a previously set error.
+    """
     try:
         db_manager.update_connector(connector_id=connector_id, error=error)
     except Exception as exc:

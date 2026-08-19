@@ -19,6 +19,9 @@ from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 logger = get_logger("db_repository")
 
+# Sentinel used by update_connector to distinguish "not supplied" from explicit None.
+_UNSET: object = object()
+
 
 class DatabaseManager:
     """Manager for database operations with error handling and logging."""
@@ -790,13 +793,14 @@ class DatabaseManager:
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
         total_files: Optional[int] = None,
-        error: Optional[str] = None,
+        error: "Optional[str]" = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """
         Partial update of an existing connector.
 
-        Only non-None kwargs are written; connection_details is merged at the
-        key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Only non-``_UNSET`` kwargs are written; connection_details is merged at
+        the key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Pass ``error=None`` explicitly to clear a previously set error to NULL.
 
         Raises FileNotFoundError if no connector with the given id exists.
         """
@@ -809,7 +813,7 @@ class DatabaseManager:
                     values["allowed_extensions"] = allowed_extensions
                 if total_files is not None:
                     values["total_files"] = total_files
-                if error is not None:
+                if error is not _UNSET:
                     values["error"] = error
                 if connection_details is not None:
                     stmt = (
