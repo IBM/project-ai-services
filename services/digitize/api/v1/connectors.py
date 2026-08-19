@@ -53,14 +53,7 @@ logger = get_logger("connectors_router")
 # Helpers
 # ---------------------------------------------------------------------------
 
-_KEY_PATH = None  # resolved lazily via _get_key_path()
-
 _CREDENTIAL_ERROR_MSG = ConnectorError.CREDENTIAL_ERROR_MSG  # canonical value lives in connectors.models
-
-
-def _get_key_path() -> str:
-    """Return the encryption key path from settings."""
-    return settings.digitize.connector.encryption_key_path
 
 
 async def _probe_connector_credentials(
@@ -136,8 +129,7 @@ async def create_connector(body: ConnectorCreateRequest):
     """
     connector_id = body.connector_id or str(uuid.uuid4())
     try:
-        key_path = _get_key_path()
-        encrypted_details = encrypt_secrets(body.type, body.connection_details, key_path)
+        encrypted_details = encrypt_secrets(body.type, body.connection_details)
 
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
@@ -245,8 +237,6 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
             )
 
-        key_path = _get_key_path()
-
         # If connection_details is being updated, we need to merge with existing
         # encrypted details so untouched keys stay encrypted and intact.
         merged_details: Optional[dict] = None
@@ -255,7 +245,6 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 existing.type,
                 existing.connection_details,
                 body.connection_details,
-                key_path,
             )
 
         db_ops.upsert_connector(

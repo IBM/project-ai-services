@@ -4,8 +4,8 @@ Unit tests for services/digitize/connectors/encryption.py
 Coverage
 --------
 _load_key
-  - raises RuntimeError when key file is absent
-  - raises RuntimeError when key file has wrong byte length
+  - raises RuntimeError when DB_ENCRYPTION_KEY env var is absent
+  - raises RuntimeError when key has wrong byte length
   - returns an AESGCM instance when key is valid 32 bytes
 
 _encrypt_value / _decrypt_value (round-trip)
@@ -40,8 +40,6 @@ merge_and_encrypt_partial
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -62,23 +60,15 @@ from digitize.connectors.encryption import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Fixed 32-byte key that avoids all strippable whitespace characters.
-# bytes.strip() strips ASCII whitespace: 0x09 (tab), 0x0a (LF), 0x0b (VT),
-# 0x0c (FF), 0x0d (CR), 0x20 (space). We use bytes 0x41-0x60 (letters/symbols)
-# to guarantee no stripping occurs.
-_FIXED_KEY = bytes(range(0x41, 0x61))  # bytes 65-96 (A-Z and some punctuation)
+# Fixed 32-byte key expressed as a 32-character ASCII string (no whitespace).
+# bytes 0x41–0x60 → "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
+_FIXED_KEY = bytes(range(0x41, 0x61)).decode()  # 32-char ASCII string
 
 
-def _write_key(tmp_path: Path, data: bytes) -> str:
-    """Write *data* to a temp file and return its string path."""
-    key_file = tmp_path / "enc.key"
-    key_file.write_bytes(data)
-    return str(key_file)
-
-
-def _valid_key_path(tmp_path: Path) -> str:
-    """Write a valid 32-byte key and return its path. Uses a fixed non-whitespace key."""
-    return _write_key(tmp_path, _FIXED_KEY)
+def _set_key(monkeypatch, key: str = _FIXED_KEY):
+    """Set DB_ENCRYPTION_KEY in the environment and clear the lru_cache."""
+    monkeypatch.setenv("DB_ENCRYPTION_KEY", key)
+    _load_key.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -86,30 +76,28 @@ def _valid_key_path(tmp_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 class TestLoadKey:
-    def test_raises_when_file_absent(self, tmp_path):
-        missing = str(tmp_path / "no_such_key.bin")
-        # Clear cache from other tests that may have cached a value
+    def test_raises_when_env_var_absent(self, monkeypatch):
+        monkeypatch.delenv("DB_ENCRYPTION_KEY", raising=False)
         _load_key.cache_clear()
         with pytest.raises(RuntimeError, match="not found"):
-            _load_key(missing)
+            _load_key()
 
-    def test_raises_when_key_wrong_length(self, tmp_path):
-        short_key_path = _write_key(tmp_path, b"short_key_16byte")  # 16 bytes, not 32
+    def test_raises_when_key_wrong_length_short(self, monkeypatch):
+        monkeypatch.setenv("DB_ENCRYPTION_KEY", "short_key_16byte")  # 16 chars
         _load_key.cache_clear()
         with pytest.raises(RuntimeError, match="32 bytes"):
-            _load_key(short_key_path)
+            _load_key()
 
-    def test_raises_when_key_too_long(self, tmp_path):
-        long_key_path = _write_key(tmp_path, os.urandom(64))  # 64 bytes
+    def test_raises_when_key_too_long(self, monkeypatch):
+        monkeypatch.setenv("DB_ENCRYPTION_KEY", "A" * 64)  # 64 chars
         _load_key.cache_clear()
         with pytest.raises(RuntimeError, match="32 bytes"):
-            _load_key(long_key_path)
+            _load_key()
 
-    def test_returns_aesgcm_for_valid_32_byte_key(self, tmp_path):
+    def test_returns_aesgcm_for_valid_32_byte_key(self, monkeypatch):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
-        cipher = _load_key(key_path)
+        _set_key(monkeypatch)
+        cipher = _load_key()
         assert isinstance(cipher, AESGCM)
 
 
@@ -118,39 +106,38 @@ class TestLoadKey:
 # ---------------------------------------------------------------------------
 
 class TestEncryptDecryptRoundTrip:
-    def _cipher(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
-        return _get_cipher(key_path)
+    def _cipher(self, monkeypatch):
+        _set_key(monkeypatch)
+        return _get_cipher()
 
-    def test_roundtrip_returns_original_plaintext(self, tmp_path):
-        cipher = self._cipher(tmp_path)
+    def test_roundtrip_returns_original_plaintext(self, monkeypatch):
+        cipher = self._cipher(monkeypatch)
         plaintext = "super_secret_private_key_data"
         token = _encrypt_value(cipher, plaintext)
         recovered = _decrypt_value(cipher, token)
         assert recovered == plaintext
 
-    def test_encrypted_value_differs_from_plaintext(self, tmp_path):
-        cipher = self._cipher(tmp_path)
+    def test_encrypted_value_differs_from_plaintext(self, monkeypatch):
+        cipher = self._cipher(monkeypatch)
         plaintext = "my_secret"
         token = _encrypt_value(cipher, plaintext)
         assert token != plaintext
 
-    def test_two_encryptions_produce_different_ciphertext(self, tmp_path):
+    def test_two_encryptions_produce_different_ciphertext(self, monkeypatch):
         """Random nonce → each call produces a unique token."""
-        cipher = self._cipher(tmp_path)
+        cipher = self._cipher(monkeypatch)
         plaintext = "same_value"
         token1 = _encrypt_value(cipher, plaintext)
         token2 = _encrypt_value(cipher, plaintext)
         assert token1 != token2
 
-    def test_empty_string_roundtrip(self, tmp_path):
-        cipher = self._cipher(tmp_path)
+    def test_empty_string_roundtrip(self, monkeypatch):
+        cipher = self._cipher(monkeypatch)
         token = _encrypt_value(cipher, "")
         assert _decrypt_value(cipher, token) == ""
 
-    def test_unicode_roundtrip(self, tmp_path):
-        cipher = self._cipher(tmp_path)
+    def test_unicode_roundtrip(self, monkeypatch):
+        cipher = self._cipher(monkeypatch)
         plaintext = "日本語テスト🔑"
         token = _encrypt_value(cipher, plaintext)
         assert _decrypt_value(cipher, token) == plaintext
@@ -161,45 +148,40 @@ class TestEncryptDecryptRoundTrip:
 # ---------------------------------------------------------------------------
 
 class TestEncryptSecrets:
-    def test_encrypts_ssh_private_key(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_encrypts_ssh_private_key(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"host": "example.com", "username": "user", "private_key": "MY_PRIVATE_KEY"}
-        encrypted = encrypt_secrets("ssh", details, key_path)
+        encrypted = encrypt_secrets("ssh", details)
         # The private_key field must be base64-encoded ciphertext, not plain
         assert encrypted["private_key"] != "MY_PRIVATE_KEY"
         assert encrypted["host"] == "example.com"
         assert encrypted["username"] == "user"
 
-    def test_encrypts_s3_secret_access_key(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_encrypts_s3_secret_access_key(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"bucket": "my-bucket", "access_key_id": "AKID", "secret_access_key": "MY_SECRET"}
-        encrypted = encrypt_secrets("s3", details, key_path)
+        encrypted = encrypt_secrets("s3", details)
         assert encrypted["secret_access_key"] != "MY_SECRET"
         assert encrypted["bucket"] == "my-bucket"
         assert encrypted["access_key_id"] == "AKID"
 
-    def test_unknown_connector_type_leaves_all_fields_intact(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_unknown_connector_type_leaves_all_fields_intact(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"token": "bearer_token", "endpoint": "https://api.example.com"}
-        result = encrypt_secrets("ftp", details, key_path)
+        result = encrypt_secrets("ftp", details)
         assert result == details
 
-    def test_skips_none_valued_secret_fields(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_skips_none_valued_secret_fields(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"private_key": None, "username": "admin"}
-        result = encrypt_secrets("ssh", details, key_path)
+        result = encrypt_secrets("ssh", details)
         assert result["private_key"] is None
         assert result["username"] == "admin"
 
-    def test_does_not_mutate_original_dict(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_does_not_mutate_original_dict(self, monkeypatch):
+        _set_key(monkeypatch)
         original = {"private_key": "secret", "host": "ssh.example.com"}
-        _ = encrypt_secrets("ssh", original, key_path)
+        _ = encrypt_secrets("ssh", original)
         assert original["private_key"] == "secret"
 
 
@@ -208,47 +190,42 @@ class TestEncryptSecrets:
 # ---------------------------------------------------------------------------
 
 class TestDecryptSecrets:
-    def test_decrypts_value_encrypted_by_encrypt_secrets(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_decrypts_value_encrypted_by_encrypt_secrets(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"private_key": "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----"}
-        encrypted = encrypt_secrets("ssh", details, key_path)
-        decrypted = decrypt_secrets("ssh", encrypted, key_path)
+        encrypted = encrypt_secrets("ssh", details)
+        decrypted = decrypt_secrets("ssh", encrypted)
         assert decrypted["private_key"] == details["private_key"]
 
-    def test_leaves_non_secret_fields_untouched(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_leaves_non_secret_fields_untouched(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"host": "sftp.example.com", "private_key": "KEY_DATA", "port": 22}
-        encrypted = encrypt_secrets("ssh", details, key_path)
-        decrypted = decrypt_secrets("ssh", encrypted, key_path)
+        encrypted = encrypt_secrets("ssh", details)
+        decrypted = decrypt_secrets("ssh", encrypted)
         assert decrypted["host"] == "sftp.example.com"
         assert decrypted["port"] == 22
 
-    def test_raises_on_tampered_ciphertext(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_raises_on_tampered_ciphertext(self, monkeypatch):
+        _set_key(monkeypatch)
         bad_details = {"private_key": "not_valid_base64_ciphertext=="}
         with pytest.raises(Exception):
-            decrypt_secrets("ssh", bad_details, key_path)
+            decrypt_secrets("ssh", bad_details)
 
-    def test_skips_none_valued_secret_fields(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_skips_none_valued_secret_fields(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {"private_key": None, "host": "host.example.com"}
-        result = decrypt_secrets("ssh", details, key_path)
+        result = decrypt_secrets("ssh", details)
         assert result["private_key"] is None
 
-    def test_s3_full_roundtrip(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_s3_full_roundtrip(self, monkeypatch):
+        _set_key(monkeypatch)
         details = {
             "bucket": "my-bucket",
             "access_key_id": "AKID123",
             "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         }
-        encrypted = encrypt_secrets("s3", details, key_path)
-        decrypted = decrypt_secrets("s3", encrypted, key_path)
+        encrypted = encrypt_secrets("s3", details)
+        decrypted = decrypt_secrets("s3", encrypted)
         assert decrypted == details
 
 
@@ -293,56 +270,50 @@ class TestStripSecrets:
 # ---------------------------------------------------------------------------
 
 class TestMergeAndEncryptPartial:
-    def test_non_secret_keys_copied_verbatim(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_non_secret_keys_copied_verbatim(self, monkeypatch):
+        _set_key(monkeypatch)
         existing = {"private_key": "ENCRYPTED_BLOB", "host": "old.example.com", "port": 22}
         partial = {"host": "new.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, partial, key_path)
+        result = merge_and_encrypt_partial("ssh", existing, partial)
         assert result["host"] == "new.example.com"
         assert result["port"] == 22
 
-    def test_secret_keys_in_partial_are_encrypted(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_secret_keys_in_partial_are_encrypted(self, monkeypatch):
+        _set_key(monkeypatch)
         existing = {"private_key": "OLD_ENCRYPTED", "host": "sftp.example.com"}
         partial = {"private_key": "NEW_PLAINTEXT_KEY"}
-        result = merge_and_encrypt_partial("ssh", existing, partial, key_path)
+        result = merge_and_encrypt_partial("ssh", existing, partial)
         # The updated private_key must be a new ciphertext, not plaintext
         assert result["private_key"] != "NEW_PLAINTEXT_KEY"
         assert result["private_key"] != "OLD_ENCRYPTED"
 
-    def test_existing_encrypted_key_preserved_when_not_in_partial(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_existing_encrypted_key_preserved_when_not_in_partial(self, monkeypatch):
+        _set_key(monkeypatch)
         existing = {"private_key": "EXISTING_CIPHERTEXT", "host": "sftp.example.com"}
         partial = {"host": "new-sftp.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, partial, key_path)
+        result = merge_and_encrypt_partial("ssh", existing, partial)
         # Private key blob unchanged — it was not in partial_update
         assert result["private_key"] == "EXISTING_CIPHERTEXT"
 
-    def test_does_not_mutate_existing_encrypted(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_does_not_mutate_existing_encrypted(self, monkeypatch):
+        _set_key(monkeypatch)
         existing = {"private_key": "CIPHERTEXT", "host": "old.example.com"}
         original_existing = dict(existing)
-        merge_and_encrypt_partial("ssh", existing, {"host": "new.example.com"}, key_path)
+        merge_and_encrypt_partial("ssh", existing, {"host": "new.example.com"})
         assert existing == original_existing
 
-    def test_partial_none_value_for_secret_field_is_passed_through(self, tmp_path):
+    def test_partial_none_value_for_secret_field_is_passed_through(self, monkeypatch):
         """A None update for a secret field must not be encrypted — passed as None."""
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+        _set_key(monkeypatch)
         existing = {"private_key": "CIPHERTEXT", "host": "sftp.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, {"private_key": None}, key_path)
+        result = merge_and_encrypt_partial("ssh", existing, {"private_key": None})
         assert result["private_key"] is None
 
-    def test_s3_partial_update_encrypts_secret_access_key(self, tmp_path):
-        key_path = _valid_key_path(tmp_path)
-        _load_key.cache_clear()
+    def test_s3_partial_update_encrypts_secret_access_key(self, monkeypatch):
+        _set_key(monkeypatch)
         existing = {"bucket": "b", "access_key_id": "OLD_AK", "secret_access_key": "OLD_CIPHERTEXT"}
         partial = {"secret_access_key": "NEW_PLAINTEXT_SECRET"}
-        result = merge_and_encrypt_partial("s3", existing, partial, key_path)
+        result = merge_and_encrypt_partial("s3", existing, partial)
         assert result["secret_access_key"] != "NEW_PLAINTEXT_SECRET"
         assert result["bucket"] == "b"
 
