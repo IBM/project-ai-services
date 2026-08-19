@@ -10,13 +10,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, bundleService bundlesvc.BundleServiceInterface) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -37,6 +38,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerCatalogRoutes(v1, handlers.NewCatalogHandler(), handlers.NewResourcesHandler(), auth)
 	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), auth)
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
+	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 
 	return router
 }
@@ -65,6 +67,25 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)
+	}
+}
+
+func registerBundleRoutes(v1 *gin.RouterGroup, h *handlers.BundleHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("catalog/bundles")
+	g.Use(authMw)
+	{
+		// POST /api/v1/catalog/bundles — create a new bundle
+		g.POST("", h.CreateBundle)
+		// POST /api/v1/catalog/bundles/validate — validate without storing
+		g.POST("/validate", h.ValidateBundle)
+		// GET /api/v1/catalog/bundles — list all bundles
+		g.GET("", h.ListBundles)
+		// GET /api/v1/catalog/bundles/:bundle_id — get a single bundle
+		g.GET("/:bundle_id", h.GetBundle)
+		// PUT /api/v1/catalog/bundles/:bundle_id — replace an existing bundle
+		g.PUT("/:bundle_id", h.UpdateBundle)
+		// DELETE /api/v1/catalog/bundles/:bundle_id — delete a bundle
+		g.DELETE("/:bundle_id", h.DeleteBundle)
 	}
 }
 
