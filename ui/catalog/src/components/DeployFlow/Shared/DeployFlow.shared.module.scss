@@ -325,6 +325,14 @@
   }
 }
 
+.deployErrorNotification {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
+  max-width: 400px;
+}
+
 // Required field indicators
 .requiredIndicator {
   color: $support-error;

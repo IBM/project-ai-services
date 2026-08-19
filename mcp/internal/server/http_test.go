@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/project-ai-services/mcp/internal/openapi"
-	"github.com/project-ai-services/mcp/internal/tool"
-	"github.com/project-ai-services/mcp/internal/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/project-ai-services/mcp/internal/openapi"
+	"github.com/project-ai-services/mcp/internal/tool"
+	"github.com/project-ai-services/mcp/internal/types"
 	"golang.org/x/time/rate"
 )
 
@@ -39,27 +39,6 @@ func (m *mockAuthenticator) IsPassthrough() bool {
 
 func (m *mockAuthenticator) GetType() string {
 	return m.authType
-}
-
-type MockTokenValidator struct {
-	shouldError bool
-	claims      interface{}
-	errorMsg    string
-}
-
-func NewMockTokenValidator(shouldError bool, claims interface{}, errorMsg string) TokenValidator {
-	return &MockTokenValidator{
-		shouldError: shouldError,
-		claims:      claims,
-		errorMsg:    errorMsg,
-	}
-}
-
-func (m *MockTokenValidator) GetClaims(token string, validateExp bool) (interface{}, error) {
-	if m.shouldError {
-		return nil, errors.New(m.errorMsg)
-	}
-	return m.claims, nil
 }
 
 type MockLogger struct {
@@ -142,7 +121,6 @@ func createTestAggregator() *tool.Aggregator {
 			},
 		},
 	}
-
 
 	// Create proper mock document
 	info := &base.Info{
@@ -385,38 +363,22 @@ func TestHTTPServer_createToolHandler(t *testing.T) {
 	}
 }
 
-func createMockDependencies() (TokenValidator, Logger, SignalHandler) {
+func createMockDependencies() (Logger, SignalHandler) {
 	mockLogger := NewMockLogger()
-	mockTokenValidator := NewMockTokenValidator(false, map[string]interface{}{"sub": "test-user"}, "")
 	mockSignalHandler := NewMockSignalHandler()
 
-	return mockTokenValidator, mockLogger, mockSignalHandler
-}
-
-func TestTokenValidatorAdapterErrorPath(t *testing.T) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.Log("TokenValidatorAdapter panicked as expected with nil validator")
-		}
-	}()
-
-	adapter := &TokenValidatorAdapter{validator: nil}
-	_, err := adapter.GetClaims("test-token", false)
-
-	if err == nil {
-		t.Error("Expected error due to nil validator")
-	}
+	return mockLogger, mockSignalHandler
 }
 
 // Test NewHTTPServer constructor
 func TestNewHTTPServer(t *testing.T) {
 	aggregator := createTestAggregator()
-	tokenValidator, logger, signalHandler := createMockDependencies()
+	logger, signalHandler := createMockDependencies()
 	tags := []string{"test-tag"}
 	port := 8080
 	mockRateLimiter := NewRateLimiterManager(20, 60)
 
-	server := NewHTTPServer(port, aggregator, tags, tokenValidator, logger, signalHandler, mockRateLimiter)
+	server := NewHTTPServer(port, aggregator, tags, logger, signalHandler, mockRateLimiter)
 
 	if server.port != port {
 		t.Errorf("Expected port %d, got %d", port, server.port)
@@ -426,9 +388,6 @@ func TestNewHTTPServer(t *testing.T) {
 	}
 	if len(server.tags) != len(tags) || server.tags[0] != tags[0] {
 		t.Errorf("Expected tags %v, got %v", tags, server.tags)
-	}
-	if server.tokenValidator != tokenValidator {
-		t.Error("Expected tokenValidator to be set correctly")
 	}
 	if server.logger != logger {
 		t.Error("Expected logger to be set correctly")
@@ -441,11 +400,11 @@ func TestNewHTTPServer(t *testing.T) {
 // Test HTTPServer Start method with successful execution
 func TestHTTPServerStartSuccess(t *testing.T) {
 	aggregator := createTestAggregator()
-	tokenValidator, logger, signalHandler := createMockDependencies()
+	logger, signalHandler := createMockDependencies()
 	mockLogger := logger.(*MockLogger)
 	mockSignalHandler := signalHandler.(*MockSignalHandler)
 	mockRateLimiter := NewRateLimiterManager(20, 60)
-	server := NewHTTPServer(3000, aggregator, nil, tokenValidator, logger, signalHandler, mockRateLimiter)
+	server := NewHTTPServer(3000, aggregator, nil, logger, signalHandler, mockRateLimiter)
 
 	// Create a channel to signal server startup completion
 	done := make(chan bool, 1)
@@ -480,87 +439,16 @@ func TestHTTPServerStartSuccess(t *testing.T) {
 	}
 }
 
-// Test token validation middleware with valid token
-func TestTokenValidationMiddlewareValid(t *testing.T) {
-	tokenValidator, logger, signalHandler := createMockDependencies()
-	mockRateLimiter := NewRateLimiterManager(20, 60)
-	server := NewHTTPServer(3000, createTestAggregator(), nil, tokenValidator, logger, signalHandler, mockRateLimiter)
-
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := server.tokenValidationMiddleware(nextHandler, tokenValidator)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
-	w := httptest.NewRecorder()
-
-	middleware.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status OK, got %d", w.Code)
-	}
-}
-
-// Test token validation middleware with missing token
-func TestTokenValidationMiddlewareMissingToken(t *testing.T) {
-	tokenValidator, logger, signalHandler := createMockDependencies()
-	mockRateLimiter := NewRateLimiterManager(20, 60)
-	server := NewHTTPServer(3000, createTestAggregator(), nil, tokenValidator, logger, signalHandler, mockRateLimiter)
-
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := server.tokenValidationMiddleware(nextHandler, tokenValidator)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	middleware.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status Unauthorized, got %d", w.Code)
-	}
-}
-
-func TestTokenValidationMiddlewareInvalidToken(t *testing.T) {
-	mockLogger := NewMockLogger()
-	mockTokenValidator := NewMockTokenValidator(true, nil, "invalid token")
-	mockSignalHandler := NewMockSignalHandler()
-	mockRateLimiter := NewRateLimiterManager(20, 60)
-
-	server := NewHTTPServer(3000, createTestAggregator(), nil, mockTokenValidator, mockLogger, mockSignalHandler, mockRateLimiter)
-
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := server.tokenValidationMiddleware(nextHandler, mockTokenValidator)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer invalid-token")
-	w := httptest.NewRecorder()
-
-	middleware.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status Unauthorized, got %d", w.Code)
-	}
-}
-
 // Test HTTPServer Start method with HTTP server error
 func TestHTTPServerStartWithHTTPError(t *testing.T) {
 	aggregator := createTestAggregator()
 
 	// Create dependencies
 	mockLogger := NewMockLogger()
-	mockTokenValidator := NewMockTokenValidator(false, map[string]interface{}{"sub": "test-user"}, "")
 	mockSignalHandler := NewMockSignalHandler()
 	mockRateLimiter := NewRateLimiterManager(20, 60)
 
-	server := NewHTTPServer(3000, aggregator, nil, mockTokenValidator, mockLogger, mockSignalHandler, mockRateLimiter)
+	server := NewHTTPServer(3000, aggregator, nil, mockLogger, mockSignalHandler, mockRateLimiter)
 
 	// Start server in goroutine to test error handling
 	done := make(chan error, 1)
@@ -672,50 +560,27 @@ func TestHTTPServer_RequestHeaderContextPassing(t *testing.T) {
 	}
 }
 
-func TestRateLimitMiddlewareMissingToken(t *testing.T) {
-	mockLogger := NewMockLogger()
-	mockTokenValidator := NewMockTokenValidator(false, nil, "")
-	mockSignalHandler := NewMockSignalHandler()
-	mockRateLimiter := NewRateLimiterManager(20, 60)
-
-	server := NewHTTPServer(3000, createTestAggregator(), nil, mockTokenValidator, mockLogger, mockSignalHandler, mockRateLimiter)
-
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := server.tokenValidationMiddleware(server.rateLimitMiddleware(nextHandler), mockTokenValidator)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	middleware.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status Unauthorized (401), got %d", w.Code)
-	}
-}
-
 func TestRateLimitMiddlewareExceeded(t *testing.T) {
 	os.Setenv("RATE_LIMIT_REQUESTS", "3")
 	os.Setenv("RATE_LIMIT_PER_SECONDS", "60")
 
 	mockLogger := NewMockLogger()
-	mockTokenValidator := NewMockTokenValidator(false, &IAMAccessTokenClaims{IAMID: "user-123"}, "")
 	mockSignalHandler := NewMockSignalHandler()
 	rateLimit := rate.Every(60 * time.Second / 3) // 1 req per 20 seconds
 	mockRateLimiter := NewRateLimiterManager(rateLimit, 3)
 
-	server := NewHTTPServer(3000, createTestAggregator(), nil, mockTokenValidator, mockLogger, mockSignalHandler, mockRateLimiter)
+	server := NewHTTPServer(3000, createTestAggregator(), nil, mockLogger, mockSignalHandler, mockRateLimiter)
 
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := server.tokenValidationMiddleware(server.rateLimitMiddleware(nextHandler), mockTokenValidator)
+	middleware := server.rateLimitMiddleware(nextHandler)
 
+	// httptest.NewRequest sets a fixed RemoteAddr ("192.0.2.1:1234"), and the same
+	// req is reused across every iteration below, so all 5 requests land in the
+	// same rate-limit bucket -- exactly what this test needs to verify.
 	req := httptest.NewRequest("POST", "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
 
 	for i := 0; i < 5; i++ {
 		w := httptest.NewRecorder()
@@ -746,5 +611,40 @@ func TestRateLimitMiddlewareExceeded(t *testing.T) {
 				t.Errorf("Expected error 'rate_limit_exceeded', got '%s'", body["code"])
 			}
 		}
+	}
+}
+
+func TestRateLimitMiddleware_DistinguishesCallersBehindProxy(t *testing.T) {
+	os.Setenv("RATE_LIMIT_REQUESTS", "3")
+	os.Setenv("RATE_LIMIT_PER_SECONDS", "60")
+
+	mockRateLimiter := NewRateLimiterManager(rate.Every(20*time.Second), 3)
+	server := NewHTTPServer(3000, createTestAggregator(), nil, NewMockLogger(), NewMockSignalHandler(), mockRateLimiter)
+	middleware := server.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Both requests arrive from the same Caddy address; only X-Forwarded-For
+	// distinguishes the two real callers.
+	callerA := httptest.NewRequest("POST", "/mcp", nil)
+	callerA.RemoteAddr = "10.0.0.5:443"
+	callerA.Header.Set("X-Forwarded-For", "203.0.113.7")
+
+	callerB := httptest.NewRequest("POST", "/mcp", nil)
+	callerB.RemoteAddr = "10.0.0.5:443"
+	callerB.Header.Set("X-Forwarded-For", "198.51.100.9")
+
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		middleware.ServeHTTP(w, callerA)
+		if w.Code != http.StatusOK {
+			t.Fatalf("callerA request %d: expected 200, got %d", i, w.Code)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	middleware.ServeHTTP(w, callerB)
+	if w.Code != http.StatusOK {
+		t.Errorf("callerB should be unaffected by callerA's traffic, got %d", w.Code)
 	}
 }

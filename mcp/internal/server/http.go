@@ -5,24 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/project-ai-services/mcp/internal/tool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/project-ai-services/mcp/internal/tool"
 	"golang.org/x/time/rate"
 )
-
-type TokenValidator interface {
-	GetClaims(token string, validateExp bool) (interface{}, error)
-}
 
 type Logger interface {
 	Printf(format string, v ...interface{})
@@ -33,7 +29,7 @@ type SignalHandler interface {
 }
 
 type RateLimiter interface {
-	GetLimiter(iamID string) *rate.Limiter
+	GetLimiter(clientID string) *rate.Limiter
 }
 
 type RateLimiterManager struct {
@@ -51,14 +47,14 @@ func NewRateLimiterManager(limit rate.Limit, burst int) *RateLimiterManager {
 	}
 }
 
-func (r *RateLimiterManager) GetLimiter(iamID string) *rate.Limiter {
+func (r *RateLimiterManager) GetLimiter(clientID string) *rate.Limiter {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	limiter, exists := r.limiters[iamID]
+	limiter, exists := r.limiters[clientID]
 	if !exists {
 		limiter = rate.NewLimiter(r.limit, r.burst)
-		r.limiters[iamID] = limiter
+		r.limiters[clientID] = limiter
 	}
 	return limiter
 }
@@ -88,20 +84,6 @@ func GetRateLimiterConfig() (rate.Limit, int, error) {
 	return rate.Limit(rateVal / windowVal), int(rateVal), nil
 }
 
-type TokenValidatorAdapter struct {
-	validator *JWTTokenValidator
-}
-
-func NewTokenValidatorAdapter(validator *JWTTokenValidator) *TokenValidatorAdapter {
-	return &TokenValidatorAdapter{
-		validator: validator,
-	}
-}
-
-func (t *TokenValidatorAdapter) GetClaims(tokenStr string, validateExp bool) (interface{}, error) {
-	return t.validator.GetClaims(tokenStr, validateExp)
-}
-
 type StdLogger struct{}
 
 func (l *StdLogger) Printf(format string, v ...interface{}) {
@@ -115,32 +97,29 @@ func (o *OSSignalHandler) Notify(c chan<- os.Signal, sig ...os.Signal) {
 }
 
 type HTTPServer struct {
-	port           int
-	aggregator     *tool.Aggregator
-	tags           []string
-	tokenValidator TokenValidator
-	logger         Logger
-	signalHandler  SignalHandler
-	rateLimiter    RateLimiter
+	port          int
+	aggregator    *tool.Aggregator
+	tags          []string
+	logger        Logger
+	signalHandler SignalHandler
+	rateLimiter   RateLimiter
 }
 
 func NewHTTPServer(
 	port int,
 	aggregator *tool.Aggregator,
 	tags []string,
-	tokenValidator TokenValidator,
 	logger Logger,
 	signalHandler SignalHandler,
 	rateLimiter RateLimiter,
 ) *HTTPServer {
 	return &HTTPServer{
-		port:           port,
-		aggregator:     aggregator,
-		tags:           tags,
-		tokenValidator: tokenValidator,
-		logger:         logger,
-		signalHandler:  signalHandler,
-		rateLimiter:    rateLimiter,
+		port:          port,
+		aggregator:    aggregator,
+		tags:          tags,
+		logger:        logger,
+		signalHandler: signalHandler,
+		rateLimiter:   rateLimiter,
 	}
 }
 
@@ -166,11 +145,8 @@ func (s *HTTPServer) Start() error {
 
 	mux := http.NewServeMux()
 
-	combinedHandler := s.tokenValidationMiddleware(
-		s.rateLimitMiddleware(
-			s.corsMiddleware(streamHandler),
-		),
-		s.tokenValidator,
+	combinedHandler := s.rateLimitMiddleware(
+		s.corsMiddleware(streamHandler),
 	)
 
 	mux.Handle("/mcp", combinedHandler)
@@ -233,29 +209,6 @@ func (s *HTTPServer) createToolHandler() mcp.ToolHandler {
 	}
 }
 
-type contextKey string
-
-const claimsContextKey contextKey = "claims"
-
-func (s *HTTPServer) tokenValidationMiddleware(next http.Handler, validator TokenValidator) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tok := r.Header.Get("Authorization")
-		if tok == "" {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-
-		claims, err := validator.GetClaims(strings.TrimSpace(strings.TrimPrefix(tok, "Bearer")), false)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
 func (s *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -305,18 +258,24 @@ func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// use X-Forwarded-For instead, so callers are not sharing a single rate limit
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func (s *HTTPServer) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Add("Accept", "text/event-stream")
 
-		claims, ok := r.Context().Value(claimsContextKey).(*IAMAccessTokenClaims)
-		if !ok || claims.IAMID == "" {
-			http.Error(w, "Invalid or missing claims", http.StatusUnauthorized)
-			return
-		}
-
-		IAMID := claims.IAMID
-		limiter := s.rateLimiter.GetLimiter(IAMID)
+		host := clientIP(r)
+		limiter := s.rateLimiter.GetLimiter(host)
 
 		// another place the default is used... also why is it a string here -> fix default
 		retryAfter, err := strconv.Atoi(os.Getenv("RATE_LIMIT_PER_SECONDS"))

@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret"
-    ai-services.io/volume: "podman-auth-secret,catalog-secret"
+    ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret"
   annotations:
     run.oci.keep_original_groups: "1"
     ai-services.io/routes: "8081:catalog-ui:ui, 8080:catalog-api:api"
@@ -97,6 +97,7 @@ spec:
         - |
           export ADMIN_PASSWORD=$(cat /etc/secret/catalog-secret/admin-password)
           export DB_PASSWORD=$(cat /etc/secret/catalog-db-secret/db-password)
+          export DB_ENCRYPTION_KEY=$(cat /etc/secret/catalog-db-encryption-secret/db-encryption-key)
           exec /usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }} --workergateway-port={{ .Values.backend.workerGatewayPort }}
       env:
         - name: GIN_MODE
@@ -157,6 +158,9 @@ spec:
         - name: catalog-db-secret
           mountPath: /etc/secret/catalog-db-secret
           readOnly: true
+        - name: catalog-db-encryption-secret
+          mountPath: /etc/secret/catalog-db-encryption-secret
+          readOnly: true
       resources:
         requests:
           podman.io/device=/dev/vfio: 4
@@ -187,3 +191,6 @@ spec:
     - name: catalog-db-secret
       secret:
         secretName: catalog-db-secret
+    - name: catalog-db-encryption-secret
+      secret:
+        secretName: catalog-db-encryption-secret

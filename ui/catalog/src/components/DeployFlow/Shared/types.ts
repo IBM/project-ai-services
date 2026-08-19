@@ -37,6 +37,7 @@ export interface ResourceItem {
 }
 
 // Each flow's ACTION_TYPES object includes all of these plus its own unique keys.
+// RESET_STATE is intentionally absent — each flow owns its own reset to preserve flow-specific fields.
 export const SHARED_ACTION_TYPES = {
   SET_CURRENT_STEP: "SET_CURRENT_STEP",
   SET_IS_DEPLOYING: "SET_IS_DEPLOYING",

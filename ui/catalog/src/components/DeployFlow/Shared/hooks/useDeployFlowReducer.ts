@@ -38,12 +38,37 @@ export function sharedDeployFlowReducer<S extends BaseDeployFlowState>(
   }
 }
 
-// Returns the four callbacks that are identical across both flows.
+// Returns the shared callbacks used by both flows.
 // Each flow owns its own useReducer call — this hook only wraps the callbacks.
 export function useDeployFlowReducer(
   dispatch: React.Dispatch<SharedDeployFlowAction>,
   currentStep: number,
+  stepOne: number,
+  lastStep: number,
 ) {
+  const handleNext = useCallback(
+    (formDataName: string) => {
+      if (currentStep === stepOne && !formDataName.trim()) {
+        dispatch({
+          type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
+          payload: true,
+        });
+        return;
+      }
+      if (currentStep < lastStep) {
+        dispatch({
+          type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
+          payload: false,
+        });
+        dispatch({
+          type: SHARED_ACTION_TYPES.SET_CURRENT_STEP,
+          payload: currentStep + 1,
+        });
+      }
+    },
+    [currentStep, stepOne, lastStep, dispatch],
+  );
+
   const handleFormDataChange = useCallback(
     (updates: Partial<DeployFormData>) => {
       dispatch({
@@ -84,6 +109,7 @@ export function useDeployFlowReducer(
   }, [currentStep, dispatch]);
 
   return {
+    handleNext,
     handleFormDataChange,
     handleEditingChange,
     handleResourceStatusChange,

@@ -1494,6 +1494,77 @@ class DatabaseManager:
             return False
 
 
+    @staticmethod
+    def reset_syncing_connectors(
+        error: str = "Service restarted during sync tick",
+    ) -> List[str]:
+        """
+        Bulk-reset all connectors stuck in ``'syncing'`` to ``'out of sync'``.
+
+        Called on startup to unlock connectors that were mid-tick when the
+        service crashed.  Returns the list of connector IDs that were reset.
+
+        Also stamps ``last_sync_error`` and ``error`` on every affected row so
+        that callers can see the crash reason without joining to sync-log rows.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(Connector)
+                    .where(Connector.sync_status == ConnectorStatus.SYNCING)
+                    .values(
+                        sync_status=ConnectorStatus.OUT_OF_SYNC,
+                        last_sync_error=error,
+                        error=error,
+                    )
+                    .returning(Connector.id)
+                )
+                affected = [row[0] for row in result.fetchall()]
+                if affected:
+                    logger.info(
+                        f"reset_syncing_connectors: reset {len(affected)} connector(s) "
+                        f"from syncing to out-of-sync: {affected}"
+                    )
+                return affected
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in reset_syncing_connectors: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def close_open_sync_log(connector_id: str, error: str) -> bool:
+        """
+        Close the open (status=STARTED or CANCEL_PENDING) sync-log row for
+        *connector_id* by setting its status to FAILED with *error* and
+        stamping ``finished_at = now()``.
+
+        Returns True if a row was updated, False if none was found.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.status.in_(
+                            [SyncLogStatus.STARTED, SyncLogStatus.CANCEL_PENDING]
+                        ),
+                    )
+                    .values(
+                        status=SyncLogStatus.FAILED,
+                        finished_at=datetime.now(timezone.utc),
+                        error=error,
+                    )
+                    .returning(ConnectorSyncLog.seq)
+                ).one_or_none()
+                return result is not None
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in close_open_sync_log({connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return False
+
+
 # Singleton instance for easy access
 db_manager = DatabaseManager()
 
