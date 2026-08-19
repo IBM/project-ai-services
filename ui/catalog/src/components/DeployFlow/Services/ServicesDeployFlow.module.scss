@@ -47,15 +47,6 @@
   margin-bottom: $spacing-05;
 }
 
-// TODO PR 9: unify with DA customToast into one shared class
-.deployErrorNotification {
-  position: fixed;
-  top: $spacing-07;
-  right: $spacing-07;
-  z-index: 9999;
-  max-width: 400px;
-}
-
 // StepZero — service selection
 .selected {
   border: 2px solid $border-interactive;

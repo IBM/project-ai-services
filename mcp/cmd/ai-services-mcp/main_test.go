@@ -78,6 +78,7 @@ func TestCreateAuthenticator(t *testing.T) {
 	origAuthAPIKey := authAPIKey
 	origAuthToken := authToken
 	origAuthPassthrough := authPassthrough
+	origHTTPMode := httpMode
 
 	defer func() {
 		// Restore original values
@@ -85,6 +86,7 @@ func TestCreateAuthenticator(t *testing.T) {
 		authAPIKey = origAuthAPIKey
 		authToken = origAuthToken
 		authPassthrough = origAuthPassthrough
+		httpMode = origHTTPMode
 	}()
 
 	tests := []struct {
@@ -101,6 +103,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = ""
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr: true,
 			errMsg:  "Must provide an authentication option",
@@ -112,6 +115,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = "test-key"
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr: true,
 			errMsg:  "Must not use more than one authentication option",
@@ -123,6 +127,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = ""
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr:      false,
 			expectedType: "cli",
@@ -134,6 +139,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = "test-api-key"
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr:      false,
 			expectedType: "api-key",
@@ -145,6 +151,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = "$TEST_API_KEY"
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr: true, // Will fail because TEST_API_KEY is not set in test environment
 			errMsg:  "Environment variable TEST_API_KEY is not set or empty",
@@ -156,6 +163,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = "op://vault/item/field"
 				authToken = ""
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr:      false,
 			expectedType: "1password",
@@ -167,6 +175,7 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = ""
 				authToken = "test-token"
 				authPassthrough = false
+				httpMode = false
 			},
 			wantErr:      false,
 			expectedType: "token",
@@ -178,9 +187,58 @@ func TestCreateAuthenticator(t *testing.T) {
 				authAPIKey = ""
 				authToken = ""
 				authPassthrough = true
+				httpMode = true
 			},
 			wantErr:      false,
 			expectedType: "passthrough",
+		},
+		{
+			name: "API key authentication in HTTP mode",
+			setupFlags: func() {
+				authCLI = false
+				authAPIKey = "test-api-key"
+				authToken = ""
+				authPassthrough = false
+				httpMode = true
+			},
+			wantErr: true,
+			errMsg:  "Must use --auth-passthrough with --http",
+		},
+		{
+			name: "CLI authentication in HTTP mode",
+			setupFlags: func() {
+				authCLI = true
+				authAPIKey = ""
+				authToken = ""
+				authPassthrough = false
+				httpMode = true
+			},
+			wantErr: true,
+			errMsg:  "Must use --auth-passthrough with --http",
+		},
+		{
+			name: "Token authentication in HTTP mode",
+			setupFlags: func() {
+				authCLI = false
+				authAPIKey = ""
+				authToken = "test-token"
+				authPassthrough = false
+				httpMode = true
+			},
+			wantErr: true,
+			errMsg:  "Must use --auth-passthrough with --http",
+		},
+		{
+			name: "Passthrough authentication in stdio mode",
+			setupFlags: func() {
+				authCLI = false
+				authAPIKey = ""
+				authToken = ""
+				authPassthrough = true
+				httpMode = false
+			},
+			wantErr: true,
+			errMsg:  "Must use --http with --auth-passthrough",
 		},
 	}
 
