@@ -538,6 +538,17 @@ The `name` field is the human-readable display label from `metadata.yaml` `name:
 
 The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it is **not** stored in the DB. For components, `catalog_id` uses `--` as separator (e.g. `llm--my-provider`), giving a directory name of `llm--my-provider-1.0.0`.
 
+**Query parameters:**
+
+| Parameter   | Type    | Default | Constraints      | Description                          |
+|-------------|---------|---------|------------------|--------------------------------------|
+| `page`      | integer | `1`     | ≥ 1              | Page number (1-indexed)              |
+| `page_size` | integer | `20`    | 1 – 100          | Number of items per page             |
+
+Results are ordered by `created_at DESC`. Omitting either parameter applies the default.
+
+**Response (200 OK):**
+
 ```json
 {
   "bundles": [
@@ -565,9 +576,25 @@ The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it i
       "version":      "1.0.0",
       "created_by":  "admin"
     }
-  ]
+  ],
+  "pagination": {
+    "page":        1,
+    "page_size":   20,
+    "total_items": 2,
+    "total_pages": 1,
+    "has_next":    false,
+    "has_prev":    false
+  }
 }
 ```
+
+**Error responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400`  | `page` < 1 or `page_size` outside 1–100 |
+| `401`  | Unauthorized |
+| `500`  | Internal server error |
 
 ---
 
