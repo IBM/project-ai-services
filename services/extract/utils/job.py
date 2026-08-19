@@ -14,10 +14,11 @@ from typing import Any, Dict, Optional
 from fastapi import UploadFile
 
 from common.misc_utils import get_logger
-from common.validation_utils import validate_file_extension as _validate_extension
 from extract.settings import settings
 
 logger = get_logger("job_utils")
+
+ALLOWED_EXTENSIONS = {".txt", ".md"}
 
 
 # ---------------------------------------------------------------------------
@@ -35,18 +36,12 @@ def ensure_directories() -> None:
 # ---------------------------------------------------------------------------
 
 def validate_file_extension(filename: str) -> tuple[bool, Optional[str]]:
-    """Return (is_valid, extension_or_None).
-
-    Delegates to the shared ``common.validation_utils.validate_file_extension``
-    while preserving the existing ``(bool, ext_or_None)`` return contract.
-    """
+    """Return (is_valid, extension_or_None)."""
     if not filename:
         return False, None
-    try:
-        ext = _validate_extension(filename)
-        return True, f".{ext}"
-    except ValueError:
-        return False, None
+    import os
+    ext = os.path.splitext(filename)[1].lower()
+    return (ext in ALLOWED_EXTENSIONS), (ext if ext in ALLOWED_EXTENSIONS else None)
 
 
 def stage_uploaded_file(job_id: str, file: UploadFile) -> Path:
