@@ -942,9 +942,10 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 
 ### Pending PRs
 
-- **PR 7 — Scheduler + Lifespan + Crash Recovery ❌ NOT IMPLEMENTED:**
-  - `scheduler.py` does not exist. No `ConnectorScheduler`, no `register_connector_job`, no `_run_tick_wrapped`, no `AsyncScheduler`, no `AsyncSQLAlchemyDataStore`.
-  - `recover_connector_sync_state()` does not exist in `utils/recovery.py` (only `recover_zombie_jobs()` is present, which handles regular jobs only).
-  - `app.py` `lifespan()` does not start an APScheduler, does not call `recover_connector_sync_state()`, does not re-register connector jobs on startup, and does not set a custom thread pool executor.
-  - `POST /v1/connectors` currently has a code comment reading "Worker start is a no-op stub in PR3 — the worker manager (PR7) will hook in here once implemented." Scheduler registration on connector creation is pending.
-
+- **PR 7 — Scheduler + Lifespan + Crash Recovery ✅:**
+  - `connectors/scheduler.py` created: `register_connector_job`, `remove_connector_job`, `_run_tick_wrapped` (APScheduler v4 `AsyncScheduler` + `SQLAlchemyDataStore` backed by the shared Postgres engine). `apscheduler[sqlalchemy]==4.0.0a6` added to `requirements.txt`.
+  - `recover_connector_sync_state()` added to `utils/recovery.py`: bulk-resets connectors stuck in `'syncing'` → `'out of sync'`; closes open `connector_sync_logs` rows to `'failed'`. DB helpers `reset_syncing_connectors` / `close_open_sync_log` added to `db/manager.py` and `utils/db.py`.
+  - `app.py` `lifespan()` updated: starts `AsyncScheduler` within an `async with` block, calls `recover_connector_sync_state()`, re-registers all existing connector jobs (`fire_immediately=False`), and sizes the default `ThreadPoolExecutor` to `max(N+4, 8)`.
+  - `POST /v1/connectors` now calls `register_connector_job(connector_id, sync_interval, fire_immediately=True)` after the DB insert. The stub comment is removed.
+  - `DELETE /v1/connectors/{id}` now calls `remove_connector_job(connector_id)` before dispatching teardown so no new tick fires after the connector is marked delete-pending.
+  - Unit tests in `tests/test_connector_scheduler.py` cover `_run_tick_wrapped`, `register_connector_job`, `remove_connector_job`, and `recover_connector_sync_state`.

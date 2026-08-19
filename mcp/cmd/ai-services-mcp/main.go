@@ -123,17 +123,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Start the appropriate server
 	if httpMode {
-		// Create JWT token validator
-		iamEndpoint, ok := os.LookupEnv("IAM_ENDPOINT")
-		if !ok {
-			iamEndpoint = "https://iam.cloud.ibm.com/identity/keys"
-		}
-		jwtValidator, err := server.NewJWTTokenValidator(iamEndpoint)
-		if err != nil {
-			return fmt.Errorf("failed to create token validator: %w", err)
-		}
-		tokenValidator := server.NewTokenValidatorAdapter(jwtValidator)
-
 		// Create simple implementations for dependencies
 		logger := &server.StdLogger{}
 		signalHandler := &server.OSSignalHandler{}
@@ -149,7 +138,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 			port,
 			aggregator,
 			tags,
-			tokenValidator,
 			logger,
 			signalHandler,
 			rateLimiter,
@@ -195,6 +183,23 @@ func createAuthenticator() (authenticator.Authenticator, error) {
 	}
 	if authCount > 1 {
 		return nil, errors.NewUsageError("Must not use more than one authentication option")
+	}
+
+	// The HTTP server does not authenticate incoming requests: authorization is
+	// delegated to the upstream API, which validates the caller's own token. A
+	// server-held credential would therefore be usable by anyone who can reach
+	// the port, so HTTP transport and passthrough authentication require each
+	// other. Stdio has no request headers to pass through.
+	if httpMode && !authPassthrough {
+		return nil, errors.NewUsageError(
+			"Must use --auth-passthrough with --http. The HTTP server does not authenticate " +
+				"incoming requests, so a server-held credential would be usable by any caller " +
+				"that can reach the port")
+	}
+	if authPassthrough && !httpMode {
+		return nil, errors.NewUsageError(
+			"Must use --http with --auth-passthrough. Stdio transport has no request headers " +
+				"to pass through")
 	}
 
 	if authCLI {
@@ -296,25 +301,26 @@ Flags:
   -e, --endpoint        <URL> The service endpoint to use.
   -k, --auth-api-key    <key> The AI Services API key with which to obtain
                               tokens to authenticate requests. Cannot be used
-                              with --auth-cli or --auth-token.
+                              with --auth-cli, --auth-token or --http.
                        $<VAR> As above, but read in the API key from an
                               environment variable. Note that this works
                               when a literal $-prefixed variable name is
                               passed in outside of a shell context. Cannot be
-                              used with --auth-cli or --auth-token.
+                              used with --auth-cli, --auth-token or --http.
                         <URL> The 1Password reference containing an AI Services
                               API key with which to obtain tokens to
                               authenticate requests. Cannot be used with
-                              --auth-cli or --auth-token.
+                              --auth-cli, --auth-token or --http.
   -c, --auth-cli              Use the ibmcloud CLI to authenticate. The CLI
                               must have an active login. Cannot be used with
-                              --auth-api-key or --auth-token.
+                              --auth-api-key, --auth-token or --http.
   -a, --auth-token     <token> The IAM token with which to authenticate
-                              requests. Cannot be used with --auth-cli or
-                              --auth-api-key.
+                              requests. Cannot be used with --auth-cli,
+                              --auth-api-key or --http.
   -P, --auth-passthrough      Use passthrough authentication mode where the
                               client provides the authorization header in each
                               request. Cannot be used with other auth options.
+                              Requires --http, and is required by --http.
   -Q, --query   <key>=<value> A query parameter value to include with every
                               request. Required when the API has globally
                               required query parameters. Can be used multiple
@@ -326,6 +332,8 @@ Flags:
                               provided tags. Can be used multiple times.
   -S, --http                  Use HTTP transport instead of stdio. Starts an
                               HTTP server with MCP Streamable HTTP transport.
+                              Requires --auth-passthrough, as the server does
+                              not authenticate incoming requests.
   -p, --port           <port> Port number for HTTP server (default: 3000).
                               Only used with --http flag.
   -C, --config                Instead of starting an MCP server, output an
@@ -333,6 +341,11 @@ Flags:
   --help                      Show this usage information.
 
 Transport Modes:
-  Default: Stdio transport (for use with MCP clients like Claude Desktop)
-  --http:  HTTP transport (for direct HTTP clients or web interfaces)`
+  Default: Stdio transport (for use with MCP clients like Claude Desktop).
+           Authenticates with a server-held credential: --auth-api-key,
+           --auth-cli or --auth-token.
+  --http:  HTTP transport (for direct HTTP clients or web interfaces).
+           Requires --auth-passthrough: each caller supplies its own
+           Authorization header, which is forwarded to the API for
+           validation. The server holds no credential of its own.`
 }
