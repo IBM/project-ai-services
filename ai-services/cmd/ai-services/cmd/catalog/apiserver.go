@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
@@ -77,6 +78,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
 
 	// Initialize repositories
+	bundleRepo := repository.NewBundleRepository(pool)
 	appRepo := repository.NewApplicationRepository(pool)
 	svcRepo := repository.NewServiceRepository(pool)
 	compRepo := repository.NewComponentRepository(pool)
@@ -117,6 +119,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
+		BundleService:      bundlesvc.NewBundleService(bundleRepo),
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
 	}
