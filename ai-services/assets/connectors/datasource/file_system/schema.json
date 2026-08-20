@@ -14,25 +14,29 @@
       "type": "string",
       "title": "Hostname or IP address",
       "description": "Hostname or IP address of the remote file system server.",
+      "minLength": 1,
       "ui:section": "Location"
     },
     "username": {
       "type": "string",
       "title": "Username",
       "description": "Username used to authenticate.",
+      "minLength": 1,
       "ui:section": "Authentication"
     },
     "private_key": {
       "type": "string",
       "title": "Private key",
       "description": "PEM-encoded private key used for SSH authentication.",
-      "ui:section": "Authentication",
-      "format": "password"
+      "format": "password",
+      "minLength": 1,
+      "ui:section": "Authentication"
     },
     "remote_path": {
       "type": "string",
       "title": "Remote folder path",
       "description": "Absolute path on the remote file system server to use as the content root (e.g. /data/documents).",
+      "minLength": 1,
       "ui:section": "Location"
     },
     "allowed_extensions": {

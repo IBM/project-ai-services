@@ -41,6 +41,33 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest:
+    properties:
+      metadata:
+        additionalProperties: {}
+        description: |-
+          Metadata holds the provider-specific configuration. Sensitive fields (format: "password"
+          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
+        type: object
+      name:
+        description: Name is the unique human-readable label for this connector.
+        maxLength: 100
+        minLength: 3
+        type: string
+      provider_id:
+        description: ProviderID identifies the provider implementation (e.g. "object_storage",
+          "file_system").
+        type: string
+    required:
+    - metadata
+    - name
+    - provider_id
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:
+    properties:
+      id:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
       catalog_id:
@@ -1555,6 +1582,56 @@ paths:
       summary: Get connector provider parameters
       tags:
       - Catalog
+  /datasources:
+    post:
+      consumes:
+      - application/json
+      description: Validates the request, tests the connection, encrypts credentials,
+        and persists a new datasource connector. Returns 422 if the connection test
+        fails.
+      parameters:
+      - description: Datasource creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Datasource created
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Provider not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource name already exists
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Connection test failed
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create datasource connector
+      tags:
+      - Datasources
   /resources:
     get:
       description: Retrieves system resource information including CPU, memory, and

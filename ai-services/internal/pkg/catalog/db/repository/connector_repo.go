@@ -35,6 +35,9 @@ type ConnectorUpdateFields struct {
 type ConnectorRepository interface {
 	// Insert creates a new connector, populating the ID, CreatedAt, and UpdatedAt fields on success.
 	Insert(ctx context.Context, connector *models.Connector) error
+	// GetByName retrieves a connector by its unique name.
+	// Returns nil (not an error) when no connector with that name exists.
+	GetByName(ctx context.Context, name string) (*models.Connector, error)
 	// GetByID retrieves a connector by its UUID.
 	// When includeCreds is false the metadata column is omitted (safe for API responses).
 	// When includeCreds is true the full row including metadata is returned; callers are
@@ -158,6 +161,28 @@ func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector)
 	}
 
 	return nil
+}
+
+// GetByName retrieves a connector by its unique name.
+// Returns nil (not an error) when no connector with that name exists.
+func (r *connectorRepo) GetByName(ctx context.Context, name string) (*models.Connector, error) {
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE name = $1`
+
+	rows, err := r.pool.Query(ctx, query, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connector by name: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to get connector by name: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	return scanConnector(rows)
 }
 
 // GetByID retrieves a connector by UUID.

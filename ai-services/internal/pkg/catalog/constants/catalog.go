@@ -20,6 +20,12 @@ const (
 	CatalogTypeConnectors = "connectors"
 )
 
+// Connector type constants.
+const (
+	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
+	ConnectorTypeDatasource = "datasource"
+)
+
 // Catalog name constants.
 const (
 	// CatalogAppName represents the catalog name.
