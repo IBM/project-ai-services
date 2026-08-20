@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
@@ -119,15 +120,57 @@ func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 //	@Failure		422		{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
 //	@Router			/catalog/bundles/{id} [put]
 func (h *BundleHandler) UpdateBundle(c *gin.Context) {
-	// TODO: read id path param via c.Param("id")
-	// TODO: call h.bundleService.GetBundleRecord — return 404 if nil
-	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
-	// TODO: extract userID from context via middleware.CtxUserIDKey
-	// TODO: call h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
-	// TODO: set Location header and return 200 with updated BundleResponse
+	// Enforce MAX_BUNDLE_SIZE before any further parsing.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
 	bundleID := c.Param("id")
-	_ = fmt.Sprintf("/api/v1/catalog/bundles/%s", bundleID)
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+
+	// Validate UUID format upfront — avoids a round-trip to the DB for a malformed ID.
+	if _, err := uuid.Parse(bundleID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("bundle_id %q is not a valid UUID; use the bundle ID returned by list or create", bundleID),
+		})
+
+		return
+	}
+
+	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: fmt.Sprintf("bundle %q not found", bundleID)})
+
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+
+		return
+	}
+
+	userID := c.GetString(middleware.CtxUserIDKey)
+
+	resp, err := h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
+	c.JSON(http.StatusOK, resp)
 }
 
 // DeleteBundle godoc

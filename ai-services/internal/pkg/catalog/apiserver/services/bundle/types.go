@@ -40,7 +40,7 @@ type BundleServiceInterface interface {
 	// in-place (status=active, version, name, size_bytes), reloads CatalogProvider, deletes
 	// the old on-disk directory when it differs, and returns 200.
 	// On failure after the status transition the DB row is marked failed.
-	ReplaceBundle(ctx context.Context, existing *BundleRecord, file io.Reader, userID string) (*BundleResponse, error)
+	ReplaceBundle(ctx context.Context, existing *BundleResponse, file io.Reader, userID string) (*BundleResponse, error)
 
 	// GetBundleByID returns the full BundleResponse for a specific bundle by its UUID string.
 	// Returns (nil, nil) when not found.
