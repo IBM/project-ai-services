@@ -31,8 +31,8 @@ pipeline {
         OPENSEARCH_BUILD_REPO   = "https://github.com/opensearch-project/opensearch-build.git"
         OPENSEARCH_BUILD_BRANCH = "3.7.0"
 
-        BUILD_SCRIPTS_REPO      = "https://github.com/irapandey/build-scripts.git"
-        BUILD_SCRIPTS_BRANCH    = "opensearch-ais"
+        BUILD_SCRIPTS_REPO      = "https://github.com/ppc64le/build-scripts.git"
+        BUILD_SCRIPTS_BRANCH    = "master"
 
         // Workspace
         BUILD_DIR   = "${WORKSPACE}/opensearch-build"
