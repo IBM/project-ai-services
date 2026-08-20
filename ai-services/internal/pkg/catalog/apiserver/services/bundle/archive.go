@@ -17,6 +17,9 @@ import (
 )
 
 const (
+	// BundleFileExtension is the required file extension for bundle uploads.
+	BundleFileExtension = ".tar.gz"
+
 	// bundleStorageRoot is the mount path for the dedicated catalog-bundles volume.
 	bundleStorageRoot = "/data/catalog-bundles"
 

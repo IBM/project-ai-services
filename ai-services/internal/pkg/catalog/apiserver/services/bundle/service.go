@@ -17,9 +17,9 @@ import (
 
 // bundleService implements BundleServiceInterface.
 type bundleService struct {
-	repo      repository.BundleRepository
-	svcRepo   repository.ServiceRepository
-	compRepo  repository.ComponentRepository
+	repo     repository.BundleRepository
+	svcRepo  repository.ServiceRepository
+	compRepo repository.ComponentRepository
 	// TODO: add CatalogProvider reference for Reload() calls once wired in.
 	// catalogProvider *catalog.CatalogProvider
 }
@@ -187,7 +187,7 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 		return nil, fmt.Errorf("failed to mark bundle as processing: %w", updateErr)
 	}
 
-	// Steps 5–9: extract, rename, activate, cleanup. Any failure after step 4
+	// Steps 5–10: extract, rename, activate, cleanup. Any failure after step 4
 	// marks the row failed.
 	resp, replaceErr := s.replaceBundleFiles(ctx, existingID, existing, meta, archiveBytes)
 	if replaceErr != nil {
@@ -364,8 +364,8 @@ func (s *bundleService) checkNoRunningInstances(ctx context.Context, meta Bundle
 
 	case CatalogTypeComponent:
 		// catalog_id is "<component_type>--<provider>"; split on the first "--".
-		parts := strings.SplitN(meta.CatalogID(), "--", 2)
-		if len(parts) != 2 {
+		parts := strings.SplitN(meta.CatalogID(), "--", splitTwo)
+		if len(parts) != splitTwo {
 			return fmt.Errorf("malformed component catalog_id %q: expected <type>--<provider>", meta.CatalogID())
 		}
 		componentType, provider := parts[0], parts[1]

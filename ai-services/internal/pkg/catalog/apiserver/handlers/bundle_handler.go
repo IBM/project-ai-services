@@ -60,8 +60,8 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 	}
 	defer func() { _ = file.Close() }()
 
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+	if !strings.HasSuffix(strings.ToLower(header.Filename), bundlesvc.BundleFileExtension) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a " + bundlesvc.BundleFileExtension + " archive"})
 
 		return
 	}
@@ -154,8 +154,8 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 	}
 	defer func() { _ = file.Close() }()
 
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a .tar.gz archive"})
+	if !strings.HasSuffix(strings.ToLower(header.Filename), bundlesvc.BundleFileExtension) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a " + bundlesvc.BundleFileExtension + " archive"})
 
 		return
 	}
