@@ -247,7 +247,7 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 
 ### 6.1 List Datasources
 
-**`GET /api/v1/connectors/datasources`**
+**`GET /api/v1/datasources`**
 
 Query parameters:
 
@@ -291,7 +291,7 @@ Query parameters:
 
 ### 6.2 Get Datasource
 
-**`GET /api/v1/connectors/datasources/:id`**
+**`GET /api/v1/datasources/:id`**
 
 **Response `200 OK`:** Single datasource object (same structure as list item above, without secrets). The `provider` field is the same JSON object `{"id": "...", "name": "..."}` shape. The `connected_services` integer is included.
 
@@ -303,7 +303,7 @@ Query parameters:
 
 ### 6.3 Create Datasource
 
-**`POST /api/v1/connectors/datasources`**
+**`POST /api/v1/datasources`**
 
 The request body varies by `provider`. The catalog backend validates the connection using the provided credentials before persisting.
 
@@ -361,7 +361,7 @@ The request body varies by `provider`. The catalog backend validates the connect
 
 ### 6.4 Update Datasource
 
-**`PUT /api/v1/connectors/datasources/:id`**
+**`PUT /api/v1/datasources/:id`**
 
 Only the credential fields for the datasource's provider may be updated. Structural fields (bucket, host, path, etc.) are immutable after creation. Any non-updatable field present in the request body is ignored.
 
@@ -400,7 +400,7 @@ When a datasource is updated, for every application it is currently connected to
 
 ### 6.5 Delete Datasource
 
-**`DELETE /api/v1/connectors/datasources/:id`**
+**`DELETE /api/v1/datasources/:id`**
 
 **Rules:**
 
@@ -500,7 +500,7 @@ Returns all registered providers for the given connector type, discovered from t
 
 ### 6.8 Get Connected Services for Datasource
 
-**`GET /api/v1/connectors/datasources/:id/services`**
+**`GET /api/v1/datasources/:id/services`**
 
 Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each service's Digitize pod.
 
@@ -553,7 +553,7 @@ Returns the list of services currently connected to a datasource, enriched with 
 
 ### 6.10 Connect Datasource to Application
 
-**`PUT /api/v1/applications/:id/connectors/datasources/:datasource_id`**
+**`PUT /api/v1/applications/:id/datasources/:datasource_id`**
 
 Creates a link in `service_dependencies` and calls `POST /v1/connectors` on each eligible service.
 
@@ -598,7 +598,7 @@ Creates a link in `service_dependencies` and calls `POST /v1/connectors` on each
 
 ### 6.11 Disconnect Datasource from Application
 
-**`DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id`**
+**`DELETE /api/v1/applications/:id/datasources/:datasource_id`**
 
 Removes the link from `application_datasources` and calls `DELETE /v1/connectors/:connectorid` on the Digitize service.
 
@@ -612,7 +612,7 @@ Removes the link from `application_datasources` and calls `DELETE /v1/connectors
 
 ### 6.12 Get Datasource Status for Application
 
-**`GET /api/v1/applications/:id/connectors/datasources/:datasource_id`**
+**`GET /api/v1/applications/:id/datasources/:datasource_id`**
 
 The catalog backend resolves the `connector_id` from `service_dependencies`, fetches the datasource record from `components`, and calls `GET /v1/connectors/:connectorid` on each linked Digitize service pod. The response merges the Digitize sync fields at the top level with catalog identity fields nested under a `datasource` object. `provider_name` is resolved from the provider registry using `components.provider`.
 
