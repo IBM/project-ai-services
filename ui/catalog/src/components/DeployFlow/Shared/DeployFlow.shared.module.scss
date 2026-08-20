@@ -49,6 +49,7 @@
 }
 
 .formSection {
+  margin-top: $spacing-05;
   margin-bottom: $spacing-07;
 }
 
@@ -323,6 +324,14 @@
   .formField {
     max-width: 100%;
   }
+}
+
+.deployErrorNotification {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
+  max-width: 400px;
 }
 
 // Required field indicators

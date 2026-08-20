@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { sumProviderResources } from "../../Shared/utils/resources";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import {
   Button,
@@ -7,18 +8,84 @@ import {
   InlineLoading,
   Accordion,
   AccordionItem,
+  InlineNotification,
 } from "@carbon/react";
+import type { ServiceDeployOptions } from "@/types/api.types";
+import { useResources } from "../../Shared/hooks/useResources";
 import { useProviderSchema } from "../hooks/useProviderSchema";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit } from "@carbon/icons-react";
 import styles from "../ServicesDeployFlow.module.scss";
 import type { StepProps } from "../types";
-import type { ServiceConfig } from "../../Shared/types";
-import { ResourceRequirements } from "../components/ResourceRequirements";
+import type { ServiceConfig, DeployFormData } from "../../Shared/types";
+import {
+  ResourceRequirementsPanel,
+  type CalculatedResources,
+} from "../../Shared/components/ResourceRequirementsPanel";
 import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
 import { ProviderCredentialDisplay } from "../../Shared/components/ProviderCredentialDisplay";
 import { getDisplayName } from "../../Shared/utils/displayHelpers";
+
+const calculateRequiredResources = (
+  formData: DeployFormData,
+  deployOptions: ServiceDeployOptions,
+): CalculatedResources => {
+  // Key: providerId-componentType — ensures vllm-cpu counts separately per component role
+  const uniqueProviders: Record<
+    string,
+    {
+      cpu: number;
+      memory: number;
+      storage: number;
+      accelerators: Record<string, number>;
+    }
+  > = {};
+
+  Object.entries(formData.services).forEach(([_serviceKey, serviceConfig]) => {
+    if (!serviceConfig.enabled) return;
+
+    if (deployOptions.resources) {
+      const serviceResourceKey = `service-${_serviceKey}`;
+      if (!uniqueProviders[serviceResourceKey]) {
+        uniqueProviders[serviceResourceKey] = {
+          cpu: deployOptions.resources.cpu || 0,
+          memory: deployOptions.resources.memory || 0,
+          storage: deployOptions.resources.storage || 0,
+          accelerators: { ...(deployOptions.resources.accelerators || {}) },
+        };
+      }
+    }
+
+    Object.entries(serviceConfig.components).forEach(
+      ([componentType, componentConfig]) => {
+        const selectedProviderId = componentConfig.providerId;
+        if (!selectedProviderId) return;
+
+        const component = deployOptions.components.find(
+          (c) => c.type === componentType,
+        );
+        if (!component) return;
+
+        const provider = component.providers.find(
+          (p) => p.id === selectedProviderId,
+        );
+        const uniqueKey = `${selectedProviderId}-${componentType}`;
+
+        if (provider?.resources && !uniqueProviders[uniqueKey]) {
+          uniqueProviders[uniqueKey] = {
+            cpu: provider.resources.cpu || 0,
+            memory: provider.resources.memory || 0,
+            storage: provider.resources.storage || 0,
+            accelerators: { ...(provider.resources.accelerators || {}) },
+          };
+        }
+      },
+    );
+  });
+
+  return sumProviderResources(uniqueProviders);
+};
 
 export const StepTwo: React.FC<StepProps> = ({
   title,
@@ -31,15 +98,30 @@ export const StepTwo: React.FC<StepProps> = ({
   llmModelsWithProviders = [],
   serviceDescription,
   isLoadingLlmModels = false,
+  onSchemaError,
 }) => {
+  const { resources, resourcesLoading, resourcesError } = useResources();
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
 
-  // Get component models from store for all component types
+  // Get component models and errors from store
   const componentModels = useServiceDeployStore(
     (state) => state.componentModels,
   );
+  const componentModelsError = useServiceDeployStore(
+    (state) => state.componentModelsError,
+  );
+
+  // Check if the LLM models fetch failed for the selected service
+  const llmModelsError = selectedServiceId
+    ? (componentModelsError[`${selectedServiceId}:llm`] ?? null)
+    : null;
+
+  // Notify parent so it can gate the Deploy button.
+  useEffect(() => {
+    onSchemaError?.(!!llmModelsError);
+  }, [llmModelsError, onSchemaError]);
 
   // Get the service configuration for the selected service
   const selectedServiceConfig = selectedServiceId
@@ -56,6 +138,11 @@ export const StepTwo: React.FC<StepProps> = ({
     selectedServiceId || null,
     currentLlmProviderId ? "llm" : null,
     currentLlmProviderId || null,
+  );
+
+  const calculatedResources = useMemo(
+    () => calculateRequiredResources(formData, deployOptions),
+    [formData, deployOptions],
   );
 
   // Extract service version options from API response
@@ -362,9 +449,10 @@ export const StepTwo: React.FC<StepProps> = ({
       (c) => c.type === "llm",
     );
 
-    // Check if we're still loading OR if we have LLM component but no options yet
+    // Don't spin if LLM fetch already errored — InlineNotification above handles it.
     const isLoadingLlmOptions =
       isLlmComponent &&
+      !llmModelsError &&
       (isLoadingLlmModels ||
         (llmModelsWithProviders.length === 0 && llmOptions.length === 0));
 
@@ -757,11 +845,23 @@ export const StepTwo: React.FC<StepProps> = ({
       </div>
 
       {/* Resource Requirements */}
-      <ResourceRequirements
-        formData={formData}
-        deployOptions={deployOptions}
+      <ResourceRequirementsPanel
+        calculatedResources={calculatedResources}
+        resourceData={resources}
+        resourcesLoading={resourcesLoading}
+        resourcesError={resourcesError}
         onResourceStatusChange={onResourceStatusChange}
       />
+
+      {llmModelsError && (
+        <InlineNotification
+          kind="error"
+          title="Failed to load service configuration."
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
 
       {/* Service Configuration - Dynamically rendered */}
       <div className={styles.formSection}>{renderServiceConfig()}</div>

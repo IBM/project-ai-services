@@ -16,8 +16,8 @@ Phases
 
 Caller contract
 ---------------
-Any caller — the HTTP handler (POST /v1/connectors/{id}/syncs) or the future
-APScheduler job (_run_tick_wrapped in scheduler.py) — must follow the same
+Any caller — the HTTP handler (POST /v1/connectors/{id}/syncs) or the
+APScheduler (dispatch_sync in connectors.py) — must follow the same
 three-step preamble before calling run_tick():
 
     acquired = db_ops.try_acquire_sync_lock(connector_id)

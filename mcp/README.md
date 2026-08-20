@@ -209,7 +209,8 @@ Supports multiple authentication methods:
 
 **Passthrough** (`passthrough.go`):
 - Client provides Authorization header
-- Useful for proxied scenarios
+- Forwarded verbatim to the upstream API, which validates it
+- Required for HTTP transport, and only usable with HTTP transport
 
 ## Authentication System
 
@@ -226,15 +227,29 @@ type Authenticator interface {
 ### Authentication Flow:
 
 1. **Initialization**: CLI flags determine auth method
-2. **Validation**: Ensures only one auth method is specified
+2. **Validation**: Ensures only one auth method is specified, and that it matches the transport
 3. **Token Acquisition**: Different strategies per authenticator
 4. **Request Enhancement**: Adds Authorization header to API calls
+
+### Authentication and Transport
+
+Auth mode and transport are not independent — each transport permits exactly one class of authenticator:
+
+| Transport | Permitted auth | Rationale |
+|-----------|----------------|-----------|
+| Stdio (default) | `--auth-api-key`, `--auth-cli`, `--auth-token` | The server is a subprocess of a single trusted client, so a server-held credential is scoped to that user. |
+| HTTP (`--http`) | `--auth-passthrough` only | The server does not authenticate incoming requests, so a server-held credential would be usable by any caller that can reach the port. |
+
+Any other combination is rejected at startup. In particular, `--auth-passthrough` cannot be used with
+stdio: there is no inbound HTTP request to take an Authorization header from, so every tool call
+would fail.
 
 ### Security Considerations:
 - Tokens are cached where appropriate
 - Automatic token refresh for API key auth
 - No credentials stored in memory longer than necessary
 - Support for external secret managers (1Password)
+- HTTP transport never holds a credential of its own; each caller is authorized individually by the upstream API
 
 ## Transport Modes
 
@@ -242,11 +257,15 @@ type Authenticator interface {
 - Designed for desktop MCP clients
 - Persistent bidirectional communication
 - Maintains session state
+- Authenticates with a server-held credential (API key, CLI session, or token)
 
 ### HTTP Transport
 - RESTful API interface
 - CORS-enabled for web clients
 - Session management via headers
+- Requires `--auth-passthrough`: each caller supplies its own Authorization header, which is
+  forwarded to the upstream API for validation. The server holds no credential, so one instance
+  can serve many users without any of them borrowing another's access.
 
 ## Tool Generation Pipeline
 
@@ -276,18 +295,27 @@ make run
 ### Running Locally
 
 ```bash
-# HTTP mode
+# HTTP mode (requires --auth-passthrough)
 ./bin/ai-services-mcp \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
+  --auth-passthrough \
   --query version=2025-07-01 \
   --http \
   -p 3001
 ```
 
+Callers must supply their own IAM token on each request:
+
 ```bash
-# STDIO mode
+curl -X POST http://localhost:3001/mcp \
+  -H "Authorization: Bearer $(ibmcloud iam oauth-tokens --output json | jq -r .iam_token)" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+```bash
+# STDIO mode (server holds the credential)
 ./bin/ai-services-mcp \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
@@ -311,59 +339,19 @@ docker build -t ai-services-mcp:v1.0.0 .
 
 #### Running the Container
 
+HTTP mode requires `--auth-passthrough`, so the container never needs a credential of its own —
+each caller supplies its own Authorization header. The server-held credential options
+(`--auth-api-key`, `--auth-cli`, `--auth-token`) are stdio-only; see
+[Stdio Mode in Docker](#stdio-mode-in-docker) below.
+
 **Basic HTTP Mode (Recommended for Docker)**
 
 ```bash
-# Using passthrough authentication
 docker run -p 3000:3000 \
-  -e IBMCLOUD_API_KEY=your-api-key-here \
   ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-passthrough \
-  --query version=2025-07-01 \
-  --http
-```
-
-**Using Environment Variable for API Key**
-
-```bash
-# Set API key in environment
-export IBMCLOUD_API_KEY=your-api-key-here
-
-# Run container
-docker run -p 3000:3000 \
-  -e IBMCLOUD_API_KEY \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-api-key $IBMCLOUD_API_KEY \
-  --query version=2025-07-01 \
-  --http
-```
-
-**Using IBM Cloud CLI Authentication**
-
-```bash
-# Mount IBM Cloud CLI config directory
-docker run -p 3000:3000 \
-  -v ~/.bluemix:/home/mcpuser/.bluemix:ro \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
-  --query version=2025-07-01 \
-  --http
-```
-
-**Using Direct Token Authentication**
-
-```bash
-docker run -p 3000:3000 \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-token your-iam-token-here \
   --query version=2025-07-01 \
   --http
 ```
@@ -374,11 +362,10 @@ docker run -p 3000:3000 \
 # Mount local spec file
 docker run -p 3000:3000 \
   -v /path/to/specs:/app/specs:ro \
-  -e IBMCLOUD_API_KEY=your-api-key-here \
   ai-services-mcp:latest \
   --description /app/specs/openapi.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-api-key $IBMCLOUD_API_KEY \
+  --auth-passthrough \
   --query version=2025-07-01 \
   --http
 ```
@@ -389,14 +376,58 @@ docker run -p 3000:3000 \
 # Run on custom port (e.g., 8080)
 docker run -p 8080:8080 \
   -e PORT=8080 \
-  -e IBMCLOUD_API_KEY=your-api-key-here \
   ai-services-mcp:latest \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-api-key $IBMCLOUD_API_KEY \
+  --auth-passthrough \
   --query version=2025-07-01 \
   --http \
   -p 8080
+```
+
+#### Stdio Mode in Docker
+
+Stdio transport is where server-held credentials belong: the container is a subprocess of a single
+trusted client, so run it with `-i` and no published port.
+
+**Using Environment Variable for API Key**
+
+```bash
+# Set API key in environment
+export IBMCLOUD_API_KEY=your-api-key-here
+
+# Run container
+docker run -i --rm \
+  -e IBMCLOUD_API_KEY \
+  ai-services-mcp:latest \
+  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
+  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
+  --auth-api-key '$IBMCLOUD_API_KEY' \
+  --query version=2025-07-01
+```
+
+**Using IBM Cloud CLI Authentication**
+
+```bash
+# Mount IBM Cloud CLI config directory
+docker run -i --rm \
+  -v ~/.bluemix:/home/mcpuser/.bluemix:ro \
+  ai-services-mcp:latest \
+  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
+  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
+  --auth-cli \
+  --query version=2025-07-01
+```
+
+**Using Direct Token Authentication**
+
+```bash
+docker run -i --rm \
+  ai-services-mcp:latest \
+  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
+  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
+  --auth-token your-iam-token-here \
+  --query version=2025-07-01
 ```
 
 #### Docker Environment Variables

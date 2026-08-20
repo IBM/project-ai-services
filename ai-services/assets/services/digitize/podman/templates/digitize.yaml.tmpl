@@ -4,6 +4,8 @@ metadata:
   name: "digitize-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"
@@ -67,6 +69,7 @@ spec:
           export POSTGRES_PASSWORD=$(cat /etc/secret/digitize-db-secret/password)
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          export DB_ENCRYPTION_KEY=$(cat /etc/secret/digitize-db-encryption-secret/db-encryption-key)
           {{- if .Values.llm.apiKey }}
           export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
           {{- end }}
@@ -137,6 +140,9 @@ spec:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
           readOnly: true
+        - mountPath: /etc/secret/digitize-db-encryption-secret
+          name: digitize-db-encryption-secret
+          readOnly: true
         {{- if .Values.llm.apiKey }}
         - mountPath: /etc/secret/vllm-secret
           name: vllm-secret
@@ -150,6 +156,9 @@ spec:
     - name: digitize-db-secret
       secret:
         secretName: "digitize-db-secret-{{ .InstanceSlug }}"
+    - name: digitize-db-encryption-secret
+      secret:
+        secretName: "digitize-db-encryption-secret-{{ .InstanceSlug }}"
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"

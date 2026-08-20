@@ -1,12 +1,14 @@
 import { useEffect, useRef } from "react";
 
 const AUTO_REFRESH_INTERVAL_MS = 120_000; // 2 minutes
+const TRANSITIONAL_POLL_INTERVAL_MS = 5_000; // 5 seconds
 
 interface UseAutoRefreshOptions {
   fetchFn: () => void | Promise<void>;
   hasData: boolean;
   isPaused?: boolean;
   refreshTrigger?: number;
+  hasTransitionalRow?: boolean;
 }
 
 export function useAutoRefresh({
@@ -14,6 +16,7 @@ export function useAutoRefresh({
   hasData,
   isPaused,
   refreshTrigger,
+  hasTransitionalRow,
 }: UseAutoRefreshOptions): void {
   const isMountedRef = useRef(false);
   const prevFetchFnRef = useRef<(() => void) | null>(null);
@@ -72,4 +75,22 @@ export function useAutoRefresh({
 
     return () => clearInterval(intervalId);
   }, [hasData]);
+
+  // 5-second transitional poll — active only while at least one row is in a
+  // transitional state (Deploying, Deleting, Downloading).
+  useEffect(() => {
+    if (!hasTransitionalRow) return;
+
+    const intervalId = setInterval(() => {
+      // Skip tick: delete flow is active or a previous fetch hasn't finished
+      if (isPausedRef.current || isFetchingRef.current) return;
+
+      isFetchingRef.current = true;
+      void Promise.resolve(prevFetchFnRef.current?.()).finally(() => {
+        isFetchingRef.current = false;
+      });
+    }, TRANSITIONAL_POLL_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [hasTransitionalRow]);
 }

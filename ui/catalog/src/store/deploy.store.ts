@@ -53,9 +53,14 @@ interface DeployState {
 
   // Provider params cache - persisted with 1-hour cache
   providerParams: Record<string, ProviderParamsCache>;
+  // Provider params error map - keyed "componentType:providerId", absent means loading or cached
+  providerParamsError: Record<string, string>;
 
   // Service params cache - persisted with 1-hour cache
   serviceParams: Record<string, ServiceParamsCache>;
+
+  // Service params error map - keyed by serviceId, absent means loading or cached
+  serviceParamsError: Record<string, string>;
 
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
@@ -97,11 +102,19 @@ interface DeployState {
     componentType: string,
     providerId: string,
   ) => ProviderSchema | null;
+  setProviderParamsError: (
+    componentType: string,
+    providerId: string,
+    error: string,
+  ) => void;
+  clearProviderParamsError: (componentType: string, providerId: string) => void;
   clearProviderParams: () => void;
 
   // Service params actions
   setServiceParams: (serviceId: string, data: ProviderSchema) => void;
   getServiceParams: (serviceId: string) => ProviderSchema | null;
+  setServiceParamsError: (serviceId: string, error: string) => void;
+  clearServiceParamsError: (serviceId: string) => void;
   clearServiceParams: () => void;
 
   // Check if cache is stale
@@ -158,9 +171,11 @@ export const useDeployStore = create<DeployState>()(
 
       // Provider params state
       providerParams: {},
+      providerParamsError: {},
 
       // Service params state
       serviceParams: {},
+      serviceParamsError: {},
 
       // Architectures actions
       setArchitectures: (data) =>
@@ -273,15 +288,17 @@ export const useDeployStore = create<DeployState>()(
       // Provider params actions
       setProviderParams: (componentType, providerId, data) => {
         const key = `${componentType}:${providerId}`;
-        set((state) => ({
-          providerParams: {
-            ...state.providerParams,
-            [key]: {
-              data,
-              fetchedAt: Date.now(),
+        set((state) => {
+          const { [key]: _removed, ...remainingErrors } =
+            state.providerParamsError;
+          return {
+            providerParams: {
+              ...state.providerParams,
+              [key]: { data, fetchedAt: Date.now() },
             },
-          },
-        }));
+            providerParamsError: remainingErrors,
+          };
+        });
       },
 
       getProviderParams: (componentType, providerId) => {
@@ -290,19 +307,37 @@ export const useDeployStore = create<DeployState>()(
         return cached ? cached.data : null;
       },
 
-      clearProviderParams: () => set({ providerParams: {} }),
+      setProviderParamsError: (componentType, providerId, error) => {
+        const key = `${componentType}:${providerId}`;
+        set((state) => ({
+          providerParamsError: { ...state.providerParamsError, [key]: error },
+        }));
+      },
+
+      clearProviderParamsError: (componentType, providerId) => {
+        const key = `${componentType}:${providerId}`;
+        set((state) => {
+          const { [key]: _removed, ...rest } = state.providerParamsError;
+          return { providerParamsError: rest };
+        });
+      },
+
+      clearProviderParams: () =>
+        set({ providerParams: {}, providerParamsError: {} }),
 
       // Service params actions
       setServiceParams: (serviceId, data) => {
-        set((state) => ({
-          serviceParams: {
-            ...state.serviceParams,
-            [serviceId]: {
-              data,
-              fetchedAt: Date.now(),
+        set((state) => {
+          const { [serviceId]: _removed, ...remainingErrors } =
+            state.serviceParamsError;
+          return {
+            serviceParams: {
+              ...state.serviceParams,
+              [serviceId]: { data, fetchedAt: Date.now() },
             },
-          },
-        }));
+            serviceParamsError: remainingErrors,
+          };
+        });
       },
 
       getServiceParams: (serviceId) => {
@@ -310,7 +345,24 @@ export const useDeployStore = create<DeployState>()(
         return cached ? cached.data : null;
       },
 
-      clearServiceParams: () => set({ serviceParams: {} }),
+      setServiceParamsError: (serviceId, error) => {
+        set((state) => ({
+          serviceParamsError: {
+            ...state.serviceParamsError,
+            [serviceId]: error,
+          },
+        }));
+      },
+
+      clearServiceParamsError: (serviceId) => {
+        set((state) => {
+          const { [serviceId]: _removed, ...rest } = state.serviceParamsError;
+          return { serviceParamsError: rest };
+        });
+      },
+
+      clearServiceParams: () =>
+        set({ serviceParams: {}, serviceParamsError: {} }),
 
       // Cache staleness checks
 
@@ -370,7 +422,9 @@ export const useDeployStore = create<DeployState>()(
           deployOptions: {},
           deployOptionsError: null,
           providerParams: {},
+          providerParamsError: {},
           serviceParams: {},
+          serviceParamsError: {},
         });
       },
 
@@ -402,6 +456,7 @@ export const useDeployStore = create<DeployState>()(
         architectureDetailsFetchedAt: state.architectureDetailsFetchedAt,
         deployOptions: state.deployOptions,
         providerParams: state.providerParams,
+        // providerParamsError and serviceParamsError are intentionally not persisted — errors are transient
         serviceParams: state.serviceParams,
       }),
       // Version check: clear cache if version mismatch
