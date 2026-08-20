@@ -77,39 +77,34 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
                 component.providers.length > 0,
             ) || [];
 
-          // STAGE 1: Fetch Step 1 component models first (for immediate UI display)
-          const step1Promises = step1Components.map((component) => {
-            setComponentModelsLoading(serviceId, component.type, true);
-            return fetchComponentModelsWithSchemas(
-              serviceId,
-              component.type,
-              setProviderSchema,
-              deployData, // Pass cached deploy options to avoid redundant API call
-            )
-              .then((models) => {
-                setComponentModels(serviceId, component.type, models);
-                return { type: component.type, models };
-              })
-              .catch((err) => {
-                const errorMessage =
-                  err instanceof Error
-                    ? err.message
-                    : `Failed to load ${component.type} models`;
-                setComponentModelsError(
-                  serviceId,
-                  component.type,
-                  errorMessage,
-                );
-                return { type: component.type, models: [] };
-              });
+          // STAGE 1: Fetch Step 1 component models in parallel (Promise.allSettled so a single failure does not block the rest).
+          const step1Results = await Promise.allSettled(
+            step1Components.map(async (component) => {
+              setComponentModelsLoading(serviceId, component.type, true);
+              const models = await fetchComponentModelsWithSchemas(
+                serviceId,
+                component.type,
+                setProviderSchema,
+                deployData,
+              );
+              setComponentModels(serviceId, component.type, models);
+              return { type: component.type, models };
+            }),
+          );
+
+          step1Results.forEach((result, index) => {
+            if (result.status === "rejected") {
+              const component = step1Components[index];
+              const errorMessage =
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : `Failed to load ${component.type} models`;
+              setComponentModelsError(serviceId, component.type, errorMessage);
+            }
           });
 
-          // Wait for Step 1 components to finish
-          await Promise.all(step1Promises);
-
-          // STAGE 2: Fetch LLM models in background (for Step 2)
-          // Don't wait for this - let it load in background
-          fetchLLMOptionsWithModels(serviceId, setProviderSchema, deployData) // Pass cached deploy options
+          // STAGE 2: Fetch LLM models in background (for Step 2).
+          fetchLLMOptionsWithModels(serviceId, setProviderSchema, deployData)
             .then((llmData) => {
               setComponentModels(serviceId, "llm", llmData);
             })
@@ -150,6 +145,7 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
     deployOptions,
     llmModels,
     isLoading: deployOptionsLoading || llmModelsLoading || shouldBeLoading,
-    error: deployOptionsError || llmModelsError,
+    error: deployOptionsError,
+    llmError: llmModelsError,
   };
 };

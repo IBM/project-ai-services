@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import {
@@ -8,6 +8,7 @@ import {
   InlineLoading,
   Accordion,
   AccordionItem,
+  InlineNotification,
 } from "@carbon/react";
 import type { ServiceDeployOptions } from "@/types/api.types";
 import { useResources } from "../../Shared/hooks/useResources";
@@ -97,16 +98,30 @@ export const StepTwo: React.FC<StepProps> = ({
   llmModelsWithProviders = [],
   serviceDescription,
   isLoadingLlmModels = false,
+  onSchemaError,
 }) => {
   const { resources, resourcesLoading, resourcesError } = useResources();
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
   const [showValidationError, setShowValidationError] = useState(false);
 
-  // Get component models from store for all component types
+  // Get component models and errors from store
   const componentModels = useServiceDeployStore(
     (state) => state.componentModels,
   );
+  const componentModelsError = useServiceDeployStore(
+    (state) => state.componentModelsError,
+  );
+
+  // Check if the LLM models fetch failed for the selected service
+  const llmModelsError = selectedServiceId
+    ? (componentModelsError[`${selectedServiceId}:llm`] ?? null)
+    : null;
+
+  // Notify parent so it can gate the Deploy button.
+  useEffect(() => {
+    onSchemaError?.(!!llmModelsError);
+  }, [llmModelsError, onSchemaError]);
 
   // Get the service configuration for the selected service
   const selectedServiceConfig = selectedServiceId
@@ -434,9 +449,10 @@ export const StepTwo: React.FC<StepProps> = ({
       (c) => c.type === "llm",
     );
 
-    // Check if we're still loading OR if we have LLM component but no options yet
+    // Don't spin if LLM fetch already errored — InlineNotification above handles it.
     const isLoadingLlmOptions =
       isLlmComponent &&
+      !llmModelsError &&
       (isLoadingLlmModels ||
         (llmModelsWithProviders.length === 0 && llmOptions.length === 0));
 
@@ -836,6 +852,16 @@ export const StepTwo: React.FC<StepProps> = ({
         resourcesError={resourcesError}
         onResourceStatusChange={onResourceStatusChange}
       />
+
+      {llmModelsError && (
+        <InlineNotification
+          kind="error"
+          title="Failed to load service configuration."
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
 
       {/* Service Configuration - Dynamically rendered */}
       <div className={styles.formSection}>{renderServiceConfig()}</div>

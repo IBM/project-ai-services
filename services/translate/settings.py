@@ -24,15 +24,26 @@ class TranslationConfig(BaseSettings):
         default=13107,
         ge=1,
         description=(
-            "Maximum input tokens per translation chunk (async path). "
-            "Default is 13107 (≈ 40% of 32768, the granite-3.3-8b-instruct context window). "
-            "Can be overridden via CHUNK_TOKEN_BUDGET env var. "
-            "Updated at runtime if a different MAX_MODEL_LEN is detected."
+            "Fallback chunk token budget used when the model context length cannot be "
+            "resolved at runtime. At runtime, the budget is derived as "
+            "CHUNK_BUDGET_RATIO × resolved MAX_MODEL_LEN. "
+            "Can be overridden via CHUNK_TOKEN_BUDGET env var."
+        ),
+    )
+
+    chunk_budget_ratio: float = Field(
+        default=0.40,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Fraction of the resolved model context window allocated to input tokens "
+            "per chunk. Defaults to 0.40 (40%), leaving 60% for prompt overhead and "
+            "translated output. Can be overridden via CHUNK_BUDGET_RATIO env var."
         ),
     )
 
     prompt_overhead_tokens: int = Field(
-        default=150,
+        default=250,
         ge=0,
         description="Estimated token overhead for system + user prompt template",
     )

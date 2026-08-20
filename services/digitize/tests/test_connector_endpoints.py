@@ -185,6 +185,11 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
     monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
+    # Scheduler stubs — prevent RuntimeError from uninitialised _scheduler
+    import digitize.connectors.scheduler as scheduler_module
+    monkeypatch.setattr(scheduler_module, "register_connector_job", AsyncMock())
+    monkeypatch.setattr(scheduler_module, "remove_connector_job", AsyncMock())
+
     return TestClient(digitize_app.app)
 
 

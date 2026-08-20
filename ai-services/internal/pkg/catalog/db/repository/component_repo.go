@@ -30,6 +30,8 @@ type ComponentRepository interface {
 	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
 	// Delete removes a component from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
+	// ExistsByTypeAndProvider reports whether any row in the components table has the given type and provider.
+	ExistsByTypeAndProvider(ctx context.Context, componentType, provider string) (bool, error)
 }
 
 // componentRepo implements ComponentRepository using pgx.
@@ -364,6 +366,17 @@ func (r *componentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// ExistsByTypeAndProvider reports whether any row in the components table has the given type and provider.
+func (r *componentRepo) ExistsByTypeAndProvider(ctx context.Context, componentType, provider string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM components WHERE type = $1 AND provider = $2)`, componentType, provider).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check component existence by type and provider: %w", err)
+	}
+
+	return exists, nil
 }
 
 // Made with Bob

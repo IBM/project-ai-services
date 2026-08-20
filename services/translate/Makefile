@@ -1,5 +1,5 @@
 IMAGE=translate-service
-TAG?=v0.0.2
+TAG?=v0.0.3
 
 run:
 	PORT=$${PORT:-9000} /var/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port $$PORT

@@ -12,11 +12,14 @@ import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { ServiceConfig } from "../types";
 import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../../Shared/utils/displayHelpers";
-import type { useBatchProviderParams } from "../hooks/useProviderParams";
 import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
-import type { DeployOptionsComponent as Component } from "@/types/api.types";
+import type {
+  DeployOptionsComponent as Component,
+  ProviderSchema,
+  JSONSchema,
+} from "@/types/api.types";
 import { parseSchema, validateField } from "@/utils/schemaParser";
-import { useServiceParams } from "../hooks/useServiceParams";
+import { useDeployStore } from "@/store/deploy.store";
 import { shouldShowParam } from "@/utils/paramFilter";
 
 interface ServiceConfigCardProps {
@@ -27,10 +30,7 @@ interface ServiceConfigCardProps {
   fields: ServiceConfigField[];
   isEditing: boolean;
   currentConfig: ServiceConfig | null;
-  providerParamsByType: Record<
-    string,
-    ReturnType<typeof useBatchProviderParams>
-  >;
+  providerParamsByType: Record<string, Record<string, ProviderSchema>>;
   llmComponent: Component | null;
   rerankerComponent: Component | null;
   onEdit: () => void;
@@ -61,8 +61,11 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
   const [hasValidationError, setHasValidationError] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Fetch service-level schema
-  const { params: serviceSchema } = useServiceParams(serviceId);
+  // Read service-level schema from store — written eagerly by useDeployOptions.
+  const serviceSchema = useDeployStore((state) => {
+    const cached = state.serviceParams[serviceId];
+    return cached ? cached.data : null;
+  });
 
   // Helper function to get model description from provider schema
   const getModelDescription = (
@@ -74,7 +77,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       return null;
     }
 
-    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const paramsMap = providerParamsByType[componentType] || {};
     const providerSchema = paramsMap[providerId];
 
     if (
@@ -170,7 +173,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     if (currentConfig.inferenceBackend) {
       // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
       const componentType = llmComponent ? "llm" : "reranker";
-      const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+      const paramsMap = providerParamsByType[componentType] || {};
       const providerSchema = paramsMap[currentConfig.inferenceBackend];
 
       if (providerSchema?.properties) {
@@ -223,7 +226,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     const componentType = llmComponent ? "llm" : "reranker";
     const selectedModel =
       currentConfig?.components?.[componentType]?.params?.model;
-    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const paramsMap = providerParamsByType[componentType] || {};
 
     // Filter providers compatible with the selected model
     const inferenceBackendOptions = component.providers
@@ -343,7 +346,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             const componentConfig = config.components?.[field.key];
             if (!componentConfig?.params) return null;
 
-            const paramsMap = providerParamsByType[field.key]?.paramsMap || {};
+            const paramsMap = providerParamsByType[field.key] || {};
             const schema = paramsMap[componentConfig.providerId];
 
             if (!schema?.properties) return null;
@@ -412,8 +415,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             (() => {
               // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
               const componentType = llmComponent ? "llm" : "reranker";
-              const paramsMap =
-                providerParamsByType[componentType]?.paramsMap || {};
+              const paramsMap = providerParamsByType[componentType] || {};
               const schema = paramsMap[config.inferenceBackend];
 
               if (!schema?.properties) return null;
@@ -601,8 +603,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
                               // Extract default model from provider schema
                               const paramsMap =
-                                providerParamsByType[field.key]?.paramsMap ||
-                                {};
+                                providerParamsByType[field.key] || {};
                               const cachedParams = paramsMap[providerId];
                               const modelParam: Record<string, unknown> = {};
 
@@ -693,9 +694,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     </div>
                     {(() => {
                       const providerSchema =
-                        providerParamsByType[componentType]?.paramsMap?.[
-                          fieldValue || ""
-                        ];
+                        providerParamsByType[componentType]?.[fieldValue || ""];
                       const hasCredentialFields =
                         providerSchema?.properties &&
                         Object.keys(providerSchema.properties).filter(
@@ -723,8 +722,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                                 setFieldErrors({});
                                 // Get provider schema keys to know which params belong to provider
                                 const providerSchema =
-                                  providerParamsByType[componentType]
-                                    ?.paramsMap?.[fieldValue || ""];
+                                  providerParamsByType[componentType]?.[
+                                    fieldValue || ""
+                                  ];
                                 const providerKeys = new Set(
                                   providerSchema?.properties
                                     ? Object.keys(providerSchema.properties)
@@ -754,8 +754,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                                 });
                               }}
                               providerParamsMap={
-                                providerParamsByType[componentType]
-                                  ?.paramsMap || {}
+                                (providerParamsByType[componentType] ||
+                                  {}) as Record<string, JSONSchema>
                               }
                               hasValidationError={hasValidationError}
                               fieldErrors={fieldErrors}

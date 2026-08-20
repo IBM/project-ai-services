@@ -234,16 +234,35 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 	return e.loadPodTemplate(app, file, params)
 }
 
-func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error) {
+// loadDefaultValues reads values.yaml, processes @generate annotations
+// (e.g. @generate:key, @generate:password), and unmarshals the result.
+func (e *embedTemplateProvider) loadDefaultValues(valuesPath string) (map[string]interface{}, error) {
 	// Load the default values.yaml
-	valuesPath := e.buildPath(app, getRuntime(), "values.yaml")
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml: %w", err)
 	}
+
+	// Process @generate annotations before parsing.
+	valuesData, err = utils.ProcessGenerateAnnotationsFromYAML(valuesData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process generate annotations: %w", err)
+	}
+
 	values := map[string]interface{}{}
 	if err := yaml.Unmarshal(valuesData, &values); err != nil {
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
+	}
+
+	return values, nil
+}
+
+func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error) {
+	// Load the default values.yaml (including @generate annotation processing).
+	valuesPath := e.buildPath(app, getRuntime(), "values.yaml")
+	values, err := e.loadDefaultValues(valuesPath)
+	if err != nil {
+		return nil, err
 	}
 
 	// Load user provided file overrides and validate them

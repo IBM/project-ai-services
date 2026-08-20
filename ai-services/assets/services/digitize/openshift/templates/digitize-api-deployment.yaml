@@ -71,6 +71,11 @@ spec:
                 secretKeyRef:
                   name: "digitize-db-secret"
                   key: password
+            - name: DB_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "digitize-db-encryption-secret"
+                  key: db-encryption-key
             - name: DB_POOL_SIZE
               value: "5"
             - name: DB_MAX_OVERFLOW
