@@ -21,7 +21,7 @@ The IBM Cloud API MCP Server is a Go implementation of the Model Context Protoco
 
 ### Key Features
 - Dynamic tool generation from OpenAPI specs
-- Multiple authentication methods (API Key, CLI, Token, Passthrough)
+- Multiple authentication methods (API Key, Token, Passthrough)
 - Support for both stdio and HTTP transports
 - Schema inspection capabilities
 - Tag-based tool filtering
@@ -80,9 +80,7 @@ go-api-mcp/
 │   ├── authenticator/           # Authentication implementations
 │   │   ├── interface.go         # Authenticator interface
 │   │   ├── api_key.go           # API key authentication
-│   │   ├── cli.go               # IBM Cloud CLI authentication
 │   │   ├── env.go               # Environment variable auth
-│   │   ├── op.go                # 1Password integration
 │   │   ├── passthrough.go       # Passthrough authentication
 │   │   └── token.go             # Direct token authentication
 │   │
@@ -191,17 +189,9 @@ Supports multiple authentication methods:
 - Direct API key usage
 - Exchanges key for IAM token
 
-**CLI** (`cli.go`):
-- Uses existing `ibmcloud` CLI session
-- Reads token from CLI configuration
-
 **Environment** (`env.go`):
 - Reads API key from environment variable
 - Format: `--auth-api-key $VAR_NAME`
-
-**1Password** (`op.go`):
-- Integrates with 1Password CLI
-- Format: `--auth-api-key op://vault/item/field`
 
 **Token** (`token.go`):
 - Direct IAM token usage
@@ -237,7 +227,7 @@ Auth mode and transport are not independent — each transport permits exactly o
 
 | Transport | Permitted auth | Rationale |
 |-----------|----------------|-----------|
-| Stdio (default) | `--auth-api-key`, `--auth-cli`, `--auth-token` | The server is a subprocess of a single trusted client, so a server-held credential is scoped to that user. |
+| Stdio (default) | `--auth-api-key`, `--auth-token` | The server is a subprocess of a single trusted client, so a server-held credential is scoped to that user. |
 | HTTP (`--http`) | `--auth-passthrough` only | The server does not authenticate incoming requests, so a server-held credential would be usable by any caller that can reach the port. |
 
 Any other combination is rejected at startup. In particular, `--auth-passthrough` cannot be used with
@@ -248,7 +238,6 @@ would fail.
 - Tokens are cached where appropriate
 - Automatic token refresh for API key auth
 - No credentials stored in memory longer than necessary
-- Support for external secret managers (1Password)
 - HTTP transport never holds a credential of its own; each caller is authorized individually by the upstream API
 
 ## Transport Modes
@@ -257,7 +246,7 @@ would fail.
 - Designed for desktop MCP clients
 - Persistent bidirectional communication
 - Maintains session state
-- Authenticates with a server-held credential (API key, CLI session, or token)
+- Authenticates with a server-held credential (API key or token)
 
 ### HTTP Transport
 - RESTful API interface
@@ -319,7 +308,7 @@ curl -X POST http://localhost:3001/mcp \
 ./bin/ai-services-mcp \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
+  --auth-token your-token-here \
   --query version=2025-07-01
 ```
 
@@ -341,7 +330,7 @@ docker build -t ai-services-mcp:v1.0.0 .
 
 HTTP mode requires `--auth-passthrough`, so the container never needs a credential of its own —
 each caller supplies its own Authorization header. The server-held credential options
-(`--auth-api-key`, `--auth-cli`, `--auth-token`) are stdio-only; see
+(`--auth-api-key`, `--auth-token`) are stdio-only; see
 [Stdio Mode in Docker](#stdio-mode-in-docker) below.
 
 **Basic HTTP Mode (Recommended for Docker)**
@@ -403,19 +392,6 @@ docker run -i --rm \
   --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
   --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
   --auth-api-key '$IBMCLOUD_API_KEY' \
-  --query version=2025-07-01
-```
-
-**Using IBM Cloud CLI Authentication**
-
-```bash
-# Mount IBM Cloud CLI config directory
-docker run -i --rm \
-  -v ~/.bluemix:/home/mcpuser/.bluemix:ro \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
   --query version=2025-07-01
 ```
 
@@ -486,7 +462,7 @@ Core utilities and data structures:
 
 #### Core Functionality Tests
 Business logic and tool system:
-- **`internal/authenticator`** - All authentication methods (API Key, CLI, Token, 1Password, Environment, Passthrough)
+- **`internal/authenticator`** - All authentication methods (API Key, Token, Environment, Passthrough)
 - **`internal/tool`** - Tool aggregation, provider execution, schema building
 
 #### Application Tests
