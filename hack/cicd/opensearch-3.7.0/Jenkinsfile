@@ -4,9 +4,9 @@ pipeline {
 
     parameters {
         booleanParam(
-            name: 'PUSH_FLOATING_TAG',
+            name: 'PUSH_RELEASE_TAG',
             defaultValue: false,
-            description: 'Also tag and push the image as icr.io/ai-services-private/opensearch:3.7.0-ppc64le'
+            description: 'Also tag and push the image as icr.io/ai-services-cicd/opensearch:3.7.0-ppc64le'
         )
     }
 
@@ -49,6 +49,7 @@ pipeline {
         ICR_REGISTRY = "icr.io"
 
         IMAGE_NAME = "icr.io/ai-services-private/opensearch"
+        RELEASE_TAG_IMAGE_NAME = "icr.io/ai-services-cicd/opensearch"
         IMAGE_TAG  = "${OPENSEARCH_VERSION}-${ARCHITECTURE}-${BUILD_NUMBER}"
 
         DOCKERFILE_DIR = "o/opensearch-project-opensearch-build/Dockerfiles/3.7.0_ubi9.7"
@@ -351,13 +352,13 @@ pipeline {
                 }
 
                 script {
-                    if (params.PUSH_FLOATING_TAG) {
-                        def floatingTag = "${IMAGE_NAME}:${OPENSEARCH_VERSION}-${ARCHITECTURE}"
+                    if (params.PUSH_RELEASE_TAG) {
+                        def releaseTag = "${RELEASE_TAG_IMAGE_NAME}:${OPENSEARCH_VERSION}-${ARCHITECTURE}"
 
                         sh """
                             set -euo pipefail
-                            echo "Tagging image as ${floatingTag}..."
-                            podman tag ${IMAGE_NAME}:${IMAGE_TAG} ${floatingTag}
+                            echo "Tagging image as ${releaseTag}..."
+                            podman tag ${IMAGE_NAME}:${IMAGE_TAG} ${releaseTag}
                         """
 
                         withCredentials([
@@ -376,8 +377,8 @@ pipeline {
                                     ${ICR_REGISTRY}
                                 set -x
 
-                                echo "Pushing floating tag (${floatingTag})..."
-                                podman push ${floatingTag}
+                                echo "Pushing release tag (${releaseTag})..."
+                                podman push ${releaseTag}
 
                                 podman logout ${ICR_REGISTRY}
                             """
