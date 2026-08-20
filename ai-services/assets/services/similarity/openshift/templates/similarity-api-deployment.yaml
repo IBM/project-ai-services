@@ -6,6 +6,7 @@ metadata:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: api
 spec:
   replicas: 1
   selector:
