@@ -172,7 +172,7 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 	// Step 3: TODO — full archive-based validation; call s.ValidateBundle once implemented.
 
 	// Step 3a: guard — reject if any running service/component is using this catalog entry.
-	if err := s.checkNoRunningInstances(ctx, meta); err != nil {
+	if err := s.checkNoRunningInstances(ctx, meta.CatalogType(), meta.CatalogID()); err != nil {
 		return nil, err
 	}
 
@@ -269,18 +269,67 @@ func (s *bundleService) GetBundleByID(ctx context.Context, bundleID string) (*Bu
 	return rowToResponse(row), nil
 }
 
-// DeleteBundle marks the row deleting, removes the on-disk directory, reloads
-// CatalogProvider, and deletes the DB row.
+// DeleteBundle synchronously marks the row deleting, guards against running
+// instances, removes the on-disk directory, reloads CatalogProvider (TODO),
+// and deletes the DB row.
 //
-// Processing steps (to be implemented):
-//  1. Mark row deleting via BundleRepository.Update.
-//  2. Delete on-disk directory: bundleDirPath(existing.CatalogType, existing.CatalogID, existing.Version).
-//  3. Reload CatalogProvider.
-//  4. Delete DB row via BundleRepository.Delete.
-//     On failure before step 4: mark row failed.
-func (s *bundleService) DeleteBundle(_ context.Context, _ *BundleRecord) error {
-	// TODO: implement
-	panic("not implemented")
+// It accepts the *BundleResponse returned by GetBundleByID — the same shape
+// used by ReplaceBundle — so the handler does not need to construct an
+// internal BundleRecord manually.
+//
+//  1. Guard: checkNoRunningInstances — returns 409 Conflict if live workloads
+//     still reference this bundle's catalog entry.
+//  2. Mark row deleting via BundleRepository.Update.
+//  3. Delete on-disk directory: bundleDirPath(existing.CatalogType, existing.CatalogID, existing.Version).
+//  4. TODO — CatalogProvider.Reload() once the provider reference is wired in.
+//  5. Delete DB row via BundleRepository.Delete.
+//     On failure before step 5: mark row failed.
+func (s *bundleService) DeleteBundle(ctx context.Context, existing *BundleResponse) error {
+	// Step 1: guard — reject if any running service/component is using this catalog entry.
+	// Use existing fields directly, mirroring how ReplaceBundle passes meta from the archive.
+	if err := s.checkNoRunningInstances(ctx, existing.CatalogType, existing.CatalogID); err != nil {
+		return err
+	}
+
+	existingID, err := uuid.Parse(existing.ID)
+	if err != nil {
+		return fmt.Errorf("invalid existing bundle id %q: %w", existing.ID, err)
+	}
+
+	// Step 2: mark row deleting.
+	statusDeleting := models.BundleStatusDeleting
+	if updateErr := s.repo.Update(ctx, existingID, models.BundleUpdate{Status: &statusDeleting}); updateErr != nil {
+		return fmt.Errorf("failed to mark bundle as deleting: %w", updateErr)
+	}
+
+	// Steps 3–5: remove on-disk dir, reload catalog, delete DB row.
+	// Any failure before the DB delete marks the row failed.
+	if deleteErr := s.deleteBundleFiles(ctx, existingID, existing); deleteErr != nil {
+		s.markFailed(ctx, existingID, deleteErr.Error())
+
+		return deleteErr
+	}
+
+	return nil
+}
+
+// deleteBundleFiles removes the on-disk bundle directory and then permanently
+// deletes the DB row. Called only by DeleteBundle after the row is "deleting".
+func (s *bundleService) deleteBundleFiles(ctx context.Context, existingID uuid.UUID, existing *BundleResponse) error {
+	// Step 3: delete on-disk directory (best-effort — missing dir is not fatal).
+	dirPath := bundleDirPath(existing.CatalogType, existing.CatalogID, existing.Version)
+	if err := os.RemoveAll(dirPath); err != nil {
+		return fmt.Errorf("failed to remove bundle directory %q: %w", dirPath, err)
+	}
+
+	// Step 4: TODO — CatalogProvider.Reload() once the provider reference is wired in.
+
+	// Step 5: delete DB row.
+	if err := s.repo.Delete(ctx, existingID); err != nil {
+		return fmt.Errorf("failed to delete bundle record: %w", err)
+	}
+
+	return nil
 }
 
 // ListBundles returns one page of bundle rows ordered by created_at DESC.
@@ -338,17 +387,17 @@ func (s *bundleService) ListBundles(ctx context.Context, req BundleListRequest) 
 
 // checkNoRunningInstances returns a 409 Conflict ValidationError when any
 // service or component row in the DB is already using the catalog entry
-// identified by meta.  It is called before ReplaceBundle (and can be reused
-// by DeleteBundle in the future) to prevent in-flight replacements or
-// deletions while live workloads depend on the bundle.
+// identified by catalogType + catalogID.  It is called before ReplaceBundle
+// and DeleteBundle to prevent in-flight replacements or deletions while live
+// workloads depend on the bundle.
 //
 //   - For a service bundle:  checks the services table by catalog_id.
 //   - For a component bundle: the catalog_id is "<type>--<provider>"; both
 //     halves are matched against the components table (type + provider).
-func (s *bundleService) checkNoRunningInstances(ctx context.Context, meta BundleMetadata) error {
-	switch meta.CatalogType() {
+func (s *bundleService) checkNoRunningInstances(ctx context.Context, catalogType, catalogID string) error {
+	switch catalogType {
 	case CatalogTypeService:
-		exists, err := s.svcRepo.ExistsByCatalogID(ctx, meta.CatalogID())
+		exists, err := s.svcRepo.ExistsByCatalogID(ctx, catalogID)
 		if err != nil {
 			return fmt.Errorf("failed to check running services: %w", err)
 		}
@@ -357,16 +406,16 @@ func (s *bundleService) checkNoRunningInstances(ctx context.Context, meta Bundle
 				Code: http.StatusConflict,
 				Message: fmt.Sprintf(
 					"cannot replace bundle: one or more services are currently running with catalog_id %q",
-					meta.CatalogID(),
+					catalogID,
 				),
 			}
 		}
 
 	case CatalogTypeComponent:
 		// catalog_id is "<component_type>--<provider>"; split on the first "--".
-		parts := strings.SplitN(meta.CatalogID(), "--", splitTwo)
+		parts := strings.SplitN(catalogID, "--", splitTwo)
 		if len(parts) != splitTwo {
-			return fmt.Errorf("malformed component catalog_id %q: expected <type>--<provider>", meta.CatalogID())
+			return fmt.Errorf("malformed component catalog_id %q: expected <type>--<provider>", catalogID)
 		}
 		componentType, provider := parts[0], parts[1]
 		exists, err := s.compRepo.ExistsByTypeAndProvider(ctx, componentType, provider)

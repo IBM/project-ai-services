@@ -186,11 +186,36 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 //	@Failure		404	{object}	ErrorResponse	"Bundle not found"
 //	@Router			/catalog/bundles/{id} [delete]
 func (h *BundleHandler) DeleteBundle(c *gin.Context) {
-	// TODO: read id path param via c.Param("id")
-	// TODO: call h.bundleService.GetBundleRecord — return 404 if nil
-	// TODO: call h.bundleService.DeleteBundle(c.Request.Context(), existing)
-	// TODO: return 204 on success
-	c.Status(http.StatusNotImplemented)
+	bundleID := c.Param("id")
+
+	// Validate UUID format upfront — avoids a round-trip to the DB for a malformed ID.
+	if _, err := uuid.Parse(bundleID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("bundle_id %q is not a valid UUID; use the bundle ID returned by list or create", bundleID),
+		})
+
+		return
+	}
+
+	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: fmt.Sprintf("bundle %q not found", bundleID)})
+
+		return
+	}
+
+	if err := h.bundleService.DeleteBundle(c.Request.Context(), existing); err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // ListBundles godoc
