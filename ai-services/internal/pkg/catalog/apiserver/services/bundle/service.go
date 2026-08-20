@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -16,14 +17,16 @@ import (
 
 // bundleService implements BundleServiceInterface.
 type bundleService struct {
-	repo repository.BundleRepository
+	repo      repository.BundleRepository
+	svcRepo   repository.ServiceRepository
+	compRepo  repository.ComponentRepository
 	// TODO: add CatalogProvider reference for Reload() calls once wired in.
 	// catalogProvider *catalog.CatalogProvider
 }
 
-// NewBundleService creates a new bundleService backed by the given BundleRepository.
-func NewBundleService(repo repository.BundleRepository) BundleServiceInterface {
-	return &bundleService{repo: repo}
+// NewBundleService creates a new bundleService backed by the given repositories.
+func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository) BundleServiceInterface {
+	return &bundleService{repo: repo, svcRepo: svcRepo, compRepo: compRepo}
 }
 
 // ValidateBundle validates a .tar.gz archive without persisting anything.
@@ -167,6 +170,11 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 	}
 
 	// Step 3: TODO — full archive-based validation; call s.ValidateBundle once implemented.
+
+	// Step 3a: guard — reject if any running service/component is using this catalog entry.
+	if err := s.checkNoRunningInstances(ctx, meta); err != nil {
+		return nil, err
+	}
 
 	existingID, err := uuid.Parse(existing.ID)
 	if err != nil {
@@ -327,6 +335,57 @@ func (s *bundleService) ListBundles(ctx context.Context, req BundleListRequest) 
 // -----------------------------------------------------------------------
 // Internal helpers
 // -----------------------------------------------------------------------
+
+// checkNoRunningInstances returns a 409 Conflict ValidationError when any
+// service or component row in the DB is already using the catalog entry
+// identified by meta.  It is called before ReplaceBundle (and can be reused
+// by DeleteBundle in the future) to prevent in-flight replacements or
+// deletions while live workloads depend on the bundle.
+//
+//   - For a service bundle:  checks the services table by catalog_id.
+//   - For a component bundle: the catalog_id is "<type>--<provider>"; both
+//     halves are matched against the components table (type + provider).
+func (s *bundleService) checkNoRunningInstances(ctx context.Context, meta BundleMetadata) error {
+	switch meta.CatalogType() {
+	case CatalogTypeService:
+		exists, err := s.svcRepo.ExistsByCatalogID(ctx, meta.CatalogID())
+		if err != nil {
+			return fmt.Errorf("failed to check running services: %w", err)
+		}
+		if exists {
+			return &validators.ValidationError{
+				Code: http.StatusConflict,
+				Message: fmt.Sprintf(
+					"cannot replace bundle: one or more services are currently running with catalog_id %q",
+					meta.CatalogID(),
+				),
+			}
+		}
+
+	case CatalogTypeComponent:
+		// catalog_id is "<component_type>--<provider>"; split on the first "--".
+		parts := strings.SplitN(meta.CatalogID(), "--", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("malformed component catalog_id %q: expected <type>--<provider>", meta.CatalogID())
+		}
+		componentType, provider := parts[0], parts[1]
+		exists, err := s.compRepo.ExistsByTypeAndProvider(ctx, componentType, provider)
+		if err != nil {
+			return fmt.Errorf("failed to check running components: %w", err)
+		}
+		if exists {
+			return &validators.ValidationError{
+				Code: http.StatusConflict,
+				Message: fmt.Sprintf(
+					"cannot replace bundle: one or more components are currently running with type %q and provider %q",
+					componentType, provider,
+				),
+			}
+		}
+	}
+
+	return nil
+}
 
 // rowToResponse maps a DB row to the HTTP BundleResponse shape.
 func rowToResponse(b *models.CatalogBundle) *BundleResponse {
