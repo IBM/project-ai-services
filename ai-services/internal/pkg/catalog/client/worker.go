@@ -69,7 +69,7 @@ func (c *Client) DeleteWorkerByName(name string) error {
 	}
 
 	for _, w := range workers {
-		if string(w.Name) == name {
+		if w.Name == name {
 			return c.deleteWorkerByID(w.ID)
 		}
 	}

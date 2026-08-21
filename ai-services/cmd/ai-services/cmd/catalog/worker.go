@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -38,8 +37,6 @@ that is printed by the 'register' subcommand.`,
 // ─── register ────────────────────────────────────────────────────────────────
 
 func newWorkerRegisterCmd() *cobra.Command {
-	var runtimeType string
-
 	cmd := &cobra.Command{
 		Use:   "register <name>",
 		Short: "Pre-register a worker and obtain its bootstrap token",
@@ -50,11 +47,8 @@ Pass the token to the worker daemon at startup so it can authenticate with the
 catalog gRPC gateway:
 
   worker start --token <token> --gateway <catalog-host>:9090`,
-		Example: `  ai-services catalog worker register node-1 --runtime podman`,
+		Example: `  ai-services catalog worker register node-1`,
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return common.InitAndValidateRuntimeFlag(runtimeType)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -78,24 +72,17 @@ catalog gRPC gateway:
 		},
 	}
 
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
-
 	return cmd
 }
 
 // ─── list ─────────────────────────────────────────────────────────────────────
 
 func newWorkerListCmd() *cobra.Command {
-	var runtimeType string
-
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List all registered workers",
-		Example: `  ai-services catalog worker list --runtime podman`,
+		Example: `  ai-services catalog worker list`,
 		Args:    cobra.NoArgs,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return common.InitAndValidateRuntimeFlag(runtimeType)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -113,27 +100,20 @@ func newWorkerListCmd() *cobra.Command {
 		},
 	}
 
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
-
 	return cmd
 }
 
 // ─── deregister ───────────────────────────────────────────────────────────────
 
 func newWorkerDeregisterCmd() *cobra.Command {
-	var runtimeType string
-
 	cmd := &cobra.Command{
 		Use:   "deregister <name>",
 		Short: "Permanently deregister a worker",
 		Long: `Permanently removes a worker from the catalog by name.
 
 If the worker is currently connected its gRPC stream is also cleaned up.`,
-		Example: `  ai-services catalog worker deregister node-1 --runtime podman`,
+		Example: `  ai-services catalog worker deregister node-1`,
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return common.InitAndValidateRuntimeFlag(runtimeType)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -151,8 +131,6 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 			return nil
 		},
 	}
-
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	return cmd
 }
