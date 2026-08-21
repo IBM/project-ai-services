@@ -79,6 +79,24 @@ export const DeployFlow = ({
     initialize,
   } = useDeployStore();
 
+  // Build once here and pass down — both StepOne and StepTwo need the same map.
+  const providerParamsByType = useMemo(() => {
+    if (!deployOptions) return {};
+    const result: Record<string, Record<string, ProviderSchema>> = {};
+    const allComponents = [
+      ...deployOptions.global_components,
+      ...deployOptions.services.flatMap((s) => s.components),
+    ];
+    allComponents.forEach((component) => {
+      if (!result[component.type]) result[component.type] = {};
+      component.providers.forEach((provider) => {
+        const cached = providerParams[`${component.type}:${provider.id}`];
+        if (cached) result[component.type][provider.id] = cached.data;
+      });
+    });
+    return result;
+  }, [deployOptions, providerParams]);
+
   // Initialize store and validate cache version on mount
   useEffect(() => {
     initialize();
@@ -237,6 +255,7 @@ export const DeployFlow = ({
           formData={state.formData}
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
+          providerParamsByType={providerParamsByType}
           showNameError={state.showStepOneNameError}
           onComponentError={setHasStep1SchemaError}
         />
@@ -247,6 +266,7 @@ export const DeployFlow = ({
           formData={state.formData}
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
+          providerParamsByType={providerParamsByType}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
           onComponentError={setHasStep2SchemaError}
