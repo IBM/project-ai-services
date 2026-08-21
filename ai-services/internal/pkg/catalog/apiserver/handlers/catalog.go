@@ -17,7 +17,7 @@ type CatalogHandler struct {
 
 // NewCatalogHandler creates a new catalog handler.
 func NewCatalogHandler() *CatalogHandler {
-	provider, err := catalog.NewCatalogProvider()
+	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		// Log error but don't fail - let individual requests handle it
 		panic(fmt.Sprintf("Failed to initialize catalog provider: %v", err))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -20,42 +22,79 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// bundleStorageRoot is the well-known mount path for the dedicated catalog-bundles
+// volume — identical on Podman and OpenShift. Must match archive.go's constant.
+const bundleStorageRoot = "/data/catalog-bundles"
+
 // catalogItem represents a cached catalog item with its metadata and path.
+// The itemFS field is non-nil only for bundle items; embedded items use assets.CatalogFS.
 type catalogItem struct {
 	Path         string // Application path (e.g., "embedding/vllm-cpu")
 	Architecture *types.Architecture
 	Service      *types.Service
 	Component    *types.Component
 	Connector    *types.Connector
+	// itemFS is the filesystem from which this item was loaded.
+	// nil means the item was loaded from the embedded assets.CatalogFS.
+	itemFS fs.FS
 }
 
 // CatalogProvider provides access to catalog items.
-type CatalogProvider struct{}
-
-var (
-	sharedItems map[string]*catalogItem
-	once        sync.Once
-	loadErr     error
-)
-
-// NewCatalogProvider creates a new catalog provider instance.
-// The shared items map is loaded only once on the first call (thread-safe).
-func NewCatalogProvider() (*CatalogProvider, error) {
-	once.Do(func() {
-		sharedItems = make(map[string]*catalogItem)
-		loadErr = loadCatalogItems(context.Background(), sharedItems)
-	})
-
-	if loadErr != nil {
-		return nil, loadErr
-	}
-
-	return &CatalogProvider{}, nil
+// It is safe for concurrent use; all reads are protected by a read lock and
+// Reload acquires the write lock while rebuilding the items map.
+type CatalogProvider struct {
+	mu         sync.RWMutex
+	items      map[string]*catalogItem
+	bundleRepo dbrepo.BundleRepository // nil on CLI / test paths — skips bundle loading
 }
 
-// loadCatalogItems loads all catalog items into the provided map.
-func loadCatalogItems(ctx context.Context, items map[string]*catalogItem) error {
-	// Walk the catalog filesystem to find all metadata.yaml files
+// NewCatalogProvider creates a new CatalogProvider, loading all embedded items and
+// any active customer-created bundles from the DB.
+//
+// bundleRepo may be nil (CLI / test paths) — in that case only embedded items are loaded.
+func NewCatalogProvider(bundleRepo dbrepo.BundleRepository) (*CatalogProvider, error) {
+	p := &CatalogProvider{bundleRepo: bundleRepo}
+
+	items := make(map[string]*catalogItem)
+	if err := p.loadEmbeddedItems(context.Background(), items); err != nil {
+		return nil, err
+	}
+	if bundleRepo != nil {
+		if err := p.loadBundleItems(context.Background(), items); err != nil {
+			return nil, err
+		}
+	}
+
+	p.items = items
+
+	return p, nil
+}
+
+// Reload rebuilds the items map from scratch under the write lock.
+// It re-walks the embedded FS and, when bundleRepo is non-nil, re-queries all
+// active bundles from the DB. Called synchronously after every successful
+// ProcessBundle, ReplaceBundle, and DeleteBundle operation.
+func (p *CatalogProvider) Reload(ctx context.Context) error {
+	items := make(map[string]*catalogItem)
+
+	if err := p.loadEmbeddedItems(ctx, items); err != nil {
+		return err
+	}
+	if p.bundleRepo != nil {
+		if err := p.loadBundleItems(ctx, items); err != nil {
+			return err
+		}
+	}
+
+	p.mu.Lock()
+	p.items = items
+	p.mu.Unlock()
+
+	return nil
+}
+
+// loadEmbeddedItems walks assets.CatalogFS and populates items with all embedded catalog entries.
+func (p *CatalogProvider) loadEmbeddedItems(ctx context.Context, items map[string]*catalogItem) error {
 	err := fs.WalkDir(&assets.CatalogFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -75,7 +114,40 @@ func loadCatalogItems(ctx context.Context, items map[string]*catalogItem) error 
 	return nil
 }
 
-// processMetadataFile processes a single metadata.yaml file.
+// loadBundleItems queries the DB for all active bundles and loads each one via os.DirFS.
+// Bundle items overwrite the same-keyed embedded item if their catalog_id collides.
+func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]*catalogItem) error {
+	bundles, err := p.bundleRepo.GetAll(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to list bundles for catalog reload: %w", err)
+	}
+
+	for i := range bundles {
+		b := &bundles[i]
+		if string(b.Status) != "active" {
+			continue
+		}
+
+		// Derive the on-disk path: /data/catalog-bundles/<catalog_type>/<catalog_id>-<version>/
+		bundleDir := filepath.Join(bundleStorageRoot, b.CatalogType, b.CatalogID+"-"+b.Version)
+		bundleFS := os.DirFS(bundleDir)
+
+		data, readErr := fs.ReadFile(bundleFS, "metadata.yaml")
+		if readErr != nil {
+			logger.DebugfCtx(ctx, "bundle %s: failed to read metadata.yaml from %s: %v", b.ID, bundleDir, readErr)
+			continue
+		}
+
+		// Map catalog_type "service"/"component" → "services"/"components" to match
+		// the embedded-FS dispatch keys used in parseAndStoreMetadata.
+		catalogType := b.CatalogType + "s"
+		parseAndStoreMetadataWithFS(ctx, catalogType, "metadata.yaml", ".", bundleFS, data, items)
+	}
+
+	return nil
+}
+
+// processMetadataFile processes a single metadata.yaml file from the embedded CatalogFS.
 func processMetadataFile(ctx context.Context, path string, items map[string]*catalogItem) error {
 	parts := strings.Split(path, "/")
 	if len(parts) < constants.MinPathPartsForArchOrService {
@@ -97,7 +169,28 @@ func processMetadataFile(ctx context.Context, path string, items map[string]*cat
 
 	appPath := filepath.Dir(path)
 
-	return parseAndStoreMetadata(ctx, catalogType, path, appPath, data, items)
+	// nil itemFS → item is from the embedded assets.CatalogFS
+	return parseAndStoreMetadataWithFS(ctx, catalogType, path, appPath, &assets.CatalogFS, data, items)
+}
+
+// parseAndStoreMetadataWithFS parses metadata and stores it in the items map,
+// recording itemFS as the filesystem from which the item was loaded.
+// When itemFS is &assets.CatalogFS the item is embedded; otherwise it is a bundle.
+func parseAndStoreMetadataWithFS(ctx context.Context, catalogType, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
+	isCustom := itemFS != fs.FS(&assets.CatalogFS)
+
+	switch catalogType {
+	case constants.CatalogTypeArchitectures:
+		return parseArchitecture(ctx, path, appPath, itemFS, data, items)
+	case constants.CatalogTypeServices:
+		return parseService(ctx, path, appPath, itemFS, data, items)
+	case constants.CatalogTypeComponents:
+		return parseComponent(ctx, path, appPath, itemFS, data, isCustom, items)
+	case constants.CatalogTypeConnectors:
+		return parseConnector(ctx, path, appPath, itemFS, data, items)
+	}
+
+	return nil
 }
 
 // isValidMetadataPath checks if the metadata file path is valid for the catalog type.
@@ -112,24 +205,8 @@ func isValidMetadataPath(catalogType string, pathLength int) bool {
 	}
 }
 
-// parseAndStoreMetadata parses metadata and stores it in the items map.
-func parseAndStoreMetadata(ctx context.Context, catalogType, path, appPath string, data []byte, items map[string]*catalogItem) error {
-	switch catalogType {
-	case constants.CatalogTypeArchitectures:
-		return parseArchitecture(ctx, path, appPath, data, items)
-	case constants.CatalogTypeServices:
-		return parseService(ctx, path, appPath, data, items)
-	case constants.CatalogTypeComponents:
-		return parseComponent(ctx, path, appPath, data, items)
-	case constants.CatalogTypeConnectors:
-		return parseConnector(ctx, path, appPath, data, items)
-	}
-
-	return nil
-}
-
 // parseArchitecture parses and stores an architecture.
-func parseArchitecture(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseArchitecture(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
 	var arch types.Architecture
 	if unmarshalErr := yaml.Unmarshal(data, &arch); unmarshalErr != nil {
 		logger.DebugfCtx(ctx, "failed to parse architecture at %s: %v", path, unmarshalErr)
@@ -140,13 +217,15 @@ func parseArchitecture(ctx context.Context, path, appPath string, data []byte, i
 	items[arch.ID] = &catalogItem{
 		Path:         appPath,
 		Architecture: &arch,
+		itemFS:       itemFS,
 	}
 
 	return nil
 }
 
 // parseService parses and stores a service.
-func parseService(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
+// IsCustom for services is derived at read-time from item.itemFS in ListServices.
+func parseService(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
 	var svc types.Service
 	if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
 		logger.DebugfCtx(ctx, "failed to parse service at %s: %v", path, unmarshalErr)
@@ -157,13 +236,14 @@ func parseService(ctx context.Context, path, appPath string, data []byte, items 
 	items[svc.ID] = &catalogItem{
 		Path:    appPath,
 		Service: &svc,
+		itemFS:  itemFS,
 	}
 
 	return nil
 }
 
 // parseComponent parses and stores a component.
-func parseComponent(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseComponent(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, isCustom bool, items map[string]*catalogItem) error {
 	var comp types.Component
 	if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
 		logger.DebugfCtx(ctx, "failed to parse component at %s: %v", path, unmarshalErr)
@@ -171,19 +251,22 @@ func parseComponent(ctx context.Context, path, appPath string, data []byte, item
 		return nil
 	}
 
+	comp.IsCustom = isCustom
+
 	// Use composite key for components: {component_type}/{id}
 	// This allows same ID across different component types
 	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ID)
 	items[componentKey] = &catalogItem{
 		Path:      appPath,
 		Component: &comp,
+		itemFS:    itemFS,
 	}
 
 	return nil
 }
 
 // parseConnector parses and stores a connector.
-func parseConnector(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseConnector(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
 	var conn types.Connector
 	if unmarshalErr := yaml.Unmarshal(data, &conn); unmarshalErr != nil {
 		logger.DebugfCtx(ctx, "failed to parse connector at %s: %v", path, unmarshalErr)
@@ -197,14 +280,36 @@ func parseConnector(ctx context.Context, path, appPath string, data []byte, item
 	items[connectorKey] = &catalogItem{
 		Path:      appPath,
 		Connector: &conn,
+		itemFS:    itemFS,
 	}
 
 	return nil
 }
 
+// getItem returns the catalogItem for the given key, holding a read lock.
+func (p *CatalogProvider) getItem(key string) (*catalogItem, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	item, ok := p.items[key]
+
+	return item, ok
+}
+
+// allItems returns a shallow copy of the items map, holding a read lock.
+func (p *CatalogProvider) allItems() map[string]*catalogItem {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	snapshot := make(map[string]*catalogItem, len(p.items))
+	for k, v := range p.items {
+		snapshot[k] = v
+	}
+
+	return snapshot
+}
+
 // LoadArchitecture loads an architecture by ID from cache.
 func (p *CatalogProvider) LoadArchitecture(id string) (*types.Architecture, error) {
-	item, ok := sharedItems[id]
+	item, ok := p.getItem(id)
 	if !ok || item.Architecture == nil {
 		return nil, fmt.Errorf("architecture '%s' not found", id)
 	}
@@ -214,7 +319,7 @@ func (p *CatalogProvider) LoadArchitecture(id string) (*types.Architecture, erro
 
 // LoadService loads a service by ID from cache.
 func (p *CatalogProvider) LoadService(id string) (*types.Service, error) {
-	item, ok := sharedItems[id]
+	item, ok := p.getItem(id)
 	if !ok || item.Service == nil {
 		return nil, fmt.Errorf("service '%s' not found", id)
 	}
@@ -226,7 +331,7 @@ func (p *CatalogProvider) LoadService(id string) (*types.Service, error) {
 // componentType examples: "embedding", "llm", "reranker", "vector_db".
 func (p *CatalogProvider) LoadComponent(componentType, id string) (*types.Component, error) {
 	componentKey := fmt.Sprintf("%s/%s", componentType, id)
-	item, ok := sharedItems[componentKey]
+	item, ok := p.getItem(componentKey)
 	if !ok || item.Component == nil {
 		return nil, fmt.Errorf("component '%s/%s' not found", componentType, id)
 	}
@@ -238,7 +343,7 @@ func (p *CatalogProvider) LoadComponent(componentType, id string) (*types.Compon
 // connectorType examples: "datasource".
 func (p *CatalogProvider) LoadConnector(connectorType, id string) (*types.Connector, error) {
 	connectorKey := fmt.Sprintf("%s/%s", connectorType, id)
-	item, ok := sharedItems[connectorKey]
+	item, ok := p.getItem(connectorKey)
 	if !ok || item.Connector == nil {
 		return nil, fmt.Errorf("connector '%s/%s' not found", connectorType, id)
 	}
@@ -249,12 +354,26 @@ func (p *CatalogProvider) LoadConnector(connectorType, id string) (*types.Connec
 // GetCatalogItemPath returns the application path for a given ID.
 // This is useful for loading templates and other resources.
 func (p *CatalogProvider) GetCatalogItemPath(id string) (string, error) {
-	item, ok := sharedItems[id]
+	item, ok := p.getItem(id)
 	if !ok {
 		return "", fmt.Errorf("item '%s' not found", id)
 	}
 
 	return item.Path, nil
+}
+
+// getItemFS returns the filesystem for the catalog item identified by key.
+// Falls back to assets.CatalogFS when the item has no explicit itemFS set.
+func (p *CatalogProvider) getItemFS(key string) (fs.FS, error) {
+	item, ok := p.getItem(key)
+	if !ok {
+		return nil, fmt.Errorf("item '%s' not found", key)
+	}
+	if item.itemFS != nil {
+		return item.itemFS, nil
+	}
+
+	return &assets.CatalogFS, nil
 }
 
 // ToServiceSummary converts a Service to ServiceSummary.
@@ -266,6 +385,7 @@ func ToServiceSummary(service *types.Service) types.ServiceSummary {
 		CertifiedBy:   service.CertifiedBy,
 		Architectures: service.Architectures,
 		Standalone:    service.Standalone,
+		IsCustom:      service.IsCustom,
 	}
 }
 
@@ -298,8 +418,9 @@ func ToComponentSummary(component *types.Component) types.ComponentSummary {
 
 // ListArchitectures lists all available architectures from cache.
 func (p *CatalogProvider) ListArchitectures() ([]types.Architecture, error) {
+	snapshot := p.allItems()
 	architectures := make([]types.Architecture, 0)
-	for _, item := range sharedItems {
+	for _, item := range snapshot {
 		if item.Architecture != nil {
 			architectures = append(architectures, *item.Architecture)
 		}
@@ -309,11 +430,18 @@ func (p *CatalogProvider) ListArchitectures() ([]types.Architecture, error) {
 }
 
 // ListServices lists all available services from cache.
+// The returned ServiceSummary.IsCustom is true for bundle-sourced services.
 func (p *CatalogProvider) ListServices() ([]types.Service, error) {
+	snapshot := p.allItems()
 	services := make([]types.Service, 0)
-	for _, item := range sharedItems {
+	for _, item := range snapshot {
 		if item.Service != nil {
-			services = append(services, *item.Service)
+			svc := *item.Service
+			// Reflect whether this item came from a customer bundle.
+			if item.itemFS != nil && item.itemFS != fs.FS(&assets.CatalogFS) {
+				svc.IsCustom = true
+			}
+			services = append(services, svc)
 		}
 	}
 
@@ -321,9 +449,11 @@ func (p *CatalogProvider) ListServices() ([]types.Service, error) {
 }
 
 // ListComponents lists all available components from cache.
+// The returned Component.IsCustom is true for bundle-sourced components.
 func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
+	snapshot := p.allItems()
 	components := make([]types.Component, 0)
-	for _, item := range sharedItems {
+	for _, item := range snapshot {
 		if item.Component != nil {
 			components = append(components, *item.Component)
 		}
@@ -335,10 +465,11 @@ func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 // ListConnectors lists all connectors for a given connector type from cache.
 // Returns an error when the type is not registered.
 func (p *CatalogProvider) ListConnectors(connectorType string) ([]*types.Connector, error) {
+	snapshot := p.allItems()
 	result := make([]*types.Connector, 0)
 	found := false
 
-	for key, item := range sharedItems {
+	for key, item := range snapshot {
 		if item.Connector == nil {
 			continue
 		}
@@ -357,8 +488,9 @@ func (p *CatalogProvider) ListConnectors(connectorType string) ([]*types.Connect
 
 // ListAllConnectors lists every connector across all registered connector types from cache.
 func (p *CatalogProvider) ListAllConnectors() []*types.Connector {
+	snapshot := p.allItems()
 	result := make([]*types.Connector, 0)
-	for _, item := range sharedItems {
+	for _, item := range snapshot {
 		if item.Connector != nil {
 			result = append(result, item.Connector)
 		}
@@ -600,9 +732,14 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 	runtime := vars.RuntimeFactory.GetRuntimeType()
 	runtimeStr := string(runtime)
 
-	// Read values.yaml from the catalog path
+	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
+	itemFS, err := p.getItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	valuesPath := filepath.Join(servicePath, runtimeStr, "values.yaml")
-	valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
+	valuesData, err := fs.ReadFile(itemFS, valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
 	}
@@ -636,7 +773,6 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 		return nil, fmt.Errorf("component not found: %w", err)
 	}
 
-	// Get component path from catalog (uses cached path from metadata loading)
 	// The catalog stores components with key "<component_type>/<id>"
 	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
 	componentPath, err := p.GetCatalogItemPath(componentKey)
@@ -648,9 +784,14 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 	runtime := vars.RuntimeFactory.GetRuntimeType()
 	runtimeStr := string(runtime)
 
-	// Read values.yaml from the catalog path
+	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
+	itemFS, err := p.getItemFS(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	valuesPath := filepath.Join(componentPath, runtimeStr, "values.yaml")
-	valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
+	valuesData, err := fs.ReadFile(itemFS, valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
 	}
@@ -692,9 +833,14 @@ func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(componentPath, runtimeStr)
 
-	// Load metadata.yaml from runtime directory
+	// Read metadata.yaml using the item's own filesystem
+	itemFS, err := p.getItemFS(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	metadataPath := filepath.Join(catalogPath, "metadata.yaml")
-	metadataData, err := assets.CatalogFS.ReadFile(metadataPath)
+	metadataData, err := fs.ReadFile(itemFS, metadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read runtime metadata %s: %w", metadataPath, err)
 	}
@@ -724,10 +870,15 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(componentPath, runtimeStr, "templates")
 
-	// Load all template files
+	// Load all template files using the item's own filesystem
+	itemFS, err := p.getItemFS(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	templates := make(map[string]*texttemplate.Template)
 
-	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -742,7 +893,7 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 		}
 
 		// Read template file
-		templateData, err := assets.CatalogFS.ReadFile(path)
+		templateData, err := fs.ReadFile(itemFS, path)
 		if err != nil {
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}
@@ -786,9 +937,14 @@ func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID string) (*clitemp
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(servicePath, runtimeStr)
 
-	// Load metadata.yaml from runtime directory
+	// Read metadata.yaml using the item's own filesystem
+	itemFS, err := p.getItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	metadataPath := filepath.Join(catalogPath, "metadata.yaml")
-	metadataData, err := assets.CatalogFS.ReadFile(metadataPath)
+	metadataData, err := fs.ReadFile(itemFS, metadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read runtime metadata %s: %w", metadataPath, err)
 	}
@@ -817,10 +973,15 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(servicePath, runtimeStr, "templates")
 
-	// Load all template files
+	// Load all template files using the item's own filesystem
+	itemFS, err := p.getItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	templates := make(map[string]*texttemplate.Template)
 
-	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -835,7 +996,7 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 		}
 
 		// Read template file
-		templateData, err := assets.CatalogFS.ReadFile(path)
+		templateData, err := fs.ReadFile(itemFS, path)
 		if err != nil {
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}
@@ -879,10 +1040,15 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(servicePath, runtimeStr, "steps")
 
-	// Load all template files
+	// Load all md files using the item's own filesystem
+	itemFS, err := p.getItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
 	templates := make(map[string]*texttemplate.Template)
 
-	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -897,7 +1063,7 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 		}
 
 		// Read template file
-		templateData, err := assets.CatalogFS.ReadFile(path)
+		templateData, err := fs.ReadFile(itemFS, path)
 		if err != nil {
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}

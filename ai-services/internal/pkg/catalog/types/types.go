@@ -113,6 +113,7 @@ type Service struct {
 	Dependencies      []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 	Standalone        bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
 	AcceptsDatasource bool                  `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"`
+	IsCustom          bool                  `yaml:"-" json:"is_custom,omitempty"` // True when loaded from a customer-created bundle (not embedded)
 	About             *yaml.Node            `yaml:"-" json:"-"`
 }
 
@@ -159,6 +160,7 @@ type ServiceSummary struct {
 	CertifiedBy   string   `json:"certified_by"`
 	Architectures []string `json:"architectures"`
 	Standalone    bool     `json:"standalone"`
+	IsCustom      bool     `json:"is_custom,omitempty"`
 }
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
@@ -170,6 +172,7 @@ type Component struct {
 	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
 	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
 	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	IsCustom      bool   `yaml:"-" json:"is_custom,omitempty"`               // True when loaded from a customer-created bundle (not embedded)
 }
 
 // ComponentSummary represents a component for list API responses.
