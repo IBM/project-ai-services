@@ -11,6 +11,7 @@ Responsibilities:
 """
 
 import json
+import threading
 import time
 import re
 from pathlib import Path
@@ -259,8 +260,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None):
     """Extract, process, and summarize tables found in a document.
 
     Saves the extracted tables and their LLM-generated summaries to a JSON file.
@@ -350,6 +350,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,
         max_tokens=selected_max_tokens,
+        stop_event=stop_event,
     )
 
     filtered_table_dicts = {

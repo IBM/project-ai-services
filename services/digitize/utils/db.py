@@ -1087,6 +1087,27 @@ class DatabaseStatusManager:
             logger.warning(f"Job {self.job_id} not found in database")
             return
 
+        # Do not overwrite a terminal status already written by the pipeline
+        # (e.g. CANCELLED written by _run_ingest/_run_digitize) with a
+        # superseding status coming from a late update_job_progress call.
+        # CANCEL_PENDING is also protected: the job has been requested for
+        # cancellation and must not be flipped back to IN_PROGRESS by any
+        # in-flight pipeline step that hasn't yet observed the cancellation flag.
+        protected_statuses = {
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.CANCEL_PENDING,
+        }
+        current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
+        if current_db_status in protected_statuses and job_status not in protected_statuses:
+            assert current_db_status is not None  # narrowing: None is never in protected_statuses
+            logger.debug(
+                f"Job {self.job_id} already in protected state '{current_db_status.value}'; "
+                f"ignoring status update to '{job_status.value}'"
+            )
+            return
+
         # Get all documents for this job to recalculate stats
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
@@ -1110,6 +1131,12 @@ class DatabaseStatusManager:
             )
         }
 
+        # Preserve any extra keys already in job stats (e.g. clean_files flag)
+        existing_stats = job.stats or {}
+        for key, value in existing_stats.items():
+            if key not in stats:
+                stats[key] = value
+
         # Prepare job update parameters
         update_params: Dict[str, Any] = {
             "status": job_status,
@@ -1117,13 +1144,8 @@ class DatabaseStatusManager:
         }
 
         # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            total_docs = stats["total_documents"]
-            completed_docs = stats["completed"]
-            failed_docs = stats["failed"]
-
-            if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
-                update_params["completed_at"] = datetime.now(timezone.utc)
+        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
+            update_params["completed_at"] = datetime.now(timezone.utc)
 
         # Set error if provided
         if error and job_status == JobStatus.FAILED:

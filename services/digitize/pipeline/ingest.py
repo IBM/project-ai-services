@@ -17,6 +17,8 @@ from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager, DatabaseStatusManager
 from common.misc_utils import get_utc_timestamp
+from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 
 logger = get_logger("ingest")
 
@@ -184,6 +186,10 @@ def ingest(
             emb_model_dict, status_mgr, doc_id_dict, file_checksum_dict
         )
 
+        # CHECK 1: abort before launching pipeline if cancellation was requested
+        if job_id and db_manager.is_job_cancelled(job_id):
+            raise JobCancelledError(f"Job {job_id} was cancelled before processing started")
+
         start_time = time.time()
         # Reserve 100 tokens from embedding model's max_model_len to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
@@ -195,6 +201,10 @@ def ingest(
         if converted_pdf_stats is None:
             ingestion_failed()
             return
+
+        # CHECK 5: abort before writing final job status if cancelled during pipeline
+        if job_id and db_manager.is_job_cancelled(job_id):
+            raise JobCancelledError(f"Job {job_id} was cancelled during processing")
 
         # Note: Documents are now indexed immediately after chunking via the indexing_callback
         logger.info(f"All {len(converted_pdf_stats)} document(s) have been processed and indexed")
@@ -247,6 +257,10 @@ def ingest(
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats
+
+    except JobCancelledError:
+        # Re-raise so the caller (_run_ingest) handles the cancellation cleanup
+        raise
 
     except Exception as e:
         logger.error(f"Error during ingestion: {str(e)}", exc_info=True)

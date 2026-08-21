@@ -9,7 +9,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 # Local application imports
 from common.misc_utils import get_logger, DoclingConversionError
@@ -17,11 +17,19 @@ from common.retry_utils import retry_on_transient_error
 from digitize.settings import settings
 from digitize.parsing.pdf import get_document_page_count
 from digitize.models import OutputFormat
+from digitize.exceptions import JobCancelledError
 
 # Docling document conversion libraries
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import DoclingDocument
+
+@runtime_checkable
+class _CancelEvent(Protocol):
+    """Structural type for any cancel event — covers both multiprocessing.synchronize.Event
+    and the manager EventProxy returned by multiprocessing.Manager().Event()."""
+    def is_set(self) -> bool: ...
+
 
 logger = get_logger("docling_utils")
 
@@ -59,7 +67,7 @@ def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, 
         logger.error(error_msg)
         raise DoclingConversionError(error_msg) from e
 
-def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDocument:
+def convert_doc(path: str | Path, cache_dir: Optional[Path] = None, cancel_event: Optional[_CancelEvent] = None) -> DoclingDocument:
     """
     Convert a document to DoclingDocument, processing in 100-page chunks.
 
@@ -67,6 +75,8 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         path: Path to the document file to convert
         cache_dir: Optional cache directory for storing chunk results.
                    Will be cleaned up after processing.
+        cancel_event: Optional event with is_set(); if set, raises
+                      JobCancelledError between page-chunks.
 
     Returns:
         DoclingDocument containing the concatenated result
@@ -121,6 +131,14 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         for start_page in range(1, total_pages + 1, settings.digitize.doc_chunk_size):
             end_page = min(start_page + settings.digitize.doc_chunk_size - 1, total_pages)
             chunk_num = (start_page - 1) // settings.digitize.doc_chunk_size + 1
+
+            # Check for job cancellation between chunks so a long multi-chunk
+            # conversion can be cut short without waiting for all chunks.
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelledError(
+                    f"Job cancelled during chunk conversion "
+                    f"(chunk {chunk_num}/{total_chunks} of {path})"
+                )
 
             logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
@@ -217,10 +235,18 @@ def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_f
     logger.debug(f"Saved converted file to '{out_file}'")
     return str(out_file), conversion_time
 
-def convert_document(doc_path, out_path, file_name):
+def convert_document(doc_path, out_path, file_name, cancel_event: Optional[_CancelEvent] = None):
     """
     Convert a single document to JSON format.
     This function runs in a separate process via ProcessPoolExecutor.
+
+    Args:
+        doc_path: Path to the source document.
+        out_path: Directory for output files.
+        file_name: Base name (doc_id or path) used for the output JSON filename.
+        cancel_event: Optional cancel event set by the parent process when the
+                      job is cancelled. Checked between page-chunks to abort
+                      early without making any DB calls from this process.
     """
     try:
         logger.info(f"Processing '{doc_path}'")
@@ -229,12 +255,14 @@ def convert_document(doc_path, out_path, file_name):
         logger.debug(f"Converting '{doc_path}'")
         t0 = time.time()
 
-        converted_doc: DoclingDocument = convert_doc(doc_path, cache_dir=out_path / file_name)
+        converted_doc: DoclingDocument = convert_doc(doc_path, cache_dir=out_path / file_name, cancel_event=cancel_event)
         converted_doc.save_as_json(str(converted_json_f))
 
         conversion_time = time.time() - t0
         logger.debug(f"'{doc_path}' converted")
         return converted_json_f, conversion_time
+    except JobCancelledError:
+        raise
     except Exception as e:
         logger.error(f"Error converting '{doc_path}': {e}")
     return None, None

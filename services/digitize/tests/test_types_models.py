@@ -35,6 +35,8 @@ class TestEnums:
         assert JobStatus.IN_PROGRESS.value == "in_progress"
         assert JobStatus.COMPLETED.value == "completed"
         assert JobStatus.FAILED.value == "failed"
+        assert JobStatus.CANCEL_PENDING.value == "cancel_pending"
+        assert JobStatus.CANCELLED.value == "cancelled"
 
     def test_doc_status_values(self):
         assert {
@@ -48,6 +50,7 @@ class TestEnums:
             "completed",
             "failed",
             "already_exists",
+            "cancelled"
         }
 
     def test_enum_string_conversion(self):
