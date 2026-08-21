@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -63,13 +64,7 @@ func joinPreRunE(runtimeType *string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, _ []string) error {
 		cmd.SilenceUsage = true
 
-		rt := types.RuntimeType(*runtimeType)
-		if !rt.Valid() {
-			return fmt.Errorf("invalid runtime %q: must be %q or %q",
-				*runtimeType, types.RuntimeTypePodman, types.RuntimeTypeOpenShift)
-		}
-
-		return nil
+		return cmdcommon.InitAndValidateRuntimeFlag(*runtimeType)
 	}
 }
 
@@ -105,10 +100,7 @@ func addJoinFlags(cmd *cobra.Command, token, runtimeType, baseDir, httpsPort *st
 			"Example: --token <uuid>\n")
 	_ = cmd.MarkFlagRequired("token")
 
-	cmd.Flags().StringVarP(runtimeType, "runtime", "r", "",
-		fmt.Sprintf("Runtime type of this worker node (required): %s or %s.\n"+
-			"Example: --runtime podman\n", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired("runtime")
+	cmdcommon.ConfigureRuntimeFlag(cmd, runtimeType)
 
 	cmd.Flags().StringVar(baseDir, "basedir", constants.DefaultBaseDir,
 		"Base directory for AI services data (models, caddy) on this worker.\n"+

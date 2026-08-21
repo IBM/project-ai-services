@@ -2,8 +2,8 @@
 // It writes the Caddyfile and deploys the Caddy pod so that the worker can
 // serve proxied routes on behalf of the control plane.
 //
-// values.yaml is parsed into a typed struct and the pod template is rendered
-// directly from raw bytes via text/template.
+// Pod templates are rendered via EmbedTemplateProvider using assets/worker,
+// following the same pattern as the catalog deploy context.
 package caddy
 
 import (
@@ -12,10 +12,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"text/template"
+	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -29,10 +30,12 @@ const (
 	// Exported so that the join flow can reference it after setup.
 	WorkerCaddyPodName = "ai-services--worker-caddy"
 
+	// workerApp is the app name passed to the template provider.
+	// Resolves to assets/worker/<runtime>/templates/.
+	workerApp = "worker"
+
 	workerCaddyfileSubDir = "worker/caddy"
-	workerCaddyTmplPath   = "worker/podman/templates/caddy.yaml.tmpl"
 	workerCaddyfilePath   = "worker/podman/Caddyfile.tmpl"
-	workerValuesPath      = "worker/podman/values.yaml"
 
 	dirPerm  = 0o755
 	filePerm = 0o644
@@ -54,25 +57,13 @@ type SetupOptions struct {
 // template. The pod itself is only deployed if it is not already running —
 // once up, its configuration is considered immutable.
 func Setup(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions) error {
-	vals, err := readValues()
-	if err != nil {
-		return fmt.Errorf("worker caddy: read values: %w", err)
-	}
-
-	if vals.Caddy.Image == "" {
-		return fmt.Errorf("worker caddy: caddy.image not set in values.yaml")
-	}
-
-	// CLI-supplied port overrides the (empty) value from values.yaml.
-	vals.Caddy.HTTPSPort = opts.HTTPSPort
-
 	logger.InfolnCtx(ctx, "Setting up worker Caddy proxy...")
 
 	if err := writeCaddyfile(opts.BaseDir); err != nil {
 		return fmt.Errorf("worker caddy: write Caddyfile: %w", err)
 	}
 
-	if err := deployIfNotExists(ctx, rt, opts, vals); err != nil {
+	if err := deployIfNotExists(ctx, rt, opts); err != nil {
 		return err
 	}
 
@@ -107,57 +98,13 @@ func writeCaddyfile(baseDir string) error {
 	return nil
 }
 
-// deployPod renders the pod template from raw bytes and calls
-// DeployPodAndReadinessCheck.
-func deployPod(ctx context.Context, rt *podman.PodmanClient, baseDir string, vals *workerCaddyValues) error {
-	raw, err := assets.WorkerFS.ReadFile(workerCaddyTmplPath)
-	if err != nil {
-		return fmt.Errorf("read pod template: %w", err)
-	}
-
-	tmpl, err := template.New("caddy.yaml.tmpl").Parse(string(raw))
-	if err != nil {
-		return fmt.Errorf("parse pod template: %w", err)
-	}
-
-	params := map[string]any{
-		"BaseDir": baseDir,
-		"Values": map[string]any{
-			"caddy": map[string]any{
-				"image":     vals.Caddy.Image,
-				"adminPort": vals.Caddy.AdminPort,
-				"httpsPort": vals.Caddy.HTTPSPort,
-			},
-		},
-	}
-
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, params); err != nil {
-		return fmt.Errorf("render pod template: %w", err)
-	}
-
-	var podSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		return fmt.Errorf("parse rendered pod YAML: %w", err)
-	}
-
-	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
-
-	logger.InfofCtx(ctx, "worker caddy: deploying %s\n", WorkerCaddyPodName)
-
-	return clipodman.DeployPodAndReadinessCheck(
-		ctx, rt, &podSpec, "caddy.yaml.tmpl",
-		bytes.NewReader(rendered.Bytes()), deployOpts,
-	)
-}
-
 // ─── deploy ───────────────────────────────────────────────────────────────────
 
 // deployIfNotExists deploys the worker Caddy pod if it is not already running.
 // Once deployed, the pod is never restarted by this tool — its config is
 // considered immutable after first join.
 // TODO: Need a way to implement certificate rotation in future.
-func deployIfNotExists(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions, vals *workerCaddyValues) error {
+func deployIfNotExists(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions) error {
 	exists, err := rt.PodExists(WorkerCaddyPodName)
 	if err != nil {
 		return fmt.Errorf("worker caddy: check pod existence: %w", err)
@@ -169,33 +116,73 @@ func deployIfNotExists(ctx context.Context, rt *podman.PodmanClient, opts SetupO
 		return nil
 	}
 
-	return deployPod(ctx, rt, opts.BaseDir, vals)
+	return deployPods(ctx, rt, opts)
 }
 
-// ─── values ───────────────────────────────────────────────────────────────────
+// deployPods loads all pod templates from assets/worker/<runtime>/templates via
+// EmbedTemplateProvider and deploys each one in the order defined by
+// metadata.yaml podTemplateExecutions — matching the catalog deploy pattern.
+func deployPods(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions) error {
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, workerApp)
 
-// workerCaddyValues mirrors the structure of assets/worker/podman/values.yaml.
-type workerCaddyValues struct {
-	Caddy struct {
-		Image     string `yaml:"image"`
-		AdminPort string `yaml:"adminPort"`
-		HTTPSPort string `yaml:"httpsPort"`
-	} `yaml:"caddy"`
-}
+	var appMetadata templates.AppMetadata
+	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
+		return fmt.Errorf("worker caddy: load metadata: %w", err)
+	}
 
-// readValues parses assets/worker/podman/values.yaml.
-func readValues() (*workerCaddyValues, error) {
-	raw, err := assets.WorkerFS.ReadFile(workerValuesPath)
+	tmpls, err := tp.LoadAllTemplates(workerApp)
 	if err != nil {
-		return nil, fmt.Errorf("read values.yaml: %w", err)
+		return fmt.Errorf("worker caddy: load templates: %w", err)
 	}
 
-	var vals workerCaddyValues
-	if err := k8syaml.Unmarshal(raw, &vals); err != nil {
-		return nil, fmt.Errorf("parse values.yaml: %w", err)
+	values, err := tp.LoadValues(workerApp, nil, map[string]string{
+		"caddy.httpsPort": opts.HTTPSPort,
+	})
+	if err != nil {
+		return fmt.Errorf("worker caddy: load values: %w", err)
 	}
 
-	return &vals, nil
+	params := map[string]any{
+		"BaseDir": opts.BaseDir,
+		"Values":  values,
+	}
+
+	for _, layer := range appMetadata.PodTemplateExecutions {
+		for _, tmplName := range layer {
+			if err := deployTemplate(ctx, rt, tmpls, tmplName, params); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// deployTemplate renders a single pod template and deploys it.
+// The rendered YAML is used both as the pod spec source and as the body for
+// CreatePod — rendered once, parsed once.
+func deployTemplate(ctx context.Context, rt *podman.PodmanClient, tmpls map[string]*ttemplate.Template, tmplName string, params map[string]any) error {
+	tmpl, ok := tmpls[tmplName]
+	if !ok {
+		return fmt.Errorf("worker caddy: template %q not found", tmplName)
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("worker caddy: render %s: %w", tmplName, err)
+	}
+
+	var podSpec podmodels.PodSpec
+	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+		return fmt.Errorf("worker caddy: parse pod spec %s: %w", tmplName, err)
+	}
+
+	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
+
+	logger.InfofCtx(ctx, "worker caddy: deploying %s\n", podSpec.Name)
+
+	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
+		bytes.NewReader(rendered.Bytes()), deployOpts)
 }
 
 // Made with Bob
