@@ -156,7 +156,7 @@ func deployPod(ctx context.Context, rt *podman.PodmanClient, baseDir string, val
 // deployIfNotExists deploys the worker Caddy pod if it is not already running.
 // Once deployed, the pod is never restarted by this tool — its config is
 // considered immutable after first join.
-// TODO: Need a way to implement certificate rotation in future
+// TODO: Need a way to implement certificate rotation in future.
 func deployIfNotExists(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions, vals *workerCaddyValues) error {
 	exists, err := rt.PodExists(WorkerCaddyPodName)
 	if err != nil {
