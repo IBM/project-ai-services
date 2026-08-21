@@ -13,7 +13,7 @@
 9. [Deployment Execution Flow](#9-deployment-execution-flow)
 10. [Worker Registry and State Machine](#10-worker-registry-and-state-machine)
 11. [Database Schema](#11-database-schema)
-12. [CLI Commands](#12-cli-commands)
+12. [CLI Commands and REST API](#12-cli-commands)
 13. [Configuration Files and Assets](#13-configuration-files-and-assets)
 14. [Code Structure](#14-code-structure)
 15. [Security Design](#15-security-design)
@@ -270,23 +270,18 @@ sequenceDiagram
     participant TS as TokenStore
     participant REG as Registry
 
-    W->>GW: Register(worker_name="lpar-1", token, labels={domain_suffix})
+    W->>GW: Register(token, runtime_type, metadata={})
     GW->>TS: Validate(token)
-    TS-->>GW: OK (token marked used)
-    GW->>REG: Upsert(req)
-    GW->>REG: MarkReady("lpar-1")
+    TS-->>GW: OK (token marked used; worker_name bound to token)
+    GW->>REG: Upsert(worker_name, runtime_type, metadata)
     GW-->>W: RegisterResponse{worker_name: "lpar-1"}
 
     W->>GW: CommandStream — Send(CommandResult{is_heartbeat:true, worker_name:"lpar-1"})
-    GW->>REG: SetWorkerIP("lpar-1", "192.168.1.5")
-    GW->>REG: SetDomainSuffix("lpar-1", "192.168.1.5.nip.io")
     GW->>REG: MarkReady("lpar-1")
     Note over W,GW: stream open — awaiting Commands
 ```
 
-**Worker IP capture:** The gateway would read the TCP source IP from the gRPC peer info on the stream context. This would be the address of the Worker LPAR as seen from the control plane.
-
-**Domain suffix propagation:** `worker join` would compute the domain suffix (cert CN > `--domain-name` > `workerIP.nip.io`) and send it as `labels["domain_suffix"]` in `RegisterRequest` directly at startup. The gateway would extract it and store it in `WorkerEntry.DomainSuffix`. No configuration file is used to store this information on disk.
+**Domain suffix:** The worker will send `domain_suffix` as `metadata["domain_suffix"]` in `RegisterRequest`. The gateway stores this directly in the `workers.metadata` column via `WorkerRepository`. The `RegisterRequest.metadata` map (proto field 3) is the designated carrier for this value.
 
 ---
 
@@ -355,7 +350,7 @@ The proposed Caddyfile:
    - If **already running**: skip deployment — the existing pod and its port bindings are reused.
 4. Resolve the admin URL: inspect the running pod → find the `2019/tcp` host port → `http://localhost:<port>`.
 5. Health-check the Caddy admin API.
-6. Compute the domain suffix (`workerIP.nip.io`) and pass it directly to the registration payload.
+6. The worker computes `<workerIP>.nip.io` and sends it as `metadata["domain_suffix"]` in `RegisterRequest`. The gateway persists it to the DB via `WorkerRepository`.
 
 **Idempotency.** Re-running `worker join` writes a fresh Caddyfile but leaves a running Caddy pod untouched. To force a re-deploy (e.g. after a port change), the operator must manually remove the pod first.
 
@@ -406,7 +401,7 @@ This would dispatch `COMMAND_TYPE_REGISTER_PROXY_ROUTE` over gRPC. The daemon wo
 POST http://localhost:<port>/config/apps/http/servers/ai_services_worker/routes
 ```
 
-**Domain suffix for worker routes** would come from `RemoteRuntime.DomainSuffix()` — read from the worker's registry entry, populated from `labels["domain_suffix"]` at stream open. The worker's domain suffix would be independent of the control-plane's `DOMAIN_SUFFIX` env var.
+**Domain suffix for worker routes** would come from `RemoteRuntime.DomainSuffix()` — read from the worker's DB entry, populated from `metadata["domain_suffix"]` sent by the worker in `RegisterRequest`. The worker's domain suffix is independent of the control-plane's `DOMAIN_SUFFIX` env var.
 
 ### 7.7 Upstream uses pod IP, not pod name
 
@@ -555,43 +550,42 @@ sequenceDiagram
 
 ### 10.1 Proposed WorkerEntry fields
 
+The in-memory `WorkerEntry` holds only the live gRPC plumbing. All durable fields live in the database.
+
 ```go
 type WorkerEntry struct {
-    WorkerName     string
-    Labels        map[string]string  // would include "domain_suffix"
-    Capabilities  map[string]string
-    Status        WorkerStatus
-    LastHeartbeat time.Time
-    RegisteredAt  time.Time
-    WorkerIP      string    // TCP source IP from gRPC peer info
-    DomainSuffix  string    // from labels["domain_suffix"] at stream open
-    CommandCh     chan *Command  // capacity 32
-    results       map[string]chan *CommandResult
+    DBID       uuid.UUID                       // UUID assigned by DB on first Upsert
+    WorkerName string
+
+    // CommandCh is written by RemoteRuntime to dispatch commands to the worker.
+    // The gateway goroutine drains it and writes to the gRPC stream.
+    CommandCh  chan *workerpb.Command           // capacity 32
+    results    map[string]chan *CommandResult   // result routing by command ID (mu-protected)
 }
 ```
+
+`Status`, `LastHeartbeat`, `Metadata` are **not** stored in `WorkerEntry`. Durable state (status, metadata, heartbeat) is owned by the `WorkerRepository` and the PostgreSQL `workers` table.
 
 ### 10.2 Status state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : Register() called
+    [*] --> PENDING : Preregister() called (CLI: catalog worker register)
 
-    PENDING --> READY : token validated\nCommandStream open
-    PENDING --> REJECTED : invalid / expired token
+    PENDING --> READY : token validated\nRegister() + CommandStream open
+    PENDING --> PENDING : invalid / expired token (worker retries)
 
-    READY --> BUSY : command in-flight
-    BUSY --> READY : result delivered
     READY --> READY : heartbeat received
 
     READY --> DISCONNECTED : heartbeat timeout (90s)
-    BUSY --> DISCONNECTED : heartbeat timeout (90s)
     DISCONNECTED --> DISCONNECTED : stream closed
 
-    DISCONNECTED --> PENDING : worker re-registers
-    REJECTED --> PENDING : worker re-registers
+    DISCONNECTED --> READY : worker re-registers (Register() + new stream)
 ```
 
-Proposed status values: `pending`, `ready`, `busy`, `draining`, `disconnected`, `rejected`.
+Implemented status values: `pending`, `ready`, `disconnected`.
+
+> `busy` and `draining` are defined as future work (§17); they are not set by the current implementation.
 
 ### 10.3 Worker selection
 
@@ -608,21 +602,46 @@ A background goroutine would sweep all `READY`/`BUSY` workers every 30 seconds. 
 
 ## 11. Database Schema
 
-A new `workers` table would persist worker state across catalog restarts:
+A new `workers` table would persist worker state across catalog restarts. Status and runtime type are typed PostgreSQL enums:
 
 ```sql
-CREATE TABLE workers (
-    worker_name     TEXT PRIMARY KEY,
-    labels         JSONB        NOT NULL DEFAULT '{}',
-    capabilities   JSONB        NOT NULL DEFAULT '{}',
-    status         TEXT         NOT NULL DEFAULT 'pending',
-    last_heartbeat TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    registered_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+-- Worker runtime type enum
+CREATE TYPE worker_runtime_type AS ENUM (
+    'unknown',    -- initial value set at pre-registration; replaced when worker connects
+    'podman',
+    'openshift'
 );
+
+-- Worker status enum
+CREATE TYPE worker_status AS ENUM (
+    'pending',
+    'ready',
+    'disconnected'
+);
+
+CREATE TABLE workers (
+    id             UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
+    name           TEXT                NOT NULL UNIQUE,
+    runtime_type   worker_runtime_type NOT NULL DEFAULT 'unknown',
+    status         worker_status       NOT NULL DEFAULT 'pending',
+    last_heartbeat TIMESTAMPTZ,                    -- NULL until first heartbeat
+    metadata       JSONB,                          -- arbitrary key/value (includes domain_suffix)
+    registered_at  TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ         NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON workers(status);
+CREATE INDEX ON workers(runtime_type);
 ```
 
-The in-memory `Registry` would be the primary source of truth for live routing decisions. The database would provide durability so that `ai-services catalog worker list` works correctly after a catalog restart.
+Key changes from the original sketch:
+- **`id UUID`** replaces `worker_name TEXT` as the primary key; `name` is `UNIQUE`.
+- **`runtime_type` enum** replaces a plain TEXT column; `'unknown'` is the value at pre-registration time, before the worker connects and declares its environment.
+- **`metadata JSONB`** (nullable) 
+Domain suffix and any other per-worker key/value pairs are stored here.
+- **`last_heartbeat` is nullable** — `NULL` until the first heartbeat arrives; no default `NOW()`.
+
+The in-memory `Registry` is the primary source of truth for live routing decisions. The database provides durability so that `ai-services catalog worker list` works correctly after a catalog restart.
 
 ---
 
@@ -640,13 +659,13 @@ Pre-registers the worker by name in the catalog and outputs a single-use UUID to
 ```
 ai-services catalog worker list
 ```
-Would display worker name, status, labels, last heartbeat, and active command slot count.
+Would display worker ID, name, runtime type, status, metadata, and last heartbeat.
 
-**Delete an worker:**
+**Delete a worker:**
 ```
-ai-services catalog worker delete --name <worker-name>
+ai-services catalog worker delete <worker-id>
 ```
-Would remove the worker from the in-memory registry and PostgreSQL.
+Would remove the worker from the in-memory registry and PostgreSQL by UUID.
 
 **Start the WorkerGateway:**
 ```
@@ -671,7 +690,7 @@ ai-services worker join <gateway>        # required positional: host:port of cat
 - **Single command, no pre-steps.** There is no `bootstrap configure` or `worker configure` to run first.
 - **Caddy is deployed only if not already running.** Re-joining leaves a live Caddy pod untouched.
 - `adminPort` would not be configurable via CLI — always from `values.yaml` (`"0"` = OS-assigned random port).
-- Would compute the domain suffix and keep it in-memory to send it directly as `labels["domain_suffix"]` in `RegisterRequest`.
+- Would compute the domain suffix (`<workerIP>.nip.io`) and send it as `metadata["domain_suffix"]` in `RegisterRequest`.
 - Would inject a `LocalCaddyManager` into the Podman runtime by inspecting the running Caddy pod.
 - Would reconnect with exponential backoff (5s base, 120s max) on stream failure.
 
@@ -679,6 +698,55 @@ ai-services worker join <gateway>        # required positional: host:port of cat
 ```bash
 ai-services worker status
 ```
+
+### 12.3 REST API
+
+The Catalog API Server exposes three worker management endpoints under `/api/v1/workers`:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/workers` | Pre-register a new worker; returns a single-use bootstrap token |
+| `GET` | `/api/v1/workers` | List all registered workers and their current status |
+| `DELETE` | `/api/v1/workers/{id}` | Deregister a worker by UUID |
+
+**`POST /api/v1/workers`**
+
+Request:
+```json
+{ "worker_name": "lpar-1" }
+```
+
+Response `201 Created`:
+```json
+{
+  "worker_name": "lpar-1",
+  "token": "<uuid>"
+}
+```
+
+**`GET /api/v1/workers`**
+
+Response `200 OK` — array of worker objects:
+```json
+[
+  {
+    "id":             "550e8400-e29b-41d4-a716-446655440000",
+    "name":           "lpar-1",
+    "runtime_type":   "podman",
+    "status":         "ready",
+    "last_heartbeat": "2026-08-21T12:00:00Z",
+    "metadata":       { "domain_suffix": "192.168.1.5.nip.io" },
+    "registered_at":  "2026-08-20T10:00:00Z",
+    "updated_at":     "2026-08-21T12:00:00Z"
+  }
+]
+```
+
+**`DELETE /api/v1/workers/{id}`**
+
+- Path parameter `id` is the UUID from the registration response.
+- Response `204 No Content` on success; `404` if not found.
+- Removes the worker from both the in-memory registry and PostgreSQL.
 
 ---
 
@@ -693,20 +761,19 @@ ai-services worker status
 | File | Purpose |
 |---|---|
 | `assets/worker/podman/values.yaml` | Default values for image, adminPort, httpsPort |
-| `assets/worker/podman/templates/worker-caddy.yaml.tmpl` | Kubernetes-style pod spec for the Caddy pod |
-| `assets/worker/podman/templates/worker-caddyfile.tmpl` | Static Caddyfile written to `<baseDir>/worker/caddy/Caddyfile` |
+| `assets/worker/podman/templates/caddy.yaml.tmpl` | Kubernetes-style pod spec for the Caddy pod |
+| `assets/worker/podman/Caddyfile.tmpl` | Static Caddyfile written to `<baseDir>/worker/caddy/Caddyfile` |
 
-Assets would be embedded into the binary via `go:embed`.
+Assets are embedded into the binary via `go:embed` using `assets.WorkerFS`.
 
-### 13.3 Domain suffix priority
+### 13.3 Domain suffix
 
-Both catalog and worker would use the same `ComputeDomainConfig` function with the following priority:
+The worker computes its domain suffix and sends it as `metadata["domain_suffix"]` inside `RegisterRequest` every time it registers. The gateway passes this through to `WorkerRepository.Upsert()`, where it is persisted in the `workers.metadata` JSONB column.
+
+The default value computed by the worker is:
 
 ```
-Priority (highest to lowest):
-  1. SSL certificate CN/SAN  (--ssl-cert provided)
-  2. --domain-name flag
-  3. <workerIP>.nip.io        (auto-detected)
+<workerIP>.nip.io
 ```
 
 ---
@@ -742,7 +809,7 @@ ai-services/
     │   ├── daemon/
     │   │   └── daemon.go               # Run() + dispatchToRuntime() (all 29 cases)
     │   ├── gateway/
-    │   │   └── gateway.go              # WorkerGateway gRPC server; captures WorkerIP + DomainSuffix
+    │   │   └── gateway.go              # WorkerGateway gRPC server; persists worker-supplied domain_suffix to DB
     │   ├── httpclient/
     │   │   └── httpclient.go           # WorkerHTTPClient (Get/Post/Do over HTTPProxy)
     │   └── registry/
@@ -765,7 +832,7 @@ ai-services/
         ├── podman/
         │   └── podman.go               # HTTPProxy + resolvePodNameInURL (additions)
         ├── remote/
-        │   └── remote.go               # RemoteRuntime: all 29 methods, WorkerIP(), DomainSuffix()
+        │   └── remote.go               # RemoteRuntime: all 29 methods, DomainSuffix()
         └── openshift/
             └── openshift.go            # proxy + HTTPProxy stubs (unsupported, return error)
 ```
@@ -778,7 +845,7 @@ ai-services/
 
 - UUID v4, single-use, 24-hour expiry.
 - Would be stored in-memory in a `TokenStore`; destroyed on process restart (operator would need to re-issue).
-- Not bound to an worker name at issuance: the worker would supply its own name at registration time.
+- Bound to a worker name at issuance via `Preregister()`: the worker name is set by the control-plane operator at token-issue time and is not trusted from the worker's `RegisterRequest`.
 - Operators should rotate tokens regularly; a leaked token could not be used twice.
 
 ### 15.2 Transport encryption
@@ -818,7 +885,7 @@ The gateway would be designed to issue a short-lived client certificate per work
 |---|---|---|
 | HTTPS entry point | Control-plane Caddy only | Per-worker Caddy instance |
 | Route registration | Local Caddy Admin API | `COMMAND_TYPE_REGISTER_PROXY_ROUTE` over gRPC |
-| Domain suffix | `DOMAIN_SUFFIX` env var (control plane) | `DomainSuffix` from `RegisterRequest.Labels["domain_suffix"]` |
+| Domain suffix | `DOMAIN_SUFFIX` env var (control plane) | `DomainSuffix` from `RegisterRequest.metadata["domain_suffix"]` (sent by worker) |
 
 ### Internal HTTP access
 
