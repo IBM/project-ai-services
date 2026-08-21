@@ -32,7 +32,7 @@ jobs:
       
       - name: Publish image
         working-directory: ${{ inputs.working-directory }}
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             SERVICE=${{ inputs.service }} \
