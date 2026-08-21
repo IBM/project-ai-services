@@ -111,10 +111,12 @@ func addJoinFlags(cmd *cobra.Command, token, runtimeType, baseDir, httpsPort *st
 	_ = cmd.MarkFlagRequired("runtime")
 
 	cmd.Flags().StringVar(baseDir, "basedir", constants.DefaultBaseDir,
-		"Base directory for Caddy data and config volumes on this node.\n"+
+		"Base directory for AI services data (models, caddy) on this worker.\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 
 	cmd.Flags().StringVar(httpsPort, "https-port", defaultJoinHTTPSPort,
-		"Host port Caddy binds for HTTPS traffic on this worker node.\n"+
+		"Custom HTTPS port to expose the service endpoints externally.\n"+
+			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n")
 }
