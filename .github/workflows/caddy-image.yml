@@ -5,12 +5,11 @@ on:
       - 'images/caddy/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/caddy/**'
       - '.github/workflows/caddy-image.yml'
-    branches:
-      - main
 
 env:
   ICR_REGISTRY: icr.io
