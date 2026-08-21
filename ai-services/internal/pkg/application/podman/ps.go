@@ -10,8 +10,7 @@ import (
 )
 
 // List returns information about running applications.
-func (p *PodmanApplication) List(opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
-	ctx := context.Background()
+func (p *PodmanApplication) List(ctx context.Context, opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
 	// filter and fetch pods based on appName
 	pods, err := common.FetchFilteredPods(ctx, p.runtime, opts.ApplicationName)
 	if err != nil {

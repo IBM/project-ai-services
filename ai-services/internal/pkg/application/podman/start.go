@@ -14,8 +14,7 @@ import (
 )
 
 // Start starts a stopped application.
-func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
-	ctx := context.Background()
+func (p *PodmanApplication) Start(ctx context.Context, opts appTypes.StartOptions) error {
 	var pods []types.Pod
 	var err error
 	// if legacy flag is set, get pods from runtime; otherwise use catalog API

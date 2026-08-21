@@ -13,8 +13,7 @@ import (
 )
 
 // Info displays detailed information about an application.
-func (p *PodmanApplication) Info(opts types.InfoOptions) error {
-	ctx := context.Background()
+func (p *PodmanApplication) Info(ctx context.Context, opts types.InfoOptions) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}

@@ -13,8 +13,7 @@ import (
 )
 
 // Info displays detailed information about an application.
-func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
-	ctx := context.Background()
+func (o *OpenshiftApplication) Info(ctx context.Context, opts types.InfoOptions) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}

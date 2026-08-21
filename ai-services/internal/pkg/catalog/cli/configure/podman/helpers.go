@@ -131,8 +131,8 @@ func IsCatalogServiceRunning(ctx context.Context, rt runtime.Runtime) (bool, err
 	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
-			logger.InfolnCtx(context.Background(), "Catalog service is not configured or running.")
-			logger.InfolnCtx(context.Background(), "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
+			logger.InfolnCtx(ctx, "Catalog service is not configured or running.")
+			logger.InfolnCtx(ctx, "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
 
 			return false, nil
 		}
