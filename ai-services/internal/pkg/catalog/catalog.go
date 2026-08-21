@@ -114,6 +114,7 @@ func (p *CatalogProvider) loadEmbeddedItems(ctx context.Context, items map[strin
 }
 
 // loadBundleItems queries the DB for all active bundles and loads each one via os.DirFS.
+// The on-disk path mirrors bundleDirPath: <bundleStorageRoot>/<catalog_type>s/<catalog_id>-<version>.
 // Bundle items overwrite the same-keyed embedded item if their catalog_id collides.
 func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]*catalogItem) error {
 	bundles, err := p.bundleRepo.GetAll(ctx, nil)
@@ -127,8 +128,9 @@ func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]
 			continue
 		}
 
-		// Derive the on-disk path: /data/catalog-bundles/<catalog_type>/<catalog_id>-<version>/
-		bundleDir := filepath.Join(bundleStorageRoot, b.CatalogType, b.CatalogID+"-"+b.Version)
+		// Derive the on-disk path: /data/catalog-bundles/<catalog_type>s/<catalog_id>-<version>/
+		// e.g. service → services/my-service-1.0.0/, component → components/llm--prov-1.0.0/
+		bundleDir := filepath.Join(bundleStorageRoot, b.CatalogType+"s", b.CatalogID+"-"+b.Version)
 		bundleFS := os.DirFS(bundleDir)
 
 		data, readErr := fs.ReadFile(bundleFS, "metadata.yaml")
