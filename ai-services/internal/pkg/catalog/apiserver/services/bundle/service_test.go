@@ -1370,9 +1370,9 @@ func failsOnReload(err error) *mockCatalogReloader {
 }
 
 // TestProcessBundle_ReloadCalledOnSuccess verifies that Reload is invoked after
-// a successful insert and that the row is then activated.
-// We drive replaceBundleFiles directly (avoiding bundleStorageRoot) to exercise
-// the reload + activate path.
+// the row is activated (not before), so loadBundleItems sees the "active" row.
+// We drive the activate → reload → re-fetch path directly, bypassing the
+// filesystem step that requires bundleStorageRoot to exist.
 func TestProcessBundle_ReloadCalledOnSuccess(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	now := time.Now()
@@ -1408,17 +1408,14 @@ func TestProcessBundle_ReloadCalledOnSuccess(t *testing.T) {
 		},
 	}
 
-	// Call the internal reload+activate path directly, bypassing the
+	// Call the activate → reload → re-fetch path directly, bypassing the
 	// filesystem step that requires bundleStorageRoot to exist.
 	svc := &bundleService{repo: repo, catalogReloader: reloader}
 
 	// Simulate what ProcessBundle does after a successful insert (steps 6–8).
 	ctx := context.Background()
 
-	// Step 6: reload.
-	require.NoError(t, svc.catalogReloader.Reload(ctx))
-
-	// Step 7: activate.
+	// Step 6: activate first — row must be "active" before Reload queries the DB.
 	statusActive := models.BundleStatusActive
 	name := "My Service"
 	version := "1.0.0"
@@ -1428,6 +1425,9 @@ func TestProcessBundle_ReloadCalledOnSuccess(t *testing.T) {
 		Name:      &name,
 		Version:   &version,
 	}))
+
+	// Step 7: reload — loadBundleItems now sees the active row.
+	require.NoError(t, svc.catalogReloader.Reload(ctx))
 
 	// Step 8: re-fetch.
 	resp, err := svc.GetBundleByID(ctx, fixedID.String())

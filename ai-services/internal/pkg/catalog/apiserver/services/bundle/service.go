@@ -68,9 +68,10 @@ func (s *bundleService) ValidateBundle(_ context.Context, _ io.Reader) (any, err
 //  4. Extract archive to bundleDirPath(catalogType, catalogID, version),
 //     stripping the top-level directory.
 //  5. Insert DB row via BundleRepository.Insert (status=processing).
-//  6. CatalogProvider.Reload() — rebuilds the in-memory catalog so the new bundle
+//  6. Mark row active via BundleRepository.Update (status=active, size_bytes, name, version).
+//     On failure: mark row failed and return error.
+//  7. CatalogProvider.Reload() — rebuilds the in-memory catalog so the now-active bundle
 //     is immediately visible. On failure: mark row failed and return error.
-//  7. Mark row active via BundleRepository.Update (status=active, size_bytes, name, version).
 //  8. Re-fetch via GetBundleByID and return as *BundleResponse.
 //     On failure after step 5: mark row failed and store the error message.
 func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userID string) (*BundleResponse, error) {
@@ -111,7 +112,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 }
 
 // insertActivateAndFetch performs steps 5–8 of ProcessBundle:
-// insert DB row, reload catalog, mark active, and re-fetch the final row.
+// insert DB row, mark active, reload catalog, and re-fetch the final row.
 func (s *bundleService) insertActivateAndFetch(ctx context.Context, meta BundleMetadata, destDir string, sizeBytes int64, userID string) (*BundleResponse, error) {
 	// Step 5: insert DB row with status=processing.
 	row := &models.CatalogBundle{
@@ -127,16 +128,7 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, meta BundleM
 		return nil, fmt.Errorf("failed to insert bundle record: %w", err)
 	}
 
-	// Step 6: reload the catalog so the new bundle is immediately visible.
-	if s.catalogReloader != nil {
-		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
-			s.markFailed(ctx, row.ID, reloadErr.Error())
-
-			return nil, fmt.Errorf("catalog reload failed after bundle creation: %w", reloadErr)
-		}
-	}
-
-	// Step 7: mark row active.
+	// Step 6: mark row active so Reload() can see it as "active" when it queries the DB.
 	statusActive := models.BundleStatusActive
 	name := meta.DisplayName()
 	version := meta.Version()
@@ -149,6 +141,15 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, meta BundleM
 		s.markFailed(ctx, row.ID, updateErr.Error())
 
 		return nil, fmt.Errorf("failed to activate bundle: %w", updateErr)
+	}
+
+	// Step 7: reload the catalog so the now-active bundle is immediately visible.
+	if s.catalogReloader != nil {
+		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+			s.markFailed(ctx, row.ID, reloadErr.Error())
+
+			return nil, fmt.Errorf("catalog reload failed after bundle creation: %w", reloadErr)
+		}
 	}
 
 	// Step 8: re-fetch the authoritative row from DB and return.
