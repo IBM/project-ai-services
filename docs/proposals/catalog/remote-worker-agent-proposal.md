@@ -52,7 +52,7 @@ This means that to deploy AI workloads on a second or third LPAR, an operator mu
 - Allow AI application pods to be deployed on remote Worker LPARs from a single control plane.
 - Route external HTTPS traffic to deployed services via a per-worker Caddy proxy.
 - Allow the control plane to perform health checks and internal HTTP calls against remote pod endpoints over the gRPC stream, with no new exposed port.
-- Minimal operational overhead: a single daemon binary, one `join` workflow per Worker.
+- Minimal operational overhead: a single daemon binary, one `join` command per Worker — no separate bootstrap or configure step.
 - All communication over a single outbound TCP connection from Worker → control plane (firewall-friendly).
 
 ### 2.4 Non-Goals
@@ -239,8 +239,8 @@ The `CommandType` enum would cover all 29 operations needed to proxy the full `r
 # Start the WorkerGateway on the control plane (default port is 9090)
 ai-services catalog configure --runtime podman [--workergateway-port 9090]
 
-# Issue a single-use bootstrap token (24-hour expiry)
-ai-services catalog worker issue-token
+# Pre-register the worker by name and obtain a single-use bootstrap token
+ai-services catalog worker register <worker-name>
 # Output: <uuid-token>
 ```
 
@@ -249,19 +249,17 @@ Tokens would be stored in-memory in a `TokenStore`. Each token would be single-u
 ### 6.2 Worker setup
 
 ```bash
-# Step 1 — bootstrap the Worker LPAR (installs Podman, SELinux policies, etc.)
-ai-services bootstrap configure --runtime podman
-
-# Step 2 — join the worker to the control plane (installs Caddy, registers and starts the daemon)
-ai-services worker join \
-    --server lpar-0.example.com:9090 \
-    --name lpar-1 \
+# Single command — registers and starts the daemon (deploys Caddy if not already running)
+ai-services worker join <catalog-host>:9090 \
     --token <uuid-token> \
     --runtime podman \
     [--https-port 443] \
+    [--basedir /var/lib/ai-services]
     [--domain-name example.com] \
     [--ssl-cert /path/cert.pem --ssl-key /path/key.pem]
 ```
+
+There is no separate `bootstrap configure` or `worker configure` step. The `join` command handles everything in one shot: it deploys the Caddy proxy (if not already running), registers with the catalog gRPC gateway using the bootstrap token, and holds the connection open indefinitely.
 
 ### 6.3 Registration sequence
 
@@ -299,6 +297,7 @@ Each Worker LPAR would run its own Caddy instance for externally-visible HTTPS r
 ### 7.1 Design principles
 
 - **Same pattern as catalog Caddy.** The catalog configure command deploys a Caddy pod; the proposed `worker join` command would do the same for the worker.
+- **Deploy-once semantics.** The Caddy pod is deployed only if it is not already running. Once up, its configuration is considered immutable — re-running `worker join` will not redeploy or restart the pod.
 - **Admin port always random.** Setting `adminPort: "0"` in `values.yaml` would cause the OS to assign a random loopback port, resolved at runtime by inspecting the running pod.
 - **No `--resume`.** Worker Caddy would not use `caddy run --resume` to avoid stale autosave state from a previous server name.
 - **Server name `ai_services_worker`.** The Caddyfile global block would name the `:443` server `ai_services_worker`, so routes would be POSTed to `.../servers/ai_services_worker/routes`.
@@ -347,18 +346,18 @@ The proposed Caddyfile:
 
 ### 7.3 `DeployWorkerCaddy` execution
 
-**Proposed steps for `DeployWorkerCaddy()` (triggered inside `worker join`):**
+**Proposed steps for `Setup()` (triggered inside `worker join`):**
 
 1. Read `values.yaml` (image, adminPort, httpsPort). Apply `--https-port` CLI override if provided.
 2. Render the Caddyfile template and write to `<baseDir>/worker/caddy/Caddyfile`.
-3. Force-remove any existing `ai-services--worker-caddy` pod (to handle stale or failed pods).
-4. Render the pod template and deploy via readiness-checked pod deployment.
-5. Resolve the admin URL: inspect the running pod → find the `2019/tcp` host port → `http://localhost:<port>`.
-6. Health-check the Caddy admin API.
-7. Compute the domain suffix (cert CN > `--domain-name` > `workerIP.nip.io`).
-8. Keep `DomainSuffix` in-memory and pass it directly to the registration payload.
+3. Check whether `ai-services--worker-caddy` pod already exists.
+   - If **not running**: render the pod template and deploy via readiness-checked pod deployment.
+   - If **already running**: skip deployment — the existing pod and its port bindings are reused.
+4. Resolve the admin URL: inspect the running pod → find the `2019/tcp` host port → `http://localhost:<port>`.
+5. Health-check the Caddy admin API.
+6. Compute the domain suffix (`workerIP.nip.io`) and pass it directly to the registration payload.
 
-**This process would be idempotent.** Re-joining would always remove and redeploy the Caddy pod to ensure correct port bindings.
+**Idempotency.** Re-running `worker join` writes a fresh Caddyfile but leaves a running Caddy pod untouched. To force a re-deploy (e.g. after a port change), the operator must manually remove the pod first.
 
 ### 7.4 Admin URL resolution
 
@@ -631,11 +630,11 @@ The in-memory `Registry` would be the primary source of truth for live routing d
 
 ### 12.1 Control-plane commands
 
-**Issue a bootstrap token:**
+**Pre-register a worker and obtain a bootstrap token:**
 ```
-ai-services catalog worker issue-token
+ai-services catalog worker register <worker-name>
 ```
-Would output a single-use UUID token valid for 24 hours.
+Pre-registers the worker by name in the catalog and outputs a single-use UUID token valid for 24 hours.
 
 **List all registered workers:**
 ```
@@ -656,22 +655,21 @@ ai-services catalog configure --runtime podman --workergateway-port 9090
 
 ### 12.2 Worker commands
 
-**`worker join`** — Deploy the worker Caddy proxy, register, and start the daemon:
+**`worker join`** — Single command to deploy the worker Caddy proxy (if not already running), register with the catalog, and start the daemon:
 
 ```bash
-ai-services worker join \
-    --server lpar-0.example.com:9090   # required
-    --name   lpar-1                     # required
-    --token  <uuid>                     # required
-    --runtime podman                    # required; no default
-    [--https-port 443]                  # default from values.yaml; can be overridden
-    [--base-dir /var/lib/ai-services]
+ai-services worker join <gateway>        # required positional: host:port of catalog gRPC gateway
+    --token  <uuid>                      # required; single-use token from 'catalog worker register'
+    --runtime podman                     # required; no default
+    [--https-port 443]                   # default 443; overrides values.yaml httpsPort
+    [--basedir /var/lib/ai-services]
     [--domain-name example.com]
     [--ssl-cert /path/cert.pem --ssl-key /path/key.pem]
     [--tls-dir /var/lib/ai-services/worker/tls]
 ```
 
-- Would be idempotent: always removes and redeploys the Caddy pod.
+- **Single command, no pre-steps.** There is no `bootstrap configure` or `worker configure` to run first.
+- **Caddy is deployed only if not already running.** Re-joining leaves a live Caddy pod untouched.
 - `adminPort` would not be configurable via CLI — always from `values.yaml` (`"0"` = OS-assigned random port).
 - Would compute the domain suffix and keep it in-memory to send it directly as `labels["domain_suffix"]` in `RegisterRequest`.
 - Would inject a `LocalCaddyManager` into the Podman runtime by inspecting the running Caddy pod.
