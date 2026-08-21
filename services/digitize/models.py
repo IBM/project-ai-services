@@ -19,6 +19,8 @@ class JobStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCEL_PENDING = "cancel_pending"
+    CANCELLED = "cancelled"
 
 
 class DocStatus(str, Enum):
@@ -30,6 +32,7 @@ class DocStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
+    CANCELLED = "cancelled"
 
 
 class AlreadyExistsFile(BaseModel):
@@ -52,6 +55,8 @@ class JobsListResponse(BaseModel):
 class JobCreatedResponse(BaseModel):
     """Response model for job creation."""
     job_id: str
+
+
 
 class DocumentListItem(BaseModel):
     """Minimal document information for list responses."""

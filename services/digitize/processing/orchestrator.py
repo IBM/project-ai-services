@@ -11,9 +11,11 @@ Responsibilities:
 """
 
 import json
+import multiprocessing
 import shutil
+import threading
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from docling_core.types.doc.document import DoclingDocument
@@ -32,6 +34,8 @@ from common.misc_utils import (
 from common.thread_utils import ContextAwareThreadPoolExecutor
 from digitize.utils.db import get_status_manager
 from digitize.models import DocStatus, JobStatus
+from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 from digitize.parsing.converter import convert_document
 from digitize.parsing.pdf import get_document_page_count
 from digitize.processing.language import (
@@ -69,7 +73,6 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     Returns:
         List of text chunks
     """
-    logger.debug(f"Using language for chunking: {language}")
 
     sentences = SentenceSplitter(language=language).split(text)
     chunks = []
@@ -421,11 +424,15 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
 # Per-document orchestration
 # ---------------------------------------------------------------------------
 
-def process_converted_document(converted_json_path, doc_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
+def process_converted_document(converted_json_path, doc_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id, stop_event: threading.Event | None = None):
     """
     Process converted document to extract text and tables.
     No caching - always process fresh.
     Returns detected language along with other results.
+
+    Args:
+        stop_event: Optional threading.Event. When set, table summarization is
+                    cut short between individual LLM calls (see process_table).
     """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
@@ -454,11 +461,14 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
 
         table_count, process_time = process_table(
-            converted_doc, doc_path, processed_table_json_path, gen_model, gen_endpoint, document_language
+            converted_doc, doc_path, processed_table_json_path, gen_model, gen_endpoint, document_language,
+            stop_event=stop_event,
         )
         timings["process_tables"] = process_time
 
         return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language
+    except JobCancelledError:
+        raise
     except Exception as e:
         logger.error(f"Error processing converted document: {doc_path}. Details: {e}", exc_info=True)
         return None, None, None, None, None, None
@@ -516,16 +526,33 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         if not batch_paths:
             return batch_stats
 
-        with ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
+        # Shared stop event signalled to any running process_converted_document
+        # thread so it can abort mid-table-summarization without waiting for all
+        # LLM calls to finish.
+        _process_stop_event = threading.Event()
+
+        # Manager-backed event shared with converter worker processes so they
+        # can check for cancellation between page-chunks without making DB calls
+        # from the worker process. A plain multiprocessing.Event cannot be
+        # pickled under the 'spawn' start method (macOS/Windows default) and
+        # raises "Condition objects should only be shared through inheritance".
+        # Manager events are proxy objects and are picklable under any start method.
+        with multiprocessing.Manager() as _mp_manager, \
+             ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
              ContextAwareThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
              ContextAwareThreadPoolExecutor(max_workers=max_worker) as chunker_executor, \
              ContextAwareThreadPoolExecutor(max_workers=max_worker) as indexer_executor:
+
+            _cancel_event = _mp_manager.Event()
 
             # A. Submit Conversions
             conversion_futures = {}
             process_futures = {}
             chunk_futures = {}
             indexing_futures = {}  # Track indexing futures
+
+            if job_id and db_manager.is_job_cancelled(job_id):
+                raise JobCancelledError(f"Job {job_id} cancelled before conversion stage")
 
             for path in batch_paths:
                 file_name = ""
@@ -534,159 +561,254 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     file_name = path
                 else:
                     file_name = doc_id
-                future = converter_executor.submit(convert_document, path, out_path, file_name)
+                future = converter_executor.submit(convert_document, path, out_path, file_name, _cancel_event)
                 conversion_futures[future] = path
                 if doc_id is not None:
-                    logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
+                    logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {path}")
                     status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
                     status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
-            process_futures = {}
-            chunk_futures = {}
-
             # B. Handle Conversions -> Submit Processing
-            for fut in as_completed(conversion_futures):
-                path = conversion_futures[fut]
-                doc_id = doc_id_dict.get(Path(path).name)
-                try:
-                    converted_json, conv_time = fut.result()
-                    if not converted_json:
-                        if doc_id is not None:
-                            logger.error(f"Conversion failed for {path}: converted_json is None")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
-                        continue
+            # Poll instead of as_completed so cancellation is checked before each pending
+            # future starts. running() futures cannot be interrupted — they drain naturally.
+            pending_conversion = dict(conversion_futures)
+            is_cancelled = False  # latched True on first cancellation; never reset between stages
+            while pending_conversion:
+                is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
+                if is_cancelled:
+                    _cancel_event.set()
+                    _process_stop_event.set()
+                for fut, path in list(pending_conversion.items()):
+                    doc_id = doc_id_dict.get(Path(path).name)
+                    if is_cancelled and not fut.running() and not fut.done():
+                        fut.cancel()
+                        logger.info(f"Job {job_id} cancelled — skipping conversion for document: {path}")
+                        del pending_conversion[fut]
+                    elif fut.done():
+                        del pending_conversion[fut]
+                        try:
+                            converted_json, conv_time = fut.result()
+                            if not converted_json:
+                                if doc_id is not None:
+                                    logger.error(f"Conversion failed for {path}: converted_json is None")
+                                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
+                                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
+                                continue
 
-                    batch_stats[path] = {"timings": {"digitizing": round(float(conv_time or 0), 2)}}
+                            batch_stats[path] = {"timings": {"digitizing": round(float(conv_time or 0), 2)}}
 
-                    if doc_id is not None:
-                        logger.debug(f"Conversion Done: updating doc & job metadata for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {
-                            "status": DocStatus.DIGITIZED,
-                            "timing_in_secs": {**batch_stats[path]["timings"]},
-                        })
-                        status_mgr.update_job_progress(doc_id, DocStatus.DIGITIZED, JobStatus.IN_PROGRESS)
+                            if doc_id is not None:
+                                logger.debug(f"Conversion Done: updating doc & job metadata for document: {path}")
+                                status_mgr.update_doc_metadata(doc_id, {
+                                    "status": DocStatus.DIGITIZED,
+                                    "timing_in_secs": {**batch_stats[path]["timings"]},
+                                })
+                                status_mgr.update_job_progress(doc_id, DocStatus.DIGITIZED, JobStatus.IN_PROGRESS)
 
-                    p_future = processor_executor.submit(
-                        process_converted_document, converted_json, path, out_path,
-                        llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
-                    )
-                    process_futures[p_future] = str(path)
-                except Exception as e:
-                    logger.error(f"Error from conversion for {path}: {str(e)}", exc_info=True)
-                    batch_stats.pop(path, {})
-                    if doc_id is not None:
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                            # CHECK 2: don't submit new work if cancelled
+                            if is_cancelled:
+                                logger.info(f"Job {job_id} cancelled — not submitting converted document for processing: {path}")
+                                continue
+
+                            p_future = processor_executor.submit(
+                                process_converted_document, converted_json, path, out_path,
+                                llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id,
+                                stop_event=_process_stop_event,
+                            )
+                            process_futures[p_future] = str(path)
+                        except JobCancelledError:
+                            logger.info(f"Job {job_id} cancelled — conversion was interrupted for document: {path}")
+                            is_cancelled = True
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error from conversion for {path}: {str(e)}", exc_info=True)
+                            batch_stats.pop(path, {})
+                            if doc_id is not None:
+                                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                if pending_conversion:
+                    time.sleep(0.5)
+            if is_cancelled and not process_futures:
+                raise JobCancelledError(f"Job {job_id} cancelled at conversion→process boundary")
+            # process_futures may contain entries submitted in earlier iterations when
+            # is_cancelled was still False — fall through to section C which already
+            # handles cancellation, draining, and suppressing downstream submissions.
 
             # C. Handle Processing -> Submit Chunking
-            for fut in as_completed(process_futures):
-                path = process_futures[fut]
-                doc_id = doc_id_dict.get(Path(path).name)
-                try:
-                    txt_json, tab_json, pgs, tabs, timings, document_language = fut.result()
+            # Poll instead of as_completed so cancellation is checked before each pending
+            # future starts. running() futures cannot be interrupted — they drain naturally.
+            pending_process = dict(process_futures)
+            while pending_process:
+                is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
+                if is_cancelled:
+                    # Signal any running process_converted_document threads so they
+                    # can cut short mid-table-summarization rather than waiting for
+                    # all queued LLM calls to complete.
+                    _process_stop_event.set()
+                for fut, path in list(pending_process.items()):
+                    doc_id = doc_id_dict.get(Path(path).name)
+                    if is_cancelled and not fut.running() and not fut.done():
+                        fut.cancel()
+                        logger.info(f"Job {job_id} cancelled — skipping processing for document: {path}")
+                        del pending_process[fut]
+                    elif fut.done():
+                        del pending_process[fut]
+                        try:
+                            txt_json, tab_json, pgs, tabs, timings, document_language = fut.result()
 
-                    if not txt_json or not tab_json:
-                        if doc_id is not None:
-                            logger.error(f"Processing failed for {path}: txt_json or tab_json is None")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to process document {doc_id}: processing returned None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                        batch_stats.pop(path, {})
-                        continue
+                            if not txt_json or not tab_json:
+                                if doc_id is not None:
+                                    logger.error(f"Processing failed for {path}: txt_json or tab_json is None")
+                                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to process document {doc_id}: processing returned None")
+                                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                                batch_stats.pop(path, {})
+                                continue
 
-                    total_processing_time = timings["process_text"] + timings["process_tables"]
-                    batch_stats[path].update({"page_count": pgs, "table_count": tabs})
-                    batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
+                            total_processing_time = timings["process_text"] + timings["process_tables"]
+                            batch_stats[path].update({"page_count": pgs, "table_count": tabs})
+                            batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
 
-                    if doc_id is not None:
-                        logger.debug(f"Processing Done: updating doc & job metadata for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {
-                            "status": DocStatus.PROCESSED,
-                            "pages": pgs,
-                            "tables": tabs,
-                            "timing_in_secs": {**batch_stats[path]["timings"]},
-                        })
-                        status_mgr.update_job_progress(
-                            doc_id=doc_id,
-                            doc_status=DocStatus.PROCESSED,
-                            job_status=JobStatus.IN_PROGRESS,
-                        )
+                            if doc_id is not None:
+                                logger.debug(f"Processing Done: updating doc & job metadata for document: {path}")
+                                status_mgr.update_doc_metadata(doc_id, {
+                                    "status": DocStatus.PROCESSED,
+                                    "pages": pgs,
+                                    "tables": tabs,
+                                    "timing_in_secs": {**batch_stats[path]["timings"]},
+                                })
+                                status_mgr.update_job_progress(
+                                    doc_id=doc_id,
+                                    doc_status=DocStatus.PROCESSED,
+                                    job_status=JobStatus.IN_PROGRESS,
+                                )
 
-                    c_future = chunker_executor.submit(
-                        chunk_single_file, txt_json, tab_json, out_path,
-                        emb_endpoint, max_tokens, doc_id=doc_id, language=document_language
-                    )
-                    chunk_futures[c_future] = str(path)
-                except Exception as e:
-                    if doc_id is not None:
-                        logger.error(f"Error from processing for {path}: {str(e)}", exc_info=True)
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to process document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                    batch_stats.pop(path, {})
+                            # CHECK 3: don't submit new work if cancelled
+                            if is_cancelled:
+                                logger.info(f"Job {job_id} cancelled — not submitting processed document for chunking: {path}")
+                                continue
+
+                            c_future = chunker_executor.submit(
+                                chunk_single_file, txt_json, tab_json, out_path,
+                                emb_endpoint, max_tokens, doc_id=doc_id, language=document_language
+                            )
+                            chunk_futures[c_future] = str(path)
+                        except JobCancelledError:
+                            logger.info(f"Job {job_id} cancelled — processing was interrupted for document: {path}")
+                            is_cancelled = True
+                            continue
+                        except Exception as e:
+                            if doc_id is not None:
+                                logger.error(f"Error from processing for {path}: {str(e)}", exc_info=True)
+                                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to process document: {str(e)}")
+                                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                            batch_stats.pop(path, {})
+                if pending_process:
+                    time.sleep(0.5)
+            if is_cancelled and not chunk_futures:
+                raise JobCancelledError(f"Job {job_id} cancelled at processing→chunk boundary")
+            # chunk_futures may contain entries submitted in earlier iterations when
+            # is_cancelled was still False — fall through to section D which already
+            # handles cancellation, draining, and suppressing downstream submissions.
 
             # D. Handle Chunking (both text and tables)
-            for fut in as_completed(chunk_futures):
-                path = chunk_futures[fut]
-                doc_id = doc_id_dict.get(Path(path).name)
-                try:
-                    text_chunk_json, table_chunk_json, total_time = fut.result()
+            # Poll instead of as_completed so cancellation is checked before each pending
+            # future starts. running() futures cannot be interrupted — they drain naturally.
+            pending_chunk = dict(chunk_futures)
+            while pending_chunk:
+                is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
+                for fut, path in list(pending_chunk.items()):
+                    doc_id = doc_id_dict.get(Path(path).name)
+                    if is_cancelled and not fut.running() and not fut.done():
+                        fut.cancel()
+                        logger.info(f"Job {job_id} cancelled — skipping chunking for document: {path}")
+                        del pending_chunk[fut]
+                    elif fut.done():
+                        del pending_chunk[fut]
+                        try:
+                            text_chunk_json, table_chunk_json, total_time = fut.result()
 
-                    if not text_chunk_json or not table_chunk_json:
-                        if doc_id is not None:
-                            logger.error(f"Chunking failed for {path}")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Chunking failed for document {doc_id}")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                        batch_stats.pop(path, {})
-                        continue
+                            if not text_chunk_json or not table_chunk_json:
+                                if doc_id is not None:
+                                    logger.error(f"Chunking failed for {path}")
+                                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Chunking failed for document {doc_id}")
+                                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                                batch_stats.pop(path, {})
+                                continue
 
-                    batch_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
+                            batch_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
 
-                    chunk_count = count_chunks(text_chunk_json, table_chunk_json)
-                    batch_stats[path]["chunk_count"] = chunk_count
+                            chunk_count = count_chunks(text_chunk_json, table_chunk_json)
+                            batch_stats[path]["chunk_count"] = chunk_count
 
-                    if doc_id is not None:
-                        logger.debug(f"Chunking Done: updating doc & job metadata for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {
-                            "status": DocStatus.CHUNKED,
-                            "chunks": chunk_count,
-                            "timing_in_secs": {**batch_stats[path]["timings"]},
-                        })
-                        status_mgr.update_job_progress(doc_id, DocStatus.CHUNKED, JobStatus.IN_PROGRESS)
+                            if doc_id is not None:
+                                logger.debug(f"Chunking Done: updating doc & job metadata for document: {path}")
+                                status_mgr.update_doc_metadata(doc_id, {
+                                    "status": DocStatus.CHUNKED,
+                                    "chunks": chunk_count,
+                                    "timing_in_secs": {**batch_stats[path]["timings"]},
+                                })
+                                status_mgr.update_job_progress(doc_id, DocStatus.CHUNKED, JobStatus.IN_PROGRESS)
 
-                        if indexing_callback:
-                            try:
-                                # Create chunks for immediate indexing
-                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
-                                # Inject doc_id into chunks
-                                for chunk in doc_chunks:
-                                    chunk["doc_id"] = doc_id
+                                # CHECK 4: don't submit new indexing work if cancelled
+                                if is_cancelled:
+                                    logger.info(f"Job {job_id} cancelled — not submitting chunked document for indexing: {path}")
+                                    continue
 
-                                logger.debug(f"Submitting async indexing for document: {doc_id}")
-                                # Submit to indexer executor for async processing
-                                index_future = indexer_executor.submit(indexing_callback, doc_id, doc_chunks, path)
-                                indexing_futures[index_future] = doc_id
-                            except Exception as e:
-                                logger.error(f"Error submitting indexing for {doc_id}: {e}", exc_info=True)
-                                # Don't fail the entire pipeline if indexing submission fails
-                except Exception as e:
-                    if doc_id is not None:
-                        logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                    batch_stats.pop(path, {})
+                                if indexing_callback:
+                                    try:
+                                        # Create chunks for immediate indexing
+                                        doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
+                                        # Inject doc_id into chunks
+                                        for chunk in doc_chunks:
+                                            chunk["doc_id"] = doc_id
 
-            # E. Wait for all indexing to complete (non-blocking for chunking)
-            if indexing_futures:
-                logger.info(f"Waiting for {len(indexing_futures)} indexing operations to complete...")
-                for index_fut in as_completed(indexing_futures):
-                    doc_id = indexing_futures[index_fut]
-                    try:
-                        # Get result to ensure any exceptions are raised
-                        index_fut.result()
-                        logger.debug(f"Indexing completed for document: {doc_id}")
-                    except Exception as e:
-                        logger.error(f"Indexing failed for document {doc_id}: {e}", exc_info=True)
-                        # Error already handled by callback, just log here
+                                        logger.debug(f"Submitting async indexing for document: {path}")
+                                        # Submit to indexer executor for async processing
+                                        index_future = indexer_executor.submit(indexing_callback, doc_id, doc_chunks, path)
+                                        indexing_futures[index_future] = doc_id
+                                    except Exception as e:
+                                        logger.error(f"Error submitting indexing for {doc_id}: {e}", exc_info=True)
+                                        # Don't fail the entire pipeline if indexing submission fails
+                        except Exception as e:
+                            if doc_id is not None:
+                                logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
+                                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document: {str(e)}")
+                                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                            batch_stats.pop(path, {})
+                if pending_chunk:
+                    time.sleep(0.5)
+            
+            if is_cancelled and not indexing_futures:
+                raise JobCancelledError(f"Job {job_id} cancelled at chunk→index boundary")
+
+            # E. Wait for all indexing to complete (non-blocking for chunking).
+            # is_cancelled is already latched True if any earlier stage was cancelled;
+            # pending index futures from those stages are handled here alongside any
+            # new cancellations that arrive during the indexing wait.
+            pending_futures = dict(indexing_futures)
+            while pending_futures:
+                is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
+                for index_fut, doc_id in list(pending_futures.items()):
+                    if is_cancelled and not index_fut.running() and not index_fut.done():
+                        index_fut.cancel()
+                        logger.info(f"Job {job_id} cancelled — skipping indexing for document: {doc_id}")
+                        del pending_futures[index_fut]
+                    elif index_fut.done():
+                        try:
+                            index_fut.result()
+                            logger.debug(f"Indexing completed for document: {doc_id}")
+                        except Exception as e:
+                            logger.error(f"Indexing failed for document {doc_id}: {e}", exc_info=True)
+                        del pending_futures[index_fut]
+                    elif is_cancelled and index_fut.running():
+                        logger.info(
+                            f"Job {job_id} cancelled — indexing already running for document {doc_id}, letting it complete to avoid stale VDB entries"
+                        )
+                        # Leave in pending_futures; will be collected when done()
+                if pending_futures:
+                    time.sleep(0.5)
+            if is_cancelled:
+                raise JobCancelledError(f"Job {job_id} cancelled at indexing stage")
 
         return batch_stats
 
@@ -713,6 +835,10 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         # Indexing is now done inside _run_batch, so we just return stats
         # No need for post-processing assembly or indexing
         return {}, converted_pdf_stats
+
+    except JobCancelledError:
+        # Propagate cancellation to ingest.py so it can set CANCELLED status
+        raise
 
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)

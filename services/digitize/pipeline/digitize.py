@@ -11,6 +11,8 @@ from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.parsing.pdf import get_pdf_page_count, get_document_page_count
 from digitize.parsing.converter import convert_document_format
 from digitize.utils.db import get_status_manager
+from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
@@ -55,6 +57,10 @@ def digitize(
     file_path = documents[0]
     filename = file_path.name
     doc_id = doc_id_dict[filename]
+
+    # Check cancellation before entering the ProcessPoolExecutor — the only safe abort point
+    if job_id and db_manager.is_job_cancelled(job_id):
+        raise JobCancelledError(f"Job {job_id} was cancelled before digitization started")
 
     try:
         # Mark document/job as IN_PROGRESS
