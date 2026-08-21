@@ -15,7 +15,7 @@ import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
-import { StepOne } from "./steps/StepOne";
+import { StepOne } from "./steps/DAStepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
@@ -194,6 +194,8 @@ export const DeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitialized.current = false;
+    setHasStep1SchemaError(false);
+    setHasStep2SchemaError(false);
     onClose();
   };
 
@@ -236,7 +238,7 @@ export const DeployFlow = ({
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
           showNameError={state.showStepOneNameError}
-          onSchemaError={setHasStep1SchemaError}
+          onComponentError={setHasStep1SchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -247,7 +249,7 @@ export const DeployFlow = ({
           deployOptions={deployOptions}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
-          onSchemaError={setHasStep2SchemaError}
+          onComponentError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>

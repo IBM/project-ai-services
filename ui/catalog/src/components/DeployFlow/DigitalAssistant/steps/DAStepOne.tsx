@@ -1,16 +1,12 @@
 import { useMemo, useEffect } from "react";
-import {
-  TextInput,
-  Dropdown,
-  Grid,
-  Column,
-  InlineNotification,
-} from "@carbon/react";
-import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps } from "../types";
 import type { ComponentConfig } from "../../Shared/types";
 import type { ProviderSchema } from "@/types/api.types";
 import { useDeployStore } from "@/store/deploy.store";
+import {
+  SharedStepOne,
+  type StepOneComponentRow,
+} from "../../Shared/steps/SharedStepOne";
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -18,14 +14,8 @@ export const StepOne: React.FC<StepProps> = ({
   onChange,
   deployOptions,
   showNameError = false,
-  onSchemaError,
+  onComponentError,
 }) => {
-  const isNameValid = !!formData.name.trim();
-
-  const versionOptions = [
-    { id: deployOptions.version, text: deployOptions.version },
-  ];
-
   const providerParams = useDeployStore((state) => state.providerParams);
   const providerParamsError = useDeployStore(
     (state) => state.providerParamsError,
@@ -62,7 +52,7 @@ export const StepOne: React.FC<StepProps> = ({
     providerParamsError,
   ]);
 
-  // Extract model names from provider schemas for display
+  // Extract model names from provider schemas for display in the dropdown labels.
   const modelNames = useMemo(() => {
     const result: Record<string, string> = {};
     Object.entries(paramsByType).forEach(([_componentType, paramsMap]) => {
@@ -78,12 +68,7 @@ export const StepOne: React.FC<StepProps> = ({
     return result;
   }, [paramsByType]);
 
-  // Notify parent when schema error state changes so it can gate the Next button.
-  useEffect(() => {
-    onSchemaError?.(failedComponentTypes.length > 0);
-  }, [failedComponentTypes, onSchemaError]);
-
-  // Initialize default model parameters when provider params are loaded
+  // Set default model param for each component when its provider schema loads.
   useEffect(() => {
     if (Object.keys(paramsByType).length === 0) return;
 
@@ -118,37 +103,34 @@ export const StepOne: React.FC<StepProps> = ({
     }
   }, [paramsByType, formData.globalComponents, onChange]);
 
-  // Build component data with provider options, deduplicate by preferring default provider
-  const globalComponentsData = useMemo(() => {
+  // Build component rows — deduplicate providers by display name, preferring the default.
+  const components = useMemo<StepOneComponentRow[]>(() => {
     return deployOptions.global_components.map((component) => {
-      const providersByDisplayName = new Map<
-        string,
-        (typeof component.providers)[0]
-      >();
+      const byDisplayName = new Map<string, (typeof component.providers)[0]>();
 
       component.providers.forEach((provider) => {
         const displayName = modelNames[provider.id] || provider.name;
-        const existing = providersByDisplayName.get(displayName);
-        if (!existing) {
-          providersByDisplayName.set(displayName, provider);
-        } else if (provider.default && !existing.default) {
-          providersByDisplayName.set(displayName, provider);
+        const existing = byDisplayName.get(displayName);
+        if (!existing || (provider.default && !existing.default)) {
+          byDisplayName.set(displayName, provider);
         }
       });
 
       const providerOptions: Array<{ id: string; text: string }> = [];
-      providersByDisplayName.forEach((provider, displayName) => {
+      byDisplayName.forEach((provider, displayName) => {
         providerOptions.push({ id: provider.id, text: displayName });
       });
-
-      const selectedProviderId =
-        formData.globalComponents[component.type]?.providerId || "";
 
       return {
         type: component.type,
         name: component.name,
+        // TODO(PR 8c): switch to model-first selection — hasModels will become true here.
+        hasModels: false,
+        modelOptions: [],
+        selectedModel: "",
         providerOptions,
-        selectedProviderId,
+        selectedProviderId:
+          formData.globalComponents[component.type]?.providerId || "",
       };
     });
   }, [deployOptions.global_components, formData.globalComponents, modelNames]);
@@ -174,79 +156,17 @@ export const StepOne: React.FC<StepProps> = ({
   };
 
   return (
-    <>
-      <div className={styles.stepHeader}>
-        <h2 className={styles.stepTitle}>{title}</h2>
-      </div>
-
-      {failedComponentTypes.length > 0 && (
-        <InlineNotification
-          kind="error"
-          title={`Failed to load configurations of ${failedComponentTypes.join(", ")}.`}
-          subtitle="Cancel and reopen to try again."
-          lowContrast
-          hideCloseButton
-        />
-      )}
-
-      <div className={styles.formSection}>
-        <Grid narrow className={styles.formGrid}>
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.formField}>
-              <TextInput
-                id="assistant-name"
-                labelText="Name"
-                value={formData.name}
-                invalid={showNameError && !isNameValid}
-                invalidText="Name is required"
-                onChange={(e) => {
-                  onChange({ name: e.target.value });
-                }}
-              />
-            </div>
-          </Column>
-
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.formField}>
-              <Dropdown
-                id="assistant-version"
-                titleText="Digital assistant version"
-                label="Select version"
-                items={versionOptions}
-                itemToString={(item) => (item ? item.text : "")}
-                selectedItem={
-                  versionOptions.find((v) => v.id === formData.version) || null
-                }
-                onChange={({ selectedItem }) =>
-                  onChange({ version: selectedItem?.id || "" })
-                }
-              />
-            </div>
-          </Column>
-
-          {globalComponentsData.map((component) => (
-            <Column key={component.type} sm={4} md={8} lg={16}>
-              <div className={styles.formField}>
-                <Dropdown
-                  id={`${component.type}-provider`}
-                  titleText={component.name}
-                  label={`Select ${component.name.toLowerCase()}`}
-                  items={component.providerOptions}
-                  itemToString={(item) => (item ? item.text : "")}
-                  selectedItem={
-                    component.providerOptions.find(
-                      (p) => p.id === component.selectedProviderId,
-                    ) || null
-                  }
-                  onChange={({ selectedItem }) =>
-                    handleProviderChange(component.type, selectedItem?.id || "")
-                  }
-                />
-              </div>
-            </Column>
-          ))}
-        </Grid>
-      </div>
-    </>
+    <SharedStepOne
+      title={title}
+      formData={formData}
+      onChange={onChange}
+      version={deployOptions.version}
+      versionLabel="Digital assistant version"
+      components={components}
+      onComponentChange={handleProviderChange}
+      showNameError={showNameError}
+      failedComponentNames={failedComponentTypes}
+      onComponentError={onComponentError}
+    />
   );
 };
