@@ -50,7 +50,7 @@
     },
     "allowed_extensions": {
       "type": "array",
-      "title": "File filters",
+      "title": "Include files by type",
       "description": "Restrict ingestion to files whose name ends with one of these extensions.",
       "ui:section": "File filters",
       "minItems": 1,
