@@ -17,6 +17,8 @@ from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager
+from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 
 logger = get_logger("digitize")
 
@@ -93,6 +95,10 @@ def digitize(
 
     timeout_s = settings.digitize.conversion_timeout_s
     deadline = time.monotonic() + timeout_s
+
+    # Check cancellation before entering the ProcessPoolExecutor — the only safe abort point
+    if job_id and db_manager.is_job_cancelled(job_id):
+        raise JobCancelledError(f"Job {job_id} was cancelled before digitization started")
 
     try:
         # Phase 1: wait until the dispatcher picks up the task (queued → running).

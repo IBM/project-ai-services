@@ -49,7 +49,7 @@ def recover_zombie_jobs() -> int:
     import digitize.settings as config
 
     orphan_count = 0
-    orphan_statuses = [JobStatus.ACCEPTED, JobStatus.IN_PROGRESS]
+    orphan_statuses = [JobStatus.ACCEPTED, JobStatus.IN_PROGRESS, JobStatus.CANCEL_PENDING]
 
     try:
         for status in orphan_statuses:

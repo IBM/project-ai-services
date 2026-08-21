@@ -12,7 +12,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
@@ -22,6 +22,7 @@ from digitize.utils.db import get_status_manager
 import digitize.utils.db as db_ops
 from digitize.settings import settings
 from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 
 router = APIRouter()
 logger = get_logger("jobs_router")
@@ -45,6 +46,19 @@ async def _run_digitize(
         from digitize.pipeline.digitize import digitize
         await asyncio.to_thread(digitize, job_id, doc_id_dict)
         logger.info(f"Digitization for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Digitization job {job_id} was cancelled")
+        # Mark all non-terminal documents as CANCELLED
+        docs = db_manager.get_documents_by_job_id(job_id)
+        for doc in docs:
+            if doc.status not in (
+                models.DocStatus.COMPLETED.value,
+                models.DocStatus.FAILED.value,
+                models.DocStatus.CANCELLED.value,
+                models.DocStatus.ALREADY_EXISTS.value,
+            ):
+                db_manager.update_document(doc.doc_id, status=models.DocStatus.CANCELLED)
+        db_manager.update_job(job_id, status=models.JobStatus.CANCELLED)
     except Exception as exc:
         logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
@@ -75,6 +89,45 @@ async def _run_ingest(
         from digitize.pipeline.ingest import ingest
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
         logger.info(f"Ingestion for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Ingestion job {job_id} was cancelled")
+        # Mark all non-terminal documents as CANCELLED
+        docs = db_manager.get_documents_by_job_id(job_id)
+        terminal = {
+            models.DocStatus.COMPLETED.value,
+            models.DocStatus.FAILED.value,
+            models.DocStatus.CANCELLED.value,
+            models.DocStatus.ALREADY_EXISTS.value,
+        }
+        for doc in docs:
+            if doc.status not in terminal:
+                db_manager.update_document(doc.doc_id, status=models.DocStatus.CANCELLED)
+        db_manager.update_job(job_id, status=models.JobStatus.CANCELLED)
+
+        # Sub-Task 6: clean vector DB if requested
+        try:
+            job_row = db_manager.get_job_by_id(job_id)
+            if job_row and job_row.stats.get("clean_files"):
+                import common.db_utils as db_utils
+                indexed_statuses = {
+                    models.DocStatus.CHUNKED.value,
+                    models.DocStatus.COMPLETED.value,
+                }
+                # Re-fetch docs after marking cancelled to get accurate statuses
+                all_docs = db_manager.get_documents_by_job_id(job_id)
+                # Use original doc_id_dict values since docs are now CANCELLED;
+                # any doc that was CHUNKED or COMPLETED before cancellation may have vector data
+                doc_ids_to_clean = [
+                    d.doc_id for d in all_docs
+                    if d.doc_id in doc_id_dict.values()
+                ]
+                if doc_ids_to_clean:
+                    vector_store = db_utils.get_vector_store()
+                    deleted = vector_store.remove_docs_from_index(doc_ids_to_clean)
+                    logger.info(f"Cancelled job {job_id}: removed {deleted} vector chunks (clean_files=true)")
+        except Exception as vdb_exc:
+            logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
+
     except Exception as exc:
         logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
@@ -473,3 +526,78 @@ async def delete_job(job_id: str):
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"Failed to delete job '{job_id}'",
         )
+
+
+
+# ------------------------------------------------------------------ #
+# Cancel endpoint                                                     #
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/{job_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_class=Response,
+    responses={
+        404: http_error_responses[404],
+        409: http_error_responses[409],
+        500: http_error_responses[500],
+    },
+    summary="Cancel a job",
+    description=(
+        "Request cancellation of an active job (accepted or in_progress). "
+        "The job status is immediately set to 'cancel_pending' in the database; "
+        "the background pipeline will observe this at its next checkpoint, stop, "
+        "and then mark the job as 'cancelled'. "
+        "Pass clean_files=true to also delete any vector-DB chunks already indexed "
+        "for this job's documents (ingestion jobs only)."
+    ),
+    response_description="Cancellation accepted",
+)
+async def cancel_job(
+    job_id: str,
+    clean_files: bool = Query(False, description="Delete already-indexed vector DB chunks for this job"),
+):
+    """Mark an active job as CANCEL_PENDING. The pipeline will stop at its next checkpoint and write CANCELLED."""
+    try:
+        from digitize.utils.db import get_job as _get_job
+
+        job_data = _get_job(job_id)
+
+        if job_data is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"No job found with id '{job_id}'",
+            )
+
+        job_status = job_data.get("status", "")
+        non_cancellable_statuses = (
+            models.JobStatus.COMPLETED,
+            models.JobStatus.FAILED,
+            models.JobStatus.CANCEL_PENDING,
+            models.JobStatus.CANCELLED,
+        )
+        if job_status in non_cancellable_statuses:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Job '{job_id}' is already in terminal state '{job_status}' and cannot be cancelled",
+            )
+
+        # Persist clean_files flag into stats so the background task can read it
+        current_stats = job_data.get("stats") or {}
+        updated_stats = {**current_stats, "clean_files": clean_files}
+
+        # Single update: set status=cancel_pending and store clean_files flag
+        db_manager.update_job(job_id, status=models.JobStatus.CANCEL_PENDING, stats=updated_stats)
+        logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
+        return
+
+    except HTTPException as http_exc:
+        logger.warning(f"HTTP error while cancelling job '{job_id}': {http_exc.status_code} {http_exc.detail}")
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to cancel job {job_id}: {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to cancel job '{job_id}'",
+        )
+
