@@ -46,13 +46,13 @@ opensearch:
 
 postgres:
   # @hidden
-  image: icr.io/ai-services/postgres:18-3-1
+  image: icr.io/ai-services-cicd/postgres:18-3-1
   # @description Password for PostgreSQL default 'postgres' user authentication. Must be at least 8 characters. Use this to override the default password.
   password: "Aiservicesdb@1234"
 
 instruct:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+  image: registry.redhat.io/rhaii-early-access/vllm-spyre-rhel9:3.5.0-ea.2
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
@@ -74,7 +74,7 @@ embedding:
 
 reranker:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+  image: registry.redhat.io/rhaii-early-access/vllm-spyre-rhel9:3.5.0-ea.2
   model:
     # @hidden
     name: BAAI/bge-reranker-v2-m3
