@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - 'services/digitize/**'
-      - '.github/workflows/build-and-publish-image.yml'
     branches:
       - main
       - 'release-*'
