@@ -1640,7 +1640,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (`worker start --token \u003ctoken\u003e`).",
+                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (`worker join --token \u003ctoken\u003e`).",
                 "consumes": [
                     "application/json"
                 ],

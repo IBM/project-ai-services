@@ -35,7 +35,7 @@ type createWorkerResp struct {
 //
 //	@Summary		Register a new worker
 //	@Description	Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.
-//	@Description	The operator passes this token when starting the worker daemon (`worker start --token <token>`).
+//	@Description	The operator passes this token when starting the worker daemon (`worker join --token <token>`).
 //	@Tags			Workers
 //	@Accept			json
 //	@Produce		json

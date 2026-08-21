@@ -1722,7 +1722,7 @@ paths:
       - application/json
       description: |-
         Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.
-        The operator passes this token when starting the worker daemon (`worker start --token <token>`).
+        The operator passes this token when starting the worker daemon (`worker join --token <token>`).
       parameters:
       - description: Worker registration request
         in: body

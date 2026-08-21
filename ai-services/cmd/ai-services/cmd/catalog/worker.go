@@ -46,7 +46,7 @@ bootstrap token.
 Pass the token to the worker daemon at startup so it can authenticate with the
 catalog gRPC gateway:
 
-  worker start --token <token> --gateway <catalog-host>:9090`,
+  worker join --token <token> --gateway <catalog-host>:9090`,
 		Example: `  ai-services catalog worker register node-1`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
