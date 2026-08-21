@@ -61,7 +61,6 @@ class StorageManager:
                     None,
                     partial(self._write_bytes, target, content),
                 )
-                logger.debug(f"Staged file: {filename} for job {job_id}")
             except PermissionError as exc:
                 logger.error(
                     f"Permission denied staging {filename} (job {job_id}): {exc}"
@@ -72,6 +71,7 @@ class StorageManager:
                     f"Unexpected error staging {filename} (job {job_id}): {exc}"
                 )
                 raise
+        logger.debug(f"Staged {len(filenames)} file(s) for job {job_id}")
 
     @staticmethod
     def _write_bytes(path: Path, content: bytes) -> None:
