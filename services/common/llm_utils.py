@@ -1,5 +1,6 @@
 import os
 import requests
+import threading
 import time
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -108,12 +109,23 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         logger.error(f"Error summarizing/classifying table: {e}")
         raise
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32, stop_event: threading.Event | None = None):
     """Combined function to summarize and classify tables using a single prompt.
 
-    Returns tuple: (summaries, decisions, failures).
-    failures is a dict mapping table index to error message for failed tables.
-    Table failures are non-fatal: failed tables use fallback values and processing continues.
+    Args:
+        table_mds: List of table markdown strings.
+        gen_model: LLM model name.
+        llm_endpoint: LLM endpoint URL.
+        doc_path: Document path (used for logging).
+        prompt_template: Prompt template string with a {content} placeholder.
+        max_tokens: Maximum tokens for the LLM response.
+        max_workers: Maximum parallel LLM workers.
+        stop_event: Optional threading.Event. When set, the function stops
+                    collecting further LLM results between table calls and
+                    cancels any queued futures that have not yet started.
+
+    Returns tuple: (summaries, decisions)
+    Raises JobCancelledError if stop_event is set mid-processing.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
@@ -131,6 +143,16 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             for idx, prompt in enumerate(all_prompts)
         }
         for future in as_completed(futures):
+            # Check for job cancellation after each table's LLM call completes.
+            if stop_event is not None and stop_event.is_set():
+                # Cancel any futures that haven't started yet.
+                for pending_fut in futures:
+                    if not pending_fut.running() and not pending_fut.done():
+                        pending_fut.cancel()
+                from digitize.exceptions import JobCancelledError
+                raise JobCancelledError(
+                    f"Job cancelled during table summarization for '{doc_path}'"
+                )
             idx = futures[future]
             try:
                 results[idx] = future.result()

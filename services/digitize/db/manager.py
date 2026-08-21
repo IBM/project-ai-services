@@ -123,6 +123,39 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving job {job_id}: {e}", exc_info=True)
             return None
 
+
+    @staticmethod
+    def is_job_cancelled(job_id: str) -> bool:
+        """
+        Check whether a job has been marked for cancellation.
+
+        Returns True for both 'cancel_pending' (set by the API endpoint) and
+        'cancelled' (set by the pipeline after it finishes draining), so that
+        pipeline checkpoints stop as soon as the cancellation request arrives.
+
+        Performs a lightweight single-column SELECT so it is cheap to call
+        at pipeline checkpoints without loading the full job row.
+
+        Args:
+            job_id: Unique identifier for the job
+
+        Returns:
+            True if the job status is 'cancel_pending' or 'cancelled', False
+            otherwise (including when the job is not found or a DB error occurs).
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Job.status).where(Job.job_id == job_id)
+                job_status = session.scalar(stmt)
+                return job_status in ("cancel_pending", "cancelled")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+
+
     @staticmethod
     def get_all_jobs(
         status: Optional[JobStatus] = None,
