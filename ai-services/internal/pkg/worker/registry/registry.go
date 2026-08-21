@@ -207,7 +207,9 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 	now := time.Now()
 
 	for _, w := range workers {
-		if w.Status == models.WorkerStatusDisconnected {
+		// Pending workers have never connected — they have no heartbeat yet
+		// and must not be swept to Disconnected.
+		if w.Status == models.WorkerStatusPending || w.Status == models.WorkerStatusDisconnected {
 			continue
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > timeout {
