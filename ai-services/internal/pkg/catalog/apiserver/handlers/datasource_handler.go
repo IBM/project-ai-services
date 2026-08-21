@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
@@ -78,6 +79,53 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// ListDatasources godoc
+//
+//	@Summary		List datasource connectors
+//	@Description	Returns a paginated list of datasource connectors with optional filters by status and provider.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
+//	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
+//	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
+//	@Success		200			{object}	models.DatasourceListResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/datasources [get]
+func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	req := models.ListDatasourcesRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Status:   c.Query("status"),
+		Provider: c.Query("provider"),
+	}
+
+	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)
+	if err != nil {
+		logger.ErrorfCtx(c.Request.Context(), "failed to list datasources: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to list datasources",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // Made with Bob

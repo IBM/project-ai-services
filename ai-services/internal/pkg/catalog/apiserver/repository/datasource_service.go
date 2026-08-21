@@ -19,7 +19,7 @@ func NewDatasourceService(
 	validator := validators.NewConnectorValidator(provider)
 	encryptionKey := os.Getenv("DB_ENCRYPTION_KEY")
 
-	return datasourceservice.NewDatasourceService(connectorRepo, validator, encryptionKey)
+	return datasourceservice.NewDatasourceService(connectorRepo, provider, validator, encryptionKey)
 }
 
 // Made with Bob

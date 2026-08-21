@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
@@ -31,9 +33,10 @@ type ValidationError = validators.ValidationError
 // sensitive-field identification) is delegated to a ConnectionTester looked up
 // from the testers registry.
 type DatasourceService struct {
-	connectorRepo dbrepo.ConnectorRepository
-	validator     *validators.ConnectorValidator
-	encryptionKey string
+	connectorRepo    dbrepo.ConnectorRepository
+	catalogProvider  *catalog.CatalogProvider
+	validator        *validators.ConnectorValidator
+	encryptionKey    string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
 }
@@ -44,13 +47,15 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	catalogProvider *catalog.CatalogProvider,
 	validator *validators.ConnectorValidator,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
-		connectorRepo: connectorRepo,
-		validator:     validator,
-		encryptionKey: encryptionKey,
+		connectorRepo:   connectorRepo,
+		catalogProvider: catalogProvider,
+		validator:       validator,
+		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
 			ProviderObjectStorage: NewObjectStorageTester(),
 			ProviderFileSystem:    NewFileSystemTester(),
@@ -122,6 +127,77 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	return &apimodels.CreateDatasourceResponse{ID: connector.ID.String()}, nil
+}
+
+// ListDatasources returns a paginated list of datasource connectors, optionally filtered
+// by status and provider. Pagination mirrors the application and bundle list patterns:
+// uses repository.ConnectorFilters with Limit/Offset derived from Page/PageSize.
+func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error) {
+	filters := &dbrepo.ConnectorFilters{
+		Status:   dbmodels.ConnectorStatus(req.Status),
+		Provider: req.Provider,
+		Limit:    req.PageSize,
+		Offset:   (req.Page - 1) * req.PageSize,
+	}
+
+	totalCount, err := s.connectorRepo.GetCount(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count datasources: %w", err)
+	}
+
+	connectors, err := s.connectorRepo.List(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list datasources: %w", err)
+	}
+
+	data := make([]apimodels.DatasourceResponse, 0, len(connectors))
+	for i := range connectors {
+		data = append(data, *s.connectorToResponse(&connectors[i], 0))
+	}
+
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
+	}
+
+	return &apimodels.DatasourceListResponse{
+		Data: data,
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			TotalItems: totalCount,
+			TotalPages: totalPages,
+			HasNext:    req.Page < totalPages,
+			HasPrev:    req.Page > 1,
+		},
+	}, nil
+}
+
+// connectorToResponse converts a DB Connector model to a DatasourceResponse API model.
+// The provider name is resolved from the catalog; if unavailable (e.g. provider removed from
+// catalog), the name falls back to the stored provider ID so the response is never incomplete.
+// connectedServices is passed in directly from the List query's COUNT projection; callers
+// that do not have this value (GetByID) pass 0.
+func (s *DatasourceService) connectorToResponse(c *dbmodels.Connector, connectedServices int) *apimodels.DatasourceResponse {
+	providerName := c.Provider
+	if catalogConnector, err := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, c.Provider); err == nil {
+		providerName = catalogConnector.Name
+	}
+
+	return &apimodels.DatasourceResponse{
+		ID:   c.ID.String(),
+		Name: c.Name,
+		Type: c.Type,
+		Provider: apimodels.DatasourceProviderInfo{
+			ID:   c.Provider,
+			Name: providerName,
+		},
+		Status:            string(c.Status),
+		Message:           c.Message,
+		ConnectedServices: connectedServices,
+		CreatedAt:         c.CreatedAt.Format(catalogconstants.RFC3339WithTimezone),
+		UpdatedAt:         c.UpdatedAt.Format(catalogconstants.RFC3339WithTimezone),
+	}
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in
