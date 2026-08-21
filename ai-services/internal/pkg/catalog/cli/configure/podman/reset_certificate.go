@@ -13,8 +13,8 @@ import (
 // ResetCatalogCertificate resets the SSL certificates for the catalog service.
 // It stages new certificates and loads them into Caddy via the Admin API without pod restart.
 // Caddy health is verified internally when connecting to the Admin API.
-func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
-	logger.DebuglnCtx(context.Background(), "Resetting catalog SSL certificates...")
+func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string) error {
+	logger.DebuglnCtx(ctx, "Resetting catalog SSL certificates...")
 
 	// Create deployment context to get runtime
 	deployCtx, err := deploy.NewDeployContext()
@@ -23,7 +23,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Validate catalog service is running
-	isCatalogRunning, err := IsCatalogServiceRunning(deployCtx.Runtime)
+	isCatalogRunning, err := IsCatalogServiceRunning(ctx, deployCtx.Runtime)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Get existing catalog pod details
-	opts, _, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -61,7 +61,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 		return err
 	}
 
-	logger.InfolnCtx(context.Background(), "SSL certificates reset successfully")
+	logger.InfolnCtx(ctx, "SSL certificates reset successfully")
 
 	return nil
 }

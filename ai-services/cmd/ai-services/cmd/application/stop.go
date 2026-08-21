@@ -58,6 +58,7 @@ Note:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
 		// For podman runtime with default mode, validate application name using catalog API
@@ -85,7 +86,7 @@ Note:
 			Legacy:   legacyStop,
 		}
 
-		return app.Stop(opts)
+		return app.Stop(ctx, opts)
 	},
 }
 

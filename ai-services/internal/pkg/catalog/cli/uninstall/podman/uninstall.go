@@ -50,7 +50,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 
 	// Retrieve the BaseDir from the catalog pod configuration
 	var baseDir string
-	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
+	config, _, err := catalogUtils.GetCatalogPodConfig(context.Background(), rt)
 	if err != nil {
 		logger.Warningf("Failed to retrieve BaseDir from catalog pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()
@@ -104,7 +104,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 // deleteSecrets removes the specified secrets.
 func deleteSecrets(rt *podman.PodmanClient, secrets []string) error {
 	for _, secret := range secrets {
-		if err := rt.DeleteSecret(secret); err != nil {
+		if err := rt.DeleteSecret(context.Background(), secret); err != nil {
 			return err
 		}
 	}
@@ -136,7 +136,7 @@ func podsDeletion(rt *podman.PodmanClient, pods []types.Pod) error {
 	for _, pod := range pods {
 		logger.Infof("Deleting pod: %s\n", pod.Name)
 
-		if err := rt.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
+		if err := rt.DeletePod(context.Background(), pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
 
 			continue
@@ -248,7 +248,7 @@ func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
 	for _, volumeName := range volumeNames {
 		logger.Infof("Deleting volume: %s\n", volumeName)
 
-		if err := rt.DeleteVolume(volumeName); err != nil {
+		if err := rt.DeleteVolume(context.Background(), volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogUtils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)

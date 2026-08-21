@@ -45,7 +45,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	}
 
 	// Step 4: Collect and hash password (if secret doesn't exist)
-	passwordHash, err := catalogutils.CollectAndHashPassword(runtime)
+	passwordHash, err := catalogutils.CollectAndHashPassword(ctx, runtime)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func generateArgParams(rt *runtimeOpenshift.OpenshiftClient, passwordHash string
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 
-	dbSecretExists, err := rt.SecretExists(catalogconstants.CatalogDBSecretName)
+	dbSecretExists, err := rt.SecretExists(context.Background(), catalogconstants.CatalogDBSecretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check db secret existence: %w", err)
 	}

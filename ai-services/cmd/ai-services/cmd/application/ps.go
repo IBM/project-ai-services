@@ -70,6 +70,8 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
+
 		var applicationName string
 		if len(args) > 0 {
 			applicationName = args[0]
@@ -90,7 +92,7 @@ Arguments:
 				return fmt.Errorf("failed to create application instance: %w", err)
 			}
 
-			_, err = app.List(opts)
+			_, err = app.List(ctx, opts)
 			if err != nil {
 				return fmt.Errorf("failed to fetch application: %w", err)
 			}

@@ -15,7 +15,7 @@ import (
 // GetCatalogPods return the list of catalog pod.
 func GetCatalogPods(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
 	// Check if catalog pods exist
-	pods, err := rt.ListPods(map[string][]string{
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalogConstants.CatalogAppName)},
 	})
 	if err != nil {

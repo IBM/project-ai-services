@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -12,7 +13,7 @@ import (
 )
 
 // Info displays detailed information about an application.
-func (p *PodmanApplication) Info(opts types.InfoOptions) error {
+func (p *PodmanApplication) Info(ctx context.Context, opts types.InfoOptions) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}
@@ -20,7 +21,7 @@ func (p *PodmanApplication) Info(opts types.InfoOptions) error {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", opts.Name)}
 	}
 
-	pods, err := p.runtime.ListPods(listFilters)
+	pods, err := p.runtime.ListPods(ctx, listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}

@@ -18,7 +18,7 @@ const (
 	inspectPollInterval = 10 * time.Second
 )
 
-func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
+func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
 	var containerStatus *types.Container
 	var err error
 
@@ -26,7 +26,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 
 	for {
 		// fetch the container status
-		containerStatus, err = runtime.InspectContainer(containerNameOrId)
+		containerStatus, err = runtime.InspectContainer(ctx, containerNameOrId)
 		if err != nil {
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
@@ -52,12 +52,12 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 }
 
 // WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
-func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
+func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for {
 		// fetch the pod info
-		pInfo, err := runtime.InspectPod(podID)
+		pInfo, err := runtime.InspectPod(ctx, podID)
 		if err != nil {
 			return fmt.Errorf("failed to do pod inspect for podID: %s with error: %w", podID, err)
 		}
@@ -78,9 +78,9 @@ func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedCo
 	}
 }
 
-func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
+func FetchContainerStartPeriod(ctx context.Context, runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
 	// fetch the container stats
-	containerStats, err := runtime.InspectContainer(containerNameOrId)
+	containerStats, err := runtime.InspectContainer(ctx, containerNameOrId)
 	if err != nil {
 		return 0, fmt.Errorf("failed to check container stats: %w", err)
 	}
@@ -140,7 +140,7 @@ func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.R
 func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
-	pods, err := runtime.ListPods(map[string][]string{
+	pods, err := runtime.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
@@ -158,7 +158,7 @@ func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName s
 		if pod.Status != "Running" {
 			logger.WarningfCtx(ctx, "Pod %q is in %q state — deleting it so it can be redeployed\n", pod.Name, pod.Status)
 
-			if err := runtime.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
+			if err := runtime.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); err != nil {
 				return nil, fmt.Errorf("failed to delete non-running pod %q: %w", pod.Name, err)
 			}
 
@@ -173,7 +173,7 @@ func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName s
 func existingSecrets(ctx context.Context, runtime runtime.Runtime, secretNames []string) ([]string, error) {
 	secretsToSkip := make([]string, 0, len(secretNames))
 	for _, secretName := range secretNames {
-		secret, err := runtime.ListSecrets(map[string][]string{
+		secret, err := runtime.ListSecrets(ctx, map[string][]string{
 			"name": {secretName},
 		})
 		if err != nil && !strings.Contains(err.Error(), constants.ErrSecretNotFound) {

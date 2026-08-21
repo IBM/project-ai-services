@@ -64,7 +64,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 // Accepts pre-extracted route infos from templates.
-func GetCatalogRouteInfo(caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
+func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
 	// Create proxy manager
 	proxyManager, err := caddyCtx.CreateProxyManager()
 	if err != nil {
@@ -78,7 +78,7 @@ func GetCatalogRouteInfo(caddyCtx *Context, runtime *podman.PodmanClient, routeI
 	}
 
 	// Get Caddy HTTPS port
-	httpsPort, err := caddyCtx.GetHTTPSPort(runtime)
+	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, runtime)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
 	}
