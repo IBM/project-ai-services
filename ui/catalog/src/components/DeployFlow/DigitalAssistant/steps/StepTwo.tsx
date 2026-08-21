@@ -192,9 +192,10 @@ export const StepTwo: React.FC<DAStepProps> = ({
   formData,
   onChange,
   deployOptions,
+  providerParamsByType,
   onEditingChange,
   onResourceStatusChange,
-  onSchemaError,
+  onComponentError,
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
 
@@ -213,8 +214,8 @@ export const StepTwo: React.FC<DAStepProps> = ({
 
   // Notify parent so it can gate the Deploy button.
   useEffect(() => {
-    onSchemaError?.(failedServiceNames.length > 0);
-  }, [failedServiceNames, onSchemaError]);
+    onComponentError?.(failedServiceNames.length > 0);
+  }, [failedServiceNames, onComponentError]);
 
   const { resources, resourcesLoading, resourcesError } = useResources();
   const calculatedResources = useMemo(
@@ -227,24 +228,6 @@ export const StepTwo: React.FC<DAStepProps> = ({
     () => [{ id: deployOptions.version, text: deployOptions.version }],
     [deployOptions.version],
   );
-
-  // Provider schemas from store, keyed by componentType → providerId.
-  const providerParams = useDeployStore((state) => state.providerParams);
-  const providerParamsByType = useMemo(() => {
-    const result: Record<string, Record<string, ProviderSchema>> = {};
-
-    deployOptions.services.forEach((service) => {
-      service.components.forEach((component) => {
-        if (!result[component.type]) result[component.type] = {};
-        component.providers.forEach((provider) => {
-          const cached = providerParams[`${component.type}:${provider.id}`];
-          if (cached) result[component.type][provider.id] = cached.data;
-        });
-      });
-    });
-
-    return result;
-  }, [deployOptions.services, providerParams]);
 
   // Extract model names from params for display - DYNAMIC for all component types
   useEffect(() => {

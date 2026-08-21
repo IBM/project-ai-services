@@ -15,7 +15,7 @@ import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
-import { StepOne } from "./steps/StepOne";
+import { StepOne } from "./steps/DAStepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
@@ -78,6 +78,24 @@ export const DeployFlow = ({
     serviceParams,
     initialize,
   } = useDeployStore();
+
+  // Build once here and pass down — both StepOne and StepTwo need the same map.
+  const providerParamsByType = useMemo(() => {
+    if (!deployOptions) return {};
+    const result: Record<string, Record<string, ProviderSchema>> = {};
+    const allComponents = [
+      ...deployOptions.global_components,
+      ...deployOptions.services.flatMap((s) => s.components),
+    ];
+    allComponents.forEach((component) => {
+      if (!result[component.type]) result[component.type] = {};
+      component.providers.forEach((provider) => {
+        const cached = providerParams[`${component.type}:${provider.id}`];
+        if (cached) result[component.type][provider.id] = cached.data;
+      });
+    });
+    return result;
+  }, [deployOptions, providerParams]);
 
   // Initialize store and validate cache version on mount
   useEffect(() => {
@@ -194,6 +212,8 @@ export const DeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitialized.current = false;
+    setHasStep1SchemaError(false);
+    setHasStep2SchemaError(false);
     onClose();
   };
 
@@ -235,8 +255,9 @@ export const DeployFlow = ({
           formData={state.formData}
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
+          providerParamsByType={providerParamsByType}
           showNameError={state.showStepOneNameError}
-          onSchemaError={setHasStep1SchemaError}
+          onComponentError={setHasStep1SchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -245,9 +266,10 @@ export const DeployFlow = ({
           formData={state.formData}
           onChange={handleFormDataChange}
           deployOptions={deployOptions}
+          providerParamsByType={providerParamsByType}
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
-          onSchemaError={setHasStep2SchemaError}
+          onComponentError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>
