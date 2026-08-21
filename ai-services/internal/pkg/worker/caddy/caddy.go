@@ -2,10 +2,8 @@
 // It writes the Caddyfile and deploys the Caddy pod so that the worker can
 // serve proxied routes on behalf of the control plane.
 //
-// This package intentionally mirrors the pattern used in internal/pkg/agent/configure
-// from the remote_2_3 branch: values.yaml is parsed into a typed struct, the pod
-// template is rendered directly from raw bytes, and the pod is always removed and
-// redeployed to ensure correct port bindings.
+// values.yaml is parsed into a typed struct and the pod template is rendered
+// directly from raw bytes via text/template.
 package caddy
 
 import (
@@ -43,18 +41,18 @@ const (
 // SetupOptions carries the parameters needed to deploy Caddy on a worker node.
 type SetupOptions struct {
 	// BaseDir is the host directory used for Caddy data / config volumes.
+	// Set once at first join; ignored on subsequent runs if the pod is already running.
 	BaseDir string
 	// HTTPSPort is the host port Caddy binds for HTTPS traffic, e.g. "443".
-	// Set by the CLI flag default — never empty when called from join.
+	// Set once at first join; ignored on subsequent runs if the pod is already running.
 	HTTPSPort string
 }
 
 // Setup writes the Caddyfile and deploys the worker Caddy pod.
 //
-// If an existing pod is running it is removed first. Routes are preserved
-// across restarts because the pod starts with --resume, which reloads
-// Caddy's autosaved config from /config/caddy/autosave.json (persisted to
-// <baseDir>/worker/caddy-config on the host).
+// The Caddyfile is always (re)written so it stays in sync with the embedded
+// template. The pod itself is only deployed if it is not already running —
+// once up, its configuration is considered immutable.
 func Setup(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions) error {
 	vals, err := readValues()
 	if err != nil {
@@ -74,23 +72,8 @@ func Setup(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions) erro
 		return fmt.Errorf("worker caddy: write Caddyfile: %w", err)
 	}
 
-	// Remove any existing pod so port bindings are always fresh.
-	// Routes survive because --resume reloads the autosave on startup.
-	exists, err := rt.PodExists(WorkerCaddyPodName)
-	if err != nil {
-		return fmt.Errorf("worker caddy: check pod existence: %w", err)
-	}
-
-	if exists {
-		logger.InfofCtx(ctx, "worker caddy: %s exists — removing before redeploy\n", WorkerCaddyPodName)
-		force := true
-		if err := rt.DeletePod(WorkerCaddyPodName, &force); err != nil {
-			return fmt.Errorf("worker caddy: remove existing pod: %w", err)
-		}
-	}
-
-	if err := deployPod(ctx, rt, opts.BaseDir, vals); err != nil {
-		return fmt.Errorf("worker caddy: deploy pod: %w", err)
+	if err := deployIfNotExists(ctx, rt, opts, vals); err != nil {
+		return err
 	}
 
 	logger.InfolnCtx(ctx, "Worker Caddy proxy is ready.")
@@ -125,7 +108,7 @@ func writeCaddyfile(baseDir string) error {
 }
 
 // deployPod renders the pod template from raw bytes and calls
-// DeployPodAndReadinessCheck, mirroring the agent configure pattern.
+// DeployPodAndReadinessCheck.
 func deployPod(ctx context.Context, rt *podman.PodmanClient, baseDir string, vals *workerCaddyValues) error {
 	raw, err := assets.WorkerFS.ReadFile(workerCaddyTmplPath)
 	if err != nil {
@@ -166,6 +149,27 @@ func deployPod(ctx context.Context, rt *podman.PodmanClient, baseDir string, val
 		ctx, rt, &podSpec, "caddy.yaml.tmpl",
 		bytes.NewReader(rendered.Bytes()), deployOpts,
 	)
+}
+
+// ─── deploy ───────────────────────────────────────────────────────────────────
+
+// deployIfNotExists deploys the worker Caddy pod if it is not already running.
+// Once deployed, the pod is never restarted by this tool — its config is
+// considered immutable after first join.
+// TODO: Need a way to implement certificate rotation in future
+func deployIfNotExists(ctx context.Context, rt *podman.PodmanClient, opts SetupOptions, vals *workerCaddyValues) error {
+	exists, err := rt.PodExists(WorkerCaddyPodName)
+	if err != nil {
+		return fmt.Errorf("worker caddy: check pod existence: %w", err)
+	}
+
+	if exists {
+		logger.InfofCtx(ctx, "worker caddy: %s already running — skipping deploy.\n", WorkerCaddyPodName)
+
+		return nil
+	}
+
+	return deployPod(ctx, rt, opts.BaseDir, vals)
 }
 
 // ─── values ───────────────────────────────────────────────────────────────────
