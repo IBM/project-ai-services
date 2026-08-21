@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -18,6 +19,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+)
+
+const (
+	CADDY_FILE_INDENT   = 10
+	CERT_CONTENT_INDENT = 4
 )
 
 // DeployContext encapsulates catalog deployment context.
@@ -106,8 +112,7 @@ func (d *DeployContext) ExtractRouteInfos() ([]caddy.TemplateRouteInfo, error) {
 }
 
 // ExecutePodLayers executes all pod template layers.
-func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context,
-	existingResources []string) error {
+func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context, existingResources []string) error {
 	logger.Debugln("executing catalog service resources...")
 
 	for i, layer := range d.appMetadata.PodTemplateExecutions {
@@ -169,16 +174,24 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 		return fmt.Errorf("failed to load pod template: %w", err)
 	}
 
+	// Pre-indent the template contents to ensure the rendered YAML remains valid
+	indentedCaddyfile := indentString(caddyCtx.GetCaddyFileContent(), CADDY_FILE_INDENT)
+	indentedSSLCert := indentString(caddyCtx.GetSSLCertContent(), CERT_CONTENT_INDENT)
+	indentedSSLKey := indentString(caddyCtx.GetSSLKeyContent(), CERT_CONTENT_INDENT)
+
 	// Generate template parameters
 	params := map[string]any{
-		"AppName":         catalogconstants.CatalogAppName,
-		"AppTemplateName": catalogconstants.CatalogAppTemplate,
-		"Version":         d.appMetadata.Version,
-		"BaseDir":         baseDir,
-		"CaddyAdminURL":   caddyCtx.GetContainerAdminURL(),
-		"DomainSuffix":    caddyCtx.GetDomainSuffix(),
-		"Values":          d.values,
-		"env":             map[string]map[string]string{},
+		"AppName":          catalogconstants.CatalogAppName,
+		"AppTemplateName":  catalogconstants.CatalogAppTemplate,
+		"Version":          d.appMetadata.Version,
+		"BaseDir":          baseDir,
+		"CaddyAdminURL":    caddyCtx.GetContainerAdminURL(),
+		"DomainSuffix":     caddyCtx.GetDomainSuffix(),
+		"Values":           d.values,
+		"env":              map[string]map[string]string{},
+		"CaddyfileContent": indentedCaddyfile,
+		"SSLCertContent":   indentedSSLCert,
+		"SSLKeyContent":    indentedSSLKey,
 	}
 
 	// filter out resources
@@ -197,6 +210,13 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 		return fmt.Errorf("failed to render pod template: %w", err)
 	}
 
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", podTemplateName)
+
+		return nil
+	}
+
 	// Deploy the pod with readiness checks
 	reader := bytes.NewReader(rendered.Bytes())
 	podDeployOptions := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(*podSpec))
@@ -206,6 +226,21 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 	}
 
 	return nil
+}
+
+func indentString(s string, spaces int) string {
+	if s == "" {
+		return ""
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			lines[i] = prefix + line
+		}
+	}
+
+	return prefix + strings.Join(lines, "\n")
 }
 
 // Made with Bob

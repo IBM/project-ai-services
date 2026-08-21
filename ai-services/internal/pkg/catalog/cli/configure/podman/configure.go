@@ -211,8 +211,7 @@ func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (m
 // This function:
 // 1. Gets the Caddy pod name from deployment context templates
 // 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
-// 3. Creates Caddy context with pod name and domain suffix
-// 4. Generates and writes Caddyfile.
+// 3. Creates Caddy context with pod name and domain suffix.
 func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
@@ -235,11 +234,12 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 	// Create Caddy context with pod name and domain suffix (NO template dependencies)
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
 
-	// Generate and write Caddyfile before deploying
-	if err := caddy.GenerateCaddyfile(opts.BaseDir); err != nil {
-		s.Fail("failed to generate Caddyfile")
+	if err = caddyCtx.LoadCaddyFileContent(); err != nil {
+		return nil, err
+	}
 
-		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
+	if err = caddyCtx.LoadCertAndKeyContent(opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+		return nil, err
 	}
 
 	return caddyCtx, nil

@@ -154,7 +154,7 @@ func ExtractDomainFromCertificate(certPath string) (string, error) {
 // LoadUserCertificates validates staged certificate files on the host and updates Caddy to load them from container-visible paths.
 func LoadUserCertificates(hostCertPath, hostKeyPath, caddyCertPath, caddyKeyPath, adminURL string) error {
 	// Read and parse staged host-side certificate files
-	_, keyBytes, cert, err := readAndParseCertificates(hostCertPath, hostKeyPath)
+	_, keyBytes, cert, err := ReadAndParseCertificates(hostCertPath, hostKeyPath)
 	if err != nil {
 		return err
 	}
@@ -172,8 +172,8 @@ func LoadUserCertificates(hostCertPath, hostKeyPath, caddyCertPath, caddyKeyPath
 	return nil
 }
 
-// readAndParseCertificates reads and parses certificate and key files.
-func readAndParseCertificates(certPath, keyPath string) ([]byte, []byte, *x509.Certificate, error) {
+// ReadAndParseCertificates reads and parses certificate and key files.
+func ReadAndParseCertificates(certPath, keyPath string) ([]byte, []byte, *x509.Certificate, error) {
 	certBytes, err := os.ReadFile(certPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to read certificate: %w", err)

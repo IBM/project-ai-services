@@ -6,8 +6,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ResetCatalogCertificate resets the SSL certificates for the catalog service.
@@ -53,8 +55,16 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 		return fmt.Errorf("failed to get Caddy pod name: %w", err)
 	}
 
-	// Create Caddy context for certificate operations
-	caddyCtx := caddy.NewContext(caddyPodName, "")
+	if err := deleteSecretAndPod(deployCtx, caddyPodName, catalogConstant.CatalogCertSecretName); err != nil {
+		return err
+	}
+
+	opts.SSLCertPath = sslCertPath
+	opts.SSLKeyPath = sslKeyPath
+	caddyCtx, err := executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
+	if err != nil {
+		return fmt.Errorf("failed to deploy catalog pod: %w", err)
+	}
 
 	// Load certificates with health check
 	if err := loadCertificatesToCaddy(caddyCtx, opts.BaseDir, sslCertPath, sslKeyPath); err != nil {
@@ -62,6 +72,21 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	logger.InfolnCtx(context.Background(), "SSL certificates reset successfully")
+
+	return nil
+}
+
+// deleteSecretAndPod deletes the caddy cert secret and pod before redeployment.
+func deleteSecretAndPod(deployCtx *deploy.DeployContext, nameOrID, secretName string) error {
+	logger.InfofCtx(context.Background(), "Deleting existing secret %s", secretName)
+	if err := deployCtx.Runtime.DeleteSecret(secretName); err != nil {
+		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
+	}
+
+	logger.InfofCtx(context.Background(), "Deleting existing pod %s", nameOrID)
+	if err := deployCtx.Runtime.DeletePod(nameOrID, utils.BoolPtr(true)); err != nil {
+		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
+	}
 
 	return nil
 }
