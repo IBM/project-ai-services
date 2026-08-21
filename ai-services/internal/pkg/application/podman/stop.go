@@ -13,8 +13,7 @@ import (
 )
 
 // Stop stops a running application.
-func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
-	ctx := context.Background()
+func (p *PodmanApplication) Stop(ctx context.Context, opts appTypes.StopOptions) error {
 	pods, err := p.listApplicationPods(ctx, opts)
 	if err != nil {
 		return err

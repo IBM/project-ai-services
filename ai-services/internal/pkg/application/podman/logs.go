@@ -9,8 +9,7 @@ import (
 )
 
 // Logs displays logs from an application pod.
-func (p *PodmanApplication) Logs(opts types.LogsOptions) error {
-	ctx := context.Background()
+func (p *PodmanApplication) Logs(ctx context.Context, opts types.LogsOptions) error {
 	logger.Warningln("Press Ctrl+C to exit the logs and return to the terminal.")
 	logger.Infof("Fetching logs for application pod: %s", opts.PodName)
 

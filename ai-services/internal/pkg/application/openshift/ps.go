@@ -10,12 +10,11 @@ import (
 )
 
 // List returns information about running applications.
-func (o *OpenshiftApplication) List(opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
+func (o *OpenshiftApplication) List(ctx context.Context, opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
 	if opts.ApplicationName == "" {
 		return nil, fmt.Errorf("application name is required for openshift runtime")
 	}
 
-	ctx := context.Background()
 	// filter and fetch pods based on appName
 	pods, err := common.FetchFilteredPods(ctx, o.runtime, opts.ApplicationName)
 	if err != nil {

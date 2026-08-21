@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-func ResetPodmanAuth() error {
+func ResetPodmanAuth(ctx context.Context) error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
@@ -19,7 +19,7 @@ func ResetPodmanAuth() error {
 	}
 
 	// Validate catalog service and confirm reset action
-	shouldProceed, err := validateCatalogServiceAndConfirmReset(context.Background(), deployCtx.Runtime, "podman auth")
+	shouldProceed, err := validateCatalogServiceAndConfirmReset(ctx, deployCtx.Runtime, "podman auth")
 	if err != nil {
 		return err
 	}
@@ -29,24 +29,24 @@ func ResetPodmanAuth() error {
 	}
 
 	// Delete podman auth secret.
-	logger.InfofCtx(context.Background(), "Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
-	err = deployCtx.Runtime.DeleteSecret(context.Background(), catalogConstant.CatalogPodmanAuthSecretName)
+	logger.InfofCtx(ctx, "Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
+	err = deployCtx.Runtime.DeleteSecret(ctx, catalogConstant.CatalogPodmanAuthSecretName)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}
 
-	opts, podID, err := catalogUtils.GetCatalogPodConfig(context.Background(), deployCtx.Runtime)
+	opts, podID, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
 
-	logger.InfofCtx(context.Background(), "Deleting existing catalog pod %s", podID)
-	err = deployCtx.Runtime.DeletePod(context.Background(), podID, utils.BoolPtr(true))
+	logger.InfofCtx(ctx, "Deleting existing catalog pod %s", podID)
+	err = deployCtx.Runtime.DeletePod(ctx, podID, utils.BoolPtr(true))
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}
 
-	_, err = executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
+	_, err = executeCatalogDeployment(ctx, deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}

@@ -101,12 +101,14 @@ SSL/TLS certificate management, HTTPS port configuration, and credential/certifi
 		return validateConfigureFlags()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		if resetPasswordFlag {
-			return runResetPassword()
+			return runResetPassword(ctx)
 		} else if resetPodmanAuthFlag {
-			return runResetPodmanAuth()
+			return runResetPodmanAuth(ctx)
 		} else if resetCertificateFlag {
-			return runResetCertificate()
+			return runResetCertificate(ctx)
 		}
 
 		return runConfigure()
@@ -233,9 +235,9 @@ func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 	return nil
 }
 
-func runResetCertificate() error {
+func runResetCertificate(ctx context.Context) error {
 	// Call ResetCatalogCertificate with certificate paths
-	return catalogPodman.ResetCatalogCertificate(catalogUtils.SanitizeFilePath(sslCertPath), catalogUtils.SanitizeFilePath(sslKeyPath))
+	return catalogPodman.ResetCatalogCertificate(ctx, catalogUtils.SanitizeFilePath(sslCertPath), catalogUtils.SanitizeFilePath(sslKeyPath))
 }
 
 func initConfigureCommonFlags() {
@@ -361,22 +363,22 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	return builder.Build()
 }
 
-func runResetPassword() error {
+func runResetPassword(ctx context.Context) error {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	switch rt {
 	case types.RuntimeTypePodman:
-		return catalogPodman.ResetCatalogPassword()
+		return catalogPodman.ResetCatalogPassword(ctx)
 
 	case types.RuntimeTypeOpenShift:
-		return catalogOpenShift.ResetCatalogPassword()
+		return catalogOpenShift.ResetCatalogPassword(ctx)
 
 	default:
 		return fmt.Errorf("unsupported runtime: %s", rt)
 	}
 }
 
-func runResetPodmanAuth() error {
-	return catalogPodman.ResetPodmanAuth()
+func runResetPodmanAuth(ctx context.Context) error {
+	return catalogPodman.ResetPodmanAuth(ctx)
 }
 
 func initConfigureOpenShiftFlags() {

@@ -67,6 +67,7 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		namespace := applicationName
 
@@ -98,7 +99,7 @@ Arguments:
 			ContainerNameOrID: containerNameOrID,
 		}
 
-		return app.Logs(opts)
+		return app.Logs(ctx, opts)
 	},
 }
 

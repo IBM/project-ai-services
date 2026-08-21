@@ -13,10 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 )
 
-func ResetCatalogPassword() error {
+func ResetCatalogPassword(ctx context.Context) error {
 	catalog := catalogConstants.CatalogAppName
 	namespace := catalog
-	ctx := context.Background()
 
 	// Create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)

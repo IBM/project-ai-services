@@ -46,6 +46,7 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
 		// When legacyInfo is true, use the older/stable code path
@@ -61,7 +62,7 @@ Arguments:
 				Name: applicationName,
 			}
 
-			return app.Info(opts)
+			return app.Info(ctx, opts)
 		}
 
 		// Default: use new implementation using catalog
