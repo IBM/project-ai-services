@@ -92,7 +92,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	}
 	syncService.Start(ctx)
 
-	catalogProvider, err := catalog.NewCatalogProvider()
+	catalogProvider, err := catalog.NewCatalogProvider(bundleRepo)
 	if err != nil {
 		syncService.Stop(ctx)
 
@@ -119,7 +119,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
-		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
+		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo, catalogProvider),
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
 	}

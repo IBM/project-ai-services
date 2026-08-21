@@ -80,7 +80,7 @@ func NewSyncService(
 		syncInterval = DefaultSyncInterval
 	}
 
-	catalogProvider, err := catalogpkg.NewCatalogProvider()
+	catalogProvider, err := catalogpkg.NewCatalogProvider(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider for sync service: %w", err)
 	}
