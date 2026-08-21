@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
