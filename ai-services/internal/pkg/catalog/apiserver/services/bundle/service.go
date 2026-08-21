@@ -172,7 +172,7 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 	// Step 3: TODO — full archive-based validation; call s.ValidateBundle once implemented.
 
 	// Step 3a: guard — reject if any running service/component is using this catalog entry.
-	if err := s.checkNoRunningInstances(ctx, meta.CatalogType(), meta.CatalogID()); err != nil {
+	if err := s.checkNoRunningInstances(ctx, "replace", meta.CatalogType(), meta.CatalogID()); err != nil {
 		return nil, err
 	}
 
@@ -287,7 +287,7 @@ func (s *bundleService) GetBundleByID(ctx context.Context, bundleID string) (*Bu
 func (s *bundleService) DeleteBundle(ctx context.Context, existing *BundleResponse) error {
 	// Step 1: guard — reject if any running service/component is using this catalog entry.
 	// Use existing fields directly, mirroring how ReplaceBundle passes meta from the archive.
-	if err := s.checkNoRunningInstances(ctx, existing.CatalogType, existing.CatalogID); err != nil {
+	if err := s.checkNoRunningInstances(ctx, "delete", existing.CatalogType, existing.CatalogID); err != nil {
 		return err
 	}
 
@@ -394,7 +394,7 @@ func (s *bundleService) ListBundles(ctx context.Context, req BundleListRequest) 
 //   - For a service bundle:  checks the services table by catalog_id.
 //   - For a component bundle: the catalog_id is "<type>--<provider>"; both
 //     halves are matched against the components table (type + provider).
-func (s *bundleService) checkNoRunningInstances(ctx context.Context, catalogType, catalogID string) error {
+func (s *bundleService) checkNoRunningInstances(ctx context.Context, operation, catalogType, catalogID string) error {
 	switch catalogType {
 	case CatalogTypeService:
 		exists, err := s.svcRepo.ExistsByCatalogID(ctx, catalogID)
@@ -405,8 +405,8 @@ func (s *bundleService) checkNoRunningInstances(ctx context.Context, catalogType
 			return &validators.ValidationError{
 				Code: http.StatusConflict,
 				Message: fmt.Sprintf(
-					"cannot replace bundle: one or more services are currently running with catalog_id %q",
-					catalogID,
+					"cannot %s bundle: one or more services are currently running with catalog_id %q",
+					operation, catalogID,
 				),
 			}
 		}
@@ -426,8 +426,8 @@ func (s *bundleService) checkNoRunningInstances(ctx context.Context, catalogType
 			return &validators.ValidationError{
 				Code: http.StatusConflict,
 				Message: fmt.Sprintf(
-					"cannot replace bundle: one or more components are currently running with type %q and provider %q",
-					componentType, provider,
+					"cannot %s bundle: one or more components are currently running with type %q and provider %q",
+					operation, componentType, provider,
 				),
 			}
 		}

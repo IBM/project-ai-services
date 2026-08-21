@@ -556,12 +556,13 @@ func TestUpdateBundle(t *testing.T) {
 			wantLocationOf: "/api/v1/catalog/bundles/" + fixedID,
 		},
 		{
-			name:            "400 — malformed UUID rejected before DB lookup",
+			name:            "400 — malformed UUID rejected by GetBundleByID",
 			bundleID:        "not-a-uuid",
 			filename:        "bundle-v2.tar.gz",
 			fileContent:     validTarGz,
+			getErr:          &validators.ValidationError{Code: http.StatusBadRequest, Message: `invalid bundle id "not-a-uuid"`},
 			wantStatus:      http.StatusBadRequest,
-			wantErrContains: "not a valid UUID",
+			wantErrContains: "invalid bundle id",
 		},
 		{
 			name:            "404 — bundle not found (GetBundleByID returns nil)",
@@ -853,10 +854,11 @@ func TestDeleteBundle(t *testing.T) {
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name:            "400 — malformed UUID rejected before DB lookup",
+			name:            "400 — malformed UUID rejected by GetBundleByID",
 			bundleID:        "not-a-uuid",
+			getErr:          &validators.ValidationError{Code: http.StatusBadRequest, Message: `invalid bundle id "not-a-uuid"`},
 			wantStatus:      http.StatusBadRequest,
-			wantErrContains: "not a valid UUID",
+			wantErrContains: "invalid bundle id",
 		},
 		{
 			name:            "404 — bundle not found (GetBundleByID returns nil)",

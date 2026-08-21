@@ -795,7 +795,9 @@ func TestListBundles_GetCountError(t *testing.T) {
 func TestListBundles_GetAllError(t *testing.T) {
 	repo := &mockBundleRepo{
 		getCount: func(_ context.Context) (int, error) { return 5, nil },
-		getAll:   func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) { return nil, assert.AnError },
+		getAll: func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) {
+			return nil, assert.AnError
+		},
 	}
 	_, err := NewBundleService(repo, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.Error(t, err)
@@ -1195,7 +1197,7 @@ func TestDeleteBundle_ServiceRunning(t *testing.T) {
 	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo)
 
 	err := svc.DeleteBundle(context.Background(), existingBundleResponse())
-	assertValidationError(t, err, http.StatusConflict, "cannot replace bundle")
+	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
 	assertValidationError(t, err, http.StatusConflict, `"my-service"`)
 }
 
@@ -1245,7 +1247,7 @@ func TestDeleteBundle_ComponentRunning(t *testing.T) {
 	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo)
 
 	err := svc.DeleteBundle(context.Background(), resp)
-	assertValidationError(t, err, http.StatusConflict, "cannot replace bundle")
+	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
 	assertValidationError(t, err, http.StatusConflict, `"llm"`)
 }
 

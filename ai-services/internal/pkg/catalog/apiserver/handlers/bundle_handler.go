@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
@@ -125,15 +124,6 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 
 	bundleID := c.Param("id")
 
-	// Validate UUID format upfront — avoids a round-trip to the DB for a malformed ID.
-	if _, err := uuid.Parse(bundleID); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("bundle_id %q is not a valid UUID; use the bundle ID returned by list or create", bundleID),
-		})
-
-		return
-	}
-
 	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
 	if err != nil {
 		h.mapServiceError(c, err)
@@ -187,15 +177,6 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 //	@Router			/catalog/bundles/{id} [delete]
 func (h *BundleHandler) DeleteBundle(c *gin.Context) {
 	bundleID := c.Param("id")
-
-	// Validate UUID format upfront — avoids a round-trip to the DB for a malformed ID.
-	if _, err := uuid.Parse(bundleID); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("bundle_id %q is not a valid UUID; use the bundle ID returned by list or create", bundleID),
-		})
-
-		return
-	}
 
 	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
 	if err != nil {
