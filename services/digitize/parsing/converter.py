@@ -143,6 +143,11 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
             logger.warning(f"Failed to cleanup cache directory {chunk_cache_dir}: {e}")
 
 def get_doc_converter():
+    """Create and configure a Docling DocumentConverter instance.
+
+    Sets up the PDF pipeline options, including model paths, table structure parsing,
+    and cell matching, and disables OCR.
+    """
     import os
     from pathlib import Path
     from docling.datamodel.base_models import InputFormat
@@ -179,6 +184,11 @@ def get_doc_converter():
     return doc_converter
 
 def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
+    """Convert a document's format and write the resulting output files.
+
+    Performs the docling-based conversion, measures performance metrics, and saves the formatted
+    output (JSON, MD, TXT, or HTML) to the target directory.
+    """
     logger.info(f"Processing '{doc_path}'")
 
     out_dir = Path(out_path)

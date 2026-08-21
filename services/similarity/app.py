@@ -58,6 +58,11 @@ def _initialize_vectorstore():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application lifespan events (startup and shutdown).
+
+    Sets up the global LLM connection pool, resolves endpoint configurations for
+    retrieval models, and initializes the vector store connection.
+    """
     create_llm_session(pool_maxsize=10)
     _initialize_models()
     await asyncio.to_thread(_initialize_vectorstore)
@@ -89,6 +94,11 @@ app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -98,6 +108,7 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 def swagger_root():
+    """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="AI-Services Similarity Search API - Swagger UI",
@@ -134,6 +145,12 @@ def swagger_root():
     response_description="Documents ranked by descending score, with score_type indicating the scoring method used. Performance metrics available in response headers."
 )
 async def similarity_search(req: SimilaritySearchRequest, response: Response) -> SimilaritySearchResponse:
+    """Perform a vector similarity search against the vector store.
+
+    Validates inputs, executes the requested retrieval mode (dense, sparse, or hybrid),
+    runs reranking if requested, and formats the matching document chunks. Includes performance
+    metrics in response headers.
+    """
     if not req.query or not req.query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "query is required")
 
@@ -210,6 +227,11 @@ async def similarity_search(req: SimilaritySearchRequest, response: Response) ->
     description="Returns 200 when the service is running.",
 )
 async def health():
+    """Perform a basic health check.
+
+    Returns:
+        dict: A dictionary indicating the service is running and healthy.
+    """
     return {"status": "ok"}
 
 if __name__ == "__main__":

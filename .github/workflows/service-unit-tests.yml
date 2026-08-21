@@ -1,4 +1,4 @@
-name: Services Unit Tests
+name: Services Lint & Unit Tests
 
 on:
   pull_request:
@@ -31,7 +31,14 @@ jobs:
           pip install -r services/requirements-test.txt \
             --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
             --prefer-binary
-      
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint docstrings (services)
+        run: ruff check
+        working-directory: services
+        
       - name: Run all service tests
         run: |
           # Set PYTHONPATH to include services directory for common module imports

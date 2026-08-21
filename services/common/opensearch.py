@@ -29,6 +29,7 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
 
 class OpensearchVectorStore(VectorStore):
     def __init__(self):
+        """Initialize the OpenSearch client and create the hybrid search pipeline."""
         logger.debug("Initializing OpensearchVectorStore")
 
         self.host = settings.vector_store.opensearch_host
@@ -162,8 +163,8 @@ class OpensearchVectorStore(VectorStore):
 
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
-        """
-        Supports 2 modes of insertion with retry logic for transient failures.
+        """Supports 2 modes of insertion with retry logic for transient failures.
+
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
 

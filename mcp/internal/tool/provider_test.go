@@ -84,7 +84,7 @@ func TestNewProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, tt.endpoint, auth, tt.globalQuery, tt.globalHeaders)
+			provider, err := NewProvider(tt.operation, tt.endpoint, auth, tt.globalQuery, tt.globalHeaders, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewProvider() error = %v, wantErr %v", err, tt.wantErr)
@@ -122,7 +122,7 @@ func TestProvider_GetTool(t *testing.T) {
 		Description: "Test operation",
 	}
 
-	provider, err := NewProvider(operation, "https://api.example.com", auth, nil, nil)
+	provider, err := NewProvider(operation, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestProvider_buildInputSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, tt.endpoint, auth, nil, nil)
+			provider, err := NewProvider(tt.operation, tt.endpoint, auth, nil, nil, false)
 			if err != nil {
 				t.Fatalf("NewProvider() error = %v", err)
 			}
@@ -615,7 +615,7 @@ func TestProvider_Execute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewProvider(tt.operation, server.URL, auth, nil, nil)
+			provider, err := NewProvider(tt.operation, server.URL, auth, nil, nil, false)
 			if err != nil {
 				t.Fatalf("NewProvider() error = %v", err)
 			}
@@ -637,5 +637,62 @@ func TestProvider_Execute(t *testing.T) {
 				tt.checkResponse(t, result)
 			}
 		})
+	}
+}
+
+func TestProvider_ExecuteTLSSkipVerify(t *testing.T) {
+	// TLS test server presents a self-signed certificate
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id": "123", "name": "Test User"}`))
+	}))
+	defer server.Close()
+
+	auth := &mockAuthenticator{
+		token:       "test-token-123",
+		passthrough: false,
+		authType:    "api-key",
+	}
+
+	operation := types.OperationInfo{
+		OperationID: "getUser",
+		Method:      types.GET,
+		Path:        "/users/{id}",
+		Parameters: []types.ParameterInfo{
+			{
+				Name:     "id",
+				In:       "path",
+				Required: true,
+				Schema:   &jsonschema.Schema{Type: "string"},
+			},
+		},
+	}
+	mcpParams := &mcp.CallToolParamsRaw{
+		Name:      operation.OperationID,
+		Arguments: json.RawMessage(`{"id": "123"}`),
+	}
+
+	// Without skip, the self-signed certificate must be rejected
+	provider, err := NewProvider(operation, server.URL, auth, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewProvider() error = %v", err)
+	}
+	if _, err := provider.Execute(context.Background(), mcpParams); err == nil {
+		t.Error("Execute() should fail against a self-signed certificate when tlsSkipVerify is false")
+	}
+
+	// With skip, the request succeeds
+	provider, err = NewProvider(operation, server.URL, auth, nil, nil, true)
+	if err != nil {
+		t.Fatalf("NewProvider() error = %v", err)
+	}
+	result, err := provider.Execute(context.Background(), mcpParams)
+	if err != nil {
+		t.Fatalf("Execute() with tlsSkipVerify failed: %v", err)
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || !strings.Contains(textContent.Text, "Test User") {
+		t.Errorf("Execute() with tlsSkipVerify returned unexpected content: %+v", result.Content)
 	}
 }

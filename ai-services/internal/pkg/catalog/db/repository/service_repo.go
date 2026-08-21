@@ -26,6 +26,8 @@ type ServiceRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ServiceStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a service.
 	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
+	// ExistsByCatalogID reports whether any row in the services table has the given catalog_id.
+	ExistsByCatalogID(ctx context.Context, catalogID string) (bool, error)
 }
 
 // serviceRepo implements ServiceRepository using pgx.
@@ -246,6 +248,17 @@ func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoin
 	}
 
 	return nil
+}
+
+// ExistsByCatalogID reports whether any row in the services table has the given catalog_id.
+func (r *serviceRepo) ExistsByCatalogID(ctx context.Context, catalogID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM services WHERE catalog_id = $1)`, catalogID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check service existence by catalog_id: %w", err)
+	}
+
+	return exists, nil
 }
 
 // Made with Bob

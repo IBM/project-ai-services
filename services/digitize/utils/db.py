@@ -1,5 +1,4 @@
-"""
-Database operations — utils/db.py
+""" Database operations — utils/db.py.
 
 All functions that directly interact with the database via db_manager:
 CRUD for jobs and documents, advisory import/export lock, DatabaseStatusManager,

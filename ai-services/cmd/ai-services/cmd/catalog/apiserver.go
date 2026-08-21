@@ -119,7 +119,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
-		BundleService:      bundlesvc.NewBundleService(bundleRepo),
+		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
 	}

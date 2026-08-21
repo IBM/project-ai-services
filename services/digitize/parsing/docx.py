@@ -105,9 +105,8 @@ def _get_text_value_by_ref(converted_doc, ref: str) -> str:
 
 
 def _looks_like_table_caption(text: str) -> bool:
-    """
-    Heuristic check for real table captions such as:
-    'Table 1-1 VIOS release schedule'
+    """Heuristic check for real table captions such as.
+    'Table 1-1 VIOS release schedule'.
     """
     if not text:
         logger.debug("_looks_like_table_caption: empty text -> False")
@@ -251,11 +250,10 @@ def _get_enclosing_section_header_for_table(converted_doc, table_ix: int) -> str
 
 
 def recover_table_caption_from_body_context(converted_doc, table_ix: int, search_window: int = 3) -> str:
-    """
-    Recover a table caption using layered fallbacks:
+    """Recover a table caption using layered fallbacks.
     1. nearby caption paragraph in top-level body order
     2. nearby caption paragraph within the enclosing parent/container children
-    3. enclosing section header text as semantic fallback
+    3. enclosing section header text as semantic fallback.
     """
     target_ref = f"#/tables/{table_ix}"
     logger.debug(f"recover_table_caption_from_body_context: looking for caption near {target_ref} with search_window={search_window}")

@@ -1,5 +1,4 @@
-"""
-Job lifecycle utilities — utils/jobs.py
+""" Job lifecycle utilities — utils/jobs.py.
 
 Coordinator layer between the API routers and the DB/storage layers:
 job initialisation, file staging, active-job guards, document content

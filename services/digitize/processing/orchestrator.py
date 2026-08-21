@@ -104,6 +104,11 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
 
 
 def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=LanguageCodes.ENGLISH):
+    """Flushes the current buffered chunk content into structured token-limited chunks.
+
+    Splits the chunk content into smaller token-limited chunks if necessary, and appends them
+    to the global chunks list with appropriate metadata.
+    """
     content = current_chunk["content"].strip()
     if not content:
         return
@@ -460,7 +465,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
 
 
 def clean_intermediate_files(doc_id, out_path):
-    """Remove intermediate files but keep <doc_id>.json"""
+    """Remove intermediate files but keep <doc_id>.json."""
     for pattern in [f"{doc_id}{text_suffix}", f"{doc_id}{table_suffix}", f"{doc_id}{text_chunk_suffix}", f"{doc_id}{table_chunk_suffix}"]:
         file_path = Path(out_path) / pattern
         if file_path.exists():

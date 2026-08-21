@@ -858,7 +858,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all registered bundles ordered by created_at DESC.",
+                "description": "Returns a paginated list of all registered bundles ordered by created_at DESC.",
                 "produces": [
                     "application/json"
                 ],
@@ -866,11 +866,33 @@ const docTemplate = `{
                     "Bundles"
                 ],
                 "summary": "List all bundles",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pagination parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -1605,7 +1627,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker"
                             }
                         }
                     },
@@ -1624,7 +1646,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (` + "`" + `worker start --token \u003ctoken\u003e` + "`" + `).",
+                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (` + "`" + `worker join --token \u003ctoken\u003e` + "`" + `).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1832,6 +1854,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse"
                     }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
                 }
             }
         },
@@ -1889,62 +1914,6 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "last_heartbeat": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "registered_at": {
-                    "type": "string"
-                },
-                "runtime_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType"
-                },
-                "status": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType": {
-            "type": "string",
-            "enum": [
-                "unknown",
-                "podman",
-                "openshift"
-            ],
-            "x-enum-varnames": [
-                "WorkerRuntimeTypeUnknown",
-                "WorkerRuntimeTypePodman",
-                "WorkerRuntimeTypeOpenShift"
-            ]
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus": {
-            "type": "string",
-            "enum": [
-                "pending",
-                "ready",
-                "disconnected"
-            ],
-            "x-enum-varnames": [
-                "WorkerStatusPending",
-                "WorkerStatusReady",
-                "WorkerStatusDisconnected"
-            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
@@ -2562,6 +2531,36 @@ const docTemplate = `{
                 "Removing",
                 "Dead"
             ]
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "last_heartbeat": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registered_at": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
             "type": "object",

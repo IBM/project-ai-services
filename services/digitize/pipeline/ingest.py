@@ -141,6 +141,11 @@ def ingest(
     doc_id_dict: Optional[dict] = None,
     file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
+    """Injest documents in the specified directory path.
+
+    Coordinates document conversion, chunking, table extraction, summarization,
+    vector index building, and status database management.
+    """
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
