@@ -51,6 +51,7 @@ type APIServerOptions struct {
 	TokenManager       *auth.TokenManager
 	Blacklist          repository.TokenBlacklist
 	ApplicationService repository.ApplicationServiceInterface
+	DatasourceService  repository.DatasourceServiceInterface
 	BundleService      bundlesvc.BundleServiceInterface
 
 	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
@@ -68,6 +69,7 @@ type APIserver struct {
 	tokenManager       *auth.TokenManager
 	blacklist          repository.TokenBlacklist
 	applicationService repository.ApplicationServiceInterface
+	datasourceService  repository.DatasourceServiceInterface
 	bundleService      bundlesvc.BundleServiceInterface
 
 	workerGatewayPort int
@@ -90,6 +92,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		tokenManager:       options.TokenManager,
 		blacklist:          options.Blacklist,
 		applicationService: options.ApplicationService,
+		datasourceService:  options.DatasourceService,
 		bundleService:      options.BundleService,
 		workerGatewayPort:  options.WorkerGatewayPort,
 		workerRegistry:     options.WorkerRegistry,
@@ -113,7 +116,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.bundleService)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.datasourceService, a.bundleService)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

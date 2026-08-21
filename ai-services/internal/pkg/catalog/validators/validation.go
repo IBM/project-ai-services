@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 )
@@ -432,6 +433,47 @@ func formatParamKeys(keys []string) string {
 	}
 
 	return strings.Join(quoted, ", ")
+}
+
+// ConnectorValidator validates CreateDatasourceRequest payloads against the catalog.
+type ConnectorValidator struct {
+	provider *catalog.CatalogProvider
+}
+
+// NewConnectorValidator creates a new ConnectorValidator backed by the given catalog provider.
+func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidator {
+	return &ConnectorValidator{provider: provider}
+}
+
+// ValidateCreateDatasourceRequest validates the full CreateDatasourceRequest:
+//  1. Verifies the provider exists in the catalog under the "datasource" connector type.
+//  2. Validates params against the provider's JSON Schema (if one is present).
+func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context, req apimodels.CreateDatasourceRequest) error {
+	if !v.provider.ConnectorExists(catalogconstants.ConnectorTypeDatasource, req.ProviderID) {
+		return &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("Datasource provider %q not found in catalog", req.ProviderID),
+		}
+	}
+
+	schema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	if len(schema) == 0 {
+		// No schema defined for this provider — no parameter constraints to enforce.
+		return nil
+	}
+
+	if len(req.Metadata) == 0 {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("Metadata is required for datasource provider %q", req.ProviderID),
+		}
+	}
+
+	return ValidateParams(req.Metadata, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
 }
 
 // Made with Bob

@@ -83,6 +83,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	svcRepo := repository.NewServiceRepository(pool)
 	compRepo := repository.NewComponentRepository(pool)
 	svcDepRepo := repository.NewServiceDependencyRepository(pool)
+	connectorRepo := repository.NewConnectorRepository(pool)
 
 	// Initialize sync service for background DB-Pod synchronization
 	// TODO: implement sync service on remote machines
@@ -119,6 +120,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
+		DatasourceService:  apirepository.NewDatasourceService(connectorRepo, catalogProvider),
 		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
