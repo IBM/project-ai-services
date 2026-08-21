@@ -44,8 +44,8 @@ CONNECTOR_NAME = "prod-sftp-reports"
 CONNECTOR_TYPE = "ssh"
 
 SSH_PAYLOAD = {
-    "connector_id": CONNECTOR_ID,
-    "connector_name": CONNECTOR_NAME,
+    "id": CONNECTOR_ID,
+    "name": CONNECTOR_NAME,
     "type": "ssh",
     "allowed_extensions": [".pdf", ".docx"],
     "connection_details": {
@@ -57,8 +57,8 @@ SSH_PAYLOAD = {
 }
 
 S3_PAYLOAD = {
-    "connector_id": "a1b2c3d4-0000-0000-0000-000000000002",
-    "connector_name": "prod-s3-rag-docs",
+    "id": "a1b2c3d4-0000-0000-0000-000000000002",
+    "name": "prod-s3-rag-docs",
     "type": "s3",
     "allowed_extensions": [".pdf"],
     "connection_details": {
@@ -89,7 +89,6 @@ def _make_connector(
     c.attached_at = _NOW
     c.last_sync_at = _NOW
     c.sync_status = sync_status
-    c.last_sync_error = None
     c.error = None
     c.total_files = 42
     return c
@@ -121,7 +120,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     Patches:
       - settings → fake dirs and fast-path values
       - encrypt_secrets / merge_and_encrypt_partial → return input unchanged
-      - _get_key_path → /dev/null (never touched because encryption is mocked)
       - db_ops.insert_connector, upsert_connector, etc.
     """
     from digitize.workers.concurrency import concurrency_manager
@@ -140,7 +138,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
             ingestion_concurrency_limit=1,
             connector=SimpleNamespace(
                 sync_interval_seconds=300,
-                encryption_key_path="/dev/null",
             ),
         ),
     )
@@ -166,11 +163,11 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     # Encryption: pass-through (no real key needed)
     monkeypatch.setattr(
         "digitize.api.v1.connectors.encrypt_secrets",
-        lambda connector_type, details, key_path: dict(details),
+        lambda connector_type, details: dict(details),
     )
     monkeypatch.setattr(
         "digitize.api.v1.connectors.merge_and_encrypt_partial",
-        lambda connector_type, existing, partial, key_path: {**existing, **partial},
+        lambda connector_type, existing, partial: {**existing, **partial},
     )
     monkeypatch.setattr(
         "digitize.api.v1.connectors.strip_secrets",
@@ -202,7 +199,7 @@ class TestPostConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 201
-        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert response.json() == {"id": CONNECTOR_ID}
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
         captured = {}
@@ -231,7 +228,7 @@ class TestPostConnector:
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.json() == {"connector_id": CONNECTOR_ID}
+        assert response.json() == {"id": CONNECTOR_ID}
         assert "private_key" not in response.text
         assert "password" not in response.text
 
@@ -264,12 +261,12 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "new-name"},
+            json={"name": "new-name"},
         )
         assert response.status_code == 404
 
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
-        """PUT with only connector_name must not touch connection_details."""
+        """PUT with only name must not touch connection_details."""
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_active_connector",
             Mock(return_value=_make_connector()),
@@ -278,7 +275,7 @@ class TestPutConnector:
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", upsert_mock)
         connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "renamed"},
+            json={"name": "renamed"},
         )
         # connection_details kwarg should be None (not supplied)
         call_kwargs = upsert_mock.call_args.kwargs if upsert_mock.called else {}
@@ -295,7 +292,7 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "taken-name"},
+            json={"name": "taken-name"},
         )
         assert response.status_code == 409
 
@@ -306,7 +303,7 @@ class TestPutConnector:
         )
         response = connector_test_client.put(
             f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connector_name": "new-name"},
+            json={"name": "new-name"},
         )
         assert response.status_code == 409
 
@@ -439,7 +436,7 @@ class TestListConnectors:
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
-        assert data[0]["connector_id"] == CONNECTOR_ID
+        assert data[0]["id"] == CONNECTOR_ID
 
     def test_never_returns_secret_fields(self, connector_test_client, monkeypatch):
         c = _make_connector()
@@ -478,7 +475,7 @@ class TestGetConnector:
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 200
         data = response.json()
-        assert data["connector_id"] == CONNECTOR_ID
+        assert data["id"] == CONNECTOR_ID
         assert data["total_files"] == 42
         assert data["connection_details"] == {
             "host": "sftp.example.com",
@@ -893,5 +890,164 @@ class TestStopSync:
             f"/v1/connectors/{CONNECTOR_ID}/syncs/{_ACTIVE_SEQ}/stop"
         )
         assert response.status_code == 404
+
+# ===========================================================================
+# _probe_connector_credentials (async unit tests)
+# ===========================================================================
+
+@pytest.mark.asyncio
+class TestProbeConnectorCredentials:
+    """Unit tests for the _probe_connector_credentials background coroutine."""
+
+    def _make_row(self, error=None):
+        c = _make_connector()
+        c.error = error
+        return c
+
+    async def test_sets_error_on_connect_failure(self, monkeypatch):
+        """connect() raises → connector error set to generic auth-failed message."""
+        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect.side_effect = ConnectionError("bad credentials")
+        mock_scanner.close = Mock()
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        await _probe_connector_credentials(
+            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"]
+        )
+
+        set_error_mock.assert_called_once_with(CONNECTOR_ID, _CREDENTIAL_ERROR_MSG)
+
+    async def test_does_not_set_error_on_success(self, monkeypatch):
+        """connect() succeeds and no prior auth error → error field untouched."""
+        from digitize.api.v1.connectors import _probe_connector_credentials
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect = Mock()
+        mock_scanner.close = Mock()
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        await _probe_connector_credentials(
+            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"], current_error=None
+        )
+
+        set_error_mock.assert_not_called()
+
+    async def test_clears_auth_error_on_success_when_previously_set(self, monkeypatch):
+        """connect() succeeds and prior error was auth-failed → error cleared to None."""
+        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect = Mock()
+        mock_scanner.close = Mock()
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        await _probe_connector_credentials(
+            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"], current_error=_CREDENTIAL_ERROR_MSG
+        )
+
+        set_error_mock.assert_called_once_with(CONNECTOR_ID, None)
+
+    async def test_does_not_clear_sync_error_on_success(self, monkeypatch):
+        """connect() succeeds but prior error is sync-related → error field untouched."""
+        from digitize.api.v1.connectors import _probe_connector_credentials
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect = Mock()
+        mock_scanner.close = Mock()
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        await _probe_connector_credentials(
+            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"],
+            current_error="Sync failed: remote file not found"
+        )
+
+        set_error_mock.assert_not_called()
+
+    async def test_close_failure_after_connect_failure_is_swallowed(self, monkeypatch):
+        """scanner.close() raising after a connect failure must not propagate."""
+        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
+
+        mock_scanner = MagicMock()
+        mock_scanner.connect.side_effect = ConnectionError("bad credentials")
+        mock_scanner.close.side_effect = RuntimeError("close also broken")
+
+        set_error_mock = Mock()
+        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
+
+        # must not raise even though both connect and close fail
+        await _probe_connector_credentials(CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"])
+
+        # error still persisted despite close() blowing up
+        set_error_mock.assert_called_once_with(CONNECTOR_ID, _CREDENTIAL_ERROR_MSG)
+
+    async def test_put_probes_credentials_when_connection_details_changed(
+        self, monkeypatch
+    ):
+        """PUT with connection_details change schedules a credential probe task."""
+        from digitize.api.v1.connectors import update_connector
+        from digitize.connectors.models import ConnectorUpdateRequest
+
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.merge_and_encrypt_partial",
+            lambda ctype, existing, partial: {**existing, **partial},
+        )
+
+        tasks_created = []
+
+        def capture_task(coro):
+            tasks_created.append(coro)
+            coro.close()  # prevent "coroutine never awaited" warning
+
+        monkeypatch.setattr("digitize.api.v1.connectors.asyncio.create_task", capture_task)
+
+        body = ConnectorUpdateRequest.model_validate({"connection_details": {"remote_path": "/new"}})
+        await update_connector(CONNECTOR_ID, body)
+
+        assert len(tasks_created) == 1
+
+    async def test_put_does_not_probe_when_only_name_changed(self, monkeypatch):
+        """PUT with only name → no credential probe scheduled."""
+        from digitize.api.v1.connectors import update_connector
+        from digitize.connectors.models import ConnectorUpdateRequest
+
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            Mock(return_value=_make_connector()),
+        )
+        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
+
+        tasks_created = []
+
+        def capture_task(coro):
+            tasks_created.append(coro)
+            coro.close()
+
+        monkeypatch.setattr("digitize.api.v1.connectors.asyncio.create_task", capture_task)
+
+        body = ConnectorUpdateRequest.model_validate({"name": "new-name"})
+        await update_connector(CONNECTOR_ID, body)
+
+        assert len(tasks_created) == 0
+
 
 # Made with Bob

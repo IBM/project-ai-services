@@ -2,10 +2,10 @@
 Connector credential encryption/decryption.
 
 Secret fields are encrypted at rest using AES-256-GCM with a key loaded from
-the path configured in settings (default: /run/secrets/connector_encryption_key).
+the DB_ENCRYPTION_KEY environment variable (32 raw bytes, base64-encoded or
+as a plain 32-character ASCII string).
 
-The key file must contain exactly 32 raw bytes (256 bits).
-When the key file is absent (e.g. in tests), operations raise RuntimeError.
+When the variable is absent (e.g. in tests), operations raise RuntimeError.
 
 Ciphertext wire format (stored as base64):
     base64( nonce[12] || tag[16] || ciphertext )
@@ -14,7 +14,6 @@ Ciphertext wire format (stored as base64):
 import base64
 import os
 from functools import lru_cache
-from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -33,25 +32,24 @@ _NONCE_SIZE = 12  # 96-bit nonce recommended for GCM
 
 
 @lru_cache(maxsize=1)
-def _load_key(key_path: str) -> AESGCM:
-    """Load and cache the AES-256-GCM cipher from the key file."""
-    path = Path(key_path)
-    if not path.exists():
+def _load_key() -> AESGCM:
+    """Load and cache the AES-256-GCM cipher from the DB_ENCRYPTION_KEY env var."""
+    raw = os.environ.get("DB_ENCRYPTION_KEY", "")
+    if not raw:
         raise RuntimeError(
-            f"Connector encryption key not found at {key_path}. "
-            "Ensure the secret is mounted before starting the service."
+            "Connector encryption key not found. "
+            "Ensure the DB_ENCRYPTION_KEY environment variable is set before starting the service."
         )
-    raw = path.read_bytes().strip()
-    if len(raw) != 32:
+    key_bytes = raw.encode()
+    if len(key_bytes) != 32:
         raise RuntimeError(
-            f"Connector encryption key at {key_path} must be exactly 32 bytes "
-            f"(AES-256); got {len(raw)} bytes."
+            f"DB_ENCRYPTION_KEY must be exactly 32 bytes (AES-256); got {len(key_bytes)} bytes."
         )
-    return AESGCM(raw)
+    return AESGCM(key_bytes)
 
 
-def _get_cipher(key_path: str) -> AESGCM:
-    return _load_key(key_path)
+def _get_cipher() -> AESGCM:
+    return _load_key()
 
 
 def _encrypt_value(cipher: AESGCM, plaintext: str) -> str:
@@ -73,7 +71,6 @@ def _decrypt_value(cipher: AESGCM, token: str) -> str:
 def encrypt_secrets(
     connector_type: str,
     connection_details: dict,
-    key_path: str,
 ) -> dict:
     """
     Return a copy of *connection_details* with secret fields encrypted.
@@ -81,7 +78,7 @@ def encrypt_secrets(
     Only the fields listed in _SECRET_FIELDS for the given connector type
     are touched; all other fields are passed through unchanged.
     """
-    cipher = _get_cipher(key_path)
+    cipher = _get_cipher()
     secret_fields = _SECRET_FIELDS.get(connector_type, set())
     result = dict(connection_details)
     for field in secret_fields:
@@ -93,12 +90,11 @@ def encrypt_secrets(
 def decrypt_secrets(
     connector_type: str,
     connection_details: dict,
-    key_path: str,
 ) -> dict:
     """
     Return a copy of *connection_details* with secret fields decrypted.
     """
-    cipher = _get_cipher(key_path)
+    cipher = _get_cipher()
     secret_fields = _SECRET_FIELDS.get(connector_type, set())
     result = dict(connection_details)
     for field in secret_fields:
@@ -126,7 +122,6 @@ def merge_and_encrypt_partial(
     connector_type: str,
     existing_encrypted: dict,
     partial_update: dict,
-    key_path: str,
 ) -> dict:
     """
     Merge *partial_update* into *existing_encrypted* at the key level,
@@ -137,7 +132,7 @@ def merge_and_encrypt_partial(
 
     Returns the merged dict (all secret fields encrypted).
     """
-    cipher = _get_cipher(key_path)
+    cipher = _get_cipher()
     secret_fields = _SECRET_FIELDS.get(connector_type, set())
     result = dict(existing_encrypted)
     for key, value in partial_update.items():

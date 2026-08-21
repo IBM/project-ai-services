@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from common.error_utils import APIError, ErrorCode, http_error_responses
+from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.connectors.models import (
     ConnectorCreateRequest,
     ConnectorDetailResponse,
@@ -35,6 +36,7 @@ from digitize.connectors.models import (
     ConnectorStatus,
     SyncLogStatus,
     SyncTriggerResponse,
+    ConnectorError,
 )
 from digitize.connectors.encryption import (
     encrypt_secrets,
@@ -51,12 +53,52 @@ logger = get_logger("connectors_router")
 # Helpers
 # ---------------------------------------------------------------------------
 
-_KEY_PATH = None  # resolved lazily via _get_key_path()
+_CREDENTIAL_ERROR_MSG = ConnectorError.CREDENTIAL_ERROR_MSG  # canonical value lives in connectors.models
 
 
-def _get_key_path() -> str:
-    """Return the encryption key path from settings."""
-    return settings.digitize.connector.encryption_key_path
+async def _probe_connector_credentials(
+    connector_id: str,
+    connector_type: str,
+    encrypted_details: dict,
+    allowed_extensions: list,
+    current_error: Optional[str] = None,
+) -> None:
+    """
+    Attempt a real connection using the supplied (encrypted) credentials.
+
+    On failure: the connector's error field is set to a generic auth-failure message.
+
+    On success: if the connector previously had an auth-failure error (i.e. the error
+    was set by a prior probe), it is cleared so the connector no longer shows a stale
+    credential warning.  Unrelated errors (e.g. sync errors) are left untouched.
+    """
+    class _Row:
+        """Minimal duck-type accepted by build_scanner."""
+        def __init__(self, ctype: str, details: dict, extensions: list) -> None:
+            self.type = ctype
+            self.connection_details = details
+            self.allowed_extensions = extensions
+
+    scanner = build_scanner(_Row(connector_type, encrypted_details, allowed_extensions))
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, scanner.connect)
+        await loop.run_in_executor(None, scanner.close)
+        logger.info(f"Credential probe succeeded for connector {connector_id!r}")
+        # Clear the error only if it was previously set by a credential probe —
+        # leave any sync-related error intact.
+        if current_error == _CREDENTIAL_ERROR_MSG:
+            db_ops.set_connector_error(connector_id, None)
+    except Exception as exc:
+        logger.error(
+            f"Credential probe failed for connector {connector_id!r}: {exc}",
+            exc_info=True,
+        )
+        db_ops.set_connector_error(connector_id, _CREDENTIAL_ERROR_MSG)
+        try:
+            await loop.run_in_executor(None, scanner.close)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +127,9 @@ async def create_connector(body: ConnectorCreateRequest):
     Validates connector settings, encrypts credentials, persists the new connector
     configuration in the database, and schedules the background worker.
     """
-    connector_id = body.connector_id or str(uuid.uuid4())
+    connector_id = body.id or str(uuid.uuid4())
     try:
-        key_path = _get_key_path()
-        encrypted_details = encrypt_secrets(body.type, body.connection_details, key_path)
+        encrypted_details = encrypt_secrets(body.type, body.connection_details)
 
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
@@ -101,26 +142,36 @@ async def create_connector(body: ConnectorCreateRequest):
             )
         except Exception as sched_exc:
             logger.error(
-                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
+                f"Scheduler registration failed for {connector_id!r}: {sched_exc}",
+                exc_info=True,
             )
             raise
 
         db_ops.insert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connector_type=body.type,
             connection_details=encrypted_details,
             allowed_extensions=body.allowed_extensions,
             sync_interval_seconds=sync_interval,
         )
 
+        asyncio.create_task(
+            _probe_connector_credentials(
+                connector_id,
+                body.type,
+                encrypted_details,
+                body.allowed_extensions,
+            )
+        )
+
         logger.info(
-            f"Connector {connector_id!r} ({body.connector_name!r}) attached "
+            f"Connector {connector_id!r} ({body.name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
 
         return Response(
-            content=f'{{"connector_id": "{connector_id}"}}',
+            content=f'{{"id": "{connector_id}"}}',
             status_code=201,
             media_type="application/json",
         )
@@ -129,7 +180,7 @@ async def create_connector(body: ConnectorCreateRequest):
         # id or name already exists
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector {connector_id!r} or name {body.connector_name!r} already exists",
+            f"Connector {connector_id!r} or name {body.name!r} already exists",
         )
     except RuntimeError as exc:
         # encryption key not found
@@ -171,7 +222,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     """
     try:
         # Nothing to update — treat as success
-        if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
+        if body.name is None and body.allowed_extensions is None and body.connection_details is None:
             return Response(status_code=200)
 
         existing = db_ops.get_active_connector(connector_id)
@@ -186,8 +237,6 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
             )
 
-        key_path = _get_key_path()
-
         # If connection_details is being updated, we need to merge with existing
         # encrypted details so untouched keys stay encrypted and intact.
         merged_details: Optional[dict] = None
@@ -196,15 +245,27 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 existing.type,
                 existing.connection_details,
                 body.connection_details,
-                key_path,
             )
 
         db_ops.upsert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connection_details=merged_details,
             allowed_extensions=body.allowed_extensions,
         )
+
+        if merged_details is not None:
+            # Connection details changed — probe the new credentials.
+            probe_extensions = body.allowed_extensions or existing.allowed_extensions or []
+            asyncio.create_task(
+                _probe_connector_credentials(
+                    connector_id,
+                    existing.type,
+                    merged_details,
+                    probe_extensions,
+                    current_error=existing.error,
+                )
+            )
 
         logger.info(f"Connector {connector_id!r} updated")
         return Response(status_code=200)
@@ -217,7 +278,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     except IntegrityError:
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector name {body.connector_name!r} is already in use",
+            f"Connector name {body.name!r} is already in use",
         )
     except RuntimeError as exc:
         logger.error(f"Encryption key error: {exc}")
@@ -436,13 +497,12 @@ async def list_connectors():
         connectors = db_ops.list_connectors()
         return [
             ConnectorListItem(
-                connector_id=c.id,
-                connector_name=c.name,
+                id=c.id,
+                name=c.name,
                 type=c.type,
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
                 sync_status=c.sync_status,
-                last_sync_error=c.last_sync_error,
                 error=c.error,
                 total_files=c.total_files,
             )
@@ -487,15 +547,14 @@ async def get_connector(connector_id: str):
             )
 
         return ConnectorDetailResponse(
-            connector_id=connector.id,
-            connector_name=connector.name,
+            id=connector.id,
+            name=connector.name,
             type=connector.type,
             allowed_extensions=list(connector.allowed_extensions or []),
             sync_interval_seconds=connector.sync_interval_seconds,
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
             sync_status=connector.sync_status,
-            last_sync_error=connector.last_sync_error,
             error=connector.error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
