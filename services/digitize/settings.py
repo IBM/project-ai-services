@@ -20,11 +20,6 @@ class DigitizeConfig(BaseSettings):
             description="Sync interval in seconds applied to all connectors at attach time",
         )
 
-        encryption_key_path: str = Field(
-            default="/run/secrets/connector_encryption_key",
-            description="Path to the AES-256-GCM key file (32 raw bytes) used to encrypt connector secrets at rest",
-        )
-
         model_config = SettingsConfigDict(env_prefix="CONNECTOR_")
 
     # Directory paths
