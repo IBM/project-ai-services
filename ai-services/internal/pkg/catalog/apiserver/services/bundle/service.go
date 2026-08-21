@@ -15,18 +15,30 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
+// CatalogReloader is satisfied by *catalog.CatalogProvider.
+// It is defined here so the bundle service can be tested without importing the
+// concrete provider type.
+type CatalogReloader interface {
+	Reload(ctx context.Context) error
+}
+
 // bundleService implements BundleServiceInterface.
 type bundleService struct {
-	repo     repository.BundleRepository
-	svcRepo  repository.ServiceRepository
-	compRepo repository.ComponentRepository
-	// TODO: add CatalogProvider reference for Reload() calls once wired in.
-	// catalogProvider *catalog.CatalogProvider
+	repo            repository.BundleRepository
+	svcRepo         repository.ServiceRepository
+	compRepo        repository.ComponentRepository
+	catalogReloader CatalogReloader // nil on CLI / test paths — Reload() calls are skipped when nil
 }
 
 // NewBundleService creates a new bundleService backed by the given repositories.
-func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository) BundleServiceInterface {
-	return &bundleService{repo: repo, svcRepo: svcRepo, compRepo: compRepo}
+// catalogReloader may be nil — Reload() calls are skipped when nil.
+func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository, catalogReloader CatalogReloader) BundleServiceInterface {
+	return &bundleService{
+		repo:            repo,
+		svcRepo:         svcRepo,
+		compRepo:        compRepo,
+		catalogReloader: catalogReloader,
+	}
 }
 
 // ValidateBundle validates a .tar.gz archive without persisting anything.
@@ -56,8 +68,10 @@ func (s *bundleService) ValidateBundle(_ context.Context, _ io.Reader) (any, err
 //  4. Extract archive to bundleDirPath(catalogType, catalogID, version),
 //     stripping the top-level directory.
 //  5. Insert DB row via BundleRepository.Insert (status=processing).
-//  6. TODO — CatalogProvider.Reload() once the provider reference is wired in.
-//  7. Mark row active via BundleRepository.Update (status=active, size_bytes, name, version).
+//  6. Mark row active via BundleRepository.Update (status=active, size_bytes, name, version).
+//     On failure: mark row failed and return error.
+//  7. CatalogProvider.Reload() — rebuilds the in-memory catalog so the now-active bundle
+//     is immediately visible. On failure: mark row failed and return error.
 //  8. Re-fetch via GetBundleByID and return as *BundleResponse.
 //     On failure after step 5: mark row failed and store the error message.
 func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userID string) (*BundleResponse, error) {
@@ -93,6 +107,13 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 		return nil, err
 	}
 
+	// Steps 5–8: insert, reload, activate, and return.
+	return s.insertActivateAndFetch(ctx, meta, destDir, sizeBytes, userID)
+}
+
+// insertActivateAndFetch performs steps 5–8 of ProcessBundle:
+// insert DB row, mark active, reload catalog, and re-fetch the final row.
+func (s *bundleService) insertActivateAndFetch(ctx context.Context, meta BundleMetadata, destDir string, sizeBytes int64, userID string) (*BundleResponse, error) {
 	// Step 5: insert DB row with status=processing.
 	row := &models.CatalogBundle{
 		Name:        meta.DisplayName(),
@@ -107,9 +128,7 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 		return nil, fmt.Errorf("failed to insert bundle record: %w", err)
 	}
 
-	// Step 6: TODO — CatalogProvider.Reload() once the provider reference is wired in.
-
-	// Step 7: mark row active.
+	// Step 6: mark row active so Reload() can see it as "active" when it queries the DB.
 	statusActive := models.BundleStatusActive
 	name := meta.DisplayName()
 	version := meta.Version()
@@ -122,6 +141,15 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 		s.markFailed(ctx, row.ID, updateErr.Error())
 
 		return nil, fmt.Errorf("failed to activate bundle: %w", updateErr)
+	}
+
+	// Step 7: reload the catalog so the now-active bundle is immediately visible.
+	if s.catalogReloader != nil {
+		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+			s.markFailed(ctx, row.ID, reloadErr.Error())
+
+			return nil, fmt.Errorf("catalog reload failed after bundle creation: %w", reloadErr)
+		}
 	}
 
 	// Step 8: re-fetch the authoritative row from DB and return.
@@ -138,7 +166,8 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 //  5. Extract archive to a staging directory (<catalog_id>-<version>-new).
 //  6. Rename staging directory into the final path (bundleDirPath).
 //  7. UPDATE existing row in-place (status=active, version, name, size_bytes) via BundleRepository.Update.
-//  8. TODO — CatalogProvider.Reload() once the provider reference is wired in.
+//  8. CatalogProvider.Reload() — rebuilds the in-memory catalog so the replaced bundle is
+//     immediately visible. On failure: mark row failed and return error.
 //  9. Delete old on-disk directory when it differs from the new final path.
 //  10. Re-fetch via BundleRepository.GetByID and return as *BundleResponse.
 //     On failure after step 4: mark row failed, store error message.
@@ -236,7 +265,12 @@ func (s *bundleService) replaceBundleFiles(ctx context.Context, existingID uuid.
 		return nil, fmt.Errorf("failed to activate replaced bundle: %w", updateErr)
 	}
 
-	// Step 8: TODO — CatalogProvider.Reload() once the provider reference is wired in.
+	// Step 8: reload the catalog so the replaced bundle is immediately visible.
+	if s.catalogReloader != nil {
+		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+			return nil, fmt.Errorf("catalog reload failed after bundle replacement: %w", reloadErr)
+		}
+	}
 
 	// Step 9: delete old on-disk directory when it differs from the new final path.
 	if oldDir != newFinalDir {
@@ -270,8 +304,8 @@ func (s *bundleService) GetBundleByID(ctx context.Context, bundleID string) (*Bu
 }
 
 // DeleteBundle synchronously marks the row deleting, guards against running
-// instances, removes the on-disk directory, reloads CatalogProvider (TODO),
-// and deletes the DB row.
+// instances, removes the on-disk directory, reloads CatalogProvider, and
+// deletes the DB row.
 //
 // It accepts the *BundleResponse returned by GetBundleByID — the same shape
 // used by ReplaceBundle — so the handler does not need to construct an
@@ -281,7 +315,8 @@ func (s *bundleService) GetBundleByID(ctx context.Context, bundleID string) (*Bu
 //     still reference this bundle's catalog entry.
 //  2. Mark row deleting via BundleRepository.Update.
 //  3. Delete on-disk directory: bundleDirPath(existing.CatalogType, existing.CatalogID, existing.Version).
-//  4. TODO — CatalogProvider.Reload() once the provider reference is wired in.
+//  4. CatalogProvider.Reload() — rebuilds the in-memory catalog so the deleted bundle
+//     is no longer served. On failure: mark row failed and return error.
 //  5. Delete DB row via BundleRepository.Delete.
 //     On failure before step 5: mark row failed.
 func (s *bundleService) DeleteBundle(ctx context.Context, existing *BundleResponse) error {
@@ -322,7 +357,12 @@ func (s *bundleService) deleteBundleFiles(ctx context.Context, existingID uuid.U
 		return fmt.Errorf("failed to remove bundle directory %q: %w", dirPath, err)
 	}
 
-	// Step 4: TODO — CatalogProvider.Reload() once the provider reference is wired in.
+	// Step 4: reload the catalog so the deleted bundle is no longer served.
+	if s.catalogReloader != nil {
+		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+			return fmt.Errorf("catalog reload failed after bundle deletion: %w", reloadErr)
+		}
+	}
 
 	// Step 5: delete DB row.
 	if err := s.repo.Delete(ctx, existingID); err != nil {
