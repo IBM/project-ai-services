@@ -106,6 +106,13 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 		return nil, err
 	}
 
+	// Steps 5–8: insert, reload, activate, and return.
+	return s.insertActivateAndFetch(ctx, meta, destDir, sizeBytes, userID)
+}
+
+// insertActivateAndFetch performs steps 5–8 of ProcessBundle:
+// insert DB row, reload catalog, mark active, and re-fetch the final row.
+func (s *bundleService) insertActivateAndFetch(ctx context.Context, meta BundleMetadata, destDir string, sizeBytes int64, userID string) (*BundleResponse, error) {
 	// Step 5: insert DB row with status=processing.
 	row := &models.CatalogBundle{
 		Name:        meta.DisplayName(),

@@ -27,7 +27,6 @@ import (
 const bundleStorageRoot = "/data/catalog-bundles"
 
 // catalogItem represents a cached catalog item with its metadata and path.
-// The itemFS field is non-nil only for bundle items; embedded items use assets.CatalogFS.
 type catalogItem struct {
 	Path         string // Application path (e.g., "embedding/vllm-cpu")
 	Architecture *types.Architecture
@@ -35,7 +34,7 @@ type catalogItem struct {
 	Component    *types.Component
 	Connector    *types.Connector
 	// itemFS is the filesystem from which this item was loaded.
-	// nil means the item was loaded from the embedded assets.CatalogFS.
+	// Embedded items carry &assets.CatalogFS; bundle items carry an os.DirFS.
 	itemFS fs.FS
 }
 
@@ -134,14 +133,17 @@ func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]
 
 		data, readErr := fs.ReadFile(bundleFS, "metadata.yaml")
 		if readErr != nil {
-			logger.DebugfCtx(ctx, "bundle %s: failed to read metadata.yaml from %s: %v", b.ID, bundleDir, readErr)
+			logger.ErrorfCtx(ctx, "bundle %s: failed to read metadata.yaml from %s: %v", b.ID, bundleDir, readErr)
+
 			continue
 		}
 
 		// Map catalog_type "service"/"component" → "services"/"components" to match
 		// the embedded-FS dispatch keys used in parseAndStoreMetadata.
 		catalogType := b.CatalogType + "s"
-		parseAndStoreMetadataWithFS(ctx, catalogType, "metadata.yaml", ".", bundleFS, data, items)
+		if err := parseAndStoreMetadataWithFS(ctx, catalogType, "metadata.yaml", ".", bundleFS, data, items); err != nil {
+			logger.ErrorfCtx(ctx, "bundle %s: failed to parse metadata: %v", b.ID, err)
+		}
 	}
 
 	return nil
@@ -169,23 +171,19 @@ func processMetadataFile(ctx context.Context, path string, items map[string]*cat
 
 	appPath := filepath.Dir(path)
 
-	// nil itemFS → item is from the embedded assets.CatalogFS
 	return parseAndStoreMetadataWithFS(ctx, catalogType, path, appPath, &assets.CatalogFS, data, items)
 }
 
-// parseAndStoreMetadataWithFS parses metadata and stores it in the items map,
-// recording itemFS as the filesystem from which the item was loaded.
-// When itemFS is &assets.CatalogFS the item is embedded; otherwise it is a bundle.
+// parseAndStoreMetadataWithFS parses metadata and stores it in the items map.
+// itemFS is &assets.CatalogFS for embedded items and an os.DirFS for bundle items.
 func parseAndStoreMetadataWithFS(ctx context.Context, catalogType, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
-	isCustom := itemFS != fs.FS(&assets.CatalogFS)
-
 	switch catalogType {
 	case constants.CatalogTypeArchitectures:
 		return parseArchitecture(ctx, path, appPath, itemFS, data, items)
 	case constants.CatalogTypeServices:
 		return parseService(ctx, path, appPath, itemFS, data, items)
 	case constants.CatalogTypeComponents:
-		return parseComponent(ctx, path, appPath, itemFS, data, isCustom, items)
+		return parseComponent(ctx, path, appPath, itemFS, data, items)
 	case constants.CatalogTypeConnectors:
 		return parseConnector(ctx, path, appPath, itemFS, data, items)
 	}
@@ -224,7 +222,6 @@ func parseArchitecture(ctx context.Context, path, appPath string, itemFS fs.FS, 
 }
 
 // parseService parses and stores a service.
-// IsCustom for services is derived at read-time from item.itemFS in ListServices.
 func parseService(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
 	var svc types.Service
 	if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
@@ -243,15 +240,13 @@ func parseService(ctx context.Context, path, appPath string, itemFS fs.FS, data 
 }
 
 // parseComponent parses and stores a component.
-func parseComponent(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, isCustom bool, items map[string]*catalogItem) error {
+func parseComponent(ctx context.Context, path, appPath string, itemFS fs.FS, data []byte, items map[string]*catalogItem) error {
 	var comp types.Component
 	if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
 		logger.DebugfCtx(ctx, "failed to parse component at %s: %v", path, unmarshalErr)
 
 		return nil
 	}
-
-	comp.IsCustom = isCustom
 
 	// Use composite key for components: {component_type}/{id}
 	// This allows same ID across different component types
@@ -363,17 +358,15 @@ func (p *CatalogProvider) GetCatalogItemPath(id string) (string, error) {
 }
 
 // getItemFS returns the filesystem for the catalog item identified by key.
-// Falls back to assets.CatalogFS when the item has no explicit itemFS set.
+// Every item carries a non-nil itemFS: &assets.CatalogFS for embedded items,
+// os.DirFS for bundle items.
 func (p *CatalogProvider) getItemFS(key string) (fs.FS, error) {
 	item, ok := p.getItem(key)
 	if !ok {
 		return nil, fmt.Errorf("item '%s' not found", key)
 	}
-	if item.itemFS != nil {
-		return item.itemFS, nil
-	}
 
-	return &assets.CatalogFS, nil
+	return item.itemFS, nil
 }
 
 // ToServiceSummary converts a Service to ServiceSummary.
@@ -385,7 +378,6 @@ func ToServiceSummary(service *types.Service) types.ServiceSummary {
 		CertifiedBy:   service.CertifiedBy,
 		Architectures: service.Architectures,
 		Standalone:    service.Standalone,
-		IsCustom:      service.IsCustom,
 	}
 }
 
@@ -430,18 +422,12 @@ func (p *CatalogProvider) ListArchitectures() ([]types.Architecture, error) {
 }
 
 // ListServices lists all available services from cache.
-// The returned ServiceSummary.IsCustom is true for bundle-sourced services.
 func (p *CatalogProvider) ListServices() ([]types.Service, error) {
 	snapshot := p.allItems()
 	services := make([]types.Service, 0)
 	for _, item := range snapshot {
 		if item.Service != nil {
-			svc := *item.Service
-			// Reflect whether this item came from a customer bundle.
-			if item.itemFS != nil && item.itemFS != fs.FS(&assets.CatalogFS) {
-				svc.IsCustom = true
-			}
-			services = append(services, svc)
+			services = append(services, *item.Service)
 		}
 	}
 
@@ -449,7 +435,6 @@ func (p *CatalogProvider) ListServices() ([]types.Service, error) {
 }
 
 // ListComponents lists all available components from cache.
-// The returned Component.IsCustom is true for bundle-sourced components.
 func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 	snapshot := p.allItems()
 	components := make([]types.Component, 0)
