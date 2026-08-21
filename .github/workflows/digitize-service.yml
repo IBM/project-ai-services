@@ -6,6 +6,7 @@ on:
       - 'services/digitize/**'
     branches:
       - main
+      - 'release-*'
 
 jobs:
   build-publish-image:
