@@ -38,6 +38,8 @@ const (
 	PodmanAuthSecret = "podman-auth-secret"
 	// CatalogSecretName represents the catalog secret name.
 	CatalogSecretName = "catalog-secret"
+	// CatalogCertSecretName represents caddy ssl cert secret name.
+	CatalogCertSecretName = "catalog-caddy-ssl-secret"
 	// CatalogDBSecretName represents the catalog database secret name used in OpenShift deployments.
 	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogConnectorSecretName represents the catalog connector encryption key secret name.

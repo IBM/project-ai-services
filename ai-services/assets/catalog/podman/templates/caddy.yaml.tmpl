@@ -7,10 +7,32 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "proxy"
+    ai-services.io/volume: "caddy-catalog"
+    {{- if and .SSLCertContent .SSLKeyContent }}
+    ai-services.io/secret: "catalog-caddy-ssl-secret"
+    {{- end }}
   annotations:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 spec:
   restartPolicy: always
+  initContainers:
+    - name: generate-caddyfile
+      image: "{{ .Values.caddy.image }}"
+      imagePullPolicy: IfNotPresent
+      command:
+        - "sh"
+        - "-c"
+        - |
+          cat << 'EOF' > /data/caddy/Caddyfile
+          {{- if .CaddyfileContent }}
+{{ .CaddyfileContent }}
+          {{- else }}
+          # No Caddyfile
+          {{- end }}
+          EOF
+      volumeMounts:
+        - name: caddy-data
+          mountPath: /data:z
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
@@ -21,9 +43,14 @@ spec:
           value: "0.0.0.0:2019"
       volumeMounts:
         - name: caddy-data
-          mountPath: /data/caddy:z
-        - name: caddy-config
+          mountPath: /data:z
+        - name: caddy-data
           mountPath: /config:z
+        {{- if and .SSLCertContent .SSLKeyContent }}
+        - name: caddy-ssl-certs
+          mountPath: /etc/secret/ssl
+          readOnly: true
+        {{- end }}
       resources:
         requests:
           memory: "512Mi"
@@ -40,10 +67,10 @@ spec:
         failureThreshold: 3
   volumes:
     - name: caddy-data
-      hostPath:
-        path: {{ .BaseDir }}/common/caddy
-        type: DirectoryOrCreate
-    - name: caddy-config
-      hostPath:
-        path: {{ .BaseDir }}/common/caddy-config
-        type: DirectoryOrCreate
+      persistentVolumeClaim:
+        claimName: "caddy-catalog"
+    {{- if and .SSLCertContent .SSLKeyContent }}
+    - name: caddy-ssl-certs
+      secret:
+        secretName: catalog-caddy-ssl-secret
+    {{- end }}

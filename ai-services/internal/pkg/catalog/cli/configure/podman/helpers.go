@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
+	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -61,7 +61,7 @@ func validateReconfigureParameters(rt runtime.Runtime, newOpts *catalogUtils.Pod
 
 	// Validate certificate changes if SSL certificates are provided
 
-	return validateCertificateChanges(newOpts)
+	return validateCertificateChanges(rt, newOpts)
 }
 
 // validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
@@ -84,19 +84,15 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 // validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
 // Allows updating custom certificate content (e.g., for expiry or renewal).
 // Uses glob patterns to detect timestamped certificate files.
-func validateCertificateChanges(opts *catalogUtils.PodmanConfigureOptions) error {
-	// Define staged certificate directory
-	certDir := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName)
-
-	// Check if any timestamped certificates exist from previous deployment
-	stagedCerts, _ := filepath.Glob(filepath.Join(certDir, "tls-*.crt"))
-	stagedKeys, _ := filepath.Glob(filepath.Join(certDir, "tls-*.key"))
-
-	stagedCertExists := len(stagedCerts) > 0
-	stagedKeyExists := len(stagedKeys) > 0
+func validateCertificateChanges(rt runtime.Runtime, opts *catalogUtils.PodmanConfigureOptions) error {
+	// Check if any certificates secret exist from previous deployment
+	certExists, err := rt.SecretExists(catalogConstant.CatalogCertSecretName)
+	if err != nil {
+		return fmt.Errorf("failed to check existing certificates secrets: %w", err)
+	}
 
 	// If no SSL paths provided in new config but staged certs exist, block cert type change
-	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && stagedCertExists && stagedKeyExists {
+	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && certExists {
 		return fmt.Errorf("certificate type change not allowed: custom certificates are already configured. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
 	}
 

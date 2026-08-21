@@ -8,6 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	certutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // Context holds Caddy-specific configuration and cached values during catalog deployment.
@@ -21,6 +22,10 @@ type Context struct {
 	// Admin API access
 	containerAdminURL string // http://<podName>:2019 (for container use in templates)
 	hostAdminURL      string // http://localhost:<port> (for host VM use in post-deployment)
+
+	sslCertContent   string
+	sslKeyContent    string
+	caddyFileContent string
 }
 
 // NewContext creates a new Caddy context with the pod name provided by configure.go.
@@ -82,6 +87,42 @@ func (c *Context) CreateProxyManager() (proxy.ProxyManager, error) {
 // GetDomainSuffix returns the domain suffix.
 func (c *Context) GetDomainSuffix() string {
 	return c.domainSuffix
+}
+
+func (c *Context) LoadCertAndKeyContent(sslCertPath, sslKeyPath string) error {
+	if sslCertPath == "" || sslKeyPath == "" {
+		return nil
+	}
+
+	certbyte, keyBytes, _, err := certutils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
+	if err != nil {
+		return err
+	}
+	c.sslCertContent = string(certbyte)
+	c.sslKeyContent = string(keyBytes)
+
+	return nil
+}
+
+func (c *Context) LoadCaddyFileContent() error {
+	var err error
+	if c.caddyFileContent, err = GetCaddyFileContent(); err != nil {
+		return fmt.Errorf("failed to set caddy file content: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Context) GetCaddyFileContent() string {
+	return c.caddyFileContent
+}
+
+func (c *Context) GetSSLCertContent() string {
+	return c.sslCertContent
+}
+
+func (c *Context) GetSSLKeyContent() string {
+	return c.sslKeyContent
 }
 
 // Made with Bob
