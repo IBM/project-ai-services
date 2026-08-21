@@ -17,10 +17,10 @@ const (
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
 
-	// ProviderObjectStorage is the provider ID for S3-compatible object storage connectors.
-	ProviderObjectStorage = "object_storage"
-	// ProviderFileSystem is the provider ID for SSH/SFTP file system connectors.
-	ProviderFileSystem = "file_system"
+	// providerObjectStorage is the provider ID for S3-compatible object storage connectors.
+	providerObjectStorage = "object_storage"
+	// providerFileSystem is the provider ID for SSH/SFTP file system connectors.
+	providerFileSystem = "file_system"
 )
 
 // ValidationError re-exported so callers use the same type as for application errors.
@@ -52,8 +52,8 @@ func NewDatasourceService(
 		validator:     validator,
 		encryptionKey: encryptionKey,
 		testers: map[string]ConnectionTester{
-			ProviderObjectStorage: NewObjectStorageTester(),
-			ProviderFileSystem:    NewFileSystemTester(),
+			providerObjectStorage: NewObjectStorageTester(),
+			providerFileSystem:    NewFileSystemTester(),
 		},
 	}
 }
