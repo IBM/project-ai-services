@@ -15,17 +15,9 @@ type CatalogHandler struct {
 	provider *catalog.CatalogProvider
 }
 
-// NewCatalogHandler creates a new catalog handler.
-func NewCatalogHandler() *CatalogHandler {
-	provider, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		// Log error but don't fail - let individual requests handle it
-		panic(fmt.Sprintf("Failed to initialize catalog provider: %v", err))
-	}
-
-	return &CatalogHandler{
-		provider: provider,
-	}
+// NewCatalogHandler creates a new catalog handler backed by the given provider.
+func NewCatalogHandler(provider *catalog.CatalogProvider) *CatalogHandler {
+	return &CatalogHandler{provider: provider}
 }
 
 // ListArchitectures godoc

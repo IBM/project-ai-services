@@ -293,27 +293,30 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 		return nil, fmt.Errorf("component provider not found: %w", err)
 	}
 
-	// Get the component's catalog path
 	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
 	componentPath, err := p.GetCatalogItemPath(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	// Get runtime from global factory
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
-	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
+	itemFS, err := p.getItemFS(componentKey)
 	if err != nil {
-		// If schema file doesn't exist, return empty schema instead of failing
+		return nil, fmt.Errorf("failed to get component filesystem: %w", err)
+	}
+
+	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
+	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
+	schemaData, err := itemFS.Open(schemaPath)
+	if err != nil {
+		// Schema file is optional — return an empty schema rather than failing.
 		logger.WarningfCtx(ctx, "schema file not found at '%s': %v", schemaPath, err)
 
 		return map[string]any{}, nil
 	}
+	defer schemaData.Close()
 
 	var schema map[string]any
-	if err := json.Unmarshal(schemaData, &schema); err != nil {
+	if err := json.NewDecoder(schemaData).Decode(&schema); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
 
@@ -362,26 +365,29 @@ func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID string
 		return nil, fmt.Errorf("service not found: %w", err)
 	}
 
-	// Get the service's catalog path
 	servicePath, err := p.GetCatalogItemPath(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	// Get runtime from global factory
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-	schemaPath := filepath.Join(servicePath, runtimeStr, "values.schema.json")
-	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
+	itemFS, err := p.getItemFS(serviceID)
 	if err != nil {
-		// If schema file doesn't exist, return empty schema instead of failing
+		return nil, fmt.Errorf("failed to get service filesystem: %w", err)
+	}
+
+	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
+	schemaPath := filepath.Join(servicePath, runtimeStr, "values.schema.json")
+	schemaFile, err := itemFS.Open(schemaPath)
+	if err != nil {
+		// Schema file is optional — return an empty schema rather than failing.
 		logger.WarningfCtx(ctx, "schema file not found at '%s': %v", schemaPath, err)
 
 		return map[string]any{}, nil
 	}
+	defer schemaFile.Close()
 
 	var schema map[string]any
-	if err := json.Unmarshal(schemaData, &schema); err != nil {
+	if err := json.NewDecoder(schemaFile).Decode(&schema); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
 

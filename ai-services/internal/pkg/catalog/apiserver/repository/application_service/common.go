@@ -729,12 +729,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
 
-	catalogProvider, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
-	}
-
-	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, s.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect application resources: %w", err)
 	}
