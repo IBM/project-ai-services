@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -26,12 +27,13 @@ const (
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
-// DatasourceService is the single implementation of the create-datasource flow.
+// DatasourceService is the single implementation of the datasource connector business logic.
 // It is provider-agnostic: provider-specific behaviour (connection testing and
 // sensitive-field identification) is delegated to a ConnectionTester looked up
 // from the testers registry.
 type DatasourceService struct {
 	connectorRepo dbrepo.ConnectorRepository
+	svcDepRepo    dbrepo.ServiceDependencyRepository
 	validator     *validators.ConnectorValidator
 	encryptionKey string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
@@ -44,11 +46,13 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo: connectorRepo,
+		svcDepRepo:    svcDepRepo,
 		validator:     validator,
 		encryptionKey: encryptionKey,
 		testers: map[string]ConnectionTester{
@@ -122,6 +126,44 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	return &apimodels.CreateDatasourceResponse{ID: connector.ID.String()}, nil
+}
+
+// DeleteDatasource removes a datasource connector by ID.
+// Returns 404 if not found, 409 if the connector is still linked to one or more services.
+func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) error {
+	// Phase 1: verify the connector exists.
+	_, err := s.connectorRepo.GetByID(ctx, id, false)
+	if err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: fmt.Sprintf("datasource %q not found", id),
+			}
+		}
+
+		return fmt.Errorf("failed to fetch connector: %w", err)
+	}
+
+	// Phase 2: conflict guard — reject deletion if any service_dependencies rows reference
+	// this connector (i.e. it is still connected to at least one application).
+	linkedServices, err := s.svcDepRepo.GetServicesByDependency(ctx, id, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return fmt.Errorf("failed to check connector dependencies: %w", err)
+	}
+
+	if len(linkedServices) > 0 {
+		return &ValidationError{
+			Code:    http.StatusConflict,
+			Message: fmt.Sprintf("datasource is connected to %d application(s) and cannot be deleted", len(linkedServices)),
+		}
+	}
+
+	// Phase 3: delete the connector record.
+	if err := s.connectorRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete connector: %w", err)
+	}
+
+	return nil
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in
