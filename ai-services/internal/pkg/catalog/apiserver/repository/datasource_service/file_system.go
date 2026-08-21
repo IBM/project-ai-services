@@ -32,10 +32,10 @@ func (t *fileSystemTester) SensitiveFields() map[string]bool {
 // TestConnection runs three sequential checks against an SSH/SFTP endpoint:
 //  1. Network — TCP dial to host (port defaults to 22 when not supplied).
 //  2. Auth    — SSH handshake using the PEM private key.
-//  3. Access  — SFTP Stat + ReadDir on remote_path.
+//  3. Access  — SFTP Stat on remote_path.
 //
 // The overall context deadline is propagated to the raw TCP connection so that
-// every subsequent operation (SSH handshake, SFTP subsystem, Stat, ReadDir) is
+// every subsequent operation (SSH handshake, SFTP subsystem, Stat) is
 // automatically cancelled when the deadline expires.
 func (t *fileSystemTester) TestConnection(ctx context.Context, params map[string]any) error {
 	host, _ := params["host"].(string)
@@ -97,12 +97,16 @@ func (t *fileSystemTester) TestConnection(ctx context.Context, params map[string
 	sshClient := ssh.NewClient(sshConn, chans, reqs)
 	defer func() { _ = sshClient.Close() }()
 
-	// ── 3. Access — SFTP stat + readdir ──────────────────────────────────────
+	// ── 3. Access — SFTP stat ────────────────────────────────────────────────
 	return checkSFTPAccess(sshClient, remotePath)
 }
 
-// checkSFTPAccess opens an SFTP subsystem, stats the remote path, and lists up to
-// the first entry to confirm read permission.
+// checkSFTPAccess opens an SFTP subsystem and stats the remote path to confirm it
+// exists and is reachable. Stat (SSH_FXP_STAT) is sufficient: a successful response
+// proves the authenticated user has at least execute permission on the path and that
+// the path is accessible — which is the meaningful check for a datasource connection
+// test. ReadDir is intentionally avoided here: it buffers every directory entry from
+// the server before returning, which is unbounded in time for large directories.
 // The underlying TCP connection already has a deadline so all SFTP calls are bounded.
 func checkSFTPAccess(sshClient *ssh.Client, remotePath string) error {
 	sftpClient, err := sftp.NewClient(sshClient)
@@ -122,12 +126,10 @@ func checkSFTPAccess(sshClient *ssh.Client, remotePath string) error {
 		}
 	}
 
-	if info.IsDir() {
-		if _, err := sftpClient.ReadDir(remotePath); err != nil {
-			return &ConnectionCheckError{
-				CheckType: ConnectionCheckAccess,
-				Message:   fmt.Sprintf("sftp.ReadDir(%q) failed: %v", remotePath, err),
-			}
+	if !info.IsDir() {
+		return &ConnectionCheckError{
+			CheckType: ConnectionCheckAccess,
+			Message:   fmt.Sprintf("remote path %q is not a directory", remotePath),
 		}
 	}
 
