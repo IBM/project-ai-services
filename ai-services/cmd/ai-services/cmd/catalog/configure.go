@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
