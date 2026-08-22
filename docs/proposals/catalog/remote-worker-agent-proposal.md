@@ -141,84 +141,92 @@ sequenceDiagram
 
 ### 5.1 Service Definition
 
-The proposed `WorkerGateway` gRPC service would be defined as follows:
+The `WorkerGateway` gRPC service is defined as follows:
 
 ```protobuf
 service WorkerGateway {
-  // One-time call at bootstrap time.
+  // Register is called once by a new worker at bootstrap time.
   rpc Register(RegisterRequest) returns (RegisterResponse);
 
-  // Long-lived bidirectional stream.
-  // Worker initiates; sends CommandResult, receives Command.
+  // CommandStream is a long-lived bidirectional stream.
+  // The worker initiates the stream and sends CommandResult messages;
+  // the control plane sends Command messages.
   rpc CommandStream(stream CommandResult) returns (stream Command);
 }
 
 message RegisterRequest {
-  string worker_name       = 1;
-  string pre_shared_token = 2;
-  map<string, string> labels       = 3;  // would include "domain_suffix"
-  map<string, string> capabilities = 4;
+  string              worker_name      = 1;
+  string              pre_shared_token = 2;
+  map<string, string> metadata         = 3; // e.g. {"domain_suffix": "192.168.1.5.nip.io"}
+  string              runtime_type     = 4; // "podman" or "openshift"
+}
+
+message RegisterResponse {
+  string worker_name  = 1;
+  // Reserved for future mTLS support.
+  string tls_cert_pem = 2;
+  string tls_key_pem  = 3;
 }
 
 message Command {
   string      command_id = 1;
   CommandType type       = 2;
-  bytes       payload    = 3; // JSON-encoded
+  bytes       payload    = 3; // JSON-encoded type-specific payload
 }
 
 message CommandResult {
   string command_id   = 1;
   bool   success      = 2;
-  bytes  data         = 3; // JSON-encoded response
+  bytes  data         = 3; // JSON-encoded response payload
   string error        = 4;
   bool   is_heartbeat = 5;
-  string worker_name   = 6;
+  string worker_name  = 6; // set on first result and every heartbeat
 }
 ```
 
 ### 5.2 Command Types
 
-The `CommandType` enum would cover all 29 operations needed to proxy the full `runtime.Runtime` interface:
+The `CommandType` enum covers all 29 operations needed to proxy the full `runtime.Runtime` interface:
 
 | Value | Name | Payload | Description |
 |---|---|---|---|
-| 0 | `UNSPECIFIED` | — | Default / error |
-| 1 | `LIST_IMAGES` | `{}` | List local images |
-| 2 | `PULL_IMAGE` | `{Image}` | Pull an image |
-| 3 | `LIST_PODS` | `{Filters}` | List pods with optional filters |
-| 4 | `CREATE_POD` | `{Body, Opts}` | `podman kube play` |
-| 5 | `DELETE_POD` | `{ID, Force}` | Remove a pod |
-| 6 | `STOP_POD` | `{ID}` | Stop a pod |
-| 7 | `START_POD` | `{ID}` | Start a pod |
-| 8 | `INSPECT_POD` | `{NameOrID}` | Inspect pod details + port bindings |
-| 9 | `POD_EXISTS` | `{NameOrID}` | Boolean existence check |
-| 10 | `POD_LOGS` | `{NameOrID}` | Stream pod logs |
-| 11 | `GET_POD_RESOURCES` | `{NameOrID}` | CPU / memory / accelerator usage |
-| 12 | `LIST_SECRETS` | `{Filters}` | List secrets |
-| 13 | `DELETE_SECRET` | `{Name}` | Remove a secret |
-| 14 | `SECRET_EXISTS` | `{NameOrID}` | Boolean existence check |
-| 15 | `DELETE_VOLUME` | `{Name}` | Remove a volume |
-| 16 | `VOLUME_EXISTS` | `{NameOrID}` | Boolean existence check |
-| 17 | `INSPECT_CONTAINER` | `{NameOrID}` | Inspect container details |
-| 18 | `CONTAINER_EXISTS` | `{NameOrID}` | Boolean existence check |
-| 19 | `CONTAINER_LOGS` | `{ContainerNameOrID}` | Stream container logs |
-| 20 | `LIST_ROUTES` | `{}` | List OpenShift routes (stub on Podman) |
-| 21 | `DELETE_PVCS` | `{AppLabel}` | Delete PVCs (OpenShift only) |
-| 22 | `GET_SYSTEM_INFO` | `{}` | CPU / memory / Spyre card info |
-| 23 | `RUNTIME_TYPE` | `{}` | Returns `"podman"` or `"openshift"` |
-| 24 | `RUN_EPHEMERAL_CONTAINER` | `{Image, Cmd, Mounts}` | One-shot container |
-| 25 | `REGISTER_PROXY_ROUTE` | `{ID, Domain, Upstream, Terminal, Type}` | Add route to worker Caddy |
-| 26 | `UNREGISTER_PROXY_ROUTE` | `{RouteID}` | Remove route from worker Caddy |
-| 27 | `GET_PROXY_ROUTE` | `{RouteID}` | Fetch route from worker Caddy |
-| 28 | `PROXY_HEALTH_CHECK` | `{}` | Verify worker Caddy is reachable |
-| 29 | `HTTP_PROXY` | `{Method, TargetURL, Headers, Body}` | Tunnel HTTP request to worker pod |
+| 0 | `COMMAND_TYPE_UNSPECIFIED` | — | Default / error |
+| 1 | `COMMAND_TYPE_LIST_IMAGES` | `{}` | List local images |
+| 2 | `COMMAND_TYPE_PULL_IMAGE` | `{Image}` | Pull an image |
+| 3 | `COMMAND_TYPE_LIST_PODS` | `{Filters}` | List pods with optional filters |
+| 4 | `COMMAND_TYPE_CREATE_POD` | `{Body, Opts}` | `podman kube play` |
+| 5 | `COMMAND_TYPE_DELETE_POD` | `{ID, Force}` | Remove a pod |
+| 6 | `COMMAND_TYPE_STOP_POD` | `{ID}` | Stop a pod |
+| 7 | `COMMAND_TYPE_START_POD` | `{ID}` | Start a pod |
+| 8 | `COMMAND_TYPE_INSPECT_POD` | `{NameOrID}` | Inspect pod details + port bindings |
+| 9 | `COMMAND_TYPE_POD_EXISTS` | `{NameOrID}` | Boolean existence check |
+| 10 | `COMMAND_TYPE_POD_LOGS` | `{NameOrID}` | Stream pod logs |
+| 11 | `COMMAND_TYPE_GET_POD_RESOURCES` | `{NameOrID}` | CPU / memory / accelerator usage |
+| 12 | `COMMAND_TYPE_LIST_SECRETS` | `{Filters}` | List secrets |
+| 13 | `COMMAND_TYPE_DELETE_SECRET` | `{Name}` | Remove a secret |
+| 14 | `COMMAND_TYPE_SECRET_EXISTS` | `{NameOrID}` | Boolean existence check |
+| 15 | `COMMAND_TYPE_DELETE_VOLUME` | `{Name}` | Remove a volume |
+| 16 | `COMMAND_TYPE_VOLUME_EXISTS` | `{NameOrID}` | Boolean existence check |
+| 17 | `COMMAND_TYPE_INSPECT_CONTAINER` | `{NameOrID}` | Inspect container details |
+| 18 | `COMMAND_TYPE_CONTAINER_EXISTS` | `{NameOrID}` | Boolean existence check |
+| 19 | `COMMAND_TYPE_CONTAINER_LOGS` | `{ContainerNameOrID}` | Stream container logs |
+| 20 | `COMMAND_TYPE_LIST_ROUTES` | `{}` | List OpenShift routes (stub on Podman) |
+| 21 | `COMMAND_TYPE_DELETE_PVCS` | `{AppLabel}` | Delete PVCs (OpenShift only) |
+| 22 | `COMMAND_TYPE_GET_SYSTEM_INFO` | `{}` | CPU / memory / Spyre card info |
+| 23 | `COMMAND_TYPE_RUNTIME_TYPE` | `{}` | Returns `"podman"` or `"openshift"` |
+| 24 | `COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER` | `{Image, Cmd, Mounts}` | One-shot container |
+| 25 | `COMMAND_TYPE_REGISTER_PROXY_ROUTE` | `{ID, Domain, Upstream, Terminal, Type}` | Add route to worker Caddy |
+| 26 | `COMMAND_TYPE_UNREGISTER_PROXY_ROUTE` | `{RouteID}` | Remove route from worker Caddy |
+| 27 | `COMMAND_TYPE_GET_PROXY_ROUTE` | `{RouteID}` | Fetch route from worker Caddy |
+| 28 | `COMMAND_TYPE_PROXY_HEALTH_CHECK` | `{}` | Verify worker Caddy is reachable |
+| 29 | `COMMAND_TYPE_HTTP_PROXY` | `{Method, TargetURL, Headers, Body}` | Tunnel HTTP request to worker pod |
 
 ### 5.3 Protocol Flow
 
 **Heartbeat mechanism:**
-- The worker would send a heartbeat `CommandResult{is_heartbeat: true}` immediately on stream open as the first message (used by the gateway to identify the worker).
-- A background goroutine on the worker would send heartbeats every **30 seconds**.
-- The gateway would mark an worker `DISCONNECTED` if no heartbeat is received for **90 seconds** (checked every 30 seconds).
+- The worker sends `CommandResult{is_heartbeat: true, worker_name: "<name>"}` as the very first message on stream open. The gateway uses `worker_name` from this message to identify and look up the registry entry.
+- A background goroutine on the worker sends heartbeats every **30 seconds** thereafter.
+- The gateway marks a worker `DISCONNECTED` if no heartbeat is received for **90 seconds** (sweeper runs every 30 seconds).
 
 **Command flow:**
 1. Control plane calls `RemoteRuntime.SomeMethod()`.
