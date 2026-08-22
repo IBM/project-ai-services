@@ -30,7 +30,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
@@ -62,10 +62,10 @@ type Options struct {
 	// ("podman" or "openshift"). Sent to the control plane during Register.
 	RuntimeType types.RuntimeType
 
-	// Caddy holds the options for deploying Caddy on this worker node.
-	// Caddy is set up before the gRPC handshake so the worker is ready to
-	// serve routes as soon as it connects.
-	Caddy workercaddy.SetupOptions
+	// Setup holds the options for setting up this worker node (Caddy proxy,
+	// model storage, etc.). Setup runs before the gRPC handshake so the
+	// worker is ready to serve routes as soon as it connects.
+	Setup workerdeploy.Options
 }
 
 // Run executes the complete worker join workflow and blocks until ctx is
@@ -81,9 +81,9 @@ func Run(ctx context.Context, rt *podman.PodmanClient, opts Options) error {
 		return err
 	}
 
-	// ── Step 1: Setup Caddy ──────────────────────────────────────────────────
-	if err := workercaddy.Setup(ctx, rt, opts.Caddy); err != nil {
-		return fmt.Errorf("worker join: caddy setup: %w", err)
+	// ── Step 1: Setup worker node ────────────────────────────────────────────
+	if err := workerdeploy.Setup(ctx, rt, opts.Setup); err != nil {
+		return fmt.Errorf("worker join: setup: %w", err)
 	}
 
 	// ── Step 2: Dial the gateway ─────────────────────────────────────────────

@@ -14,7 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/join"
 )
 
@@ -79,7 +79,7 @@ func joinRunE(token, runtimeType, baseDir, httpsPort *string) func(*cobra.Comman
 			GatewayAddr: args[0],
 			Token:       *token,
 			RuntimeType: types.RuntimeType(*runtimeType),
-			Caddy: workercaddy.SetupOptions{
+			Setup: workerdeploy.Options{
 				BaseDir:   *baseDir,
 				HTTPSPort: *httpsPort,
 			},
@@ -103,7 +103,7 @@ func addJoinFlags(cmd *cobra.Command, token, runtimeType, baseDir, httpsPort *st
 	cmdcommon.ConfigureRuntimeFlag(cmd, runtimeType)
 
 	cmd.Flags().StringVar(baseDir, "basedir", constants.DefaultBaseDir,
-		"Base directory for AI services data (models, caddy) on this worker.\n"+
+		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 
