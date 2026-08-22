@@ -694,10 +694,19 @@ ai-services worker join <gateway>        # required positional: host:port of cat
 - Would inject a `LocalCaddyManager` into the Podman runtime by inspecting the running Caddy pod.
 - Would reconnect with exponential backoff (5s base, 120s max) on stream failure.
 
-**`worker status`** — Show current worker state:
+**`worker uninstall`** — Best-effort reversion of all changes made by `worker join`:
+
 ```bash
-ai-services worker status
+ai-services worker uninstall \
+    --runtime podman                     # required; no default
+    [--basedir /var/lib/ai-services]
+    [--yes]                              # skip confirmation prompt
 ```
+
+- Stops and removes the `ai-services--worker-caddy` Podman pod.
+- Removes the Caddy data and config directories under `<basedir>/worker/`.
+- Best-effort: failures on individual steps are logged as warnings and do not abort the overall uninstall.
+- Does **not** contact the control plane — run `ai-services catalog worker delete <id>` on the control plane separately to deregister the worker from the catalog.
 
 ### 12.3 REST API
 
@@ -796,7 +805,7 @@ ai-services/
 ├── cmd/ai-services/cmd/worker/
 │   ├── worker.go                        # worker subcommand root
 │   ├── join.go                         # cobra command: worker join
-│   └── status.go                       # cobra command: worker status
+│   └── uninstall.go                    # cobra command: worker uninstall
 │
 └── internal/pkg/
     ├── worker/
