@@ -278,14 +278,14 @@ sequenceDiagram
     participant TS as TokenStore
     participant REG as Registry
 
-    W->>GW: Register(token, runtime_type, metadata={})
+    W->>GW: Register(token, runtime_type, metadata)
     GW->>TS: Validate(token)
-    TS-->>GW: OK (token marked used; worker_name bound to token)
+    TS-->>GW: OK (worker_name bound to token)
     GW->>REG: Upsert(worker_name, runtime_type, metadata)
-    GW-->>W: RegisterResponse{worker_name: "lpar-1"}
+    GW-->>W: RegisterResponse{worker_name}
 
-    W->>GW: CommandStream — Send(CommandResult{is_heartbeat:true, worker_name:"lpar-1"})
-    GW->>REG: MarkReady("lpar-1")
+    W->>GW: CommandStream.Send(heartbeat, worker_name)
+    GW->>REG: MarkReady(worker_name)
     Note over W,GW: stream open — awaiting Commands
 ```
 
