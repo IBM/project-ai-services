@@ -302,7 +302,7 @@ Each Worker LPAR would run its own Caddy instance for externally-visible HTTPS r
 - **Same pattern as catalog Caddy.** The catalog configure command deploys a Caddy pod; the proposed `worker join` command would do the same for the worker.
 - **Deploy-once semantics.** The Caddy pod is deployed only if it is not already running. Once up, its configuration is considered immutable — re-running `worker join` will not redeploy or restart the pod.
 - **Admin port always random.** Setting `adminPort: "0"` in `values.yaml` would cause the OS to assign a random loopback port, resolved at runtime by inspecting the running pod.
-- **No `--resume`.** Worker Caddy would not use `caddy run --resume` to avoid stale autosave state from a previous server name.
+- **Uses `--resume`.** Worker Caddy runs with `caddy run --config /data/caddy/Caddyfile --resume`. On restart, Caddy reloads its autosaved config from `/config/caddy/autosave.json` (persisted to `<baseDir>/worker/caddy-config` on the host), so dynamically registered routes survive pod restarts without needing to be re-registered.
 - **Server name `ai_services_worker`.** The Caddyfile global block would name the `:443` server `ai_services_worker`, so routes would be POSTed to `.../servers/ai_services_worker/routes`.
 - **Admin port only on loopback.** The pod port binding would be `127.0.0.1:<random>:2019` — unreachable from outside the LPAR.
 
@@ -316,13 +316,13 @@ The pod template would render a port binding annotation such as:
 ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 ```
 
-The proposed `values.yaml` defaults:
+The `values.yaml` defaults:
 
 ```yaml
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.4-0
-  adminPort: "0"   # OS-assigned random loopback port
-  httpsPort: 443   # Default; overridden via --https-port
+  image: icr.io/ai-services-cicd/caddy:v2.11.4-2
+  adminPort: ""    # empty → OS-assigned random loopback port at deploy time
+  httpsPort: ""    # empty → supplied via --https-port CLI flag (default 443)
 ```
 
 The proposed Caddyfile:
@@ -347,20 +347,19 @@ The proposed Caddyfile:
 }
 ```
 
-### 7.3 `DeployWorkerCaddy` execution
+### 7.3 `workerdeploy.Setup()` execution
 
-**Proposed steps for `Setup()` (triggered inside `worker join`):**
+**Steps executed by `workerdeploy.Setup()` (called inside `worker join`):**
 
-1. Read `values.yaml` (image, adminPort, httpsPort). Apply `--https-port` CLI override if provided.
-2. Render the Caddyfile template and write to `<baseDir>/worker/caddy/Caddyfile`.
-3. Check whether `ai-services--worker-caddy` pod already exists.
-   - If **not running**: render the pod template and deploy via readiness-checked pod deployment.
-   - If **already running**: skip deployment — the existing pod and its port bindings are reused.
-4. Resolve the admin URL: inspect the running pod → find the `2019/tcp` host port → `http://localhost:<port>`.
-5. Health-check the Caddy admin API.
-6. The worker computes `<workerIP>.nip.io` and sends it as `metadata["domain_suffix"]` in `RegisterRequest`. The gateway persists it to the DB via `WorkerRepository`.
+1. Call `rt.ListPods(label: "ai-services.io/component=worker-proxy")`.
+   - If any pod is returned: log and return early — worker is already set up.
+2. Write the embedded `Caddyfile.tmpl` verbatim to `<baseDir>/worker/caddy/Caddyfile` (directory created at `0750` if absent).
+3. Call `deployAll()`:
+   - Load `metadata.yaml` via `EmbedTemplateProvider` to get the ordered `podTemplateExecutions`.
+   - Load `values.yaml`, applying the `--https-port` CLI override to `caddy.httpsPort`.
+   - For each template in execution order (currently `[caddy.yaml.tmpl]`): render with `BaseDir` + `Values`, unmarshal to `PodSpec`, and deploy via `DeployPodAndReadinessCheck`.
 
-**Idempotency.** Re-running `worker join` writes a fresh Caddyfile but leaves a running Caddy pod untouched. To force a re-deploy (e.g. after a port change), the operator must manually remove the pod first.
+**Idempotency.** The running check is label-based (`ai-services.io/component=worker-proxy`) rather than by pod name, making it resilient to pod name changes. Re-running `worker join` is a no-op if the worker proxy pod is already running. To force a re-deploy, run `ai-services worker uninstall` first, then re-join.
 
 ### 7.4 Admin URL resolution
 
@@ -411,14 +410,7 @@ POST http://localhost:<port>/config/apps/http/servers/ai_services_worker/routes
 
 **Domain suffix for worker routes** would come from `RemoteRuntime.DomainSuffix()` — read from the worker's DB entry, populated from `metadata["domain_suffix"]` sent by the worker in `RegisterRequest`. The worker's domain suffix is independent of the control-plane's `DOMAIN_SUFFIX` env var.
 
-### 7.7 Upstream uses pod IP, not pod name
-
-Caddy would run as a Podman pod. Pod name DNS (Podman's internal resolver) is only available inside Podman network namespaces, not from within the Caddy container when reaching other pods on the same host. Therefore:
-
-- Route upstreams would use the **pod IP address** (e.g. `10.88.0.5:8080`), not the pod name.
-- The deployer would resolve the pod IP by inspecting the pod's infra container: `InspectPod` → `InfraContainerID` → `InspectContainer` → `NetworkSettings.IPAddress`.
-
-### 7.8 Proposed constants
+### 7.7 Proposed constants
 
 | Constant | Proposed value | Package |
 |---|---|---|
@@ -556,29 +548,58 @@ sequenceDiagram
 
 ## 10. Worker Registry and State Machine
 
-### 10.1 Proposed WorkerEntry fields
+### 10.1 WorkerEntry
 
 The in-memory `WorkerEntry` holds only the live gRPC plumbing. All durable fields live in the database.
 
 ```go
 type WorkerEntry struct {
-    DBID       uuid.UUID                       // UUID assigned by DB on first Upsert
+    // DBID is the UUID assigned by the database after the first Upsert.
+    DBID uuid.UUID
+
     WorkerName string
 
-    // CommandCh is written by RemoteRuntime to dispatch commands to the worker.
-    // The gateway goroutine drains it and writes to the gRPC stream.
-    CommandCh  chan *workerpb.Command           // capacity 32
-    results    map[string]chan *CommandResult   // result routing by command ID (mu-protected)
+    // CommandCh is written by RemoteRuntime to send commands to this worker.
+    // The gateway goroutine reads from it and writes to the gRPC stream.
+    // Buffer size: 32 (allows up to 32 concurrent in-flight deployments per worker).
+    CommandCh chan *workerpb.Command
+
+    resultsMu sync.Mutex
+    results   map[string]chan *workerpb.CommandResult // result routing by command ID
 }
 ```
 
-`Status`, `LastHeartbeat`, `Metadata` are **not** stored in `WorkerEntry`. Durable state (status, metadata, heartbeat) is owned by the `WorkerRepository` and the PostgreSQL `workers` table.
+`Status`, `LastHeartbeat`, and `Metadata` are **not** stored in `WorkerEntry` — durable state is owned by `WorkerRepository` and the PostgreSQL `workers` table.
 
-### 10.2 Status state machine
+### 10.2 Registry methods
+
+| Method | Description |
+|---|---|
+| `Preregister(ctx, workerName)` | Creates a `pending` DB row; issues a single-use 24-hour bootstrap token bound to the worker name |
+| `Register(ctx, workerName, runtimeType, metadata)` | Upserts worker to `ready` in DB; creates or reuses the in-memory `WorkerEntry`; sets `DBID` |
+| `ValidateToken(token)` | Marks token used; returns the worker name bound at issue time |
+| `Get(workerName)` | Returns the in-memory entry for a connected worker |
+| `List(ctx)` | Returns all worker rows from the DB ordered by `registered_at` |
+| `UpdateHeartbeat(ctx, workerName)` | Writes `now` to `last_heartbeat` in the DB |
+| `Disconnect(ctx, workerName)` | Removes from in-memory map; marks `disconnected` in DB (row kept for reconnect) |
+| `Deregister(ctx, id)` | Removes from in-memory map; hard-deletes the DB row by UUID |
+| `SweepStale(ctx, timeout)` | Sweeps all `ready` DB rows; marks any with `last_heartbeat` older than timeout as `disconnected` |
+| `WaitForResult(workerName, commandID)` | Returns a buffered channel (cap 1) that receives the `CommandResult` for a dispatched command |
+| `DeliverResult(res)` | Routes an incoming `CommandResult` to the waiting caller channel |
+
+### 10.3 TokenStore
+
+`TokenStore` is an in-memory single-use bootstrap token store embedded in the `Registry`. Tokens are UUID v4 strings, valid for **24 hours**, and bound to a specific worker name at issue time.
+
+- `IssueToken(workerName)` — generates a new token, stores a `TokenRecord{Token, WorkerName, ExpiresAt, Used: false}`.
+- `Validate(token)` — checks existence, expiry, and that the token has not already been used; marks `Used = true` and returns the bound worker name.
+- The store is in-memory only — tokens are lost on process restart; the operator must re-issue via `catalog worker register`.
+
+### 10.4 Status state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : Preregister() called (CLI: catalog worker register)
+    [*] --> PENDING : Preregister() called
 
     PENDING --> READY : token validated\nRegister() + CommandStream open
     PENDING --> PENDING : invalid / expired token (worker retries)
@@ -593,18 +614,10 @@ stateDiagram-v2
 
 Implemented status values: `pending`, `ready`, `disconnected`.
 
-> `busy` and `draining` are defined as future work (§17); they are not set by the current implementation.
 
-### 10.3 Worker selection
+### 10.5 Heartbeat sweeper
 
-`registry.SelectWorker(selector)` would iterate all in-memory workers. A worker would match if:
-- `Status == READY`
-- Last heartbeat within 90 seconds
-- All selector keys match: the reserved key `worker_name` would match against the worker's registered name directly; all other keys would match against `entry.Labels`.
-
-### 10.4 Heartbeat watcher
-
-A background goroutine would sweep all `READY`/`BUSY` workers every 30 seconds. Any worker with `now - LastHeartbeat > 90s` would be transitioned to `DISCONNECTED` and the status persisted to PostgreSQL.
+The gateway starts a background goroutine (`runSweeper`) that calls `registry.SweepStale(ctx, 90s)` every **30 seconds**. `SweepStale` fetches all DB rows, skips `pending` and already-`disconnected` workers, and marks any `ready` worker whose `last_heartbeat` is `nil` or older than 90 seconds as `disconnected`. The in-memory entry is not consulted — the sweep is DB-driven so it also catches workers that reconnected on a different gateway instance.
 
 ---
 
@@ -804,33 +817,31 @@ ai-services/
 ├── assets/
 │   ├── worker/
 │   │   └── podman/
-│   │       ├── values.yaml
+│   │       ├── metadata.yaml           # podTemplateExecutions: [caddy.yaml.tmpl]
+│   │       ├── values.yaml             # image, adminPort, httpsPort defaults
+│   │       ├── Caddyfile.tmpl          # static Caddyfile (no variables)
 │   │       └── templates/
-│   │           ├── worker-caddy.yaml.tmpl
-│   │           └── worker-caddyfile.tmpl
+│   │           └── caddy.yaml.tmpl     # Caddy pod spec template
 │   └── fs.go                           # WorkerFS embed
 │
 ├── cmd/ai-services/cmd/worker/
-│   ├── worker.go                        # worker subcommand root
+│   ├── worker.go                       # worker subcommand root
 │   ├── join.go                         # cobra command: worker join
 │   └── uninstall.go                    # cobra command: worker uninstall
 │
 └── internal/pkg/
     ├── worker/
     │   ├── proto/
-    │   │   └── worker.proto             # gRPC service + CommandType enum (29 types)
-    │   ├── workerbootstrap/
-    │   │   └── bootstrap.go            # Register() call at worker join
-    │   ├── configure/
-    │   │   └── configure.go            # DeployWorkerCaddy(), BuildAdminURL()
-    │   ├── daemon/
-    │   │   └── daemon.go               # Run() + dispatchToRuntime() (all 29 cases)
+    │   │   └── worker.proto            # gRPC service + CommandType enum (29 types)
+    │   ├── deploy/
+    │   │   └── deploy.go               # workerdeploy.Setup(): Caddyfile write + pod deploy via EmbedTemplateProvider
+    │   ├── join/
+    │   │   └── join.go                 # join.Run(): setup → register → CommandStream loop
     │   ├── gateway/
     │   │   └── gateway.go              # WorkerGateway gRPC server; persists worker-supplied domain_suffix to DB
-    │   ├── httpclient/
-    │   │   └── httpclient.go           # WorkerHTTPClient (Get/Post/Do over HTTPProxy)
     │   └── registry/
-    │       └── registry.go             # Registry, WorkerEntry, TokenStore
+    │       ├── registry.go             # Registry, WorkerEntry, TokenStore
+    │       └── token.go                # TokenStore: single-use UUID tokens
     │
     ├── constants/
     │   └── common.go                   # WorkerCaddyServerName, CaddyServerName (additions)
