@@ -1,4 +1,5 @@
 import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import { COMPONENT_TYPES } from "@/constants";
 import type {
   ServicesDeployFlowProps,
   DeployFlowState,
@@ -14,7 +15,7 @@ import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
 import { StepOne } from "./steps/ServicesStepOne";
-import { StepTwo } from "./steps/StepTwo";
+import { ServicesStepTwo as StepTwo } from "./steps/ServicesStepTwo";
 import { StepZero } from "./steps/StepZero";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
@@ -109,7 +110,8 @@ export const ServicesDeployFlow = ({
     if (!deployOptions) return [];
     return (
       deployOptions.components?.filter(
-        (c) => c.type !== "llm" && c.type !== "reranker",
+        (c) =>
+          c.type !== COMPONENT_TYPES.LLM && c.type !== COMPONENT_TYPES.RERANKER,
       ) || []
     );
   }, [deployOptions]);
@@ -196,11 +198,15 @@ export const ServicesDeployFlow = ({
     }
 
     const requiredFields = providerSchema.required;
-    const llmParams = llmComponent.params || {};
+    // Credentials land in serviceConfig.params; model lands in llmComponent.params.
+    // Check both so required fields are found regardless of which bag they're in.
+    const allParams = {
+      ...(llmComponent.params || {}),
+      ...(serviceConfig.params || {}),
+    };
 
-    // Check if all required fields have non-empty values
     return requiredFields.every((fieldKey) => {
-      const value = llmParams[fieldKey];
+      const value = allParams[fieldKey];
       return (
         value !== undefined && value !== null && String(value).trim() !== ""
       );
@@ -266,6 +272,8 @@ export const ServicesDeployFlow = ({
 
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
+    (state.currentStep === STEP_ONE &&
+      (isLoading || isStep1ComponentsLoading)) ||
     (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
     (isLastStep && state.isEditing) ||
     (isLastStep && !areAllRequiredFieldsFilled) ||
@@ -327,7 +335,7 @@ export const ServicesDeployFlow = ({
           llmModelsWithProviders={llmModels}
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
-          onSchemaError={setHasSchemaError}
+          onComponentError={setHasSchemaError}
         />
       )}
     </DeployTearsheetShell>

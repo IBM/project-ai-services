@@ -16,7 +16,7 @@ import { transformToDeploymentPayload } from "./utils/digitalAssistantDeployment
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
 import { StepOne } from "./steps/DAStepOne";
-import { StepTwo } from "./steps/StepTwo";
+import { DAStepTwo as StepTwo } from "./steps/DAStepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
@@ -185,19 +185,14 @@ export const DeployFlow = ({
     await runDeployment({
       dispatch,
       deploy: async () => {
-        const providerParamsData: Record<string, ProviderSchema> = {};
-        for (const [key, cache] of Object.entries(providerParams)) {
-          providerParamsData[key] = cache.data;
-        }
-        const serviceParamsData: Record<string, Record<string, unknown>> = {};
-        for (const [key, cache] of Object.entries(serviceParams)) {
-          serviceParamsData[key] = cache.data;
-        }
+        const serviceSchemas = Object.fromEntries(
+          Object.entries(serviceParams).map(([id, cache]) => [id, cache.data]),
+        );
         const deploymentPayload = transformToDeploymentPayload(
           state.formData,
           deployOptions,
-          providerParamsData,
-          serviceParamsData,
+          serviceSchemas,
+          providerParamsByType,
         );
         await deployApplication(deploymentPayload);
       },

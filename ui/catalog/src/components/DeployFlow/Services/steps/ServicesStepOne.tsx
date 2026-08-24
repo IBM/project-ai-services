@@ -6,6 +6,7 @@ import {
   SharedStepOne,
   type StepOneComponentRow,
 } from "../../Shared/steps/SharedStepOne";
+import { COMPONENT_TYPES } from "@/constants";
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -29,7 +30,8 @@ export const StepOne: React.FC<StepProps> = ({
     return deployOptions.components
       .filter(
         (c) =>
-          !["llm", "reranker"].includes(c.type) &&
+          c.type !== COMPONENT_TYPES.LLM &&
+          c.type !== COMPONENT_TYPES.RERANKER &&
           !!componentModelsError[`${selectedServiceId}:${c.type}`],
       )
       .map((c) => c.name || c.type);
@@ -50,7 +52,8 @@ export const StepOne: React.FC<StepProps> = ({
         ?.filter(
           (c) =>
             serviceComponentTypes.includes(c.type) &&
-            !["llm", "reranker"].includes(c.type),
+            c.type !== COMPONENT_TYPES.LLM &&
+            c.type !== COMPONENT_TYPES.RERANKER,
         )
         .map((component) => {
           const selectedProviderId =
