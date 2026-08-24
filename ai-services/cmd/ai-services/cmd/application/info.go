@@ -121,9 +121,9 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 		params := map[string]string{}
 		params["SERVICE_NAME"] = service.Type
 
-		uiStatus, apiSatatus := getContainerStatus(appPS.Services, service.CatalogID, rt)
+		uiStatus, apiStatus := getContainerStatus(appPS.Services, service.CatalogID, rt)
 		params["UI_STATUS"] = uiStatus
-		params["API_STATUS"] = apiSatatus
+		params["API_STATUS"] = apiStatus
 
 		for _, endpoint := range service.Endpoints {
 			urlType, urlTypeOk := endpoint["type"].(string)
@@ -187,7 +187,7 @@ func printPodmanContainerStatus(services []catalogTypes.Pod, catalogID string) (
 
 /*
 1. For each service fetch all labels
-2. See if that service has ai-services.io/component label
+2. See if that service has ai-services.io/component-type label
 3. If yes, check if value is api or ui
 4. Update status accordingly.
 */
