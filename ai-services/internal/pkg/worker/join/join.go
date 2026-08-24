@@ -27,15 +27,21 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
 const (
+	// metaKeyBaseDir is the metadata key used to transmit the worker's base
+	// directory to the control plane during registration.
+	metaKeyBaseDir = "basedir"
+
 	// heartbeatInterval is how often the worker sends a keep-alive to the control plane.
 	heartbeatInterval = 30 * time.Second
 
@@ -78,7 +84,7 @@ type Options struct {
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
 func Run(ctx context.Context, opts Options) error {
-	if err := validateOptions(opts); err != nil {
+	if err := validateOptions(&opts); err != nil {
 		return err
 	}
 
@@ -104,7 +110,11 @@ func Run(ctx context.Context, opts Options) error {
 	client := workerpb.NewWorkerGatewayClient(conn)
 
 	// ── Step 3: Register + stream loop ───────────────────────────────────────
-	return runRegistrationLoop(ctx, rt, client, opts.Token)
+	meta := map[string]string{
+		metaKeyBaseDir: opts.Setup.BaseDir,
+	}
+
+	return runRegistrationLoop(ctx, rt, client, opts.Token, meta)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -112,8 +122,8 @@ func Run(ctx context.Context, opts Options) error {
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, token string) error {
-	workerName, err := register(ctx, client, token, rt.Type())
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, token string, meta map[string]string) error {
+	workerName, err := register(ctx, client, token, rt.Type(), meta)
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
@@ -125,12 +135,13 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerp
 
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) (string, error) {
+func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType, meta map[string]string) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
 	resp, err := client.Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    rt.String(),
+		Metadata:       meta,
 	})
 	if err != nil {
 		return "", fmt.Errorf("register RPC: %w", err)
@@ -262,8 +273,10 @@ func isUnauthenticated(err error) bool {
 	return status.Code(err) == codes.Unauthenticated
 }
 
-// validateOptions performs lightweight up-front validation of join options.
-func validateOptions(opts Options) error {
+// validateOptions performs lightweight up-front validation of join options
+// and resolves opts.Setup.BaseDir to its canonical absolute path, creating
+// the directory if it does not yet exist.
+func validateOptions(opts *Options) error {
 	if opts.GatewayAddr == "" {
 		return fmt.Errorf("worker join: gateway address is required")
 	}
@@ -277,7 +290,30 @@ func validateOptions(opts Options) error {
 			opts.RuntimeType, types.RuntimeTypePodman, types.RuntimeTypeOpenShift)
 	}
 
+	resolved, err := resolveBaseDir(opts.Setup.BaseDir)
+	if err != nil {
+		return err
+	}
+
+	opts.Setup.BaseDir = resolved
+
 	return nil
+}
+
+// resolveBaseDir returns the validated base directory, falling back to the
+// default when the flag was not set. Mirrors the same logic used by
+// `catalog configure` so behaviour is consistent across commands.
+func resolveBaseDir(baseDir string) (string, error) {
+	if baseDir == "" {
+		return constants.DefaultBaseDir, nil
+	}
+
+	resolved, err := utils.ValidateBaseDir(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory %q: %w", baseDir, err)
+	}
+
+	return resolved, nil
 }
 
 // Made with Bob
