@@ -398,6 +398,10 @@ definitions:
         type: string
       healthy:
         type: boolean
+      labels:
+        additionalProperties:
+          type: string
+        type: object
       pod_id:
         type: string
       pod_name:
