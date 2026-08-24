@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -69,21 +69,6 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
-// initCatalogServices initialises the catalog provider and the datasource service that depends on it.
-func initCatalogServices(connectorRepo repository.ConnectorRepository) (*catalog.CatalogProvider, apirepository.DatasourceServiceInterface, error) {
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
-	}
-
-	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, catalogProvider)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
-	}
-
-	return catalogProvider, datasourceSvc, nil
-}
-
 // buildAPIServerOptions wires all service dependencies and returns the options
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
@@ -100,19 +85,24 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	svcDepRepo := repository.NewServiceDependencyRepository(pool)
 	connectorRepo := repository.NewConnectorRepository(pool)
 
+	catalogProvider, err := catalog.NewCatalogProvider(bundleRepo)
+	if err != nil {
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
 	// Initialize sync service for background DB-Pod synchronization
 	// TODO: implement sync service on remote machines
-	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval)
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider)
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
 	}
 	syncService.Start(ctx)
 
-	catalogProvider, datasourceSvc, err := initCatalogServices(connectorRepo)
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, catalogProvider)
 	if err != nil {
 		syncService.Stop(ctx)
 
-		return apiserver.APIServerOptions{}, nil, err
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
 	}
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
@@ -136,7 +126,8 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
 		DatasourceService:  datasourceSvc,
-		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
+		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo, catalogProvider),
+		CatalogProvider:    catalogProvider,
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
 	}

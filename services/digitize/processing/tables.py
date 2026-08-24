@@ -69,13 +69,12 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
     return markdown_table, current_caption
 
 def extract_table_headers(markdown_table: str) -> list[str]:
-    """
-    Extract headers from a markdown table.
+    """Extract headers from a markdown table.
     Smartly searches for the line directly above the separator (|---|).
     Args:
         markdown_table: Markdown formatted table string
     Returns:
-        List of header strings, or empty list if no headers found
+        List of header strings, or empty list if no headers found.
     """
     if not markdown_table or not markdown_table.strip():
         return []
@@ -198,13 +197,12 @@ def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
     return '\n'.join(merged_lines)
 
 def merge_consecutive_tables(table_dict: dict) -> dict:
-    """
-    Merge tables that span multiple consecutive pages (header check only).
+    """Merge tables that span multiple consecutive pages (header check only).
     Args:
         table_dict: Dictionary with table index as key and table data as value
                     Each value should have 'markdown', 'caption', and 'page_number' keys
     Returns:
-        Dictionary with merged tables, using same structure as input
+        Dictionary with merged tables, using same structure as input.
     """
     if not table_dict:
         return {}
@@ -263,6 +261,10 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
 
 def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
+    """Extract, process, and summarize tables found in a document.
+
+    Saves the extracted tables and their LLM-generated summaries to a JSON file.
+    """
     table_count = 0
     process_time = 0.0
     filtered_table_dicts = {}

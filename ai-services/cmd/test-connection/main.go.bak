@@ -1,0 +1,455 @@
+// cmd/test-connection/main.go
+//
+// Stand-alone connection test tool for datasource connectors (S3 / SSH).
+//
+// Uses only packages already present in the project's go.mod:
+//   - stdlib           (crypto/hmac, crypto/sha256, net/http, net, …)
+//   - golang.org/x/crypto/ssh    (already a direct dependency)
+//   - github.com/pkg/sftp        (already an indirect dependency)
+//
+// No new dependencies are introduced.
+//
+// ─── Usage ───────────────────────────────────────────────────────────────────
+//
+//  Edit the placeholder constants below, then run from the ai-services/ folder:
+//
+//    go run ./cmd/test-connection/
+//
+//  Or pass everything via flags:
+//
+//    # S3 / IBM COS / any S3-compatible store
+//    go run ./cmd/test-connection/ \
+//      -provider    s3 \
+//      -endpoint    https://s3.us-east-1.amazonaws.com \
+//      -bucket      my-bucket \
+//      -access-key  AKIAIOSFODNN7EXAMPLE \
+//      -secret-key  wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+//      -prefix      reports/
+//
+//    # SSH / SFTP
+//    go run ./cmd/test-connection/ \
+//      -provider     ssh \
+//      -host         sftp.example.com \
+//      -port         22 \
+//      -username     sync_user \
+//      -key-file     ~/.ssh/id_ed25519 \
+//      -remote-path  /exports/reports
+//
+// ─── Output ──────────────────────────────────────────────────────────────────
+//
+//   [PASS] / [FAIL]  network  – TCP reachability
+//   [PASS] / [FAIL]  auth     – credential validation
+//   [PASS] / [FAIL]  access   – bucket / remote-path accessibility
+
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Placeholder variables — edit before running, or use CLI flags.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// PROVIDER_TYPE – "s3" or "ssh".
+const PROVIDER_TYPE = "s3"
+
+// ── S3 / IBM COS ─────────────────────────────────────────────────────────────
+//
+// endpoint_url:
+//
+//	AWS S3  → "https://s3.<region>.amazonaws.com"
+//	IBM COS → "https://s3.<region>.cloud-object-storage.appdomain.cloud"
+//	Other   → any S3-compatible HTTPS endpoint
+//
+// For AWS S3 the region is auto-extracted from the endpoint URL.
+// For IBM COS the region is likewise extracted; cross-region aliases
+// (us / eu / ap) are resolved to their canonical SigV4 region.
+const S3_ENDPOINT_URL = "https://s3.us-east-1.amazonaws.com"
+const S3_BUCKET_NAME = "<your-bucket-name>"
+const S3_ACCESS_KEY_ID = "<your-access-key-id>"
+const S3_SECRET_ACCESS_KEY = "<your-secret-access-key>"
+const S3_PREFIX = "" // optional key prefix; empty = bucket root
+
+// ── SSH / SFTP ────────────────────────────────────────────────────────────────
+const SSH_HOST = "sftp.example.com"
+const SSH_PORT = "22"
+const SSH_USERNAME = "sync_user"
+
+// Provide the PEM private key as a file path OR as a raw string.
+// SSH_PRIVATE_KEY (raw PEM) takes precedence over SSH_PRIVATE_KEY_FILE.
+const SSH_PRIVATE_KEY_FILE = "" // e.g. "~/.ssh/id_ed25519"
+const SSH_PRIVATE_KEY = ""      // raw PEM content (newlines as \n)
+
+// remote_path to stat/list to verify access.
+const SSH_REMOTE_PATH = "/exports/reports"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Result type
+// ─────────────────────────────────────────────────────────────────────────────
+
+type result struct {
+	name    string
+	passed  bool
+	message string
+}
+
+func pass(name, msg string) result { return result{name, true, msg} }
+func fail(name, msg string) result { return result{name, false, msg} }
+
+func printResults(results []result) {
+	fmt.Println()
+	fmt.Println("────────────────────────────────────────────────────")
+	allPassed := true
+	for _, r := range results {
+		tag := "[PASS]"
+		if !r.passed {
+			tag = "[FAIL]"
+			allPassed = false
+		}
+		fmt.Printf("  %s  %-8s  %s\n", tag, r.name, r.message)
+	}
+	fmt.Println("────────────────────────────────────────────────────")
+	if allPassed {
+		fmt.Println("  Overall: ALL CHECKS PASSED ✓")
+	} else {
+		fmt.Println("  Overall: ONE OR MORE CHECKS FAILED ✗")
+	}
+	fmt.Println("────────────────────────────────────────────────────")
+	fmt.Println()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// main
+// ─────────────────────────────────────────────────────────────────────────────
+
+func main() {
+	provider := flag.String("provider", PROVIDER_TYPE, "Provider type: s3 or ssh")
+	s3Endpoint := flag.String("endpoint", S3_ENDPOINT_URL, "S3 endpoint URL")
+	s3Bucket := flag.String("bucket", S3_BUCKET_NAME, "S3 bucket name")
+	s3AccessKey := flag.String("access-key", S3_ACCESS_KEY_ID, "S3 access key ID")
+	s3SecretKey := flag.String("secret-key", S3_SECRET_ACCESS_KEY, "S3 secret access key")
+	s3Prefix := flag.String("prefix", S3_PREFIX, "S3 key prefix (optional)")
+	sshHost := flag.String("host", SSH_HOST, "SSH hostname")
+	sshPort := flag.String("port", SSH_PORT, "SSH port")
+	sshUser := flag.String("username", SSH_USERNAME, "SSH username")
+	sshKeyFile := flag.String("key-file", SSH_PRIVATE_KEY_FILE, "Path to SSH private key file")
+	sshKey := flag.String("key", SSH_PRIVATE_KEY, "SSH private key PEM (overrides key-file)")
+	sshPath := flag.String("remote-path", SSH_REMOTE_PATH, "SSH remote path to verify access")
+	flag.Parse()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fmt.Printf("\nTesting connection — provider: %s\n", *provider)
+
+	switch strings.ToLower(*provider) {
+	case "s3":
+		printResults(testS3(ctx, *s3Endpoint, *s3Bucket, *s3AccessKey, *s3SecretKey, *s3Prefix))
+	case "ssh":
+		pem := resolveSSHKey(*sshKey, *sshKeyFile)
+		printResults(testSSH(ctx, *sshHost, *sshPort, *sshUser, pem, *sshPath))
+	default:
+		fmt.Fprintf(os.Stderr, "unknown provider %q — must be 's3' or 'ssh'\n", *provider)
+		os.Exit(1)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S3 checks — AWS SDK v2 (aws-sdk-go-v2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// authErrorCodes are S3/STS error codes that indicate invalid credentials.
+var authErrorCodes = map[string]bool{
+	"InvalidAccessKeyId":    true,
+	"SignatureDoesNotMatch": true,
+	"InvalidClientTokenId":  true,
+	"AuthFailure":           true,
+}
+
+// accessErrorCodes are S3 error codes that indicate valid credentials but
+// insufficient permissions or a missing / inaccessible bucket.
+var accessErrorCodes = map[string]bool{
+	"AccessDenied":      true,
+	"NoSuchBucket":      true,
+	"AllAccessDisabled": true,
+}
+
+const awsEndpointSuffix = "amazonaws.com"
+const s3ConnectTimeout = 10 * time.Second
+
+// testS3 runs three sequential checks using a single ListObjectsV2(MaxKeys=0)
+// call — a zero-cost probe that transfers no object data.
+//
+//  1. Network — DNS / TCP failure detected via *net.OpError from the SDK.
+//  2. Auth    — SDK error code matched against authErrorCodes.
+//  3. Access  — SDK error code matched against accessErrorCodes (bucket missing
+//     or s3:ListBucket denied).
+//
+// A single SDK call covers all three categories; the classifyS3Error function
+// maps the returned error to the right check bucket.
+func testS3(ctx context.Context, endpointURL, bucket, accessKeyID, secretKey, prefix string) []result {
+	isAWS := strings.Contains(endpointURL, awsEndpointSuffix)
+
+	cfg := aws.Config{
+		Region:      regionFromEndpoint(endpointURL),
+		Credentials: credentials.NewStaticCredentialsProvider(accessKeyID, secretKey, ""),
+		HTTPClient:  awshttp.NewBuildableClient().WithTimeout(s3ConnectTimeout),
+	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		if !isAWS {
+			// IBM COS, MinIO, and other S3-compatible stores: supply the custom
+			// endpoint and enable path-style addressing.
+			o.BaseEndpoint = aws.String(endpointURL)
+			o.UsePathStyle = true
+		}
+		// AWS S3: SDK resolves the regional endpoint from cfg.Region automatically;
+		// virtual-hosted-style addressing is used by default — no BaseEndpoint needed.
+	})
+
+	callCtx, cancel := context.WithTimeout(ctx, s3ConnectTimeout)
+	defer cancel()
+
+	maxKeys := int32(0)
+	input := &s3.ListObjectsV2Input{
+		Bucket:  aws.String(bucket),
+		MaxKeys: &maxKeys,
+	}
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+
+	_, err := client.ListObjectsV2(callCtx, input)
+	if err == nil {
+		return []result{
+			pass("network", fmt.Sprintf("endpoint %q reachable", endpointURL)),
+			pass("auth", "credentials accepted"),
+			pass("access", fmt.Sprintf("s3://%s/%s accessible (ListObjectsV2 OK)", bucket, prefix)),
+		}
+	}
+
+	return classifyS3Error(err, endpointURL, bucket)
+}
+
+// classifyS3Error maps an SDK error to one of the three user-facing checks.
+// It uses errors.As for type-safe matching — no HTTP status string parsing.
+func classifyS3Error(err error, endpointURL, bucket string) []result {
+	// Network error: DNS failure, TCP refused, or context deadline from a
+	// completely unreachable host.
+	var netErr *net.OpError
+	if errors.As(err, &netErr) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return []result{
+			fail("network", fmt.Sprintf("cannot reach S3 endpoint %q: %v", endpointURL, err)),
+			fail("auth", "skipped — network check failed"),
+			fail("access", "skipped — network check failed"),
+		}
+	}
+	// Network passed (we got a response); now inspect the API error code.
+	networkResult := pass("network", fmt.Sprintf("endpoint %q reachable", endpointURL))
+
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		code := apiErr.ErrorCode()
+		if authErrorCodes[code] {
+			return []result{
+				networkResult,
+				fail("auth", fmt.Sprintf("credential rejected (code: %s) — check access_key_id / secret_access_key", code)),
+				fail("access", "skipped — auth check failed"),
+			}
+		}
+		if accessErrorCodes[code] {
+			return []result{
+				networkResult,
+				pass("auth", "credentials accepted"),
+				fail("access", fmt.Sprintf("bucket %q not accessible (code: %s)", bucket, code)),
+			}
+		}
+		// Unknown API error — surface code for diagnostics.
+		return []result{
+			networkResult,
+			fail("auth", fmt.Sprintf("unexpected S3 error (code: %s): %v", code, err)),
+			fail("access", "skipped — auth check failed"),
+		}
+	}
+
+	// Non-API error with a network-level response (e.g. TLS failure).
+	return []result{
+		fail("network", fmt.Sprintf("S3 connectivity error for %q: %v", endpointURL, err)),
+		fail("auth", "skipped — network check failed"),
+		fail("access", "skipped — network check failed"),
+	}
+}
+
+// regionFromEndpoint extracts the SigV4 region from the endpoint URL.
+// Falls back to "us-east-1" when the pattern is not recognised.
+//
+// Supported patterns:
+//
+//	s3.<region>.amazonaws.com                              (AWS S3)
+//	s3.<region>.cloud-object-storage.appdomain.cloud      (IBM COS direct-region)
+//	s3.us.cloud-object-storage.appdomain.cloud            (IBM COS cross-region alias → us-south)
+func regionFromEndpoint(endpointURL string) string {
+	cosAliases := map[string]string{"us": "us-south", "eu": "eu-de", "ap": "jp-tok"}
+	u := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(endpointURL, "https://"), "http://"))
+	parts := strings.Split(u, ".")
+	// ["s3", "<region>", "amazonaws", "com"]  or
+	// ["s3", "<region>", "cloud-object-storage", "appdomain", "cloud"]
+	if len(parts) >= 3 && parts[0] == "s3" {
+		region := parts[1]
+		if canonical, ok := cosAliases[region]; ok {
+			return canonical
+		}
+		return region
+	}
+	return "us-east-1"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSH checks — golang.org/x/crypto/ssh + github.com/pkg/sftp
+// ─────────────────────────────────────────────────────────────────────────────
+
+// testSSH runs three sequential checks.
+//  1. Network — TCP dial to host:port.
+//  2. Auth    — SSH handshake with private-key authentication.
+//  3. Access  — SFTP Stat on remote_path.
+//
+// Every blocking call is bounded by the deadline carried in ctx (default 30 s).
+// The deadline is applied directly to the raw TCP connection so that it covers
+// ssh.NewClientConn, sftp.NewClient, and all SFTP I/O — not just the initial dial.
+func testSSH(ctx context.Context, host, port, username string, pemBytes []byte, remotePath string) []result {
+	// ── 1. Network ────────────────────────────────────────────────────────────
+	addr := net.JoinHostPort(host, port)
+
+	// Use a dialer so we can propagate the context deadline for the TCP dial
+	// itself, rather than a separate hard-coded duration.
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	tcpConn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return []result{
+			fail("network", fmt.Sprintf("TCP dial %s failed: %v", addr, err)),
+			fail("auth", "skipped — network check failed"),
+			fail("access", "skipped — network check failed"),
+		}
+	}
+	results := []result{pass("network", fmt.Sprintf("TCP dial %s OK", addr))}
+
+	// Apply the remaining context deadline to the raw connection so that
+	// every subsequent operation (SSH handshake, SFTP subsystem, Stat)
+	// is automatically cancelled when the overall timeout expires.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = tcpConn.SetDeadline(deadline)
+	}
+
+	// ── Parse private key ─────────────────────────────────────────────────────
+	if len(pemBytes) == 0 {
+		_ = tcpConn.Close()
+		return append(results,
+			fail("auth", "no private key provided — set SSH_PRIVATE_KEY / SSH_PRIVATE_KEY_FILE or use -key / -key-file"),
+			fail("access", "skipped — auth check failed"),
+		)
+	}
+	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if err != nil {
+		_ = tcpConn.Close()
+		return append(results,
+			fail("auth", fmt.Sprintf("could not parse private key: %v", err)),
+			fail("access", "skipped — auth check failed"),
+		)
+	}
+
+	// ── 2. Auth — SSH handshake ───────────────────────────────────────────────
+	// ssh.ClientConfig.Timeout only guards the very start of the handshake; the
+	// connection deadline set above enforces the hard bound on the full exchange.
+	sshCfg := &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec G106 — diagnostic tool only; not used in production paths
+		Timeout:         10 * time.Second,
+	}
+	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, sshCfg)
+	if err != nil {
+		return append(results,
+			fail("auth", fmt.Sprintf("SSH handshake/authentication failed: %v", err)),
+			fail("access", "skipped — auth check failed"),
+		)
+	}
+	sshClient := ssh.NewClient(sshConn, chans, reqs)
+	defer sshClient.Close()
+	results = append(results, pass("auth", fmt.Sprintf("SSH key authentication succeeded as %q", username)))
+
+	// ── 3. Access — SFTP stat ────────────────────────────────────────────────
+	// The connection deadline established above still applies to all SFTP I/O.
+	results = append(results, checkSFTPAccess(sshClient, remotePath))
+	return results
+}
+
+// checkSFTPAccess opens an SFTP subsystem and stats the remote path to confirm
+// it exists and is reachable. Stat (SSH_FXP_STAT) is a single round-trip RPC
+// and is sufficient: a successful response proves the authenticated user has at
+// least execute permission on the path. ReadDir is intentionally avoided — it
+// buffers every directory entry before returning, which is unbounded in time for
+// large directories.
+// The underlying TCP connection already has a deadline, so all SFTP calls are
+// bounded — no additional timeout management is needed here.
+func checkSFTPAccess(sshClient *ssh.Client, remotePath string) result {
+	sftpClient, err := sftp.NewClient(sshClient)
+	if err != nil {
+		return fail("access", fmt.Sprintf("could not open SFTP subsystem: %v", err))
+	}
+	defer sftpClient.Close()
+
+	info, err := sftpClient.Stat(remotePath)
+	if err != nil {
+		return fail("access", fmt.Sprintf("sftp.Stat(%q) failed: %v", remotePath, err))
+	}
+
+	if info.IsDir() {
+		return pass("access", fmt.Sprintf("remote directory %q accessible", remotePath))
+	}
+	return pass("access", fmt.Sprintf("remote path %q is a file (size=%d bytes) — accessible", remotePath, info.Size()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Key helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// resolveSSHKey returns the PEM bytes for the private key.
+// rawKey (flag / constant) takes precedence; falls back to reading keyFile.
+func resolveSSHKey(rawKey, keyFile string) []byte {
+	if strings.TrimSpace(rawKey) != "" {
+		return []byte(rawKey)
+	}
+	keyFile = strings.TrimSpace(keyFile)
+	if keyFile == "" {
+		return nil
+	}
+	if strings.HasPrefix(keyFile, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			keyFile = home + keyFile[1:]
+		}
+	}
+	data, err := os.ReadFile(keyFile) // #nosec G304 — intentional: test tool reads a user-supplied key path
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not read key file %q: %v\n", keyFile, err)
+		return nil
+	}
+	return data
+}

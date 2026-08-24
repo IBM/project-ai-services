@@ -1,5 +1,4 @@
-"""
-Job lifecycle utilities — utils/jobs.py
+""" Job lifecycle utilities — utils/jobs.py.
 
 Coordinator layer between the API routers and the DB/storage layers:
 job initialisation, file staging, active-job guards, document content
@@ -87,7 +86,6 @@ def generate_uuid():
     """
     # Generate a random UUID (uuid4)
     generated_uuid = uuid.uuid4()
-    logger.debug(f"Generated UUID: {generated_uuid}")
     return str(generated_uuid)
 
 
@@ -139,7 +137,6 @@ def initialize_job_state(
     # Now create document metadata in both database and file system
     for doc in documents_info:
         doc_id = doc_id_dict[doc]
-        logger.debug(f"Generated document id {doc_id} for file: {doc}")
         create_document(
             doc_name=doc,
             doc_id=doc_id,
@@ -148,6 +145,7 @@ def initialize_job_state(
             operation=operation,
             submitted_at=submitted_at
         )
+    logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
     # Record ALREADY_EXISTS entries for files stripped from the batch.
     # Created AFTER the job row exists (foreign key constraint).

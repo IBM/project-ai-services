@@ -10,6 +10,10 @@ logger = get_logger("backend_utils")
 _similarity_session = None
 
 def get_similarity_session():
+    """Get or initialize the global requests.Session instance for similarity searches.
+
+    Utilizes an HTTPAdapter with a connection pool sized based on the maximum LLM batch size.
+    """
     global _similarity_session
     if _similarity_session is None:
         _similarity_session = requests.Session()
@@ -20,6 +24,12 @@ def get_similarity_session():
 
 
 def validate_query_length(query, emb_endpoint):
+    """Validate that the query length does not exceed the chatbot's maximum query token length limit.
+
+    Args:
+        query (str): The search query or question text to validate.
+        emb_endpoint (str): The embedding service endpoint URL to use for token length calculation.
+    """
     return _validate_query_length(query, emb_endpoint, settings.chatbot.max_query_token_length)
 
 

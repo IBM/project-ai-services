@@ -48,7 +48,7 @@ type BundleServiceInterface interface {
 
 	// DeleteBundle marks the row deleting, removes the on-disk directory, triggers
 	// CatalogProvider.Reload(), and then deletes the DB row.
-	DeleteBundle(ctx context.Context, existing *BundleRecord) error
+	DeleteBundle(ctx context.Context, existing *BundleResponse) error
 
 	// ListBundles returns a paginated BundleListResponse ordered by created_at DESC.
 	ListBundles(ctx context.Context, req BundleListRequest) (*BundleListResponse, error)

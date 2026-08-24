@@ -8,7 +8,7 @@ from typing import Optional
 from chatbot.settings import settings
 
 class Document(BaseModel):
-    """Document chunk with metadata"""
+    """Document chunk with metadata."""
     page_content: str = Field(..., description="The text content of the document chunk")
     filename: str = Field(default="", description="Source filename")
     type: str = Field(default="", description="Document type (text, image, table)")
@@ -17,7 +17,7 @@ class Document(BaseModel):
 
 
 class Message(BaseModel):
-    """Chat message in conversation"""
+    """Chat message in conversation."""
     role: str = Field(
         default="user",
         description="The role of the message author. Typically 'user' for user messages and 'assistant' for AI responses in conversation history."
@@ -41,7 +41,7 @@ class Message(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    """Request model for chat completion with conversational support"""
+    """Request model for chat completion with conversational support."""
     messages: list[Message] = Field(
         ...,
         description="List of messages in the conversation. Supports both single-turn (one message) and multi-turn (conversation history) interactions. The last message is treated as the current query."
@@ -69,17 +69,17 @@ class ChatCompletionRequest(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    """Chat message in response"""
+    """Chat message in response."""
     content: str = Field(..., description="The generated message content")
 
 
 class ChatChoice(BaseModel):
-    """Chat completion choice"""
+    """Chat completion choice."""
     message: ChatMessage = Field(..., description="The generated message")
 
 
 class ChatCompletionResponse(BaseModel):
-    """Non-streaming chat completion response"""
+    """Non-streaming chat completion response."""
     choices: list[ChatChoice] = Field(..., description="List of completion choices")
 
     model_config = {
@@ -98,7 +98,7 @@ class ChatCompletionResponse(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    """Model information"""
+    """Model information."""
     id: str = Field(..., description="Model identifier")
     object: str = Field(default="model", description="Object type")
     created: Optional[int] = Field(default=None, description="Creation timestamp")
@@ -106,7 +106,7 @@ class ModelInfo(BaseModel):
 
 
 class ModelsResponse(BaseModel):
-    """List of available models"""
+    """List of available models."""
     object: str = Field(default="list", description="Object type")
     data: list[ModelInfo] = Field(..., description="List of available models")
 
@@ -128,7 +128,7 @@ class ModelsResponse(BaseModel):
 
 
 class DBStatusResponse(BaseModel):
-    """Database status response"""
+    """Database status response."""
     ready: bool = Field(..., description="Whether the vector database is ready")
     message: Optional[str] = Field(default=None, description="Additional status message")
 
@@ -148,7 +148,7 @@ class DBStatusResponse(BaseModel):
 
 
 class PerfMetric(BaseModel):
-    """Individual performance metric entry"""
+    """Individual performance metric entry."""
     timestamp: float = Field(..., description="Unix timestamp when metric was recorded")
     readable_timestamp: str = Field(..., description="Human-readable timestamp")
     request_id: str = Field(..., description="Unique request identifier")
@@ -213,7 +213,7 @@ class PerfMetricsResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Health check response"""
+    """Health check response."""
     status: str = Field(..., description="Service health status")
 
     model_config = {

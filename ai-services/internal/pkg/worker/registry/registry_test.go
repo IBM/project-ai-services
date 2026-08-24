@@ -320,3 +320,53 @@ func TestRegistry_ValidateToken_Invalid(t *testing.T) {
 		t.Fatal("expected error for invalid token")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SweepStale tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestRegistry_SweepStale_PendingNotSwept(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	// Pre-register creates a pending row with no heartbeat.
+	if _, err := reg.Preregister(context.Background(), "worker-pending"); err != nil {
+		t.Fatalf("Preregister: %v", err)
+	}
+
+	// Sweep with a zero timeout — would sweep anything with a nil heartbeat.
+	reg.SweepStale(context.Background(), 0)
+
+	workers, _ := repo.GetAll(context.Background())
+	if len(workers) != 1 {
+		t.Fatalf("expected 1 worker, got %d", len(workers))
+	}
+	if workers[0].Status != models.WorkerStatusPending {
+		t.Errorf("expected status %q, got %q", models.WorkerStatusPending, workers[0].Status)
+	}
+}
+
+func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	// Insert a ready worker whose heartbeat is already in the past.
+	past := time.Now().Add(-2 * time.Minute)
+	w := &models.Worker{
+		Name:          "worker-stale",
+		RuntimeType:   models.WorkerRuntimeTypePodman,
+		Status:        models.WorkerStatusReady,
+		LastHeartbeat: &past,
+	}
+	if err := repo.Upsert(context.Background(), w); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// Sweep with a 1-minute timeout — the worker is 2 minutes stale.
+	reg.SweepStale(context.Background(), time.Minute)
+
+	workers, _ := repo.GetAll(context.Background())
+	if workers[0].Status != models.WorkerStatusDisconnected {
+		t.Errorf("expected status %q, got %q", models.WorkerStatusDisconnected, workers[0].Status)
+	}
+}

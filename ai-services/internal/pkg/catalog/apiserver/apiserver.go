@@ -35,6 +35,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
@@ -53,6 +54,7 @@ type APIServerOptions struct {
 	ApplicationService repository.ApplicationServiceInterface
 	DatasourceService  repository.DatasourceServiceInterface
 	BundleService      bundlesvc.BundleServiceInterface
+	CatalogProvider    *catalog.CatalogProvider
 
 	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
 	// Defaults to 9090 when zero.
@@ -71,6 +73,7 @@ type APIserver struct {
 	applicationService repository.ApplicationServiceInterface
 	datasourceService  repository.DatasourceServiceInterface
 	bundleService      bundlesvc.BundleServiceInterface
+	catalogProvider    *catalog.CatalogProvider
 
 	workerGatewayPort int
 	workerRegistry    *registry.Registry
@@ -94,6 +97,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		applicationService: options.ApplicationService,
 		datasourceService:  options.DatasourceService,
 		bundleService:      options.BundleService,
+		catalogProvider:    options.CatalogProvider,
 		workerGatewayPort:  options.WorkerGatewayPort,
 		workerRegistry:     options.WorkerRegistry,
 	}
@@ -116,7 +120,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.datasourceService, a.bundleService)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.datasourceService, a.bundleService, a.catalogProvider)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err
