@@ -362,8 +362,8 @@ async def _process_new_files(
 
     if batch_failed:
         raise RuntimeError(
-            f"One or more batches failed to ingest for connector {connector_id!r}; "
-            "connector marked as out of sync"
+            f"One or more documents failed to sync. See more details in digitize jobs "
+            f"Connector-{connector_name}-{sync_seq}-*"
         )
 
 
