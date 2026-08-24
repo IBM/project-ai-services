@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -128,7 +129,7 @@ func TestProcessBundle_BadArchive(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader([]byte("not-gzip")), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
@@ -140,7 +141,7 @@ func TestProcessBundle_MissingMetadataYAML(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{"other.yaml": "key: val\n"}, true)
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
@@ -153,7 +154,7 @@ func TestProcessBundle_InvalidMetadataYAML(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: svc\ntype: service\n"}, true) // missing version
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
@@ -167,7 +168,7 @@ func TestProcessBundle_ConflictReturns409(t *testing.T) {
 			return &models.CatalogBundle{ID: existingID}, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
@@ -183,7 +184,7 @@ func TestProcessBundle_ConflictCheckRepoError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
@@ -201,7 +202,7 @@ func TestProcessBundle_ExtractFailsBeforeInsert(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
@@ -291,7 +292,7 @@ func existingServiceRecord() *BundleResponse {
 		ID:          "550e8400-e29b-41d4-a716-446655440000",
 		Name:        "My Custom Service",
 		Status:      "active",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 		CreatedBy:   "admin",
@@ -299,20 +300,20 @@ func existingServiceRecord() *BundleResponse {
 }
 
 func TestReplaceBundle_BadArchive(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader([]byte("not-gzip")), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
 }
 
 func TestReplaceBundle_MissingMetadataYAML(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	archive := buildArchive(t, map[string]string{"other.yaml": "key: val\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "metadata.yaml not found")
 }
 
 func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	// missing version field → 422
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: my-service\ntype: service\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
@@ -320,7 +321,7 @@ func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
 }
 
 func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	// Archive has catalog_id "other-service" but existing record is "my-service".
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("other-service", "2.0.0", ""),
@@ -330,13 +331,13 @@ func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {
 }
 
 func TestReplaceBundle_CatalogTypeMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	// Existing record is a component with catalog_id "llm--my-provider".
 	// Archive also has catalog_id "llm--my-provider" but as a service type →
 	// catalog_id check passes, catalog_type check fires.
 	existingComponent := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -352,11 +353,11 @@ func TestReplaceBundle_CatalogTypeMismatch(t *testing.T) {
 func TestReplaceBundle_InvalidExistingID(t *testing.T) {
 	svc := func() BundleServiceInterface {
 		s, c := noRunningInstances()
-		return NewBundleService(&mockBundleRepo{}, s, c, nil)
+		return NewBundleService(&mockBundleRepo{}, s, c, nil, nil)
 	}()
 	badRecord := &BundleResponse{
 		ID:          "not-a-uuid",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 	}
@@ -376,7 +377,7 @@ func TestReplaceBundle_MarkProcessingFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
 	}, true)
@@ -400,7 +401,7 @@ func TestReplaceBundle_ExtractionFailsAfterMarkProcessing(t *testing.T) {
 		},
 	}
 	noSvcRepo2, noCompRepo2 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo2, noCompRepo2, nil)
+	svc := NewBundleService(repo, noSvcRepo2, noCompRepo2, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
 	}, true)
@@ -444,7 +445,7 @@ func TestReplaceBundle_HappyPath(t *testing.T) {
 				ID:          fixedID,
 				Name:        "Updated Name",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "2.0.0",
 				SizeBytes:   &sz,
@@ -454,7 +455,7 @@ func TestReplaceBundle_HappyPath(t *testing.T) {
 		},
 	}
 	noSvcRepo3, noCompRepo3 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo3, noCompRepo3, nil)
+	svc := NewBundleService(repo, noSvcRepo3, noCompRepo3, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated Name"),
@@ -491,7 +492,7 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 	archiveBytes, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
-	meta := &ServiceMetadata{id: "my-service", version: "2.0.0", displayName: "Updated Name"}
+	meta := &bundlemetadata.ServiceMetadata{ID: "my-service", Type: bundlemetadata.CatalogTypeService, Ver: "2.0.0", DisplayName: "Updated Name"}
 
 	updateCalls := make([]models.BundleUpdate, 0, 2)
 	repo := &mockBundleRepo{
@@ -525,13 +526,13 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 
 	// Call the activate step directly: update to active.
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	metaName := meta.DisplayName
+	metaVersion := meta.Ver
 	activateErr := svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
-		Name:      &name,
-		Version:   &version,
+		Name:      &metaName,
+		Version:   &metaVersion,
 	})
 	require.Error(t, activateErr)
 
@@ -570,7 +571,7 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 				ID:          fixedID,
 				Name:        "Same Version",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "1.0.0",
 				SizeBytes:   &sz,
@@ -607,8 +608,9 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	assert.DirExists(t, newFinalDir)
 
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	sm := meta.(*bundlemetadata.ServiceMetadata)
+	name := sm.DisplayName
+	version := sm.Ver
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -646,7 +648,7 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 
 	existing := &BundleResponse{
 		ID:          fixedID.String(),
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 	}
@@ -665,8 +667,9 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 	// Now simulate the DB update+refetch path.
 	sizeBytes := int64(512)
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	sm := meta.(*bundlemetadata.ServiceMetadata)
+	name := sm.DisplayName
+	version := sm.Ver
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -682,10 +685,10 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 // TestReplaceBundle_ComponentBundle verifies that a component bundle whose
 // catalog_id matches the existing record replaces successfully.
 func TestReplaceBundle_ComponentBundle_CatalogIDMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -702,7 +705,7 @@ func TestReplaceBundle_ComponentBundle_CatalogIDMismatch(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestGetBundleByID_InvalidUUID(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	_, err := svc.GetBundleByID(context.Background(), "not-a-uuid")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid bundle id")
 }
@@ -713,7 +716,7 @@ func TestGetBundleByID_NotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	resp, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
+	resp, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
 	require.NoError(t, err)
 	assert.Nil(t, resp)
 }
@@ -724,7 +727,7 @@ func TestGetBundleByID_RepoError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	_, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
+	_, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get bundle")
 }
@@ -741,7 +744,7 @@ func TestGetBundleByID_Found(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-svc",
 				Version:     "1.0.0",
 				CreatedBy:   "admin",
@@ -752,13 +755,13 @@ func TestGetBundleByID_Found(t *testing.T) {
 		},
 	}
 
-	resp, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), fixedID.String())
+	resp, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), fixedID.String())
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, fixedID.String(), resp.ID)
 	assert.Equal(t, "My Service", resp.Name)
 	assert.Equal(t, "active", resp.Status)
-	assert.Equal(t, CatalogTypeService, resp.CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, resp.CatalogType)
 	assert.Equal(t, "my-svc", resp.CatalogID)
 	assert.Equal(t, "1.0.0", resp.Version)
 	assert.Equal(t, "admin", resp.CreatedBy)
@@ -771,14 +774,14 @@ func TestGetBundleByID_Found(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestListBundles_InvalidPage(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 0, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "page must be greater than 0")
 }
 
 func TestListBundles_InvalidPageSize(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
 	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pageSize must be greater than 0")
@@ -788,7 +791,7 @@ func TestListBundles_GetCountError(t *testing.T) {
 	repo := &mockBundleRepo{
 		getCount: func(_ context.Context) (int, error) { return 0, assert.AnError },
 	}
-	_, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	_, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get bundle count")
 }
@@ -800,7 +803,7 @@ func TestListBundles_GetAllError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	_, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	_, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to retrieve bundles")
 }
@@ -811,7 +814,7 @@ func TestListBundles_Empty(t *testing.T) {
 		getCount: func(_ context.Context) (int, error) { return 0, nil },
 		getAll:   func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) { return nil, nil },
 	}
-	resp, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	resp, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Empty(t, resp.Bundles)
@@ -837,25 +840,25 @@ func TestListBundles_PaginationMetadata(t *testing.T) {
 			assert.Equal(t, 10, filters.Offset) // (page 2 - 1) * 10
 			return []models.CatalogBundle{
 				{ID: id1, Name: "My Custom Service", Status: models.BundleStatusActive,
-					CatalogType: CatalogTypeService, CatalogID: "my-service", Version: "1.0.0",
+					CatalogType: bundlemetadata.CatalogTypeService, CatalogID: "my-service", Version: "1.0.0",
 					CreatedBy: "admin", SizeBytes: &sz, CreatedAt: now, UpdatedAt: now},
 				{ID: id2, Name: "My Custom LLM Provider", Status: models.BundleStatusActive,
-					CatalogType: CatalogTypeComponent, CatalogID: "llm--my-provider", Version: "1.0.0",
+					CatalogType: bundlemetadata.CatalogTypeComponent, CatalogID: "llm--my-provider", Version: "1.0.0",
 					CreatedBy: "admin", CreatedAt: now, UpdatedAt: now},
 			}, nil
 		},
 	}
 
-	resp, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 2, PageSize: 10})
+	resp, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 2, PageSize: 10})
 	require.NoError(t, err)
 	require.Len(t, resp.Bundles, 2)
 
 	assert.Equal(t, id1.String(), resp.Bundles[0].ID)
-	assert.Equal(t, CatalogTypeService, resp.Bundles[0].CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, resp.Bundles[0].CatalogType)
 	assert.Equal(t, &sz, resp.Bundles[0].SizeBytes)
 
 	assert.Equal(t, id2.String(), resp.Bundles[1].ID)
-	assert.Equal(t, CatalogTypeComponent, resp.Bundles[1].CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeComponent, resp.Bundles[1].CatalogType)
 	assert.Nil(t, resp.Bundles[1].SizeBytes)
 
 	assert.Equal(t, 2, resp.Pagination.Page)
@@ -884,7 +887,7 @@ func TestReplaceBundle_ServiceRunning(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -906,7 +909,7 @@ func TestReplaceBundle_ServiceRunningRepoError(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -922,7 +925,7 @@ func TestReplaceBundle_ServiceRunningRepoError(t *testing.T) {
 func TestReplaceBundle_ComponentRunning(t *testing.T) {
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -938,7 +941,7 @@ func TestReplaceBundle_ComponentRunning(t *testing.T) {
 			return true, nil // simulate a running component
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
 	}, true)
@@ -952,7 +955,7 @@ func TestReplaceBundle_ComponentRunning(t *testing.T) {
 func TestReplaceBundle_ComponentRunningRepoError(t *testing.T) {
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -966,7 +969,7 @@ func TestReplaceBundle_ComponentRunningRepoError(t *testing.T) {
 			return false, assert.AnError
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
 	}, true)
@@ -990,7 +993,7 @@ func TestReplaceBundle_NoRunningInstances_Proceeds(t *testing.T) {
 		},
 	}
 	noSvcRepo4, noCompRepo4 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo4, noCompRepo4, nil)
+	svc := NewBundleService(repo, noSvcRepo4, noCompRepo4, nil, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -1019,7 +1022,7 @@ func TestRowToResponse_NilSizeBytes(t *testing.T) {
 	row := &models.CatalogBundle{
 		ID:          id,
 		Status:      models.BundleStatusProcessing,
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "svc",
 		Version:     "1.0.0",
 	}
@@ -1055,7 +1058,7 @@ func existingBundleResponse() *BundleResponse {
 		ID:          "550e8400-e29b-41d4-a716-446655440000",
 		Name:        "My Custom Service",
 		Status:      "active",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 		CreatedBy:   "admin",
@@ -1087,7 +1090,7 @@ func TestDeleteBundle_HappyPath(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1111,7 +1114,7 @@ func TestDeleteBundle_HappyPath(t *testing.T) {
 // before any repo call is made.
 func TestDeleteBundle_InvalidExistingID(t *testing.T) {
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(&mockBundleRepo{}, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, noSvcRepo, noCompRepo, nil, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = "not-a-uuid"
@@ -1132,7 +1135,7 @@ func TestDeleteBundle_MarkDeletingFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1166,7 +1169,7 @@ func TestDeleteBundle_DeleteRepoFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1195,7 +1198,7 @@ func TestDeleteBundle_ServiceRunning(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 
 	err := svc.DeleteBundle(context.Background(), existingBundleResponse())
 	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
@@ -1215,7 +1218,7 @@ func TestDeleteBundle_ServiceRunningRepoError(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 
 	err := svc.DeleteBundle(context.Background(), existingBundleResponse())
 	require.Error(t, err)
@@ -1229,7 +1232,7 @@ func TestDeleteBundle_ServiceRunningRepoError(t *testing.T) {
 func TestDeleteBundle_ComponentRunning(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -1245,7 +1248,7 @@ func TestDeleteBundle_ComponentRunning(t *testing.T) {
 			return true, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
@@ -1257,7 +1260,7 @@ func TestDeleteBundle_ComponentRunning(t *testing.T) {
 func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -1271,7 +1274,7 @@ func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 			return false, assert.AnError
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	require.Error(t, err)
@@ -1285,7 +1288,7 @@ func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 func TestDeleteBundle_MalformedComponentCatalogID(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "badformat", // missing "--"
 		Version:     "1.0.0",
 	}
@@ -1299,7 +1302,7 @@ func TestDeleteBundle_MalformedComponentCatalogID(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	require.Error(t, err)
@@ -1322,7 +1325,7 @@ func TestDeleteBundle_NoRunningInstances_Proceeds(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1398,7 +1401,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "1.0.0",
 				SizeBytes:   &sz,
@@ -1513,7 +1516,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "2.0.0",
 				SizeBytes:   &sz,

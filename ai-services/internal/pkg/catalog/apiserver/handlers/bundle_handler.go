@@ -94,11 +94,30 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 //	@Failure		422		{object}	ErrorResponse	"Validation failed"
 //	@Router			/catalog/bundles/validate [post]
 func (h *BundleHandler) ValidateBundle(c *gin.Context) {
-	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
-	// TODO: call h.bundleService.ValidateBundle(c.Request.Context(), file)
-	// TODO: type-switch result: *bundlesvc.ServiceValidationResult or *bundlesvc.ComponentValidationResult; return as 200
-	// TODO: return 422 on validation error
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), bundlesvc.BundleFileExtension) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a " + bundlesvc.BundleFileExtension + " archive"})
+
+		return
+	}
+
+	result, err := h.bundleService.ValidateBundle(c.Request.Context(), file)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // UpdateBundle godoc

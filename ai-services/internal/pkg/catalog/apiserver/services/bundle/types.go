@@ -9,12 +9,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-// Catalog type constants used throughout the bundle pipeline.
-const (
-	CatalogTypeService   = "service"
-	CatalogTypeComponent = "component"
-)
-
 // BundleServiceInterface is the interface fulfilled by bundleService.
 // It is the only dependency injected into BundleHandler.
 type BundleServiceInterface interface {
@@ -55,78 +49,13 @@ type BundleServiceInterface interface {
 }
 
 // BundleListRequest holds the validated pagination inputs for ListBundles.
-// It mirrors ListApplicationsRequest from the application service.
 type BundleListRequest struct {
 	Page     int
 	PageSize int
 }
 
 // -----------------------------------------------------------------------
-// Metadata types (returned by the internal peekMetadata helper)
-// -----------------------------------------------------------------------
-
-// BundleMetadata is the interface returned by peekMetadata.
-// Each concrete type carries the scalar fields from its metadata.yaml.
-//
-// Adding a new catalog type (e.g. "architecture") requires:
-//  1. Define a new concrete struct implementing this interface.
-//  2. Add a case in parseMetadataYAML to construct it.
-//  3. The rest of the pipeline (ProcessBundle, ReplaceBundle, ValidateBundle) is unchanged —
-//     it calls only these methods.
-type BundleMetadata interface {
-	// CatalogID returns the globally unique value stored in the DB catalog_id column.
-	// Services:   bare id                              e.g. "my-service"
-	// Components: composite <component_type>--<id>     e.g. "llm--my-provider"
-	CatalogID() string
-
-	// CatalogType returns "service" or "component".
-	CatalogType() string
-
-	// Version returns the semantic version string.
-	Version() string
-
-	// DisplayName returns the human-readable label from the metadata.yaml `name:` field.
-	DisplayName() string
-}
-
-// ServiceMetadata is the BundleMetadata implementation for catalog_type="service".
-type ServiceMetadata struct {
-	id          string
-	version     string
-	displayName string
-}
-
-func (m *ServiceMetadata) CatalogID() string   { return m.id }
-func (m *ServiceMetadata) CatalogType() string { return CatalogTypeService }
-func (m *ServiceMetadata) Version() string     { return m.version }
-func (m *ServiceMetadata) DisplayName() string { return m.displayName }
-
-// ComponentMetadata is the BundleMetadata implementation for catalog_type="component".
-// ComponentType is required and must be one of the recognised component types
-// (llm, embedding, reranker, vector_store).
-//
-// CatalogID returns the composite "<component_type>--<id>" stored in the DB.
-// The same bare id may exist under different component types; they produce different
-// CatalogID() values and are stored as independent DB rows.
-type ComponentMetadata struct {
-	id            string
-	componentType string
-	version       string
-	displayName   string
-}
-
-// CatalogID returns "<component_type>--<id>", e.g. "llm--my-provider".
-func (m *ComponentMetadata) CatalogID() string   { return m.componentType + "--" + m.id }
-func (m *ComponentMetadata) CatalogType() string { return CatalogTypeComponent }
-func (m *ComponentMetadata) Version() string     { return m.version }
-func (m *ComponentMetadata) DisplayName() string { return m.displayName }
-
-// ComponentType returns the raw component_type for this metadata.
-// Callers that need it type-assert to *ComponentMetadata.
-func (m *ComponentMetadata) ComponentType() string { return m.componentType }
-
-// -----------------------------------------------------------------------
-// Validation result types (returned by ValidateBundle — to be implemented)
+// Validation result types (returned by ValidateBundle)
 // -----------------------------------------------------------------------
 
 // ServiceValidationResult is the JSON body for a successfully validated service bundle.
@@ -149,26 +78,10 @@ type ComponentValidationResult struct {
 }
 
 // -----------------------------------------------------------------------
-// Service-layer record and response types
+// Service-layer response types
 // -----------------------------------------------------------------------
 
-// BundleRecord is the service-layer view of a catalog_bundles DB row.
-// It is passed into ReplaceBundle and DeleteBundle.
-type BundleRecord struct {
-	ID          string
-	Name        string
-	Status      string
-	CatalogType string
-	CatalogID   string
-	Version     string
-	CreatedBy   string
-	SizeBytes   *int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
 // BundleResponse is the JSON representation returned to the caller on success.
-// It maps directly to the BundleResponse JSON shape documented in the proposal.
 type BundleResponse struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name,omitempty"`
