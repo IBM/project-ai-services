@@ -53,13 +53,6 @@ func NewObjectStorageTester() ConnectionTester {
 	return &objectStorageTester{}
 }
 
-// SensitiveFields returns the credential fields that must be encrypted at rest.
-func (t *objectStorageTester) SensitiveFields() map[string]bool {
-	return map[string]bool{
-		"secret_access_key": true,
-	}
-}
-
 // TestConnection runs three sequential checks against an S3-compatible endpoint using a
 // single ListObjectsV2(MaxKeys=0) call — a zero-cost probe that transfers no object data.
 // The SDK response (or error) is classified into network / auth / access failure categories.
@@ -70,8 +63,6 @@ func (t *objectStorageTester) TestConnection(ctx context.Context, params map[str
 	secretKey, _ := params["secret_access_key"].(string)
 	prefix, _ := params["prefix"].(string)
 
-	isAWS := strings.Contains(endpointURL, awsEndpointSuffix)
-
 	cfg := aws.Config{
 		Region:      regionFromEndpoint(endpointURL),
 		Credentials: credentials.NewStaticCredentialsProvider(accessKeyID, secretKey, ""),
@@ -79,14 +70,15 @@ func (t *objectStorageTester) TestConnection(ctx context.Context, params map[str
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		if !isAWS {
-			// IBM COS, MinIO, and other S3-compatible stores: supply the custom
-			// endpoint and enable path-style addressing.
-			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+		if strings.Contains(endpointURL, awsEndpointSuffix) {
+			// AWS S3: SDK resolves the regional endpoint from cfg.Region automatically;
+			// virtual-hosted-style addressing is used by default — no BaseEndpoint needed.
+			return
 		}
-		// AWS S3: SDK resolves the regional endpoint from cfg.Region automatically;
-		// virtual-hosted-style addressing is used by default — no BaseEndpoint needed.
+		// IBM COS, MinIO, and other S3-compatible stores: supply the custom
+		// endpoint and enable path-style addressing.
+		o.BaseEndpoint = aws.String(endpointURL)
+		o.UsePathStyle = true
 	})
 
 	callCtx, cancel := context.WithTimeout(ctx, s3ConnectTimeout)

@@ -69,6 +69,21 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
+// initCatalogServices initialises the catalog provider and the datasource service that depends on it.
+func initCatalogServices(connectorRepo repository.ConnectorRepository) (*catalog.CatalogProvider, apirepository.DatasourceServiceInterface, error) {
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, catalogProvider)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
+	}
+
+	return catalogProvider, datasourceSvc, nil
+}
+
 // buildAPIServerOptions wires all service dependencies and returns the options
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
@@ -93,11 +108,11 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	}
 	syncService.Start(ctx)
 
-	catalogProvider, err := catalog.NewCatalogProvider()
+	catalogProvider, datasourceSvc, err := initCatalogServices(connectorRepo)
 	if err != nil {
 		syncService.Stop(ctx)
 
-		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+		return apiserver.APIServerOptions{}, nil, err
 	}
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
@@ -120,7 +135,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
-		DatasourceService:  apirepository.NewDatasourceService(connectorRepo, catalogProvider),
+		DatasourceService:  datasourceSvc,
 		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,

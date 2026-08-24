@@ -164,9 +164,10 @@ func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector)
 }
 
 // GetByName retrieves a connector by its unique name.
+// The comparison is case-insensitive so that "My-DB" and "my-db" are treated as the same name.
 // Returns nil (not an error) when no connector with that name exists.
 func (r *connectorRepo) GetByName(ctx context.Context, name string) (*models.Connector, error) {
-	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE name = $1`
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE LOWER(name) = LOWER($1)`
 
 	rows, err := r.pool.Query(ctx, query, name)
 	if err != nil {
