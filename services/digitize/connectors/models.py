@@ -77,10 +77,10 @@ class ConnectorError(str, Enum):
     """
 
     CREDENTIAL_ERROR_MSG = "Authentication failed: unable to connect with the provided credentials"
-    """Sentinel written by _probe_connector_credentials on auth failure.
+    """Written by run_tick when scanner.connect() raises a ConnectionError.
 
-    Only cleared when a subsequent successful probe shows the credentials are valid.
-    Sync-tick failures must never overwrite this message so the root cause stays visible.
+    Cleared automatically when a subsequent sync tick connects successfully
+    (finalize_sync_log_and_update_connector with COMPLETED status sets error=None).
     """
 
 # ---------------------------------------------------------------------------

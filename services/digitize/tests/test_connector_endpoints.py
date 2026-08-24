@@ -892,113 +892,15 @@ class TestStopSync:
         assert response.status_code == 404
 
 # ===========================================================================
-# _probe_connector_credentials (async unit tests)
+# dispatch_sync on PUT (async unit tests)
 # ===========================================================================
 
 @pytest.mark.asyncio
-class TestProbeConnectorCredentials:
-    """Unit tests for the _probe_connector_credentials background coroutine."""
+class TestPutConnectorTriggersSync:
+    """Verify that update_connector dispatches a sync when connection_details change."""
 
-    def _make_row(self, error=None):
-        c = _make_connector()
-        c.error = error
-        return c
-
-    async def test_sets_error_on_connect_failure(self, monkeypatch):
-        """connect() raises → connector error set to generic auth-failed message."""
-        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
-
-        mock_scanner = MagicMock()
-        mock_scanner.connect.side_effect = ConnectionError("bad credentials")
-        mock_scanner.close = Mock()
-
-        set_error_mock = Mock()
-        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
-        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
-
-        await _probe_connector_credentials(
-            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"]
-        )
-
-        set_error_mock.assert_called_once_with(CONNECTOR_ID, _CREDENTIAL_ERROR_MSG)
-
-    async def test_does_not_set_error_on_success(self, monkeypatch):
-        """connect() succeeds and no prior auth error → error field untouched."""
-        from digitize.api.v1.connectors import _probe_connector_credentials
-
-        mock_scanner = MagicMock()
-        mock_scanner.connect = Mock()
-        mock_scanner.close = Mock()
-
-        set_error_mock = Mock()
-        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
-        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
-
-        await _probe_connector_credentials(
-            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"], current_error=None
-        )
-
-        set_error_mock.assert_not_called()
-
-    async def test_clears_auth_error_on_success_when_previously_set(self, monkeypatch):
-        """connect() succeeds and prior error was auth-failed → error cleared to None."""
-        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
-
-        mock_scanner = MagicMock()
-        mock_scanner.connect = Mock()
-        mock_scanner.close = Mock()
-
-        set_error_mock = Mock()
-        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
-        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
-
-        await _probe_connector_credentials(
-            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"], current_error=_CREDENTIAL_ERROR_MSG
-        )
-
-        set_error_mock.assert_called_once_with(CONNECTOR_ID, None)
-
-    async def test_does_not_clear_sync_error_on_success(self, monkeypatch):
-        """connect() succeeds but prior error is sync-related → error field untouched."""
-        from digitize.api.v1.connectors import _probe_connector_credentials
-
-        mock_scanner = MagicMock()
-        mock_scanner.connect = Mock()
-        mock_scanner.close = Mock()
-
-        set_error_mock = Mock()
-        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
-        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
-
-        await _probe_connector_credentials(
-            CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"],
-            current_error="Sync failed: remote file not found"
-        )
-
-        set_error_mock.assert_not_called()
-
-    async def test_close_failure_after_connect_failure_is_swallowed(self, monkeypatch):
-        """scanner.close() raising after a connect failure must not propagate."""
-        from digitize.api.v1.connectors import _probe_connector_credentials, _CREDENTIAL_ERROR_MSG
-
-        mock_scanner = MagicMock()
-        mock_scanner.connect.side_effect = ConnectionError("bad credentials")
-        mock_scanner.close.side_effect = RuntimeError("close also broken")
-
-        set_error_mock = Mock()
-        monkeypatch.setattr("digitize.api.v1.connectors.build_scanner", lambda row: mock_scanner)
-        monkeypatch.setattr("digitize.api.v1.connectors.db_ops.set_connector_error", set_error_mock)
-
-        # must not raise even though both connect and close fail
-        await _probe_connector_credentials(CONNECTOR_ID, CONNECTOR_TYPE, {}, [".pdf"])
-
-        # error still persisted despite close() blowing up
-        set_error_mock.assert_called_once_with(CONNECTOR_ID, _CREDENTIAL_ERROR_MSG)
-
-    async def test_put_probes_credentials_when_connection_details_changed(
-        self, monkeypatch
-    ):
-        """PUT with connection_details change schedules a credential probe task."""
+    async def test_dispatches_sync_when_connection_details_changed(self, monkeypatch):
+        """PUT with connection_details change schedules a dispatch_sync task."""
         from digitize.api.v1.connectors import update_connector
         from digitize.connectors.models import ConnectorUpdateRequest
 
@@ -1025,8 +927,8 @@ class TestProbeConnectorCredentials:
 
         assert len(tasks_created) == 1
 
-    async def test_put_does_not_probe_when_only_name_changed(self, monkeypatch):
-        """PUT with only name → no credential probe scheduled."""
+    async def test_does_not_dispatch_sync_when_only_name_changed(self, monkeypatch):
+        """PUT with only name → no sync dispatched."""
         from digitize.api.v1.connectors import update_connector
         from digitize.connectors.models import ConnectorUpdateRequest
 
