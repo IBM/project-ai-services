@@ -45,8 +45,6 @@ func ComputeDomainSuffix(sslCertPath, sslKeyPath, domainName string) (string, er
 	return fmt.Sprintf("%s.nip.io", hostIP), nil
 }
 
-
-
 // ValidateSSLFlags is the shared entry-point for SSL flag validation used by
 // commands that accept --ssl-cert, --ssl-key, and --domain-name. It:
 //   - is a no-op when both paths are empty,

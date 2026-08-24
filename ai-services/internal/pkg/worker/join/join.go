@@ -284,5 +284,4 @@ func isUnauthenticated(err error) bool {
 	return status.Code(err) == codes.Unauthenticated
 }
 
-
 // Made with Bob

@@ -166,7 +166,6 @@ func runConfigure() error {
 	}
 }
 
-
 func validateResetFlag(cmd *cobra.Command, flagName string) error {
 	// Check that no configuration parameters are provided with reset flag
 	var invalidFlags []string
