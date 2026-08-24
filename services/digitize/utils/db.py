@@ -472,8 +472,10 @@ def is_connector_sourced_document(doc_id: str) -> bool:
     connector-sourced and must not be exposed via user-facing document APIs).
     """
     try:
+        from digitize.db.connection import get_db_session
+        from digitize.db.models import ConnectorDocumentChecksum
+        from sqlalchemy import select, exists
         with get_db_session() as session:
-            from sqlalchemy import exists
 
             stmt = select(
                 exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
