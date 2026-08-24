@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -19,26 +21,7 @@ import (
 const (
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
-
-	// providerObjectStorage is the provider ID for S3-compatible object storage connectors.
-	providerObjectStorage = "object_storage"
-	// providerFileSystem is the provider ID for SSH/SFTP file system connectors.
-	providerFileSystem = "file_system"
 )
-
-// updatableFields maps providerID → the set of metadata keys that may be changed after creation.
-// Any key not listed here is immutable (structural field: bucket, host, remote_path, etc.) and
-// is silently dropped from the update request.
-var updatableFields = map[string]map[string]bool{
-	providerObjectStorage: {
-		"access_key_id":     true,
-		"secret_access_key": true,
-	},
-	providerFileSystem: {
-		"username":    true,
-		"private_key": true,
-	},
-}
 
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
@@ -47,10 +30,13 @@ type ValidationError = validators.ValidationError
 // It is provider-agnostic: provider-specific behaviour (connection testing and
 // sensitive-field identification) is delegated to a ConnectionTester looked up
 // from the testers registry.
+// Sensitive-field identification is derived at runtime from each provider's
+// schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
 	serviceDepsRepo dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
+	catalogProvider *catalog.CatalogProvider
 	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
@@ -64,16 +50,18 @@ func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
 	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
+	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
 		serviceDepsRepo: serviceDepsRepo,
 		validator:       validator,
+		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
-			providerObjectStorage: NewObjectStorageTester(),
-			providerFileSystem:    NewFileSystemTester(),
+			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
+			catalogconstants.DatasourceProviderFileSystem:    NewFileSystemTester(),
 		},
 	}
 }
@@ -81,9 +69,9 @@ func NewDatasourceService(
 // CreateDatasource is the single create flow shared by all providers:
 //
 //  1. Validate the request body (provider existence + JSON-schema param validation).
-//  2. Duplicate-name guard.
+//  2. Duplicate-name guard (case-insensitive).
 //  3. Test the connection — the outcome sets the initial connector status.
-//  4. Encrypt sensitive credential fields.
+//  4. Encrypt sensitive credential fields derived from the provider's schema.json.
 //  5. Persist the connector record.
 func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error) {
 	// Phase 1: validate request (provider existence + param schema).
@@ -91,7 +79,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, err
 	}
 
-	// Phase 2: duplicate-name guard.
+	// Phase 2: duplicate-name guard (case-insensitive — handled by LOWER() in the DB query).
 	existing, err := s.connectorRepo.GetByName(ctx, req.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check for existing connector: %w", err)
@@ -113,7 +101,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		}
 	}
 
-	testErr := tester.TestConnection(ctx, req.Metadata)
+	testErr := tester.TestConnection(ctx, req.Params)
 	if testErr != nil {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
@@ -121,8 +109,13 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		}
 	}
 
-	// Phase 4: encrypt sensitive credential fields before persistence.
-	encryptedParams, err := encryptSensitiveFields(req.Metadata, tester.SensitiveFields(), s.encryptionKey)
+	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
+	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -161,7 +154,10 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 		if sensitiveKeys[k] {
 			plaintext, ok := v.(string)
 			if !ok {
-				return nil, fmt.Errorf("sensitive field %q must be a string", k)
+				return nil, &ValidationError{
+					Code:    http.StatusBadRequest,
+					Message: fmt.Sprintf("sensitive field %q must be a string value", k),
+				}
 			}
 
 			ciphertext, err := catalogutils.Encrypt(plaintext, encryptionKey)
@@ -179,15 +175,18 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 }
 
 // UpdateDatasource updates only the updatable credential fields for a datasource.
+// Updatable fields are those whose ui:section is "Authentication" in the provider's schema.json.
+// Sensitive fields (format: "password") are derived from the same schema, consistent with Create.
 //
 // The update flow:
 //  1. Fetch the existing connector (with encrypted credentials).
-//  2. Filter the request to only the updatable fields for this provider.
-//  3. Decrypt the existing metadata to obtain the full current field set.
-//  4. Merge: start from the existing decrypted metadata, then overlay the filtered updates.
-//  5. Run the connectivity test against the merged (full) metadata.
-//  6. If the test fails, return 422 — the record is left unchanged.
-//  7. Encrypt, persist, propagate, and return via persistAndPropagate.
+//  2. Load the provider schema to derive updatable and sensitive fields.
+//  3. Filter the request to only the updatable fields for this provider.
+//  4. Decrypt the existing metadata to obtain the full current field set.
+//  5. Merge: start from the existing decrypted metadata, then overlay the filtered updates.
+//  6. Run the connectivity test against the merged (full) metadata.
+//  7. If the test fails, return 422 — the record is left unchanged.
+//  8. Encrypt, persist, propagate, and return via persistAndPropagate.
 func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error) {
 	// Phase 1: fetch existing connector (metadata required for merging and decryption).
 	existing, err := s.connectorRepo.GetByID(ctx, id, true)
@@ -199,7 +198,16 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 		return nil, fmt.Errorf("failed to fetch existing connector: %w", err)
 	}
 
-	// Phase 2: look up the ConnectionTester for this provider.
+	// Phase 2: load provider schema to derive updatable and sensitive fields.
+	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, existing.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", existing.Provider, err)
+	}
+
+	updatable := updatableFieldsFromSchema(schema)
+	sensitive := sensitiveFieldsFromSchema(schema)
+
+	// Phase 3: look up the ConnectionTester for this provider.
 	tester, ok := s.testers[existing.Provider]
 	if !ok {
 		// Should not happen in normal operation — means the stored provider ID has no registered
@@ -209,27 +217,27 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 		return nil, fmt.Errorf("no connection tester registered for provider %q", existing.Provider)
 	}
 
-	// Phase 3: filter the request to only the updatable fields for this provider.
+	// Phase 4: filter the request to only the updatable fields for this provider.
 	// Return 400 if the caller supplied only structural (immutable) fields — there is nothing
 	// to update and running a connectivity test would be misleading.
-	filteredUpdates := filterUpdatableFields(req.Metadata, updatableFields[existing.Provider])
+	filteredUpdates := filterUpdatableFields(req.Params, updatable)
 	if len(filteredUpdates) == 0 {
 		return nil, &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("request contains no updatable fields for provider %q; updatable fields are: %v", existing.Provider, updatableFieldNames(existing.Provider)),
+			Message: fmt.Sprintf("request contains no updatable fields for provider %q; updatable fields are the Authentication parameters defined in the provider schema", existing.Provider),
 		}
 	}
 
-	// Phase 4: decrypt existing metadata to get the full current field set.
-	decryptedExisting, err := decryptSensitiveFields(existing.Metadata, tester.SensitiveFields(), s.encryptionKey)
+	// Phase 5: decrypt existing metadata to get the full current field set.
+	decryptedExisting, err := decryptSensitiveFields(existing.Metadata, sensitive, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt existing connector credentials: %w", err)
 	}
 
-	// Phase 5: merge — start from the existing full metadata, then overlay the filtered updates.
+	// Phase 6: merge — start from the existing full metadata, then overlay the filtered updates.
 	merged := mergeMaps(decryptedExisting, filteredUpdates)
 
-	// Phase 6: connectivity test with the merged metadata.
+	// Phase 7: connectivity test with the merged metadata.
 	if testErr := tester.TestConnection(ctx, merged); testErr != nil {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
@@ -237,8 +245,8 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 		}
 	}
 
-	// Phase 7: encrypt, persist, propagate to Digitize, and build the response.
-	return s.persistAndPropagate(ctx, id, existing.Provider, merged, tester.SensitiveFields())
+	// Phase 8: encrypt, persist, propagate to Digitize, and build the response.
+	return s.persistAndPropagate(ctx, id, merged, sensitive, updatable)
 }
 
 // persistAndPropagate encrypts merged metadata, writes it to the DB, propagates the
@@ -247,9 +255,9 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 func (s *DatasourceService) persistAndPropagate(
 	ctx context.Context,
 	id uuid.UUID,
-	provider string,
 	merged map[string]any,
 	sensitiveFields map[string]bool,
+	updatable map[string]bool,
 ) (*apimodels.UpdateDatasourceResponse, error) {
 	encryptedMerged, err := encryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
 	if err != nil {
@@ -266,7 +274,7 @@ func (s *DatasourceService) persistAndPropagate(
 	}
 
 	// Propagate plain-text credentials to linked Digitize services — never the encrypted form.
-	propagationErrors := s.propagateCredentials(ctx, id, provider, merged)
+	propagationErrors := s.propagateCredentials(ctx, id, updatable, merged)
 
 	resp := &apimodels.UpdateDatasourceResponse{
 		DatasourceItem: datasourceItemFromConnector(updated),
@@ -282,10 +290,11 @@ func (s *DatasourceService) persistAndPropagate(
 // propagateCredentials calls PUT /v1/connectors/<datasourceID> on every Digitize service
 // linked to this datasource. Each call is retried once on failure. Errors are collected and
 // returned; a failure does not roll back the DB update.
+// credFields is the set of fields to include in the propagation payload (the updatable fields).
 func (s *DatasourceService) propagateCredentials(
 	ctx context.Context,
 	datasourceID uuid.UUID,
-	provider string,
+	credFields map[string]bool,
 	fullMerged map[string]any,
 ) []apimodels.PropagationError {
 	// GetLinkedServiceEndpoints issues a single JOIN query:
@@ -313,9 +322,8 @@ func (s *DatasourceService) propagateCredentials(
 		return nil
 	}
 
-	// Build the credential payload — only the credential fields for this provider,
-	// reusing filterUpdatableFields to avoid duplicating the key-filter logic.
-	credPayload := filterUpdatableFields(fullMerged, updatableFields[provider])
+	// Build the credential payload — only the updatable (Authentication) fields for this provider.
+	credPayload := filterUpdatableFields(fullMerged, credFields)
 
 	var propErrors []apimodels.PropagationError
 
@@ -354,18 +362,6 @@ func filterUpdatableFields(input map[string]any, allowed map[string]bool) map[st
 	}
 
 	return result
-}
-
-// updatableFieldNames returns the names of all updatable fields for the given provider,
-// used to produce actionable validation error messages.
-func updatableFieldNames(provider string) []string {
-	fields := updatableFields[provider]
-	names := make([]string, 0, len(fields))
-	for k := range fields {
-		names = append(names, k)
-	}
-
-	return names
 }
 
 // datasourceItemFromConnector converts a Connector DB model to the public DatasourceItem DTO.

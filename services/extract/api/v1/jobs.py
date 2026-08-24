@@ -481,6 +481,7 @@ async def list_extract_jobs(
     status: Optional[str] = Query(default=None, description="Status filter"),
     schema_id: Optional[str] = Query(default=None, description="Filter by schema_id"),
 ) -> JobsListResponse:
+    """Retrieve a list of extraction jobs with pagination and optional status/schema filtering."""
     _VALID_STATUSES = {"accepted", "in_progress", "completed", "failed"}
     if status is not None and status not in _VALID_STATUSES:
         raise ExtractException(
@@ -537,6 +538,7 @@ async def list_extract_jobs(
     tags=["jobs"],
 )
 async def get_extract_job(job_id: str) -> JobDetailResponse:
+    """Retrieve the full status and detail metadata of a specific extraction job."""
     row = db_repo.get_job_by_id(job_id)
     if row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
@@ -584,6 +586,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
     tags=["jobs"],
 )
 async def get_extract_job_result(job_id: str):
+    """Retrieve the extraction results payload for a completed job."""
     row = db_repo.get_job_by_id(job_id)
     if row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
@@ -651,6 +654,7 @@ async def get_extract_job_result(job_id: str):
     tags=["jobs"],
 )
 async def delete_extract_job(job_id: str) -> Response:
+    """Delete a specific completed or failed extraction job record and its associated result files."""
     row = db_repo.get_job_by_id(job_id)
     if row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
@@ -701,6 +705,7 @@ async def bulk_delete_extract_jobs(
         description="Must be 'true' to confirm destructive bulk deletion",
     ),
 ) -> Response:
+    """Delete all extraction jobs and their result files after receiving explicit confirmation."""
     if confirm != "true":
         raise ExtractException(400, "CONFIRMATION_REQUIRED", "Bulk delete requires ?confirm=true.")
 

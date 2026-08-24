@@ -69,7 +69,6 @@ class DatabaseManager:
                 )
                 session.add(job)
                 session.flush()  # Ensure job is persisted before returning
-                logger.info(f"Created job in database: {job_id}")
                 return job
         except IntegrityError as e:
             logger.error(f"Job {job_id} already exists in database: {e}")
@@ -103,7 +102,6 @@ class DatabaseManager:
                          job.stats, job.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(job)
-                    logger.debug(f"Retrieved job from database: {job_id}")
                 else:
                     logger.debug(f"Job not found in database: {job_id}")
                 return job
@@ -158,7 +156,6 @@ class DatabaseManager:
                 # Expunge all jobs from session to prevent DetachedInstanceError
                 for job in jobs:
                     session.expunge(job)
-                logger.debug(f"Retrieved {len(jobs)} jobs from database (total: {total})")
                 return jobs, total
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving jobs: {e}", exc_info=True)
@@ -208,7 +205,6 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
-                    logger.debug(f"Updated job in database: {job_id}")
                     return True
                 else:
                     logger.warning(f"Job not found for update: {job_id}")
@@ -296,7 +292,6 @@ class DatabaseManager:
                 )
                 session.add(document)
                 session.flush()
-                logger.info(f"Created document in database: {doc_id}")
                 return document
         except IntegrityError as e:
             logger.error(f"Document {doc_id} already exists or invalid job_id: {e}")
@@ -521,7 +516,6 @@ class DatabaseManager:
                          doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
-                logger.debug(f"Retrieved {len(documents)} documents for job {job_id}")
                 return documents
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving documents for job {job_id}: {e}", exc_info=True)
@@ -571,7 +565,6 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
-                    logger.debug(f"Updated document in database: {doc_id}")
                     return True
                 else:
                     logger.warning(f"Document not found for update: {doc_id}")
@@ -685,8 +678,6 @@ class DatabaseManager:
                 stmt = delete(Document)
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
-
-                logger.info(f"Deleted all documents from database: {deleted_count} documents")
                 return {
                     "deleted_count": deleted_count,
                     "success": True
@@ -721,8 +712,6 @@ class DatabaseManager:
                 stmt = delete(Job)
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
-                
-                logger.info(f"Deleted all jobs from database: {deleted_count} jobs")
                 return {
                     "deleted_count": deleted_count,
                     "success": True

@@ -22,13 +22,6 @@ func NewFileSystemTester() ConnectionTester {
 	return &fileSystemTester{}
 }
 
-// SensitiveFields returns the credential fields that must be encrypted at rest.
-func (t *fileSystemTester) SensitiveFields() map[string]bool {
-	return map[string]bool{
-		"private_key": true,
-	}
-}
-
 // TestConnection runs three sequential checks against an SSH/SFTP endpoint:
 //  1. Network — TCP dial to host (port defaults to 22 when not supplied).
 //  2. Auth    — SSH handshake using the PEM private key.

@@ -66,7 +66,7 @@ func TestConvertSchemaToJSONSchemaWithValidSchema(t *testing.T) {
 
 func TestConvertSchemaIntegration(t *testing.T) {
 	// This test verifies the conversion works with actual OpenAPI documents
-	doc, err := LoadDescription("testdata/complex.yaml")
+	doc, err := LoadDescription("testdata/complex.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load test document: %v", err)
 	}

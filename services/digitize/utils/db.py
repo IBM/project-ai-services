@@ -1,5 +1,4 @@
-"""
-Database operations — utils/db.py
+""" Database operations — utils/db.py.
 
 All functions that directly interact with the database via db_manager:
 CRUD for jobs and documents, advisory import/export lock, DatabaseStatusManager,
@@ -210,7 +209,6 @@ def create_job(
                 "in_progress": 0
             }
         )
-        logger.info(f"Created job {job_id} in database")
 
     except Exception as e:
         logger.error(f"Failed to create job {job_id} in database: {e}", exc_info=True)
@@ -330,7 +328,6 @@ def get_all_jobs(
             )
             job_dicts.append(job_state.to_dict())
 
-        logger.debug(f"Retrieved {len(job_dicts)} jobs from database (total: {total})")
         return job_dicts, total
     except Exception as e:
         logger.error(f"Failed to get jobs from database: {e}", exc_info=True)
@@ -407,7 +404,6 @@ def create_document(
                 f"db_manager.create_document returned None for doc_id={doc_id} "
                 f"(name={doc_name!r}). Check logs for the underlying DB error."
             )
-        logger.info(f"Created document {doc_id} in database")
 
     except Exception as e:
         logger.error(f"Failed to create document {doc_id} in database: {e}", exc_info=True)
@@ -1050,7 +1046,6 @@ class DatabaseStatusManager:
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
-                logger.debug(f"Updated document {doc_id} in database")
                 # Register the checksum once the document is marked COMPLETED so
                 # that future uploads of the same content are caught via the
                 # document_checksum table.
@@ -1131,12 +1126,7 @@ class DatabaseStatusManager:
             update_params["error"] = error
 
         # Perform database update
-        success = db_manager.update_job(self.job_id, **update_params)
-        if success:
-            logger.debug(f"Updated job {self.job_id} in database")
-        else:
-            logger.warning(f"Job {self.job_id} not found in database for update")
-
+        db_manager.update_job(self.job_id, **update_params)
 
 def get_status_manager(job_id: str) -> DatabaseStatusManager:
     """

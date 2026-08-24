@@ -80,6 +80,11 @@ def _get_key_path() -> str:
     response_description="Connector created; worker start scheduled",
 )
 async def create_connector(body: ConnectorCreateRequest):
+    """Create a new connector and schedule its worker.
+
+    Validates connector settings, encrypts credentials, persists the new connector
+    configuration in the database, and schedules the background worker.
+    """
     connector_id = body.connector_id or str(uuid.uuid4())
     try:
         key_path = _get_key_path()
@@ -159,6 +164,11 @@ async def create_connector(body: ConnectorCreateRequest):
     response_description="Connector updated; running worker picks up changes on next tick",
 )
 async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
+    """Update an existing connector's configurations.
+
+    Encrypts updated secrets if provided and applies modifications. Running workers
+    will pick up the updated settings on their next execution interval.
+    """
     try:
         # Nothing to update — treat as success
         if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
@@ -239,8 +249,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     response_description="No content — teardown proceeds in the background",
 )
 async def delete_connector(connector_id: str):
-    """
-    Fast, non-blocking DELETE:
+    """Fast, non-blocking DELETE.
 
     Case A — sync_status == 'syncing':
         Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
@@ -419,6 +428,10 @@ def _sweep_staging_dir(
     response_description="List of connectors",
 )
 async def list_connectors():
+    """Retrieve a list of all active connectors with their current sync state.
+
+    Strips out any sensitive/secret connection details from the response.
+    """
     try:
         connectors = db_ops.list_connectors()
         return [
@@ -461,6 +474,10 @@ async def list_connectors():
     response_description="Connector detail",
 )
 async def get_connector(connector_id: str):
+    """Retrieve detailed information for a single connector by its ID.
+
+    Strips out any sensitive/secret connection details from the response.
+    """
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -595,6 +612,11 @@ async def dispatch_sync(connector_id: str) -> int:
     response_description="Sync dispatched (or already in progress)",
 )
 async def trigger_sync(connector_id: str):
+    """Manually dispatch a synchronization task for a specified connector.
+
+    If a synchronization task is already in progress, returns details for the
+    currently active run.
+    """
     try:
         sync_seq = await dispatch_sync(connector_id)
         return SyncTriggerResponse(sync_seq=sync_seq)
@@ -634,6 +656,10 @@ async def trigger_sync(connector_id: str):
     response_description="Stop signal sent",
 )
 async def cancel_sync(connector_id: str, sync_seq: int):
+    """Request cancellation/stopping of a currently running sync task.
+
+    Sends a cancellation signal to the connector worker.
+    """
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -691,6 +717,7 @@ async def get_sync_history(
     limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)"),
     offset: int = Query(0, ge=0, description="Zero-based offset"),
 ):
+    """Retrieve a paginated history of sync runs for a specific connector."""
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -743,6 +770,7 @@ async def get_sync_history(
     response_description="Sync log entry",
 )
 async def get_sync(connector_id: str, sync_seq: int):
+    """Retrieve details of a single sync run by its sequence number."""
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:

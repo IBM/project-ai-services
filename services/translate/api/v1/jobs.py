@@ -175,6 +175,7 @@ async def create_translation_job(
         description="Optional human-readable label for the job",
     ),
 ) -> JobCreatedResponse:
+    """Create a translation job for an uploaded text or Markdown file."""
     filename = file.filename or "upload"
 
     # 1. Validate file extension.
@@ -275,6 +276,7 @@ async def list_jobs(
     offset: int = Query(default=0, ge=0, description="Records to skip"),
     status_filter: Optional[str] = Query(default=None, description="Filter by job status"),
 ) -> JobsListResponse:
+    """List translation jobs with pagination and an optional status filter."""
     job_status: Optional[JobStatus] = None
     if status_filter is not None:
         try:
@@ -310,6 +312,7 @@ async def list_jobs(
     },
 )
 async def get_job(job_id: str) -> JobDetailResponse:
+    """Return detailed status and metadata for a translation job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:
         APIError.raise_error(
@@ -340,6 +343,7 @@ async def get_job(job_id: str) -> JobDetailResponse:
     },
 )
 async def get_job_result(job_id: str) -> JobResultResponse:
+    """Return the completed translation result for a job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:
         APIError.raise_error(
@@ -398,6 +402,7 @@ async def get_job_result(job_id: str) -> JobResultResponse:
     },
 )
 async def download_job_result(job_id: str):
+    """Download the translated output file for a completed job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:
         APIError.raise_error(
