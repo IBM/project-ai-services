@@ -51,12 +51,14 @@ Pass the token to the worker node and run:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			resp, err := c.CreateWorker(args[0])
+			resp, err := c.CreateWorker(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -85,12 +87,14 @@ func newWorkerListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			workers, err := c.ListWorkers()
+			workers, err := c.ListWorkers(ctx)
 			if err != nil {
 				return err
 			}
@@ -116,12 +120,14 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			if err := c.DeleteWorkerByName(args[0]); err != nil {
+			if err := c.DeleteWorkerByName(ctx, args[0]); err != nil {
 				return err
 			}
 

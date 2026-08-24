@@ -82,7 +82,7 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appName, back
 	// Create digitize backup client and call Export API
 	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
 
-	exportResponse, err := client.CallExportAPI()
+	exportResponse, err := client.CallExportAPI(ctx)
 	if err != nil {
 		return err
 	}

@@ -22,10 +22,10 @@ const (
 	infoTitle  = "Info"
 )
 
-func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
+func PrintNextSteps(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -34,7 +34,7 @@ func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemp
 }
 
 // PrintNextStepsWithProxy prints next steps with proxy route information.
-func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+func PrintNextStepsWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
 	params := map[string]string{"AppName": app}
 
 	// Add route domains to params
@@ -47,8 +47,8 @@ func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app
 		params["HTTPS_PORT"] = httpsPort
 	}
 
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -56,10 +56,10 @@ func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app
 	return nil
 }
 
-func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
+func PrintInfo(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -68,7 +68,7 @@ func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate 
 }
 
 // PrintInfoWithProxy prints info with proxy route information.
-func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+func PrintInfoWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
 	params := map[string]string{"AppName": app}
 
 	// Add route domains to params
@@ -79,8 +79,8 @@ func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, app
 		params["HTTPS_PORT"] = httpsPort
 	}
 
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -218,7 +218,7 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 	return strings.TrimSpace(result.String()), nil
 }
 
-func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
+func renderStepsMarkdown(ctx context.Context, tp templates.Template, runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
 		return nil
@@ -233,8 +233,6 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 	if err != nil {
 		return fmt.Errorf("failed to load vars file: %w", err)
 	}
-
-	ctx := context.Background()
 
 	// populate the host values set in vars file
 	if err := populateHostValues(ctx, runtime, params, varsData); err != nil {

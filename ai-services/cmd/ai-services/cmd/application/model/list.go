@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -43,7 +44,7 @@ func init() {
 
 func list(cmd *cobra.Command) error {
 	if !legacyModel && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return listCatalogModels(templateName)
+		return listCatalogModels(cmd.Context(), templateName)
 	}
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
@@ -66,8 +67,8 @@ func list(cmd *cobra.Command) error {
 }
 
 // listCatalogModels lists models for services or architectures from the catalog.
-func listCatalogModels(templateID string) error {
-	models, err := getCatalogModels(templateID)
+func listCatalogModels(ctx context.Context, templateID string) error {
+	models, err := getCatalogModels(ctx, templateID)
 	if err != nil {
 		return err
 	}

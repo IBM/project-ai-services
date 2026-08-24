@@ -72,11 +72,11 @@ Arguments:
 		namespace := applicationName
 
 		if !legacyLogs {
-			appClient, err := catalogClient.NewApplicationClient()
+			appClient, err := catalogClient.NewApplicationClient(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
 			}
-			app, err := utils.GetAppByName(appClient, applicationName)
+			app, err := utils.GetAppByName(ctx, appClient, applicationName)
 			if err != nil {
 				return err
 			}

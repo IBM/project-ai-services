@@ -20,7 +20,7 @@ type TemplateRouteInfo struct {
 
 // RegisterCatalogRoutes registers routes with Caddy and returns route domains.
 // Accepts pre-extracted route infos from templates.
-func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, routeInfos []TemplateRouteInfo) (map[string]string, error) {
+func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, caddyCtx *Context, routeInfos []TemplateRouteInfo) (map[string]string, error) {
 	if len(routeInfos) == 0 {
 		logger.Infof("No templates found with routes annotation, skipping route registration\n")
 
@@ -28,7 +28,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 	}
 
 	// Create proxy manager using Caddy context
-	proxyManager, err := caddyCtx.CreateProxyManager()
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxy manager: %w", err)
 	}
@@ -42,7 +42,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 		logger.Debugf("Registering routes for pod: %s\n", info.PodName)
 
 		// Register routes and get the built routes back
-		routes, err := proxy.RegisterRoutesForAppAndReturn(context.Background(), constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
+		routes, err := proxy.RegisterRoutesForAppAndReturn(ctx, constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 
@@ -66,7 +66,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 // Accepts pre-extracted route infos from templates.
 func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
 	// Create proxy manager
-	proxyManager, err := caddyCtx.CreateProxyManager()
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create proxy manager: %w", err)
 	}

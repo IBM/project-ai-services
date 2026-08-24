@@ -58,7 +58,7 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, bac
 
 	// Create digitize restore client and call Import API
 	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(importPayload); err != nil {
+	if err := client.CallImportAPI(ctx, importPayload); err != nil {
 		return err
 	}
 

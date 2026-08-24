@@ -24,7 +24,7 @@ func (p *PodmanApplication) Start(ctx context.Context, opts appTypes.StartOption
 			return err
 		}
 	} else {
-		pods, err = cliutils.GetPodsFromApplicationsPS(opts.Name)
+		pods, err = cliutils.GetPodsFromApplicationsPS(ctx, opts.Name)
 		if err != nil {
 			return err
 		}

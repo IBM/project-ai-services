@@ -58,12 +58,12 @@ func GetCaddyProxyManager() (ProxyManager, error) {
 }
 
 // HealthCheck verifies Caddy is running and accessible.
-func (c *caddyManager) HealthCheck() error {
+func (c *caddyManager) HealthCheck(ctx context.Context) error {
 	url, err := url.JoinPath(c.adminURL, "config")
 	if err != nil {
 		return err
 	}
-	resp, err := c.httpClient.R().Get(url)
+	resp, err := c.httpClient.R().SetContext(ctx).Get(url)
 
 	if err != nil {
 		return fmt.Errorf("failed to connect to Caddy admin API: %w", err)
@@ -245,7 +245,7 @@ func RegisterRoutesForAppAndReturn(
 	servicePodName string,
 ) ([]Route, error) {
 	// Step 1: Perform health check on Caddy
-	if err := proxyManager.HealthCheck(); err != nil {
+	if err := proxyManager.HealthCheck(ctx); err != nil {
 		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
 			err,

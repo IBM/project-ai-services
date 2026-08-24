@@ -16,8 +16,7 @@ import (
 )
 
 // DisplayCatalogInfo displays detailed information about the catalog service.
-func DisplayCatalogInfo() error {
-	ctx := context.Background()
+func DisplayCatalogInfo(ctx context.Context) error {
 	// Initialize runtime
 	runtime, err := rt.NewPodmanClient()
 	if err != nil {
@@ -53,11 +52,11 @@ func DisplayCatalogInfo() error {
 
 	// Step 3: Fetch route information
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
-	routeDomains, httpsPort, err := GetCatalogRouteInfo(runtime)
+	routeDomains, httpsPort, err := GetCatalogRouteInfo(ctx, runtime)
 	if err != nil {
 		logger.Errorf("failed to get route info: %v\n", err)
 		// Continue with basic info display
-		if err := helpers.PrintInfo(tp, runtime, constants.CatalogAppName, catalogTemplate); err != nil {
+		if err := helpers.PrintInfo(ctx, tp, runtime, constants.CatalogAppName, catalogTemplate); err != nil {
 			logger.Errorf("failed to display info: %v\n", err)
 		}
 
@@ -65,7 +64,7 @@ func DisplayCatalogInfo() error {
 	}
 
 	// Step 4: Read and print the info.md file with route information
-	if err := helpers.PrintInfoWithProxy(tp, runtime, constants.CatalogAppName, catalogTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintInfoWithProxy(ctx, tp, runtime, constants.CatalogAppName, catalogTemplate, routeDomains, httpsPort); err != nil {
 		// not failing overall info command if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 
@@ -78,8 +77,7 @@ func DisplayCatalogInfo() error {
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 // This orchestrates: deployContext gets pod name and route info from templates,
 // caddy.Context queries Caddy for route domains and HTTPS port.
-func GetCatalogRouteInfo(rt *rt.PodmanClient) (map[string]string, string, error) { //nolint:revive
-	ctx := context.Background()
+func GetCatalogRouteInfo(ctx context.Context, rt *rt.PodmanClient) (map[string]string, string, error) { //nolint:revive
 	// Create deployment context to access templates
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {

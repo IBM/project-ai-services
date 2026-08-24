@@ -86,12 +86,12 @@ Arguments:
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
-		ctx := context.Background()
+		ctx := cmd.Context()
 
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		if err := doBootstrapValidate(); err != nil {
+		if err := doBootstrapValidate(ctx); err != nil {
 			return err
 		}
 
@@ -120,7 +120,7 @@ Arguments:
 		}
 
 		// Default: use catalog way of deploying application
-		return createApp(appName)
+		return createApp(ctx, appName)
 	},
 }
 
@@ -143,7 +143,7 @@ func createExample() string {
   ai-services application create rag --template rag --runtime openshift`
 }
 
-func doBootstrapValidate() error {
+func doBootstrapValidate(ctx context.Context) error {
 	skip := helpers.ParseSkipChecks(skipChecks)
 	if len(skip) > 0 {
 		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
@@ -152,7 +152,7 @@ func doBootstrapValidate() error {
 	// Create bootstrap instance based on runtime
 	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
 
-	if err := factory.Validate(skip); err != nil {
+	if err := factory.Validate(ctx, skip); err != nil {
 		return fmt.Errorf("bootstrap validation failed: %w", err)
 	}
 
@@ -384,20 +384,20 @@ func validateSkipChecksFlag(cmd *cobra.Command) error {
 	return nil
 }
 
-func createApp(appName string) error {
+func createApp(ctx context.Context, appName string) error {
 	// 1. Initialize catalog client
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
 	// 2. Check if application already exists
-	if err := checkApplicationExists(appClient, appName); err != nil {
+	if err := checkApplicationExists(ctx, appClient, appName); err != nil {
 		return err
 	}
 
 	// 3. Build the catalog API payload
-	payload, err := buildCatalogPayload(appName)
+	payload, err := buildCatalogPayload(ctx, appName)
 	if err != nil {
 		return err
 	}
@@ -405,9 +405,9 @@ func createApp(appName string) error {
 	// 4. Create application via catalog API
 	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
 	var resp *apiModels.CreateApplicationResponse
-	err = utils.Retry(context.Background(), vars.RetryCount, vars.RetryInterval, nil, func() error {
+	err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
 		var createErr error
-		resp, createErr = appClient.CreateApplication(payload)
+		resp, createErr = appClient.CreateApplication(ctx, payload)
 
 		return createErr
 	})
@@ -418,12 +418,12 @@ func createApp(appName string) error {
 	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
 	// 5. Poll for application status
-	return pollApplicationStatus(appClient, appName, resp.ID)
+	return pollApplicationStatus(ctx, appClient, appName, resp.ID)
 }
 
 // checkApplicationExists checks if an application with the given name already exists.
-func checkApplicationExists(appClient *catalogClient.ApplicationClient, appName string) error {
-	existingApp, err := cliutils.GetAppByName(appClient, appName)
+func checkApplicationExists(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) error {
+	existingApp, err := cliutils.GetAppByName(ctx, appClient, appName)
 	if err != nil && !strings.Contains(err.Error(), "not found") {
 		return err
 	}
@@ -436,7 +436,7 @@ func checkApplicationExists(appClient *catalogClient.ApplicationClient, appName 
 }
 
 // buildCatalogPayload builds the catalog API payload for the given template.
-func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, error) {
+func buildCatalogPayload(ctx context.Context, appName string) (*apiModels.CreateApplicationRequest, error) {
 	// Initialize catalog provider
 	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
@@ -453,14 +453,14 @@ func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, e
 
 	// Build the payload
 	if isArchitecture {
-		return buildArchitecturePayload(provider, templateName, appName)
+		return buildArchitecturePayload(ctx, provider, templateName, appName)
 	}
 
-	return buildServicePayload(templateName, appName)
+	return buildServicePayload(ctx, templateName, appName)
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
-func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, id string) error {
+func pollApplicationStatus(ctx context.Context, appClient *catalogClient.ApplicationClient, appName, id string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
 
 	ticker := time.NewTicker(pollInterval)
@@ -474,12 +474,12 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, 
 			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
 
 		case <-ticker.C:
-			app, err := appClient.GetApplicationWithRefresh(id)
+			app, err := appClient.GetApplicationWithRefresh(ctx, id)
 			if err != nil {
 				return fmt.Errorf("failed to get application status: %w", err)
 			}
 
-			done, err := handleApplicationStatus(app, appName)
+			done, err := handleApplicationStatus(ctx, app, appName)
 			if err != nil {
 				return err
 			}
@@ -491,13 +491,13 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName, 
 }
 
 // handleApplicationStatus handles the application status and returns (done, error).
-func handleApplicationStatus(app *catalogTypes.Application, appName string) (bool, error) {
+func handleApplicationStatus(ctx context.Context, app *catalogTypes.Application, appName string) (bool, error) {
 	switch app.Status {
 	case "Running":
 		logger.Infof("Application '%s' is ready!\n", appName)
 
 		// Print next steps after successful deployment
-		if err := printNextSteps(app); err != nil {
+		if err := printNextSteps(ctx, app); err != nil {
 			logger.Warningf("Failed to display next steps: %v\n", err)
 		}
 
@@ -527,14 +527,14 @@ func handleApplicationStatus(app *catalogTypes.Application, appName string) (boo
 }
 
 // printNextSteps prints the next steps for the deployed application.
-func printNextSteps(app *catalogTypes.Application) error {
-	appClient, err := catalogClient.NewApplicationClient()
+func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
 	// Get full application details with services
-	application, err := appClient.GetApplication(app.ID)
+	application, err := appClient.GetApplication(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
@@ -603,7 +603,7 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 }
 
 // buildArchitecturePayload builds the payload for an architecture deployment.
-func buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName string) (*apiModels.CreateApplicationRequest, error) {
+func buildArchitecturePayload(ctx context.Context, provider *catalog.CatalogProvider, archID, appName string) (*apiModels.CreateApplicationRequest, error) {
 	// Load architecture metadata
 	arch, err := provider.LoadArchitecture(archID)
 	if err != nil {
@@ -611,13 +611,13 @@ func buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName
 	}
 
 	// Create application client for API calls
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application client: %w", err)
 	}
 
 	// Get deploy options for the architecture
-	deployOptions, err := appClient.GetArchitectureDeployOptions(archID)
+	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, archID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -639,7 +639,7 @@ func buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName
 			return nil, fmt.Errorf("deploy options not found for service '%s'", svcRef.ID)
 		}
 
-		svc, err := buildServiceEntryWithDeployOptions(appClient, svcRef.ID, svcDeployOpts)
+		svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, svcRef.ID, svcDeployOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build service '%s': %w", svcRef.ID, err)
 		}
@@ -655,20 +655,20 @@ func buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName
 }
 
 // buildServicePayload builds the payload for a standalone service deployment.
-func buildServicePayload(serviceID, appName string) (*apiModels.CreateApplicationRequest, error) {
+func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiModels.CreateApplicationRequest, error) {
 	// Create application client for API calls
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application client: %w", err)
 	}
 
 	// Get deploy options for the service
-	deployOptions, err := appClient.GetServiceDeployOptions(serviceID)
+	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
 
-	svc, err := buildServiceEntryWithDeployOptions(appClient, serviceID, deployOptions)
+	svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, serviceID, deployOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service: %w", err)
 	}
@@ -682,7 +682,7 @@ func buildServicePayload(serviceID, appName string) (*apiModels.CreateApplicatio
 }
 
 // buildServiceEntryWithDeployOptions builds a single service entry with its components using deploy options.
-func buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService) (apiModels.Service, error) {
+func buildServiceEntryWithDeployOptions(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService) (apiModels.Service, error) {
 	// Build components list from deploy options
 	components := make([]apiModels.Component, 0, len(deployOptions.Components))
 	for _, compDeployOpt := range deployOptions.Components {
@@ -717,7 +717,7 @@ func buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClie
 		}
 
 		// Fetch schema and apply defaults, merging with user params
-		componentParamsAny, err := applySchemaDefaults(appClient, compDeployOpt.Type, providerID, userParams)
+		componentParamsAny, err := applySchemaDefaults(ctx, appClient, compDeployOpt.Type, providerID, userParams)
 		if err != nil {
 			logger.Warningf("Failed to apply schema defaults for %s/%s: %v\n", compDeployOpt.Type, providerID, err)
 			// Continue with user-provided params only
@@ -945,9 +945,9 @@ func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent,
 
 // applySchemaDefaults fetches the component provider schema and applies default values.
 // User-provided params override defaults.
-func applySchemaDefaults(appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
+func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
 	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(componentType, providerID)
+	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %w", err)
 	}

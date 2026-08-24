@@ -57,7 +57,7 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 	caddyCtx := caddy.NewContext(caddyPodName, "")
 
 	// Load certificates with health check
-	if err := loadCertificatesToCaddy(caddyCtx, opts.BaseDir, sslCertPath, sslKeyPath); err != nil {
+	if err := loadCertificatesToCaddy(ctx, caddyCtx, opts.BaseDir, sslCertPath, sslKeyPath); err != nil {
 		return err
 	}
 
@@ -67,19 +67,19 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 }
 
 // loadCertificatesToCaddy checks Caddy health and loads SSL certificates.
-func loadCertificatesToCaddy(caddyCtx *caddy.Context, baseDir, sslCertPath, sslKeyPath string) error {
+func loadCertificatesToCaddy(ctx context.Context, caddyCtx *caddy.Context, baseDir, sslCertPath, sslKeyPath string) error {
 	// Check Caddy health before attempting to load certificates
-	proxyManager, err := caddyCtx.CreateProxyManager()
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create proxy manager: %w", err)
 	}
 
-	if err := proxyManager.HealthCheck(); err != nil {
+	if err := proxyManager.HealthCheck(ctx); err != nil {
 		return fmt.Errorf("caddy health check failed - admin API is not accessible: %w", err)
 	}
 
 	// Load new SSL certificates to Caddy
-	if err := caddyCtx.LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath); err != nil {
+	if err := caddyCtx.LoadSSLCertificates(ctx, baseDir, sslCertPath, sslKeyPath); err != nil {
 		return fmt.Errorf("failed to load certificates: %w", err)
 	}
 

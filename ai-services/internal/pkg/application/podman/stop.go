@@ -75,7 +75,7 @@ func (p *PodmanApplication) listApplicationPods(ctx context.Context, opts appTyp
 		return pods, nil
 	}
 
-	return cliutils.GetPodsFromApplicationsPS(opts.Name)
+	return cliutils.GetPodsFromApplicationsPS(ctx, opts.Name)
 }
 
 func (p *PodmanApplication) fetchPodsToStop(pods []types.Pod, podNames []string, appName string) ([]types.Pod, error) {

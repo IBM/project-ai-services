@@ -47,7 +47,7 @@ func ListModels(template, appName string) ([]string, error) {
 	return modelList, nil
 }
 
-func DownloadModel(model, targetDir string) error {
+func DownloadModel(ctx context.Context, model, targetDir string) error {
 	// check for target model directory
 	fileInfo, err := os.Stat(targetDir)
 	if err != nil {
@@ -73,7 +73,7 @@ func DownloadModel(model, targetDir string) error {
 		return fmt.Errorf("failed to remove test file: %w", err)
 	}
 
-	return DownloadModelContainer(context.Background(), model, targetDir)
+	return DownloadModelContainer(ctx, model, targetDir)
 }
 
 func DownloadModelContainer(ctx context.Context, model, targetDir string) error {

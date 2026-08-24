@@ -111,7 +111,7 @@ SSL/TLS certificate management, HTTPS port configuration, and credential/certifi
 			return runResetCertificate(ctx)
 		}
 
-		return runConfigure()
+		return runConfigure(ctx)
 	},
 }
 
@@ -127,9 +127,8 @@ func init() {
 }
 
 // runConfigure executes the catalog configuration process.
-func runConfigure() error {
+func runConfigure(ctx context.Context) error {
 	rt := vars.RuntimeFactory.GetRuntimeType()
-	ctx := context.Background()
 	// Deploy catalog service based on runtime
 	switch rt {
 	case types.RuntimeTypePodman:

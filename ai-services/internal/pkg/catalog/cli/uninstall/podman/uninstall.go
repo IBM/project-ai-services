@@ -41,16 +41,16 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 		}
 	}
 
-	return performCleanup(rt, pods, opts.SkipCleanup)
+	return performCleanup(ctx, rt, pods, opts.SkipCleanup)
 }
 
 // performCleanup executes all cleanup operations.
-func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool) error {
+func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool) error {
 	logger.Infoln("Proceeding with deletion...")
 
 	// Retrieve the BaseDir from the catalog pod configuration
 	var baseDir string
-	config, _, err := catalogUtils.GetCatalogPodConfig(context.Background(), rt)
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		logger.Warningf("Failed to retrieve BaseDir from catalog pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()
@@ -65,17 +65,17 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
 
 	// Delete catalog pods
-	if err := podsDeletion(rt, pods); err != nil {
+	if err := podsDeletion(ctx, rt, pods); err != nil {
 		return err
 	}
 
 	// Delete catalog secrets
-	if err := deleteSecrets(rt, secretsToDelete); err != nil {
+	if err := deleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
 
 	// Delete volumes (only those without skip-cleanup label)
-	if err := deleteVolumes(rt, volumesToDelete); err != nil {
+	if err := deleteVolumes(ctx, rt, volumesToDelete); err != nil {
 		return err
 	}
 
@@ -92,7 +92,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	}
 
 	// Delete database data and secrets
-	if err := cleanupDatabaseResources(rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
+	if err := cleanupDatabaseResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
 	}
 
@@ -102,9 +102,9 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 }
 
 // deleteSecrets removes the specified secrets.
-func deleteSecrets(rt *podman.PodmanClient, secrets []string) error {
+func deleteSecrets(ctx context.Context, rt *podman.PodmanClient, secrets []string) error {
 	for _, secret := range secrets {
-		if err := rt.DeleteSecret(context.Background(), secret); err != nil {
+		if err := rt.DeleteSecret(ctx, secret); err != nil {
 			return err
 		}
 	}
@@ -113,7 +113,7 @@ func deleteSecrets(rt *podman.PodmanClient, secrets []string) error {
 }
 
 // cleanupDatabaseResources handles database volume and secret cleanup.
-func cleanupDatabaseResources(rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
+func cleanupDatabaseResources(ctx context.Context, rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
 	if skipCleanup {
 		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
 
@@ -121,22 +121,22 @@ func cleanupDatabaseResources(rt *podman.PodmanClient, secretsToSkip []string, v
 	}
 
 	// Delete catalog secrets
-	if err := deleteSecrets(rt, secretsToSkip); err != nil {
+	if err := deleteSecrets(ctx, rt, secretsToSkip); err != nil {
 		return err
 	}
 
 	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
-	return deleteVolumes(rt, volumesToSkip)
+	return deleteVolumes(ctx, rt, volumesToSkip)
 }
 
 // podsDeletion removes all catalog pods.
-func podsDeletion(rt *podman.PodmanClient, pods []types.Pod) error {
+func podsDeletion(ctx context.Context, rt *podman.PodmanClient, pods []types.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {
 		logger.Infof("Deleting pod: %s\n", pod.Name)
 
-		if err := rt.DeletePod(context.Background(), pod.ID, utils.BoolPtr(true)); err != nil {
+		if err := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
 
 			continue
@@ -236,7 +236,7 @@ func dataDeletion(dataPath string) error {
 }
 
 // deleteVolumes removes the specified volumes.
-func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
+func deleteVolumes(ctx context.Context, rt *podman.PodmanClient, volumeNames []string) error {
 	if len(volumeNames) == 0 {
 		// Just return if there are no volumes to delete.
 		return nil
@@ -248,7 +248,7 @@ func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
 	for _, volumeName := range volumeNames {
 		logger.Infof("Deleting volume: %s\n", volumeName)
 
-		if err := rt.DeleteVolume(context.Background(), volumeName); err != nil {
+		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogUtils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)

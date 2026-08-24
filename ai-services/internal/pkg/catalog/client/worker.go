@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -24,9 +25,10 @@ type CreateWorkerResponse struct {
 }
 
 // CreateWorker pre-registers a new worker by name and returns its bootstrap token.
-func (c *Client) CreateWorker(name string) (*CreateWorkerResponse, error) {
+func (c *Client) CreateWorker(ctx context.Context, name string) (*CreateWorkerResponse, error) {
 	var result CreateWorkerResponse
 	resp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetBody(CreateWorkerRequest{WorkerName: name}).
 		SetResult(&result).
 		Post(workersRoute)
@@ -43,9 +45,10 @@ func (c *Client) CreateWorker(name string) (*CreateWorkerResponse, error) {
 }
 
 // ListWorkers returns all registered workers from the catalog.
-func (c *Client) ListWorkers() ([]catalogtypes.Worker, error) {
+func (c *Client) ListWorkers(ctx context.Context) ([]catalogtypes.Worker, error) {
 	var result []catalogtypes.Worker
 	resp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(workersRoute)
 	if err != nil {
@@ -62,15 +65,15 @@ func (c *Client) ListWorkers() ([]catalogtypes.Worker, error) {
 
 // DeleteWorkerByName resolves a worker name to its UUID and permanently removes it.
 // Returns an error if no worker with that name is registered.
-func (c *Client) DeleteWorkerByName(name string) error {
-	workers, err := c.ListWorkers()
+func (c *Client) DeleteWorkerByName(ctx context.Context, name string) error {
+	workers, err := c.ListWorkers(ctx)
 	if err != nil {
 		return err
 	}
 
 	for _, w := range workers {
 		if w.Name == name {
-			return c.deleteWorkerByID(w.ID)
+			return c.deleteWorkerByID(ctx, w.ID)
 		}
 	}
 
@@ -78,8 +81,9 @@ func (c *Client) DeleteWorkerByName(name string) error {
 }
 
 // deleteWorkerByID permanently removes a worker by its UUID string.
-func (c *Client) deleteWorkerByID(id string) error {
+func (c *Client) deleteWorkerByID(ctx context.Context, id string) error {
 	resp, err := c.httpClient.R().
+		SetContext(ctx).
 		Delete(fmt.Sprintf(workerByIDRoute, id))
 	if err != nil {
 		return fmt.Errorf("delete worker: %w", err)

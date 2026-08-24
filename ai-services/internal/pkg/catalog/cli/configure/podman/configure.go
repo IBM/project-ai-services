@@ -39,7 +39,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 	}
 
 	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 		return err
 	}
 
@@ -65,7 +65,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	logger.Debugln("checking for existing resources...")
 
 	// Check existing deployment status
-	isDeployed, existingResources, err := deployCtx.CheckStatus()
+	isDeployed, existingResources, err := deployCtx.CheckStatus(ctx)
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
@@ -82,7 +82,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		}
 
 		// Execute pod templates
-		if err := deployCtx.ExecutePodLayers(opts.BaseDir, caddyCtx, existingResources); err != nil {
+		if err := deployCtx.ExecutePodLayers(ctx, opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
 			return nil, err
@@ -115,7 +115,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	}
 
 	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := caddy.RegisterCatalogRoutes(deployCtx.Runtime, caddyCtx, routeInfos)
+	routeDomains, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
@@ -127,7 +127,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	}
 
 	// Print next steps with proxy route information
-	if err := helpers.PrintNextStepsWithProxy(deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}

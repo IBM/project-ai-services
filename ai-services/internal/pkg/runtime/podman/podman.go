@@ -283,7 +283,10 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 	stdoutChan := make(chan string, logChannelBufferSize)
 	stderrChan := make(chan string, logChannelBufferSize)
 
-	logsCtx, cancelLogs := context.WithCancel(ctx)
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	logsCtx, cancelLogs := context.WithCancel(podCtx)
 	defer cancelLogs()
 
 	// Channel to signal goroutine completion
@@ -294,7 +297,7 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		waitDone := make(chan struct{})
 		go func() {
 			defer close(waitDone)
-			_, err := containers.Wait(ctx, containerNameOrID, nil)
+			_, err := containers.Wait(logsCtx, containerNameOrID, nil)
 			if err == nil {
 				// Container exited, cancel the logs streaming
 				cancelLogs()
@@ -356,7 +359,7 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string) error {
 	}
 
 	// creating context here that listens for Ctrl+C
-	sigCtx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	for _, container := range podInspect.Containers {
@@ -393,7 +396,7 @@ func (pc *PodmanClient) ContainerLogs(ctx context.Context, containerNameOrID str
 	}
 
 	// Creating context here that listens for Ctrl+C
-	sigCtx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	return pc.streamContainerLogs(sigCtx, containerNameOrID)
@@ -455,14 +458,14 @@ func (pc *PodmanClient) ListRoutes(_ context.Context, _ string) ([]types.Route, 
 	return nil, fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
-	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+func (pc *PodmanClient) ListCRD(ctx context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
+	logger.ErrorlnCtx(ctx, "unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) DeleteNamespace(_ context.Context, _ string) error {
-	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+func (pc *PodmanClient) DeleteNamespace(ctx context.Context, _ string) error {
+	logger.ErrorlnCtx(ctx, "unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
 }
@@ -587,7 +590,7 @@ func (pc *PodmanClient) GetSystemInfo(ctx context.Context) (*models.SystemInfo, 
 	}
 
 	// Populate accelerator information (Spyre cards)
-	sysInfo.Accelerators = getAcceleratorInfo(pc.Context)
+	sysInfo.Accelerators = getAcceleratorInfo(ctx)
 
 	return sysInfo, nil
 }
@@ -652,11 +655,14 @@ func (pc *PodmanClient) GetPodResources(ctx context.Context, nameOrID string) (*
 	}
 
 	// Get stats and Spyre cards for all containers in the pod (excluding infra container)
-	return pc.aggregateContainerResourcesWithStats(podInspect)
+	return pc.aggregateContainerResourcesWithStats(ctx, podInspect)
 }
 
 // aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
-func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
+func (pc *PodmanClient) aggregateContainerResourcesWithStats(ctx context.Context, podInspect *entities.PodInspectReport) (*types.PodResources, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
 	var totalMemUsage uint64
 	var totalCPUs float64
 	spyreCards := []string{}
@@ -668,7 +674,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 		}
 
 		// Get container stats for actual CPU and memory usage using podman stats
-		statsChan, err := containers.Stats(pc.Context, []string{container.ID}, &containers.StatsOptions{
+		statsChan, err := containers.Stats(podCtx, []string{container.ID}, &containers.StatsOptions{
 			Stream: utils.BoolPtr(false), // Get a single snapshot, not streaming
 		})
 		if err != nil {
@@ -693,7 +699,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 		}
 
 		// Inspect container to get Spyre card annotations
-		containerInspect, err := containers.Inspect(pc.Context, container.ID, nil)
+		containerInspect, err := containers.Inspect(podCtx, container.ID, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}

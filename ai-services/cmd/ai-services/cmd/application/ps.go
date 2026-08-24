@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -101,7 +102,7 @@ Arguments:
 		}
 
 		// Default: use new implementation via catalog
-		return renderApplicationPS(opts)
+		return renderApplicationPS(ctx, opts)
 	},
 }
 
@@ -142,13 +143,13 @@ func buildPsFlagValidator() *flagvalidator.FlagValidator {
 
 // renderApplicationPS retrieves and processes the PS information for multiple application IDs.
 // It fetches the process status for each application using the catalog API and prints the results in tabular format.
-func renderApplicationPS(opts appTypes.ListOptions) error {
-	appClient, err := catalogClient.NewApplicationClient()
+func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	applicationList, err := cliUtils.FetchApplications(appClient, opts.ApplicationName)
+	applicationList, err := cliUtils.FetchApplications(ctx, appClient, opts.ApplicationName)
 	if err != nil {
 		return err
 	}
@@ -169,7 +170,7 @@ func renderApplicationPS(opts appTypes.ListOptions) error {
 	// Process each application ID
 	for _, app := range applicationList {
 		// Get PS information for the application
-		psResp, err := appClient.GetApplicationPS(app.ID)
+		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch application: %w", err)
 		}

@@ -57,8 +57,7 @@ func newPodmanGatherer() *podmanGatherer {
 //     no catalog pods exist at all (catalog was never installed).
 //   - Always-on: system info, secrets, network, volumes — Podman-level data
 //     that is useful regardless of catalog state.
-func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
-	ctx := context.Background()
+func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 
 	logger.InfolnCtx(ctx, "Starting must-gather for Podman runtime…")
 
@@ -156,7 +155,7 @@ func (g *podmanGatherer) createOutputDir(base string) (string, error) {
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one), then collects inspect/logs/env for each.
 func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, appName string) {
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
 
@@ -182,7 +181,7 @@ func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, app
 // appropriate warning on error or empty result. Returns (apps, true) on
 // success, (nil, false) when the caller should skip collection.
 func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
-	apps, err := cliUtils.FetchApplications(appClient, appName)
+	apps, err := cliUtils.FetchApplications(ctx, appClient, appName)
 	if err != nil {
 		if appName != "" {
 			logger.WarningfCtx(ctx, "Application %q not found: %v\n", appName, err)
@@ -210,7 +209,7 @@ func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.Ap
 // each pod. Extracted to keep collectApplicationPods within complexity limits.
 func (g *podmanGatherer) collectPodsForApps(ctx context.Context, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
 	for _, app := range apps {
-		psResp, err := appClient.GetApplicationPS(app.ID)
+		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
 			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
 

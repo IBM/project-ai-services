@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"text/template"
@@ -66,7 +67,7 @@ Arguments:
 		}
 
 		// Default: use new implementation using catalog
-		return renderApplicationInfo(applicationName, rt)
+		return renderApplicationInfo(ctx, applicationName, rt)
 	},
 }
 
@@ -74,13 +75,13 @@ func init() {
 	infoCmd.Flags().BoolVar(&legacyInfo, "legacy", false, "Use legacy application info implementation")
 }
 
-func renderApplicationInfo(appName string, rt types.RuntimeType) error {
-	appClient, err := catalogClient.NewApplicationClient()
+func renderApplicationInfo(ctx context.Context, appName string, rt types.RuntimeType) error {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	app, err := cliUtils.GetAppByName(appClient, appName)
+	app, err := cliUtils.GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			logger.Warningf("Application: '%s' does not exist", appName)
@@ -91,12 +92,12 @@ func renderApplicationInfo(appName string, rt types.RuntimeType) error {
 		return err
 	}
 
-	application, err := appClient.GetApplication(app.ID)
+	application, err := appClient.GetApplication(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	appPS, err := appClient.GetApplicationPS(app.ID)
+	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application pods: %w", err)
 	}

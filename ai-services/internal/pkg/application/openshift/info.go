@@ -46,7 +46,7 @@ func (o *OpenshiftApplication) Info(ctx context.Context, opts types.InfoOptions)
 	// Step3: Read and print the info.md file
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
-	if err := helpers.PrintInfo(tp, o.runtime, opts.Name, appTemplate); err != nil {
+	if err := helpers.PrintInfo(ctx, tp, o.runtime, opts.Name, appTemplate); err != nil {
 		// not failing if overall info command, if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 

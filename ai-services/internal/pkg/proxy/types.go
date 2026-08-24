@@ -11,7 +11,7 @@ type ProxyManager interface {
 	UnregisterRoute(routeID string) error
 
 	// HealthCheck verifies the proxy is available and responding
-	HealthCheck() error
+	HealthCheck(ctx context.Context) error
 
 	// GetRouteByID retrieves a specific route by its ID from the proxy
 	GetRouteByID(routeID string) (*Route, error)
