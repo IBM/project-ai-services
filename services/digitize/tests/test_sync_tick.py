@@ -59,7 +59,7 @@ _wait_for_job
 run_tick
   - aborts gracefully when connector not found
   - calls init_sync_log_and_update_connector, scan, classify, process, orphan, complete in order
-  - on scanner.connect failure: _fail_tick is called, scanner.close still runs
+  - on scanner.connect failure (ConnectionError): _fail_tick uses CREDENTIAL_ERROR_MSG, scanner.close still runs
   - on scan failure: _fail_tick is called, scanner.close still runs
   - _handle_interrupt is awaited when CancelledError is caught
 """
@@ -72,7 +72,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.connectors.sync_tick import (
     InterruptType,
     _cancel_tick,
@@ -462,7 +462,26 @@ class TestRunTick:
 
         args = mock_close.call_args.kwargs
         assert args["status"] == SyncLogStatus.FAILED
-        assert "refused" in args["error"]
+        assert args["error"] == ConnectorError.CREDENTIAL_ERROR_MSG
+
+    def test_scanner_connect_failure_uses_credential_error_msg(self):
+        """ConnectionError from scanner.connect() must set CREDENTIAL_ERROR_MSG on the connector,
+        not the raw transport error, so the root cause is clearly visible in the UI."""
+        connector = _connector()
+        mock_scanner = self._make_scanner(connect_raises=ConnectionError("auth rejected"))
+
+        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
+             patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
+            asyncio.run(run_tick("conn-1", sync_seq=2))
+
+        args = mock_close.call_args.kwargs
+        assert args["status"] == SyncLogStatus.FAILED
+        assert args["error"] == ConnectorError.CREDENTIAL_ERROR_MSG
+        # scanner.close() must still run in the finally block
+        mock_scanner.close.assert_called_once()
 
     def test_scanner_close_always_called(self):
         connector = _connector()

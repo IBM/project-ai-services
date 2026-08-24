@@ -41,7 +41,7 @@ from common.misc_utils import cleanup_staging_directory, get_logger
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
@@ -137,7 +137,15 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
                 f"Connector {connector_id!r} interrupted (type={interrupt.value})"
             )
 
-        await asyncio.to_thread(scanner.connect)
+        try:
+            await asyncio.to_thread(scanner.connect)
+        except ConnectionError as conn_exc:
+            logger.error(
+                f"Connector {connector_id!r} failed to connect — treating as credential error: {conn_exc}"
+            )
+            _fail_tick(sync_seq, connector_id, conn_exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG)
+            return
+
         scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
 
         known_checksums: set[str] = set(list_connector_checksums(connector_id))
@@ -450,13 +458,13 @@ def _cancel_tick(sync_seq: int, connector_id: str) -> None:
         )
 
 
-def _fail_tick(sync_seq: int, connector_id: str, exc: Exception) -> None:
+def _fail_tick(sync_seq: int, connector_id: str, exc: Exception, error_msg: Optional[str] = None) -> None:
     try:
         finalize_sync_log_and_update_connector(
             connector_id=connector_id,
             seq=sync_seq,
             status=SyncLogStatus.FAILED,
-            error=str(exc),
+            error=error_msg if error_msg is not None else str(exc),
         )
     except Exception as close_exc:
         logger.error(
