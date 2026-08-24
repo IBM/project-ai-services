@@ -6,7 +6,6 @@ metadata:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
-    ai-services.io/component: api
 spec:
   replicas: 1
   selector:
@@ -19,6 +18,7 @@ spec:
         ai-services.io/service: {{ .Release.Name }}
         ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: summarize-api
+        ai-services.io/component-type: api
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false

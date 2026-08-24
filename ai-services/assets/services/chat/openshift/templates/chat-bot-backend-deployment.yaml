@@ -6,7 +6,6 @@ metadata:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Values.templateID }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
-    ai-services.io/component: api
 spec:
   replicas: 1
   selector:
@@ -20,6 +19,7 @@ spec:
         ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: chat-bot-backend
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component-type: api
     spec:
       automountServiceAccountToken: false
       containers:

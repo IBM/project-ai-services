@@ -8,5 +8,5 @@ const (
 	PodRoutesAnnotationKey   = "ai-services.io/routes"
 	ApplicationTemplateKey   = "ai-services.io/template"
 	PrerequisiteLabelKey     = "ai-services.io/prerequisite"
-	ComponentLabelKey        = "ai-services.io/component"
+	ComponentLabelKey        = "ai-services.io/component-type"
 )
