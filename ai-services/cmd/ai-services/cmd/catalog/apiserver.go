@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -84,20 +84,18 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	compRepo := repository.NewComponentRepository(pool)
 	svcDepRepo := repository.NewServiceDependencyRepository(pool)
 
+	catalogProvider, err := catalog.NewCatalogProvider(bundleRepo)
+	if err != nil {
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+
 	// Initialize sync service for background DB-Pod synchronization
 	// TODO: implement sync service on remote machines
-	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval)
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider)
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
 	}
 	syncService.Start(ctx)
-
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		syncService.Stop(ctx)
-
-		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
-	}
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	workerRepo := repository.NewWorkerRepository(pool)
@@ -119,7 +117,8 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
-		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo),
+		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo, catalogProvider),
+		CatalogProvider:    catalogProvider,
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
 	}

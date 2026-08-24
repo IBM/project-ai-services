@@ -75,14 +75,10 @@ func NewSyncService(
 	componentRepo dbrepo.ComponentRepository,
 	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	syncInterval time.Duration,
+	catalogProvider *catalogpkg.CatalogProvider,
 ) (*SyncService, error) {
 	if syncInterval == 0 {
 		syncInterval = DefaultSyncInterval
-	}
-
-	catalogProvider, err := catalogpkg.NewCatalogProvider()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider for sync service: %w", err)
 	}
 
 	runtimeSync, err := newRuntimeSync(vars.RuntimeFactory.GetRuntimeType(), catalogProvider)

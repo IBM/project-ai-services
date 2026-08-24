@@ -29,8 +29,6 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
 
 class OpensearchVectorStore(VectorStore):
     def __init__(self):
-        """Initialize the OpenSearch client and create the hybrid search pipeline."""
-        logger.debug("Initializing OpensearchVectorStore")
 
         self.host = settings.vector_store.opensearch_host
         self.port = settings.vector_store.opensearch_port
@@ -42,7 +40,6 @@ class OpensearchVectorStore(VectorStore):
         self.num_shards = settings.vector_store.opensearch_num_shards
         
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
-        logger.debug(f"Index configuration: shards={self.num_shards}")
 
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],

@@ -124,7 +124,7 @@ func renderApplicationInfo(appName string) error {
 }
 
 func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse) error {
-	catalogProvider, err := catalog.NewCatalogProvider()
+	catalogProvider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog provider: %w", err)
 	}

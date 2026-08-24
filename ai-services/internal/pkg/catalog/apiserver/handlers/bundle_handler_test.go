@@ -29,6 +29,7 @@ type mockBundleService struct {
 	validateBundle func(ctx context.Context, file io.Reader) (any, error)
 	replaceBundle  func(ctx context.Context, existing *bundlesvc.BundleResponse, file io.Reader, userID string) (*bundlesvc.BundleResponse, error)
 	getBundleByID  func(ctx context.Context, id string) (*bundlesvc.BundleResponse, error)
+	deleteBundle   func(ctx context.Context, existing *bundlesvc.BundleResponse) error
 	listBundles    func(ctx context.Context, params bundlesvc.BundleListRequest) (*bundlesvc.BundleListResponse, error)
 }
 
@@ -53,7 +54,10 @@ func (m *mockBundleService) GetBundleByID(ctx context.Context, id string) (*bund
 	}
 	panic("GetBundleByID not set")
 }
-func (m *mockBundleService) DeleteBundle(_ context.Context, _ *bundlesvc.BundleRecord) error {
+func (m *mockBundleService) DeleteBundle(ctx context.Context, existing *bundlesvc.BundleResponse) error {
+	if m.deleteBundle != nil {
+		return m.deleteBundle(ctx, existing)
+	}
 	panic("DeleteBundle not set")
 }
 func (m *mockBundleService) ListBundles(ctx context.Context, params bundlesvc.BundleListRequest) (*bundlesvc.BundleListResponse, error) {
@@ -77,6 +81,7 @@ func setupBundleRouter(svc bundlesvc.BundleServiceInterface) *gin.Engine {
 	r.GET("/api/v1/catalog/bundles", h.ListBundles)
 	r.GET("/api/v1/catalog/bundles/:id", h.GetBundle)
 	r.PUT("/api/v1/catalog/bundles/:id", h.UpdateBundle)
+	r.DELETE("/api/v1/catalog/bundles/:id", h.DeleteBundle)
 	return r
 }
 
@@ -551,12 +556,13 @@ func TestUpdateBundle(t *testing.T) {
 			wantLocationOf: "/api/v1/catalog/bundles/" + fixedID,
 		},
 		{
-			name:            "400 — malformed UUID rejected before DB lookup",
+			name:            "400 — malformed UUID rejected by GetBundleByID",
 			bundleID:        "not-a-uuid",
 			filename:        "bundle-v2.tar.gz",
 			fileContent:     validTarGz,
+			getErr:          &validators.ValidationError{Code: http.StatusBadRequest, Message: `invalid bundle id "not-a-uuid"`},
 			wantStatus:      http.StatusBadRequest,
-			wantErrContains: "not a valid UUID",
+			wantErrContains: "invalid bundle id",
 		},
 		{
 			name:            "404 — bundle not found (GetBundleByID returns nil)",
@@ -821,4 +827,144 @@ func TestUpdateBundle_FilenameExtensionCaseInsensitive(t *testing.T) {
 	req := buildPutMultipartRequest(t, fixedID, "BUNDLE.TAR.GZ", []byte("content"))
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// -----------------------------------------------------------------------
+// TestDeleteBundle
+// -----------------------------------------------------------------------
+
+func TestDeleteBundle(t *testing.T) {
+	fixedID := "550e8400-e29b-41d4-a716-446655440000"
+
+	tests := []struct {
+		name            string
+		bundleID        string
+		// getBundleByID stub
+		getResp         *bundlesvc.BundleResponse
+		getErr          error
+		// deleteBundle stub — only consulted when getResp != nil
+		deleteErr       error
+		wantStatus      int
+		wantErrContains string
+	}{
+		{
+			name:       "204 — successful delete",
+			bundleID:   fixedID,
+			getResp:    fixedBundleResponse(),
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:            "400 — malformed UUID rejected by GetBundleByID",
+			bundleID:        "not-a-uuid",
+			getErr:          &validators.ValidationError{Code: http.StatusBadRequest, Message: `invalid bundle id "not-a-uuid"`},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "invalid bundle id",
+		},
+		{
+			name:            "404 — bundle not found (GetBundleByID returns nil)",
+			bundleID:        fixedID,
+			getResp:         nil,
+			wantStatus:      http.StatusNotFound,
+			wantErrContains: "not found",
+		},
+		{
+			name:            "400 — GetBundleByID returns ValidationError",
+			bundleID:        fixedID,
+			getErr:          &validators.ValidationError{Code: http.StatusBadRequest, Message: "invalid bundle id"},
+			wantStatus:      http.StatusBadRequest,
+			wantErrContains: "invalid bundle id",
+		},
+		{
+			name:            "500 — GetBundleByID returns unexpected error",
+			bundleID:        fixedID,
+			getErr:          assert.AnError,
+			wantStatus:      http.StatusInternalServerError,
+		},
+		{
+			name:            "409 — running instances from DeleteBundle",
+			bundleID:        fixedID,
+			getResp:         fixedBundleResponse(),
+			deleteErr:       &validators.ValidationError{Code: http.StatusConflict, Message: "cannot replace bundle"},
+			wantStatus:      http.StatusConflict,
+			wantErrContains: "cannot replace bundle",
+		},
+		{
+			name:            "500 — unexpected error from DeleteBundle",
+			bundleID:        fixedID,
+			getResp:         fixedBundleResponse(),
+			deleteErr:       assert.AnError,
+			wantStatus:      http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &mockBundleService{
+				getBundleByID: func(_ context.Context, id string) (*bundlesvc.BundleResponse, error) {
+					assert.Equal(t, tt.bundleID, id)
+					return tt.getResp, tt.getErr
+				},
+				deleteBundle: func(_ context.Context, existing *bundlesvc.BundleResponse) error {
+					if tt.getResp != nil {
+						assert.Equal(t, tt.getResp.ID, existing.ID)
+						assert.Equal(t, tt.getResp.CatalogType, existing.CatalogType)
+						assert.Equal(t, tt.getResp.CatalogID, existing.CatalogID)
+						assert.Equal(t, tt.getResp.Version, existing.Version)
+					}
+					return tt.deleteErr
+				},
+			}
+
+			router := setupBundleRouter(svc)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodDelete, "/api/v1/catalog/bundles/"+tt.bundleID, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantStatus, w.Code)
+
+			if tt.wantErrContains != "" {
+				var body map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Contains(t, body["error"], tt.wantErrContains)
+			}
+		})
+	}
+}
+
+// TestDeleteBundle_ResponseForwardedToDeleteBundle verifies that the *BundleResponse
+// returned by GetBundleByID is passed directly to DeleteBundle without any conversion.
+func TestDeleteBundle_ResponseForwardedToDeleteBundle(t *testing.T) {
+	fixedID := "550e8400-e29b-41d4-a716-446655440000"
+	sz := int64(2048)
+	now := time.Now().UTC()
+	stubResp := &bundlesvc.BundleResponse{
+		ID:          fixedID,
+		Name:        "Full Fields Service",
+		Status:      "active",
+		CatalogType: "service",
+		CatalogID:   "full-svc",
+		Version:     "3.0.0",
+		CreatedBy:   "some-user",
+		SizeBytes:   &sz,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	svc := &mockBundleService{
+		getBundleByID: func(_ context.Context, _ string) (*bundlesvc.BundleResponse, error) {
+			return stubResp, nil
+		},
+		deleteBundle: func(_ context.Context, existing *bundlesvc.BundleResponse) error {
+			// The handler must pass the exact *BundleResponse pointer — no intermediate
+			// BundleRecord construction allowed.
+			assert.Same(t, stubResp, existing)
+			return nil
+		},
+	}
+
+	router := setupBundleRouter(svc)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/catalog/bundles/"+fixedID, nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 }

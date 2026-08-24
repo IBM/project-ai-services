@@ -10,3 +10,6 @@ var BootstrapFS embed.FS
 
 //go:embed catalog architectures services components prerequisites connectors
 var CatalogFS embed.FS
+
+//go:embed worker
+var WorkerFS embed.FS
