@@ -17,15 +17,15 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
 const (
 	// commandTimeout is the maximum time to wait for a worker to respond to a
-	// single command. Long-running operations (e.g. PullImage) may need more
-	// time; callers can pass a context with a tighter deadline if needed.
-	commandTimeout = 5 * time.Minute
+	// single command. Long-running operations such as PullImage can exceed a
+	// few minutes; callers can pass a context with a tighter deadline if needed.
+	commandTimeout = 10 * time.Minute
 )
 
 // RemoteRuntime implements runtime.Runtime by forwarding each call as a
@@ -69,7 +69,7 @@ func (r *RemoteRuntime) ListImages() ([]types.Image, error) {
 }
 
 func (r *RemoteRuntime) PullImage(ctx context.Context, image string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_PULL_IMAGE, pullImagePayload{Image: image})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_PULL_IMAGE, payload.PullImage{Image: image})
 
 	return err
 }
@@ -77,7 +77,7 @@ func (r *RemoteRuntime) PullImage(ctx context.Context, image string) error {
 // ─── Pod operations ───────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListPods(filters map[string][]string) ([]types.Pod, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_PODS, listPodsPayload{Filters: filters})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_PODS, payload.ListPods{Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (r *RemoteRuntime) CreatePod(ctx context.Context, body io.Reader, opts map[
 		return nil, fmt.Errorf("remote runtime: read pod body: %w", err)
 	}
 
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CREATE_POD, createPodPayload{Body: raw, Opts: opts})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CREATE_POD, payload.CreatePod{Body: raw, Opts: opts})
 	if err != nil {
 		return nil, err
 	}
@@ -109,26 +109,26 @@ func (r *RemoteRuntime) CreatePod(ctx context.Context, body io.Reader, opts map[
 	return pods, nil
 }
 
-func (r *RemoteRuntime) DeletePod(id string, force *bool) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_POD, deletePodPayload{ID: id, Force: force})
+func (r *RemoteRuntime) DeletePod(nameOrID string, force *bool) error {
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_POD, payload.DeletePod{ID: nameOrID, Force: force})
 
 	return err
 }
 
-func (r *RemoteRuntime) StopPod(id string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_STOP_POD, podIDPayload{ID: id})
+func (r *RemoteRuntime) StopPod(nameOrID string) error {
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_STOP_POD, payload.NameOrID{NameOrID: nameOrID})
 
 	return err
 }
 
-func (r *RemoteRuntime) StartPod(id string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_START_POD, podIDPayload{ID: id})
+func (r *RemoteRuntime) StartPod(nameOrID string) error {
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_START_POD, payload.NameOrID{NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) InspectPod(nameOrID string) (*types.Pod, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (r *RemoteRuntime) InspectPod(nameOrID string) (*types.Pod, error) {
 }
 
 func (r *RemoteRuntime) PodExists(nameOrID string) (bool, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -156,13 +156,13 @@ func (r *RemoteRuntime) PodExists(nameOrID string) (bool, error) {
 }
 
 func (r *RemoteRuntime) PodLogs(nameOrID string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_POD_LOGS, nameOrIDPayload{NameOrID: nameOrID})
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) GetPodResources(nameOrID string) (*types.PodResources, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (r *RemoteRuntime) GetNamespace() (string, error) {
 // ─── Secret operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListSecrets(filters map[string][]string) ([]string, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, listSecretsPayload{Filters: filters})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, payload.ListSecrets{Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -198,13 +198,13 @@ func (r *RemoteRuntime) ListSecrets(filters map[string][]string) ([]string, erro
 }
 
 func (r *RemoteRuntime) DeleteSecret(name string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, namePayload{Name: name})
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, payload.Name{Name: name})
 
 	return err
 }
 
 func (r *RemoteRuntime) SecretExists(nameOrID string) (bool, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -226,13 +226,13 @@ func (r *RemoteRuntime) UpdateSecret(_, _ string, _ map[string][]byte) error {
 // ─── Volume operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) DeleteVolume(name string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, namePayload{Name: name})
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Name: name})
 
 	return err
 }
 
 func (r *RemoteRuntime) VolumeExists(nameOrID string) (bool, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -248,7 +248,7 @@ func (r *RemoteRuntime) VolumeExists(nameOrID string) (bool, error) {
 // ─── Container operations ─────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) InspectContainer(nameOrID string) (*types.Container, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (r *RemoteRuntime) InspectContainer(nameOrID string) (*types.Container, err
 }
 
 func (r *RemoteRuntime) ContainerExists(nameOrID string) (bool, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, nameOrIDPayload{NameOrID: nameOrID})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, payload.NameOrID{NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -276,14 +276,14 @@ func (r *RemoteRuntime) ContainerExists(nameOrID string) (bool, error) {
 }
 
 func (r *RemoteRuntime) ContainerLogs(containerNameOrID string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, nameOrIDPayload{NameOrID: containerNameOrID})
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, payload.NameOrID{NameOrID: containerNameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) ExecInContainerWithCmd(podName, containerName string, command []string) (string, error) {
 	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER,
-		execInContainerPayload{PodName: podName, ContainerName: containerName, Command: command})
+		payload.ExecInContainer{PodName: podName, ContainerName: containerName, Command: command})
 	if err != nil {
 		return "", err
 	}
@@ -299,7 +299,7 @@ func (r *RemoteRuntime) ExecInContainerWithCmd(podName, containerName string, co
 // ─── Network operations ───────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListRoutes(labelSelector string) ([]types.Route, error) {
-	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, labelSelectorPayload{LabelSelector: labelSelector})
+	res, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, payload.ListRoutes{LabelSelector: labelSelector})
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (r *RemoteRuntime) DeleteNamespace(_ string) error {
 }
 
 func (r *RemoteRuntime) DeletePVCs(appLabel string) error {
-	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, namePayload{Name: appLabel})
+	_, err := r.send(context.Background(), workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Name: appLabel})
 
 	return err
 }

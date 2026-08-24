@@ -1,57 +1,57 @@
-package dispatch
-
-// This file mirrors internal/pkg/runtime/remote/payloads.go exactly.
-// Both sides of the gRPC stream must agree on the JSON field names and
-// struct layout. Any change here must be reflected in the remote package.
+// Package payload defines the JSON wire types used as Command.payload and
+// CommandResult.data on the gRPC CommandStream between the control plane and
+// worker nodes.
+//
+// Both sides of the stream — runtime/remote (control plane, sender) and
+// worker/dispatch (worker node, receiver) — import this package so there is a
+// single source of truth for field names and struct layout. Any change here
+// automatically applies to both sides.
+package payload
 
 // ─── Image ────────────────────────────────────────────────────────────────────
 
-type pullImagePayload struct {
+type PullImage struct {
 	Image string `json:"image"`
 }
 
 // ─── Pod ──────────────────────────────────────────────────────────────────────
 
-type listPodsPayload struct {
+type ListPods struct {
 	Filters map[string][]string `json:"filters"`
 }
 
-type createPodPayload struct {
+type CreatePod struct {
 	Body []byte            `json:"body"` // raw pod YAML
 	Opts map[string]string `json:"opts"`
 }
 
-type deletePodPayload struct {
+type DeletePod struct {
 	ID    string `json:"id"`
 	Force *bool  `json:"force,omitempty"`
 }
 
-// podIDPayload is used by StopPod and StartPod.
-type podIDPayload struct {
-	ID string `json:"id"`
-}
-
 // ─── Generic ──────────────────────────────────────────────────────────────────
 
-// nameOrIDPayload is used by any method that takes a single name-or-ID string.
-type nameOrIDPayload struct {
+// NameOrID is used by any method that takes a single name-or-ID argument.
+type NameOrID struct {
 	NameOrID string `json:"nameOrId"`
 }
 
-// namePayload is used by methods that take a plain name (not an ID).
-type namePayload struct {
+// Name is used by methods that take a plain name (DeleteSecret, DeleteVolume,
+// DeletePVCs).
+type Name struct {
 	Name string `json:"name"`
 }
 
 // ─── Secret ───────────────────────────────────────────────────────────────────
 
-type listSecretsPayload struct {
+type ListSecrets struct {
 	Filters map[string][]string `json:"filters"`
 }
 
 // ─── Container ────────────────────────────────────────────────────────────────
 
-type execInContainerPayload struct {
+type ExecInContainer struct {
 	PodName       string   `json:"podName"`
 	ContainerName string   `json:"containerName"`
 	Command       []string `json:"command"`
@@ -59,6 +59,6 @@ type execInContainerPayload struct {
 
 // ─── Network ──────────────────────────────────────────────────────────────────
 
-type labelSelectorPayload struct {
+type ListRoutes struct {
 	LabelSelector string `json:"labelSelector"`
 }
