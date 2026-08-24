@@ -102,7 +102,10 @@ def decrypt_secrets(
             try:
                 result[field] = _decrypt_value(cipher, result[field])
             except Exception as exc:
-                logger.error(f"Failed to decrypt field {field!r}: {exc}")
+                logger.error(
+                    f"Failed to decrypt field {field!r} for connector type {connector_type!r}: {exc}",
+                    exc_info=True,
+                )
                 raise
     return result
 

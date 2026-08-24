@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
-from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from digitize.connectors.models import (
     ConnectorCreateRequest,
     ConnectorDetailResponse,
@@ -118,6 +118,7 @@ async def create_connector(body: ConnectorCreateRequest):
 
     except IntegrityError:
         # id or name already exists
+        logger.error(f"Connector {connector_id!r} or name {body.name!r} already exists")
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
             f"Connector {connector_id!r} or name {body.name!r} already exists",
@@ -125,15 +126,20 @@ async def create_connector(body: ConnectorCreateRequest):
     except RuntimeError as exc:
         # encryption key not found
         logger.error(f"Encryption key error: {exc}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException as exc:
-        logger.error(
-            f"Failed to create connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to create connector {connector_id!r} (name={body.name!r}): encryption error — {exc}",
         )
-        raise
+    except HTTPException as exc:
+        message = f"Failed to create connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error creating connector: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error creating connector {connector_id!r} (name={body.name!r}): {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -205,27 +211,34 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         logger.info(f"Connector {connector_id!r} updated")
         return Response(status_code=200)
 
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        logger.warning(f"Connector {connector_id!r} not found: {exc}")
         APIError.raise_error(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Connector {connector_id!r} not found",
         )
     except IntegrityError:
+        logger.error(f"Connector name {body.name!r} is already in use")
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
             f"Connector name {body.name!r} is already in use",
         )
     except RuntimeError as exc:
         logger.error(f"Encryption key error: {exc}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException as exc:
-        logger.error(
-            f"Failed to update connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to update connector {connector_id!r}: encryption error — {exc}",
         )
-        raise
+    except HTTPException as exc:
+        message = f"Failed to update connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error updating connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error updating connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -276,13 +289,15 @@ async def delete_connector(connector_id: str):
         return Response(status_code=204)
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to delete connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to delete connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error deleting connector {connector_id!r}: {exc}",
+        )
 
 
 async def _run_teardown(connector_id: str) -> None:
@@ -300,14 +315,14 @@ async def _run_teardown(connector_id: str) -> None:
       5. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
-    deletion_failed = False
+    deletion_errors: list[str] = []
     try:
         # Step 1: Remove the scheduled job so no new ticks fire after this point.
         try:
             import digitize.connectors.scheduler as _sched
             await _sched.remove_connector_job(connector_id)
         except Exception as sched_exc:
-            deletion_failed = True
+            deletion_errors.append(f"scheduler job removal failed: {sched_exc}")
             logger.warning(
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
@@ -319,9 +334,9 @@ async def _run_teardown(connector_id: str) -> None:
                 remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
                 if remaining == 0 and doc_id:
                     if not _best_effort_delete_document(doc_id):
-                        deletion_failed = True
+                        deletion_errors.append(f"document deletion failed for checksum {checksum!r}")
             except Exception as exc:
-                deletion_failed = True
+                deletion_errors.append(f"checksum removal failed for {checksum!r}: {exc}")
                 logger.error(
                     f"Error removing checksum {checksum!r} for connector "
                     f"{connector_id!r}: {exc}",
@@ -330,11 +345,12 @@ async def _run_teardown(connector_id: str) -> None:
 
         # Step 4: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
-            deletion_failed = True
+            deletion_errors.append("staging directory sweep failed")
 
-        if deletion_failed:
-            db_ops.set_connector_error(connector_id, "Teardown failed — skipping connector row deletion")
-            logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures")
+        if deletion_errors:
+            error_msg = f"Failed to delete connector, error: {'; '.join(deletion_errors)}"
+            db_ops.set_connector_error(connector_id, error_msg)
+            logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
         # Step 5: delete the connector row (cascades to connector_sync_logs)
@@ -351,7 +367,7 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
-        db_ops.set_connector_error(connector_id, "Documents deletion failed")
+        db_ops.set_connector_error(connector_id, f"Unexpected error during teardown: {exc}")
 
 
 def _best_effort_delete_document(doc_id: str) -> bool:
@@ -450,13 +466,15 @@ async def list_connectors():
             for c in connectors
         ]
     except HTTPException as exc:
-        logger.error(
-            f"Failed to list connectors: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to list connectors: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error listing connectors: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error listing connectors: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -504,13 +522,15 @@ async def get_connector(connector_id: str):
             total_files=connector.total_files,
         )
     except HTTPException as exc:
-        logger.error(
-            f"Failed to get connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to get connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error fetching connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -631,13 +651,15 @@ async def trigger_sync(connector_id: str):
     except SyncLocked as exc:
         APIError.raise_error(ErrorCode.RESOURCE_LOCKED, str(exc))
     except HTTPException as exc:
-        logger.error(
-            f"Failed to trigger sync for connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to trigger sync for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error triggering sync for connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -700,14 +722,15 @@ async def cancel_sync(connector_id: str, sync_seq: int):
         return Response(status_code=204)
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to cancel sync for connector {connector_id!r} (seq={sync_seq}): "
-            f"HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to cancel sync for connector {connector_id!r} (seq={sync_seq}): {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error cancelling sync for {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error cancelling sync for connector {connector_id!r} (seq={sync_seq}): {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -758,17 +781,18 @@ async def get_sync_history(
         return SyncLogResponse(total=total, limit=limit, offset=offset, items=items)
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to get sync history for connector {connector_id!r}: "
-            f"HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to get sync history for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(
             f"Unexpected error fetching sync log for {connector_id}: {exc}",
             exc_info=True,
         )
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching sync history for connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -815,16 +839,17 @@ async def get_sync(connector_id: str, sync_seq: int):
         )
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to get sync {sync_seq} for connector {connector_id!r}: "
-            f"HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to get sync {sync_seq} for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(
             f"Unexpected error fetching sync {sync_seq} for {connector_id}: {exc}",
             exc_info=True,
         )
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching sync {sync_seq} for connector {connector_id!r}: {exc}",
+        )
 
 # Made with Bob

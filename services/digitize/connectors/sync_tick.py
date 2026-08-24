@@ -376,6 +376,7 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
     from digitize.api.v1.connectors import _best_effort_delete_document
 
     for checksum in orphan_checksums:
+        doc_id: str | None = None
         try:
             remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
             if remaining == 0 and doc_id:
@@ -383,7 +384,8 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
         except Exception as exc:
             logger.error(
                 f"Error removing orphan checksum {checksum!r} "
-                f"for connector {connector_id!r}: {exc}",
+                f"for connector {connector_id!r} "
+                f"(doc_id={doc_id!r}): {exc}",
                 exc_info=True,
             )
             raise

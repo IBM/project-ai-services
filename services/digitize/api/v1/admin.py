@@ -11,7 +11,7 @@ Exposes one router:
 
 from fastapi import APIRouter, HTTPException, Query
 
-from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from common.misc_utils import get_logger
 import digitize.models as models
 import digitize.utils.db as db_ops
@@ -69,10 +69,9 @@ async def import_metadata(payload: models.ImportRequest):
             await db_ops.release_import_export_lock()
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to import metadata: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to import metadata: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except ValueError as exc:
         logger.error(f"Invalid import request: {exc}")
         APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
@@ -143,10 +142,9 @@ async def export_metadata(
             await db_ops.release_import_export_lock()
 
     except HTTPException as exc:
-        logger.error(
-            f"Failed to export metadata: HTTP {exc.status_code} - {exc.detail}"
-        )
-        raise
+        message = f"Failed to export metadata: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except ValueError as exc:
         logger.error(f"Invalid export request: {exc}")
         APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
