@@ -475,10 +475,10 @@ func TestReplaceBundle_HappyPath(t *testing.T) {
 	require.Error(t, err) // expected: extraction fails without real storage root
 }
 
-// TestReplaceBundle_ActivateFailureMarksRowFailed uses the internal
+// TestActivateFailureMarksRowFailed uses the internal
 // replaceBundleFiles helper to drive the post-processing path directly,
 // using a real temp dir so that extraction succeeds.
-func TestReplaceBundle_ActivateFailureMarksRowFailed(t *testing.T) {
+func TestActivateFailureMarksRowFailed(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	tmp := t.TempDir()
 
@@ -545,11 +545,11 @@ func TestReplaceBundle_ActivateFailureMarksRowFailed(t *testing.T) {
 	assert.NotNil(t, lastCall.Error)
 }
 
-// TestReplaceBundle_SameVersionNoOldDirCleanup verifies that when old and new
+// TestSameVersionNoOldDirCleanup verifies that when old and new
 // directory paths are the same (same catalog_id + same version) the code does
 // NOT attempt to remove the directory (no double-remove).
 // We test this by calling replaceBundleFiles directly with a temp dir.
-func TestReplaceBundle_SameVersionNoOldDirCleanup(t *testing.T) {
+func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	tmp := t.TempDir()
 	now := time.Now()
@@ -622,9 +622,9 @@ func TestReplaceBundle_SameVersionNoOldDirCleanup(t *testing.T) {
 	assert.Equal(t, "active", resp.Status)
 }
 
-// TestReplaceBundle_GetByIDAfterActivationError checks that when the final
+// TestGetByIDAfterActivationError checks that when the final
 // GetBundleByID re-fetch returns an error, that error is propagated.
-func TestReplaceBundle_GetByIDAfterActivationError(t *testing.T) {
+func TestGetByIDAfterActivationError(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	callCount := 0
 	repo := &mockBundleRepo{
@@ -1369,11 +1369,11 @@ func failsOnReload(err error) *mockCatalogReloader {
 	}
 }
 
-// TestProcessBundle_ReloadCalledOnSuccess verifies that Reload is invoked after
+// TestReloadAfterProcess_CalledOnSuccess verifies that Reload is invoked after
 // the row is activated (not before), so loadBundleItems sees the "active" row.
 // We drive the activate → reload → re-fetch path directly, bypassing the
 // filesystem step that requires bundleStorageRoot to exist.
-func TestProcessBundle_ReloadCalledOnSuccess(t *testing.T) {
+func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	now := time.Now()
 	sz := int64(64)
@@ -1440,9 +1440,9 @@ func TestProcessBundle_ReloadCalledOnSuccess(t *testing.T) {
 	assert.Equal(t, models.BundleStatusActive, *updateCalls[0].Status)
 }
 
-// TestProcessBundle_ReloadFailureMarksRowFailed verifies that when Reload returns
+// TestReloadAfterProcess_FailureMarksRowFailed verifies that when Reload returns
 // an error the row is marked failed and the error is propagated.
-func TestProcessBundle_ReloadFailureMarksRowFailed(t *testing.T) {
+func TestReloadAfterProcess_FailureMarksRowFailed(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	now := time.Now()
 	reloadErr := fmt.Errorf("reload boom")
@@ -1488,13 +1488,13 @@ func TestProcessBundle_ReloadFailureMarksRowFailed(t *testing.T) {
 	assert.Contains(t, *capturedFailUpdate.Error, "reload boom")
 }
 
-// TestReplaceBundle_ReloadCalledOnSuccess verifies that Reload is invoked after
+// TestReloadAfterReplace_CalledOnSuccess verifies that Reload is invoked after
 // the DB row is activated during a replace operation.
 // bundleDirPath always points at the real /data/catalog-bundles root so we
 // cannot drive replaceBundleFiles end-to-end in a unit test. Instead we exercise
 // the activate → reload → re-fetch sequence directly, mirroring the approach
 // used for ProcessBundle.
-func TestReplaceBundle_ReloadCalledOnSuccess(t *testing.T) {
+func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	now := time.Now()
 	sz := int64(512)
@@ -1551,10 +1551,10 @@ func TestReplaceBundle_ReloadCalledOnSuccess(t *testing.T) {
 	assert.Equal(t, models.BundleStatusActive, *updateCalls[0].Status)
 }
 
-// TestReplaceBundle_ReloadFailureMarksRowFailed verifies that when Reload fails
+// TestReloadAfterReplace_FailureMarksRowFailed verifies that when Reload fails
 // after the DB row is activated, replaceBundleFiles returns the error and the
-// caller (ReplaceBundle) marks the row failed.
-func TestReplaceBundle_ReloadFailureMarksRowFailed(t *testing.T) {
+// row is marked failed.
+func TestReloadAfterReplace_FailureMarksRowFailed(t *testing.T) {
 	fixedID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	reloadErr := fmt.Errorf("reload after replace failed")
 
