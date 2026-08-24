@@ -28,13 +28,14 @@ type CreateDatasourceResponse struct {
 
 // UpdateDatasourceRequest is the request body for updating datasource credentials.
 // Only the credential fields for the provider may be updated; structural fields are
-// immutable after creation. Any non-updatable field present in Metadata is silently ignored.
+// immutable after creation. Any non-updatable field present in Params is silently ignored.
 type UpdateDatasourceRequest struct {
-	// Metadata holds the credential fields to update (e.g. access_key_id / secret_access_key
-	// for S3, username / private_key for SSH). Structural fields are filtered out server-side.
+	// Params holds the credential fields to update. Only fields in the provider's
+	// schema whose ui:section is "Authentication" may be changed; structural fields
+	// are filtered out server-side.
 	// Note: binding:"required" only prevents null/missing — an empty map is rejected in the
 	// service layer, which also validates that at least one updatable field is present.
-	Metadata map[string]any `json:"metadata" binding:"required"`
+	Params map[string]any `json:"params" binding:"required"`
 }
 
 // PropagationError describes a single Digitize propagation failure during a datasource update.
@@ -48,7 +49,7 @@ type PropagationError struct {
 }
 
 // DatasourceItem is the public representation of a datasource connector returned by the API.
-// Sensitive credential fields are never included; Metadata is stripped of sensitive keys before use.
+// Sensitive credential fields are never included.
 type DatasourceItem struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`

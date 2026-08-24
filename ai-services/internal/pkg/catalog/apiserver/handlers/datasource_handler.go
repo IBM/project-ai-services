@@ -84,7 +84,7 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 // UpdateDatasource godoc
 //
 //	@Summary		Update datasource credentials
-//	@Description	Updates only the updatable credential fields for a datasource (access_key_id / secret_access_key for S3; username / private_key for SSH). Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.
+//	@Description	Updates the Authentication credential fields for a datasource as defined in the provider schema. Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.
 //	@Tags			Datasources
 //	@Accept			json
 //	@Produce		json
