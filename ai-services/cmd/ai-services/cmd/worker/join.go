@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,7 +11,6 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/join"
@@ -70,11 +68,6 @@ func joinPreRunE(runtimeType *string) func(*cobra.Command, []string) error {
 
 func joinRunE(token, runtimeType, baseDir, httpsPort *string) func(*cobra.Command, []string) error {
 	return func(_ *cobra.Command, args []string) error {
-		rt, err := podman.NewPodmanClient()
-		if err != nil {
-			return fmt.Errorf("init podman client: %w", err)
-		}
-
 		opts := join.Options{
 			GatewayAddr: args[0],
 			Token:       *token,
@@ -90,7 +83,7 @@ func joinRunE(token, runtimeType, baseDir, httpsPort *string) func(*cobra.Comman
 
 		logger.Infoln("Starting worker join — press Ctrl-C to stop.")
 
-		return join.Run(ctx, rt, opts)
+		return join.Run(ctx, opts)
 	}
 }
 

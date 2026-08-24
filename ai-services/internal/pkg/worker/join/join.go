@@ -28,9 +28,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
@@ -76,9 +77,14 @@ type Options struct {
 //   - Dial the catalog gRPC gateway.
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
-func Run(ctx context.Context, rt *podman.PodmanClient, opts Options) error {
+func Run(ctx context.Context, opts Options) error {
 	if err := validateOptions(opts); err != nil {
 		return err
+	}
+
+	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
 
 	// ── Step 1: Setup worker node ────────────────────────────────────────────
@@ -98,7 +104,7 @@ func Run(ctx context.Context, rt *podman.PodmanClient, opts Options) error {
 	client := workerpb.NewWorkerGatewayClient(conn)
 
 	// ── Step 3: Register + stream loop ───────────────────────────────────────
-	return runRegistrationLoop(ctx, client, opts.Token, opts.RuntimeType)
+	return runRegistrationLoop(ctx, rt, client, opts.Token)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -106,15 +112,15 @@ func Run(ctx context.Context, rt *podman.PodmanClient, opts Options) error {
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) error {
-	workerName, err := register(ctx, client, token, rt)
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, token string) error {
+	workerName, err := register(ctx, client, token, rt.Type())
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "Worker %q registered with control plane.\n", workerName)
 
-	return runStreamLoop(ctx, client, workerName)
+	return runStreamLoop(ctx, rt, client, workerName)
 }
 
 // register calls the Register RPC once and returns the worker name bound by
@@ -139,7 +145,7 @@ func register(ctx context.Context, client workerpb.WorkerGatewayClient, token st
 // An Unauthenticated status from the gateway means the control plane restarted
 // and lost its in-memory registry; in that case the worker re-registers before
 // reconnecting.
-func runStreamLoop(ctx context.Context, client workerpb.WorkerGatewayClient, workerName string) error {
+func runStreamLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, workerName string) error {
 	backoff := retryBase
 
 	for {
@@ -149,7 +155,7 @@ func runStreamLoop(ctx context.Context, client workerpb.WorkerGatewayClient, wor
 
 		logger.InfofCtx(ctx, "Opening CommandStream for worker %q...\n", workerName)
 
-		err := runStream(ctx, client, workerName)
+		err := runStream(ctx, rt, client, workerName)
 		if err == nil || ctx.Err() != nil {
 			// Clean exit or context cancelled — stop retrying.
 			return err
@@ -178,7 +184,7 @@ func runStreamLoop(ctx context.Context, client workerpb.WorkerGatewayClient, wor
 
 // runStream opens one CommandStream, sends heartbeats, and drains incoming
 // Commands until the stream is closed or an error occurs.
-func runStream(ctx context.Context, client workerpb.WorkerGatewayClient, workerName string) error {
+func runStream(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, workerName string) error {
 	stream, err := client.CommandStream(ctx)
 	if err != nil {
 		return fmt.Errorf("open CommandStream: %w", err)
@@ -197,7 +203,7 @@ func runStream(ctx context.Context, client workerpb.WorkerGatewayClient, workerN
 	recvErrCh := make(chan error, 1)
 
 	go func() {
-		recvErrCh <- recvLoop(ctx, stream, workerName)
+		recvErrCh <- recvLoop(ctx, rt, stream, workerName)
 	}()
 
 	ticker := time.NewTicker(heartbeatInterval)
@@ -219,9 +225,10 @@ func runStream(ctx context.Context, client workerpb.WorkerGatewayClient, workerN
 	}
 }
 
-// recvLoop reads Commands from the gateway stream and dispatches them.
+// recvLoop reads Commands from the gateway stream, dispatches each one to the
+// local runtime, and sends the result back on the stream.
 // The loop exits when the stream is closed or returns an error.
-func recvLoop(ctx context.Context, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
+func recvLoop(ctx context.Context, rt runtime.Runtime, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
 	for {
 		cmd, err := stream.Recv()
 		if err != nil {
@@ -231,8 +238,12 @@ func recvLoop(ctx context.Context, stream grpc.BidiStreamingClient[workerpb.Comm
 		logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
 			workerName, cmd.GetCommandId(), cmd.GetType())
 
-		// TODO: dispatch cmd to the local runtime executor.
-		// This will be implemented as part of the remote-runtime integration.
+		result := dispatch.Dispatch(ctx, rt, cmd)
+		result.WorkerName = workerName
+
+		if err := stream.Send(result); err != nil {
+			return fmt.Errorf("send command result id=%s: %w", cmd.GetCommandId(), err)
+		}
 	}
 }
 
