@@ -2,15 +2,18 @@ package datasourceservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -23,17 +26,32 @@ const (
 	providerFileSystem = "file_system"
 )
 
+// updatableFields maps providerID → the set of metadata keys that may be changed after creation.
+// Any key not listed here is immutable (structural field: bucket, host, remote_path, etc.) and
+// is silently dropped from the update request.
+var updatableFields = map[string]map[string]bool{
+	providerObjectStorage: {
+		"access_key_id":     true,
+		"secret_access_key": true,
+	},
+	providerFileSystem: {
+		"username":    true,
+		"private_key": true,
+	},
+}
+
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
-// DatasourceService is the single implementation of the create-datasource flow.
+// DatasourceService is the single implementation of the create/update-datasource flow.
 // It is provider-agnostic: provider-specific behaviour (connection testing and
 // sensitive-field identification) is delegated to a ConnectionTester looked up
 // from the testers registry.
 type DatasourceService struct {
-	connectorRepo dbrepo.ConnectorRepository
-	validator     *validators.ConnectorValidator
-	encryptionKey string
+	connectorRepo   dbrepo.ConnectorRepository
+	serviceDepsRepo dbrepo.ServiceDependencyRepository
+	validator       *validators.ConnectorValidator
+	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
 }
@@ -44,13 +62,15 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
-		connectorRepo: connectorRepo,
-		validator:     validator,
-		encryptionKey: encryptionKey,
+		connectorRepo:   connectorRepo,
+		serviceDepsRepo: serviceDepsRepo,
+		validator:       validator,
+		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
 			providerObjectStorage: NewObjectStorageTester(),
 			providerFileSystem:    NewFileSystemTester(),
@@ -150,6 +170,262 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 			}
 
 			result[k] = ciphertext
+		} else {
+			result[k] = v
+		}
+	}
+
+	return result, nil
+}
+
+// UpdateDatasource updates only the updatable credential fields for a datasource.
+//
+// The update flow:
+//  1. Fetch the existing connector (with encrypted credentials).
+//  2. Filter the request to only the updatable fields for this provider.
+//  3. Decrypt the existing metadata to obtain the full current field set.
+//  4. Merge: start from the existing decrypted metadata, then overlay the filtered updates.
+//  5. Run the connectivity test against the merged (full) metadata.
+//  6. If the test fails, return 422 — the record is left unchanged.
+//  7. Encrypt, persist, propagate, and return via persistAndPropagate.
+func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error) {
+	// Phase 1: fetch existing connector (metadata required for merging and decryption).
+	existing, err := s.connectorRepo.GetByID(ctx, id, true)
+	if err != nil {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
+			return nil, &ValidationError{Code: http.StatusNotFound, Message: "datasource not found"}
+		}
+
+		return nil, fmt.Errorf("failed to fetch existing connector: %w", err)
+	}
+
+	// Phase 2: look up the ConnectionTester for this provider.
+	tester, ok := s.testers[existing.Provider]
+	if !ok {
+		// Should not happen in normal operation — means the stored provider ID has no registered
+		// tester (server-side misconfiguration). Log it so it is diagnosable.
+		logger.ErrorfCtx(ctx, "no connection tester registered for provider %q on connector %s", existing.Provider, id)
+
+		return nil, fmt.Errorf("no connection tester registered for provider %q", existing.Provider)
+	}
+
+	// Phase 3: filter the request to only the updatable fields for this provider.
+	// Return 400 if the caller supplied only structural (immutable) fields — there is nothing
+	// to update and running a connectivity test would be misleading.
+	filteredUpdates := filterUpdatableFields(req.Metadata, updatableFields[existing.Provider])
+	if len(filteredUpdates) == 0 {
+		return nil, &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("request contains no updatable fields for provider %q; updatable fields are: %v", existing.Provider, updatableFieldNames(existing.Provider)),
+		}
+	}
+
+	// Phase 4: decrypt existing metadata to get the full current field set.
+	decryptedExisting, err := decryptSensitiveFields(existing.Metadata, tester.SensitiveFields(), s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt existing connector credentials: %w", err)
+	}
+
+	// Phase 5: merge — start from the existing full metadata, then overlay the filtered updates.
+	merged := mergeMaps(decryptedExisting, filteredUpdates)
+
+	// Phase 6: connectivity test with the merged metadata.
+	if testErr := tester.TestConnection(ctx, merged); testErr != nil {
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("Connection test failed: %v", testErr),
+		}
+	}
+
+	// Phase 7: encrypt, persist, propagate to Digitize, and build the response.
+	return s.persistAndPropagate(ctx, id, existing.Provider, merged, tester.SensitiveFields())
+}
+
+// persistAndPropagate encrypts merged metadata, writes it to the DB, propagates the
+// new (plain-text) credentials to every linked Digitize service, and returns the
+// response DTO. It is called only after a successful connectivity test.
+func (s *DatasourceService) persistAndPropagate(
+	ctx context.Context,
+	id uuid.UUID,
+	provider string,
+	merged map[string]any,
+	sensitiveFields map[string]bool,
+) (*apimodels.UpdateDatasourceResponse, error) {
+	encryptedMerged, err := encryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
+	}
+
+	updated, err := s.connectorRepo.Update(ctx, id, dbrepo.ConnectorUpdateFields{Metadata: encryptedMerged})
+	if err != nil {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
+			return nil, &ValidationError{Code: http.StatusNotFound, Message: "datasource not found"}
+		}
+
+		return nil, fmt.Errorf("failed to update connector: %w", err)
+	}
+
+	// Propagate plain-text credentials to linked Digitize services — never the encrypted form.
+	propagationErrors := s.propagateCredentials(ctx, id, provider, merged)
+
+	resp := &apimodels.UpdateDatasourceResponse{
+		DatasourceItem: datasourceItemFromConnector(updated),
+	}
+
+	if len(propagationErrors) > 0 {
+		resp.PropagationErrors = propagationErrors
+	}
+
+	return resp, nil
+}
+
+// propagateCredentials calls PUT /v1/connectors/<datasourceID> on every Digitize service
+// linked to this datasource. Each call is retried once on failure. Errors are collected and
+// returned; a failure does not roll back the DB update.
+func (s *DatasourceService) propagateCredentials(
+	ctx context.Context,
+	datasourceID uuid.UUID,
+	provider string,
+	fullMerged map[string]any,
+) []apimodels.PropagationError {
+	// GetLinkedServiceEndpoints issues a single JOIN query:
+	//   service_dependencies → services → applications
+	// returning the application identity and the service's runtime endpoint URL for
+	// each row where dependency_id = datasourceID AND dependency_type = 'connector'.
+	serviceEndpoints, err := s.serviceDepsRepo.GetLinkedServiceEndpoints(
+		ctx,
+		datasourceID,
+		dbmodels.DependencyTypeConnector,
+	)
+	if err != nil {
+		// Non-fatal: log the error and surface it as a propagation failure rather than
+		// returning a 500 — the DB record was already updated successfully.
+		logger.WarningfCtx(ctx, "failed to query linked service endpoints for datasource %s: %v", datasourceID, err)
+
+		return []apimodels.PropagationError{{
+			ApplicationID:   "",
+			ApplicationName: "unknown",
+			Error:           fmt.Sprintf("failed to query linked service endpoints: %v", err),
+		}}
+	}
+
+	if len(serviceEndpoints) == 0 {
+		return nil
+	}
+
+	// Build the credential payload — only the credential fields for this provider,
+	// reusing filterUpdatableFields to avoid duplicating the key-filter logic.
+	credPayload := filterUpdatableFields(fullMerged, updatableFields[provider])
+
+	var propErrors []apimodels.PropagationError
+
+	for _, svc := range serviceEndpoints {
+		baseURL := svc.URL
+		if baseURL == "" {
+			propErrors = append(propErrors, apimodels.PropagationError{
+				ApplicationID:   svc.ApplicationID.String(),
+				ApplicationName: svc.ApplicationName,
+				Error:           "service has no reachable endpoint",
+			})
+
+			continue
+		}
+
+		if err := updateDigitizeConnector(ctx, baseURL, datasourceID.String(), credPayload); err != nil {
+			propErrors = append(propErrors, apimodels.PropagationError{
+				ApplicationID:   svc.ApplicationID.String(),
+				ApplicationName: svc.ApplicationName,
+				Error:           err.Error(),
+			})
+		}
+	}
+
+	return propErrors
+}
+
+// filterUpdatableFields returns a new map containing only the keys present in allowed.
+// Keys not in allowed are silently dropped.
+func filterUpdatableFields(input map[string]any, allowed map[string]bool) map[string]any {
+	result := make(map[string]any, len(allowed))
+	for k, v := range input {
+		if allowed[k] {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// updatableFieldNames returns the names of all updatable fields for the given provider,
+// used to produce actionable validation error messages.
+func updatableFieldNames(provider string) []string {
+	fields := updatableFields[provider]
+	names := make([]string, 0, len(fields))
+	for k := range fields {
+		names = append(names, k)
+	}
+
+	return names
+}
+
+// datasourceItemFromConnector converts a Connector DB model to the public DatasourceItem DTO.
+// This is the single place that maps model fields to response fields, avoiding drift when
+// new columns are added to the Connector model.
+func datasourceItemFromConnector(c *dbmodels.Connector) apimodels.DatasourceItem {
+	return apimodels.DatasourceItem{
+		ID:        c.ID,
+		Name:      c.Name,
+		Type:      c.Type,
+		Provider:  c.Provider,
+		Status:    string(c.Status),
+		Message:   c.Message,
+		CreatedBy: c.CreatedBy,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
+}
+
+// mergeMaps returns a new map that starts with all keys from base, then overlays overrides.
+// Neither input map is modified.
+func mergeMaps(base, overrides map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	return merged
+}
+
+// decryptSensitiveFields returns a copy of params where every key listed in sensitiveKeys
+// has its ciphertext value replaced with the corresponding plaintext.
+// Fields that are not in sensitiveKeys are copied as-is.
+func decryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
+	if len(sensitiveKeys) == 0 || len(params) == 0 {
+		return params, nil
+	}
+
+	if encryptionKey == "" {
+		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
+	}
+
+	result := make(map[string]any, len(params))
+	for k, v := range params {
+		if sensitiveKeys[k] {
+			ciphertext, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("sensitive field %q must be a string", k)
+			}
+
+			plaintext, err := catalogutils.Decrypt(ciphertext, encryptionKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt field %q: %w", k, err)
+			}
+
+			result[k] = plaintext
 		} else {
 			result[k] = v
 		}

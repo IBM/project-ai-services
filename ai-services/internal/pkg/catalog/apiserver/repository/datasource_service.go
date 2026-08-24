@@ -14,12 +14,13 @@ import (
 // service so that business logic is decoupled from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
 ) DatasourceServiceInterface {
 	validator := validators.NewConnectorValidator(provider)
 	encryptionKey := os.Getenv("DB_ENCRYPTION_KEY")
 
-	return datasourceservice.NewDatasourceService(connectorRepo, validator, encryptionKey)
+	return datasourceservice.NewDatasourceService(connectorRepo, serviceDepsRepo, validator, encryptionKey)
 }
 
 // Made with Bob

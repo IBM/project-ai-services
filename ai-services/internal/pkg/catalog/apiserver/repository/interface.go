@@ -13,6 +13,15 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
+
+	// UpdateDatasource updates only the updatable credential fields for a datasource.
+	// It re-runs the connectivity test with the merged (new credentials + existing structural
+	// fields) metadata. If the test passes, the DB record is updated and the new credentials
+	// are propagated to every linked Digitize service.
+	// Returns 404 when the datasource does not exist, 422 when the connectivity test fails.
+	// A 200 is returned even when propagation to some Digitize services fails; in that case,
+	// the response body contains a non-empty PropagationErrors list.
+	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

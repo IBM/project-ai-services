@@ -2,12 +2,27 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
+
+// LinkedServiceEndpoint holds the information needed to call a downstream service
+// (e.g. Digitize) during credential propagation: the service's reachable URL and
+// the application it belongs to.
+type LinkedServiceEndpoint struct {
+	// ServiceID is the DB UUID of the linked service.
+	ServiceID uuid.UUID
+	// ApplicationID is the DB UUID of the application that owns the service.
+	ApplicationID uuid.UUID
+	// ApplicationName is the display name of the application.
+	ApplicationName string
+	// URL is the first service-type endpoint URL for this service (empty when none registered).
+	URL string
+}
 
 // ServiceDependencyRepository defines the interface for service dependency data operations.
 type ServiceDependencyRepository interface {
@@ -21,6 +36,12 @@ type ServiceDependencyRepository interface {
 	GetServicesByDependency(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]uuid.UUID, error)
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
+	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
+	// all rows matching dependencyID + dependencyType, returning the application context and
+	// the first service-type endpoint URL for each linked service.
+	// Used by the credential propagation flow to resolve downstream service base URLs in one
+	// query rather than N individual lookups.
+	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -142,6 +163,74 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 	}
 
 	return nil
+}
+
+// GetLinkedServiceEndpoints joins service_dependencies → services → applications for all
+// rows where dependency_id = dependencyID AND dependency_type = dependencyType, returning
+// the application identity and the first "service"-typed endpoint URL per linked service.
+// A single query is issued regardless of how many services are linked.
+func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error) {
+	query := `
+		SELECT sd.service_id, a.id, a.name, s.endpoints
+		FROM service_dependencies sd
+		INNER JOIN services     s ON s.id = sd.service_id
+		INNER JOIN applications a ON a.id = s.app_id
+		WHERE sd.dependency_id   = $1
+		  AND sd.dependency_type = $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyID, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query linked service endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var results []LinkedServiceEndpoint
+	for rows.Next() {
+		var (
+			ep            LinkedServiceEndpoint
+			endpointsJSON []byte
+		)
+
+		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &endpointsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan linked service endpoint row: %w", err)
+		}
+
+		ep.URL = extractFirstServiceURL(endpointsJSON)
+		results = append(results, ep)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating linked service endpoints: %w", err)
+	}
+
+	return results, nil
+}
+
+// extractFirstServiceURL parses a JSONB endpoints array (shape: [{"type":"service","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "service".
+// The "service" type is the pod-level base URL written by the deployer — this is the base URL
+// used to call Digitize's /v1/connectors endpoint.
+// Returns an empty string when the array is empty, malformed, or contains no "service" entry.
+func extractFirstServiceURL(endpointsJSON []byte) string {
+	if len(endpointsJSON) == 0 {
+		return ""
+	}
+
+	var endpoints []map[string]any
+	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+		return ""
+	}
+
+	for _, ep := range endpoints {
+		if t, ok := ep["type"].(string); ok && t == "service" {
+			if u, ok := ep["url"].(string); ok {
+				return u
+			}
+		}
+	}
+
+	return ""
 }
 
 // Made with Bob
