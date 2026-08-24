@@ -1877,21 +1877,21 @@
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest": {
             "type": "object",
             "required": [
-                "metadata",
                 "name",
+                "params",
                 "provider_id"
             ],
             "properties": {
-                "metadata": {
-                    "description": "Metadata holds the provider-specific configuration. Sensitive fields (format: \"password\"\nin the JSON schema) are encrypted at rest; all other fields are stored in plain text.",
-                    "type": "object",
-                    "additionalProperties": {}
-                },
                 "name": {
-                    "description": "Name is the unique human-readable label for this connector.",
+                    "description": "Name is the unique human-readable label for this connector.\nMust be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are\nallowed. Duplicate-name detection is case-insensitive (\"My-DB\" and \"my-db\" conflict).",
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 3
+                },
+                "params": {
+                    "description": "Params holds the provider-specific configuration. Sensitive fields (format: \"password\"\nin the JSON schema) are encrypted at rest; all other fields are stored in plain text.",
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "provider_id": {
                     "description": "ProviderID identifies the provider implementation (e.g. \"object_storage\", \"file_system\").",

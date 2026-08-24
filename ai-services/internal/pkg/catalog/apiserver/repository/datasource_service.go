@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )

@@ -43,24 +43,27 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest:
     properties:
-      metadata:
-        additionalProperties: {}
-        description: |-
-          Metadata holds the provider-specific configuration. Sensitive fields (format: "password"
-          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
-        type: object
       name:
-        description: Name is the unique human-readable label for this connector.
+        description: |-
+          Name is the unique human-readable label for this connector.
+          Must be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are
+          allowed. Duplicate-name detection is case-insensitive ("My-DB" and "my-db" conflict).
         maxLength: 100
         minLength: 3
         type: string
+      params:
+        additionalProperties: {}
+        description: |-
+          Params holds the provider-specific configuration. Sensitive fields (format: "password"
+          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
+        type: object
       provider_id:
         description: ProviderID identifies the provider implementation (e.g. "object_storage",
           "file_system").
         type: string
     required:
-    - metadata
     - name
+    - params
     - provider_id
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:

@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	awsEndpointSuffix  = "amazonaws.com"
-	s3ConnectTimeout   = 10 * time.Second
-	s3DefaultRegion    = "us-east-1"
+	awsEndpointSuffix = "amazonaws.com"
+	s3ConnectTimeout  = 10 * time.Second
+	s3DefaultRegion   = "us-east-1"
 )
 
 // regionFromEndpointRe extracts the SigV4 region segment from AWS S3 and IBM COS endpoint URLs.
