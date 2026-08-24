@@ -38,13 +38,6 @@ def _raise_file_too_large(detail: str) -> NoReturn:
     )
 
 
-def _raise_job_not_complete(detail: str) -> NoReturn:
-    raise HTTPException(
-        status_code=409,
-        detail={"error": {"code": "JOB_NOT_COMPLETE", "message": detail, "status": 409}},
-    )
-
-
 def _raise_job_failed(detail: str) -> NoReturn:
     raise HTTPException(
         status_code=410,

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import get_logger, get_utc_timestamp
@@ -21,7 +21,6 @@ from common.validation_utils import validate_file_content, validate_file_extensi
 from translate.utils.errors import (
     _raise_file_too_large,
     _raise_job_failed,
-    _raise_job_not_complete,
     _raise_unsupported_file_type,
 )
 from translate.utils.language import validate_languages
@@ -277,16 +276,16 @@ async def get_job(job_id: str) -> JobDetailResponse:
     summary="Get translation result",
     description=(
         "Retrieve the full translation result as JSON. "
-        "Returns 409 if the job is still running, 410 if it failed."
+        "Returns 202 with current status if the job is still running, 410 if it failed."
     ),
     responses={
+        202: {"description": "Accepted — job is still in progress. Retry after a short delay."},
         404: http_error_responses[404],   # job not found
-        409: http_error_responses[409],   # JOB_NOT_COMPLETE
         410: {"description": "Gone — job failed. Error details on the job resource."},
         500: http_error_responses[500],
     },
 )
-async def get_job_result(job_id: str) -> JobResultResponse:
+async def get_job_result(job_id: str):
     """Return the completed translation result for a job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:
@@ -296,9 +295,13 @@ async def get_job_result(job_id: str) -> JobResultResponse:
         )
 
     if job.status in (JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value):
-        _raise_job_not_complete(
-            f"Job is still {job.status}. "
-            f"Poll GET /v1/translate/jobs/{job_id} for status."
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "job_id": job_id,
+                "status": job.status,
+                "message": f"Job is still {job.status}. Poll GET /v1/translate/jobs/{job_id} for status.",
+            },
         )
 
     if job.status == JobStatus.FAILED.value:
@@ -339,8 +342,8 @@ async def get_job_result(job_id: str) -> JobResultResponse:
         "(.txt → text/plain, .md → text/markdown)."
     ),
     responses={
+        202: {"description": "Accepted — job is still in progress. Retry after a short delay."},
         404: http_error_responses[404],   # job not found
-        409: http_error_responses[409],   # JOB_NOT_COMPLETE
         410: {"description": "Gone — job failed. Error details on the job resource."},
         500: http_error_responses[500],
     },
@@ -355,9 +358,13 @@ async def download_job_result(job_id: str):
         )
 
     if job.status in (JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value):
-        _raise_job_not_complete(
-            f"Job is still {job.status}. "
-            f"Poll GET /v1/translate/jobs/{job_id} for status."
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "job_id": job_id,
+                "status": job.status,
+                "message": f"Job is still {job.status}. Poll GET /v1/translate/jobs/{job_id} for status.",
+            },
         )
 
     if job.status == JobStatus.FAILED.value:

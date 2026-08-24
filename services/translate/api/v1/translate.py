@@ -58,6 +58,7 @@ router = APIRouter()
     },
 )
 async def sync_translate(body: SyncTranslateRequest) -> SyncTranslateResponse:
+    """Translate inline plain text synchronously between supported languages."""
     start_time = time.perf_counter()
 
     # 1. Validate input text.
