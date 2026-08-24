@@ -21,7 +21,6 @@ func (p *PodmanBootstrap) Configure(ctx context.Context) error {
 		return fmt.Errorf("podman bootstrap requires root privileges, either run as root or use sudo")
 	}
 
-
 	// 1. Install and configure Podman if not done
 	if err := ensurePodmanInstalled(ctx); err != nil {
 		return err

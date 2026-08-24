@@ -1,9 +1,9 @@
 package utils
 
 import (
-	"context"
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
