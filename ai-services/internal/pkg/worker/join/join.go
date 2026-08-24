@@ -20,6 +20,7 @@ package join
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -27,7 +28,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -41,6 +41,14 @@ const (
 	// metaKeyBaseDir is the metadata key used to transmit the worker's base
 	// directory to the control plane during registration.
 	metaKeyBaseDir = "basedir"
+
+	// metaKeyDomainSuffix is the metadata key used to transmit the resolved
+	// domain suffix to the control plane during registration.
+	metaKeyDomainSuffix = "domainSuffix"
+
+	// metaKeyHTTPSPort is the metadata key used to transmit the HTTPS port
+	// the worker's Caddy proxy listens on.
+	metaKeyHTTPSPort = "httpsPort"
 
 	// heartbeatInterval is how often the worker sends a keep-alive to the control plane.
 	heartbeatInterval = 30 * time.Second
@@ -84,7 +92,8 @@ type Options struct {
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
 func Run(ctx context.Context, opts Options) error {
-	if err := validateOptions(&opts); err != nil {
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
 		return err
 	}
 
@@ -111,7 +120,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	// ── Step 3: Register + stream loop ───────────────────────────────────────
 	meta := map[string]string{
-		metaKeyBaseDir: opts.Setup.BaseDir,
+		metaKeyBaseDir:      opts.Setup.BaseDir,
+		metaKeyDomainSuffix: domainSuffix,
+		metaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
 	}
 
 	return runRegistrationLoop(ctx, rt, client, opts.Token, meta)
@@ -273,47 +284,5 @@ func isUnauthenticated(err error) bool {
 	return status.Code(err) == codes.Unauthenticated
 }
 
-// validateOptions performs lightweight up-front validation of join options
-// and resolves opts.Setup.BaseDir to its canonical absolute path, creating
-// the directory if it does not yet exist.
-func validateOptions(opts *Options) error {
-	if opts.GatewayAddr == "" {
-		return fmt.Errorf("worker join: gateway address is required")
-	}
-
-	if opts.Token == "" {
-		return fmt.Errorf("worker join: bootstrap token is required")
-	}
-
-	if !opts.RuntimeType.Valid() {
-		return fmt.Errorf("worker join: invalid runtime type %q (must be %q or %q)",
-			opts.RuntimeType, types.RuntimeTypePodman, types.RuntimeTypeOpenShift)
-	}
-
-	resolved, err := resolveBaseDir(opts.Setup.BaseDir)
-	if err != nil {
-		return err
-	}
-
-	opts.Setup.BaseDir = resolved
-
-	return nil
-}
-
-// resolveBaseDir returns the validated base directory, falling back to the
-// default when the flag was not set. Mirrors the same logic used by
-// `catalog configure` so behaviour is consistent across commands.
-func resolveBaseDir(baseDir string) (string, error) {
-	if baseDir == "" {
-		return constants.DefaultBaseDir, nil
-	}
-
-	resolved, err := utils.ValidateBaseDir(baseDir)
-	if err != nil {
-		return "", fmt.Errorf("invalid base directory %q: %w", baseDir, err)
-	}
-
-	return resolved, nil
-}
 
 // Made with Bob

@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -133,9 +132,9 @@ func runConfigure() error {
 	switch rt {
 	case types.RuntimeTypePodman:
 		// Resolve base directory: fall back to default when not provided.
-		aiServicesDir, err := resolveBaseDir(baseDir)
+		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
 		}
 
 		// Create the models directory under the base dir.
@@ -167,19 +166,6 @@ func runConfigure() error {
 	}
 }
 
-// resolveBaseDir returns the validated base directory, falling back to the default.
-func resolveBaseDir(baseDir string) (string, error) {
-	if baseDir == "" {
-		return constants.DefaultBaseDir, nil
-	}
-
-	resolved, err := utils.ValidateBaseDir(baseDir)
-	if err != nil {
-		return "", fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
-	}
-
-	return resolved, nil
-}
 
 func validateResetFlag(cmd *cobra.Command, flagName string) error {
 	// Check that no configuration parameters are provided with reset flag
@@ -202,7 +188,7 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 func validateConfigureFlags() error {
 	// Validate SSL flags
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		if err := validateSSLFlags(); err != nil {
+		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
 		}
 
@@ -220,67 +206,13 @@ func validateConfigureFlags() error {
 	return nil
 }
 
-// validateSSLFlags validates SSL certificate and key flags.
-func validateSSLFlags() error {
-	// If no SSL cert/key provided, validation passes
-	if sslCertPath == "" && sslKeyPath == "" {
-		return nil
-	}
-
-	if err := checkSSLFlagsPaired(); err != nil {
-		return err
-	}
-
-	warnIfBothCertAndDomainProvided()
-
-	return validateSSLCertificates()
-}
-
-// checkSSLFlagsPaired ensures cert and key flags are used together.
-func checkSSLFlagsPaired() error {
-	if (sslCertPath != "" && sslKeyPath == "") || (sslCertPath == "" && sslKeyPath != "") {
-		return fmt.Errorf("--ssl-cert and --ssl-key must be used together")
-	}
-
-	return nil
-}
-
-// warnIfBothCertAndDomainProvided warns user if both certificate and custom domain are provided.
-func warnIfBothCertAndDomainProvided() {
-	if sslCertPath != "" && sslKeyPath != "" && domainName != "" {
-		fmt.Fprintf(os.Stderr, "Warning: Both SSL certificate and --domain-name provided. "+
-			"The domain from the certificate will be used, and --domain-name will be ignored.\n\n")
-	}
-}
-
-// validateSSLCertificates performs comprehensive validation of SSL certificates.
-func validateSSLCertificates() error {
-	// Validate certificate files exist and are readable
-	if err := utils.ValidateCertificateFiles(sslCertPath, sslKeyPath); err != nil {
-		return fmt.Errorf("certificate validation failed: %w", err)
-	}
-
-	// Validate certificate and key match
-	if err := utils.ValidateCertificateKeyPair(sslCertPath, sslKeyPath); err != nil {
-		return fmt.Errorf("certificate and key validation failed: %w", err)
-	}
-
-	// Validate wildcard certificate
-	if err := utils.ValidateWildcardCertificate(sslCertPath); err != nil {
-		return fmt.Errorf("wildcard certificate validation failed: %w", err)
-	}
-
-	return nil
-}
-
 func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 	// Require SSL certificate flags with reset-certificate
 	if sslCertPath == "" || sslKeyPath == "" {
 		return fmt.Errorf("--ssl-cert and --ssl-key are required when using --reset-certificate")
 	}
 
-	// Validate SSL certificate flags
-	if err := validateSSLFlags(); err != nil {
+	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 		return err
 	}
 

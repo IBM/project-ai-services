@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const certsDirName = "certs"
@@ -113,7 +113,7 @@ func validateCertificateChanges(opts *catalogUtils.PodmanConfigureOptions) error
 func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, sslCertPath, sslKeyPath string) error {
 	// Compute the current domain configuration based on the provided SSL certificates
 	// This uses the same logic as initial configuration
-	currentDomainSuffix, err := caddy.ComputeDomainConfig(sslCertPath, sslKeyPath, "")
+	currentDomainSuffix, err := utils.ComputeDomainSuffix(sslCertPath, sslKeyPath, "")
 	if err != nil {
 		return fmt.Errorf("failed to compute current domain: %w", err)
 	}
