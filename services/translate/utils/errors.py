@@ -51,4 +51,18 @@ def _raise_job_failed(detail: str) -> NoReturn:
         detail={"error": {"code": "JOB_FAILED", "message": detail, "status": 410}},
     )
 
+
+def _raise_context_limit_exceeded(detail: str, diagnostics: dict) -> NoReturn:
+    raise HTTPException(
+        status_code=413,
+        detail={
+            "error": {
+                "code": "CONTEXT_LIMIT_EXCEEDED",
+                "message": detail,
+                "status": 413,
+                "diagnostics": diagnostics,
+            }
+        },
+    )
+
 # Made with Bob

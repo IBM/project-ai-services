@@ -20,12 +20,11 @@ from common.misc_utils import get_logger, get_utc_timestamp
 from common.validation_utils import validate_file_content, validate_file_extension
 from translate.utils.errors import (
     _raise_file_too_large,
-    _raise_invalid_language,
     _raise_job_failed,
     _raise_job_not_complete,
-    _raise_same_language,
     _raise_unsupported_file_type,
 )
+from translate.utils.language import validate_languages
 from translate.db.manager import db_manager
 from translate.models import (
     JobCreatedResponse,
@@ -53,61 +52,6 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _normalise_language(value: Optional[str]) -> str:
-    """Lowercase + strip; treat empty/None as 'auto'."""
-    if not value or not value.strip():
-        return "auto"
-    return value.strip().lower()
-
-
-def _validate_languages(
-    source_language: str,
-    target_language: str,
-) -> tuple[str, str]:
-    """
-    Validate and normalise both language parameters.
-
-    Returns ``(normalised_source, normalised_target)`` on success.
-    Raises ``HTTPException`` on any validation failure.
-    """
-    supported = settings.translate.supported_languages_list
-    supported_display = ", ".join(s.capitalize() for s in sorted(supported))
-
-    norm_source = _normalise_language(source_language)
-    norm_target = _normalise_language(target_language)
-
-    # target must not be "auto"
-    if norm_target == "auto":
-        _raise_invalid_language(
-            f"'auto' is not valid for target_language. "
-            f"Please specify an explicit target language. Supported: {supported_display}."
-        )
-
-    # target must be in allowlist
-    if norm_target not in supported:
-        _raise_invalid_language(
-            f"'{target_language}' is not a supported language. "
-            f"Supported: {supported_display}."
-        )
-
-    # source (if explicit) must be in allowlist
-    if norm_source != "auto" and norm_source not in supported:
-        _raise_invalid_language(
-            f"'{source_language}' is not a supported language. "
-            f"Supported: {supported_display}. "
-            f"Use 'auto' for source_language to auto-detect."
-        )
-
-    # explicit source must differ from target
-    if norm_source != "auto" and norm_source == norm_target:
-        _raise_same_language(
-            f"source_language and target_language must differ "
-            f"(both are '{norm_source}')."
-        )
-
-    return norm_source, norm_target
-
 
 def _job_to_detail(job) -> JobDetailResponse:
     return JobDetailResponse(
@@ -191,7 +135,7 @@ async def create_translation_job(
         _raise_unsupported_file_type(str(exc))
 
     # 3. Validate languages.
-    norm_source, norm_target = _validate_languages(source_language, target_language)
+    norm_source, norm_target = validate_languages(source_language, target_language)
 
     # 4. Check file size (txt/md only — revisit when PDF/Word support is added via digitize integration).
     max_bytes = settings.translate.max_upload_size_mb * 1024 * 1024
