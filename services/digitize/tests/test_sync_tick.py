@@ -273,7 +273,7 @@ class TestProcessNewFiles:
             # Force batch_size=1 so the two files land in separate batches
             stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
 
-            with pytest.raises(RuntimeError, match="One or more batches failed"):
+            with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
                 asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
         assert call_count["n"] == 2
@@ -289,7 +289,7 @@ class TestProcessNewFiles:
         scanner = self._make_scanner(download_raises=RuntimeError("fail"))
         ingest_list = [("docs/report.pdf", "ck1")]
         with self._patches():
-            with pytest.raises(RuntimeError, match="One or more batches failed"):
+            with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
                 asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
     def test_add_checksum_entry_called_on_success(self):
