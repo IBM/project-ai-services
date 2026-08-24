@@ -58,7 +58,6 @@ func newPodmanGatherer() *podmanGatherer {
 //   - Always-on: system info, secrets, network, volumes — Podman-level data
 //     that is useful regardless of catalog state.
 func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
-
 	logger.InfolnCtx(ctx, "Starting must-gather for Podman runtime…")
 
 	rt, err := podmanRuntime.NewPodmanClient()
