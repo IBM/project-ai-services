@@ -1405,8 +1405,9 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
+    connector_error = f"error coming from sync seq {seq}: {error}" if error else error
     db_manager.update_connector_after_sync(
-        connector_id, status=status, last_sync_at=now, error=error
+        connector_id, status=status, last_sync_at=now, error=connector_error
     )
     return True
 
