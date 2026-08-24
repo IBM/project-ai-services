@@ -196,7 +196,7 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 			return nil, fmt.Errorf("failed to scan linked service endpoint row: %w", err)
 		}
 
-		ep.URL = extractFirstServiceURL(endpointsJSON)
+		ep.URL = extractAPIEndpointURL(endpointsJSON)
 		results = append(results, ep)
 	}
 
@@ -207,12 +207,14 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	return results, nil
 }
 
-// extractFirstServiceURL parses a JSONB endpoints array (shape: [{"type":"service","url":"..."},...])
-// and returns the URL of the first entry whose "type" is "service".
-// The "service" type is the pod-level base URL written by the deployer — this is the base URL
-// used to call Digitize's /v1/connectors endpoint.
-// Returns an empty string when the array is empty, malformed, or contains no "service" entry.
-func extractFirstServiceURL(endpointsJSON []byte) string {
+// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "api".
+// Both Podman and OpenShift deployers register the Digitize backend URL with type "api"
+// (Podman route annotation "4000:digitize-backend-<slug>:api"; OpenShift route label
+// "ai-services.io/endpoint-type: api"). This is the base URL used to call
+// Digitize's /v1/connectors endpoint during credential propagation.
+// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
+func extractAPIEndpointURL(endpointsJSON []byte) string {
 	if len(endpointsJSON) == 0 {
 		return ""
 	}
@@ -223,7 +225,7 @@ func extractFirstServiceURL(endpointsJSON []byte) string {
 	}
 
 	for _, ep := range endpoints {
-		if t, ok := ep["type"].(string); ok && t == "service" {
+		if t, ok := ep["type"].(string); ok && t == "api" {
 			if u, ok := ep["url"].(string); ok {
 				return u
 			}
