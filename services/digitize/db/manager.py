@@ -1533,7 +1533,6 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
-                now = datetime.now(timezone.utc)
                 task = ConversionTask(
                     task_id=task_id,
                     job_id=job_id,
@@ -1544,8 +1543,7 @@ class DatabaseManager:
                     page_count=page_count,
                     is_large=is_large,
                     status=status,
-                    queued_at=now,
-                    updated_at=now,
+                    queued_at=datetime.now(timezone.utc),
                 )
                 session.add(task)
                 session.flush()
@@ -1572,7 +1570,7 @@ class DatabaseManager:
                     _ = (task.task_id, task.job_id, task.doc_id, task.operation,
                          task.cached_file, task.output_format, task.page_count,
                          task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at, task.updated_at)
+                         task.queued_at, task.started_at, task.completed_at)
                     session.expunge(task)
                 return task
         except SQLAlchemyError as e:
@@ -1599,7 +1597,7 @@ class DatabaseManager:
                     _ = (task.task_id, task.job_id, task.doc_id, task.operation,
                          task.cached_file, task.output_format, task.page_count,
                          task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at, task.updated_at)
+                         task.queued_at, task.started_at, task.completed_at)
                     session.expunge(task)
                 return task
         except SQLAlchemyError as e:
@@ -1621,7 +1619,7 @@ class DatabaseManager:
                     _ = (t.task_id, t.job_id, t.doc_id, t.operation,
                          t.cached_file, t.output_format, t.page_count,
                          t.is_large, t.status, t.result_path, t.error,
-                         t.queued_at, t.started_at, t.completed_at, t.updated_at)
+                         t.queued_at, t.started_at, t.completed_at)
                     session.expunge(t)
                 return tasks
         except SQLAlchemyError as e:
@@ -1643,7 +1641,7 @@ class DatabaseManager:
                     _ = (t.task_id, t.job_id, t.doc_id, t.operation,
                          t.cached_file, t.output_format, t.page_count,
                          t.is_large, t.status, t.result_path, t.error,
-                         t.queued_at, t.started_at, t.completed_at, t.updated_at)
+                         t.queued_at, t.started_at, t.completed_at)
                     session.expunge(t)
                 return tasks
         except SQLAlchemyError as e:
@@ -1767,7 +1765,6 @@ class DatabaseManager:
                 now = datetime.now(timezone.utc)
                 updates: Dict[str, Any] = {
                     "status": status,
-                    "updated_at": now,
                 }
                 if status == "running":
                     updates["started_at"] = now
@@ -1813,7 +1810,7 @@ class DatabaseManager:
                     _ = (task.task_id, task.job_id, task.doc_id, task.operation,
                          task.cached_file, task.output_format, task.page_count,
                          task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at, task.updated_at)
+                         task.queued_at, task.started_at, task.completed_at)
                     session.expunge(task)
                 return task
         except SQLAlchemyError as e:
@@ -1853,7 +1850,6 @@ class DatabaseManager:
                     .values(
                         status="running",
                         started_at=now,
-                        updated_at=now,
                     )
                     .returning(ConversionTask)
                 )
@@ -1866,7 +1862,7 @@ class DatabaseManager:
                 _ = (task.task_id, task.job_id, task.doc_id, task.operation,
                      task.cached_file, task.output_format, task.page_count,
                      task.is_large, task.status, task.result_path, task.error,
-                     task.queued_at, task.started_at, task.completed_at, task.updated_at)
+                     task.queued_at, task.started_at, task.completed_at)
                 session.expunge(task)
                 return task
         except SQLAlchemyError as e:
@@ -1917,7 +1913,7 @@ class DatabaseManager:
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id.in_(candidate_ids))
-                    .values(status="queued", queued_at=now, updated_at=now)
+                    .values(status="queued", queued_at=now)
                 )
                 result = cast(CursorResult, session.execute(stmt))
                 promoted = result.rowcount

@@ -101,6 +101,22 @@ def _init_database():
         raise RuntimeError(f"Database connection required but failed: {exc}")
 
 
+def _shutdown(dispatcher_task: asyncio.Task) -> None:
+    """Cancel the dispatcher and release sync resources on application shutdown.
+
+    Cancels ``dispatcher_task`` (caller must await it to absorb CancelledError),
+    closes DB connections, and stops the stderr monitor.
+    """
+    dispatcher_task.cancel()
+    logger.info("Application shutting down...")
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as exc:
+        logger.error(f"Error closing database connections: {exc}", exc_info=True)
+    stderr_monitor.stop()
+
+
 def _recover_zombie_jobs():
     """Recover orphan / zombie jobs left over from a previous app server run."""
     try:
@@ -223,21 +239,12 @@ async def lifespan(app: FastAPI):
     async with _connector_scheduler_lifespan():
         yield
 
-    # Shutdown — cancel dispatcher then release DB connections.
-    dispatcher_task.cancel()
+    # Shutdown — cancel dispatcher, close DB connections, stop monitor.
+    _shutdown(dispatcher_task)
     try:
         await dispatcher_task
     except asyncio.CancelledError:
         pass
-
-    logger.info("Application shutting down...")
-    try:
-        close_db_connections()
-        logger.info("Database connections closed")
-    except Exception as exc:
-        logger.error(f"Error closing database connections: {exc}", exc_info=True)
-
-    stderr_monitor.stop()
 
 
 

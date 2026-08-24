@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     queued_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     started_at      TIMESTAMPTZ,
     completed_at    TIMESTAMPTZ,
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_ct_operation    CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_ct_output_format CHECK (output_format IN ('json', 'md', 'txt')),
     CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'))
