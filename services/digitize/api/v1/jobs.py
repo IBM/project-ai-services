@@ -316,7 +316,10 @@ async def create_job(
 
         return {"job_id": job_id}
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to create job: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error in create_job: {exc}")

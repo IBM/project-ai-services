@@ -68,7 +68,10 @@ async def import_metadata(payload: models.ImportRequest):
         finally:
             await db_ops.release_import_export_lock()
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to import metadata: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except ValueError as exc:
         logger.error(f"Invalid import request: {exc}")
@@ -139,7 +142,10 @@ async def export_metadata(
         finally:
             await db_ops.release_import_export_lock()
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to export metadata: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except ValueError as exc:
         logger.error(f"Invalid export request: {exc}")

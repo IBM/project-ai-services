@@ -145,7 +145,10 @@ async def create_connector(body: ConnectorCreateRequest):
                 f"Scheduler registration failed for {connector_id!r}: {sched_exc}",
                 exc_info=True,
             )
-            raise
+            raise RuntimeError(
+                f"Failed to register scheduler job for connector {connector_id!r} "
+                f"during connector creation: {sched_exc}"
+            ) from sched_exc
 
         db_ops.insert_connector(
             connector_id=connector_id,
@@ -186,7 +189,10 @@ async def create_connector(body: ConnectorCreateRequest):
         # encryption key not found
         logger.error(f"Encryption key error: {exc}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to create connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error creating connector: {exc}", exc_info=True)
@@ -283,7 +289,10 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     except RuntimeError as exc:
         logger.error(f"Encryption key error: {exc}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to update connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error updating connector {connector_id}: {exc}", exc_info=True)
@@ -337,7 +346,10 @@ async def delete_connector(connector_id: str):
 
         return Response(status_code=204)
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to delete connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
@@ -508,7 +520,10 @@ async def list_connectors():
             )
             for c in connectors
         ]
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to list connectors: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error listing connectors: {exc}", exc_info=True)
@@ -559,7 +574,10 @@ async def get_connector(connector_id: str):
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to get connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error fetching connector {connector_id}: {exc}", exc_info=True)
@@ -683,7 +701,10 @@ async def trigger_sync(connector_id: str):
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
     except SyncLocked as exc:
         APIError.raise_error(ErrorCode.RESOURCE_LOCKED, str(exc))
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to trigger sync for connector {connector_id!r}: HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
@@ -749,7 +770,11 @@ async def cancel_sync(connector_id: str, sync_seq: int):
         logger.info(f"Cancel-sync signal sent for connector {connector_id!r} (seq={sync_seq})")
         return Response(status_code=204)
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to cancel sync for connector {connector_id!r} (seq={sync_seq}): "
+            f"HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(f"Unexpected error cancelling sync for {connector_id}: {exc}", exc_info=True)
@@ -803,7 +828,11 @@ async def get_sync_history(
 
         return SyncLogResponse(total=total, limit=limit, offset=offset, items=items)
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to get sync history for connector {connector_id!r}: "
+            f"HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(
@@ -856,7 +885,11 @@ async def get_sync(connector_id: str, sync_seq: int):
             error=log.error or "",
         )
 
-    except HTTPException:
+    except HTTPException as exc:
+        logger.error(
+            f"Failed to get sync {sync_seq} for connector {connector_id!r}: "
+            f"HTTP {exc.status_code} - {exc.detail}"
+        )
         raise
     except Exception as exc:
         logger.error(
