@@ -56,7 +56,7 @@ from digitize.utils.db import (
     update_connector_total_files,
     update_sync_log,
 )
-from digitize.utils.jobs import generate_uuid, initialize_job_state
+from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
 
 logger = get_logger("sync_tick")
 
@@ -305,8 +305,8 @@ async def _process_new_files(
         batch_dir = staging_base / batch_dir_name
         batch_dir.mkdir(parents=True, exist_ok=True)
 
-        # checksum → filename for post-ingest checksum registration
-        checksum_to_filename: dict[str, str] = {}
+        # filename → checksum, built during download phase
+        filename_to_checksum: dict[str, str] = {}
 
         try:
             for remote_path, checksum in batch:
@@ -320,7 +320,7 @@ async def _process_new_files(
                         f"{connector_id!r}; skipping file"
                     )
                     continue
-                checksum_to_filename[checksum] = filename
+                filename_to_checksum[filename] = checksum
 
             # Cancellation checkpoint: bail after each batch of downloads.
             interrupt = _check_interrupt_call(connector_id, sync_seq)
@@ -329,7 +329,7 @@ async def _process_new_files(
                     f"Connector {connector_id!r} interrupted (type={interrupt.value})"
                 )
 
-            filenames = list(checksum_to_filename.values())
+            filenames = list(filename_to_checksum.keys())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
             doc_id_dict = initialize_job_state(
                 job_id=job_id,
@@ -339,12 +339,30 @@ async def _process_new_files(
                 job_name=job_name,
             )
 
-            for checksum, filename in checksum_to_filename.items():
-                add_connector_checksum_entry(connector_id, checksum, doc_id_dict[filename])
+            # doc_id → checksum: built from doc_id_dict (filename→doc_id) + filename_to_checksum
+            doc_id_to_checksum: dict[str, str] = {
+                doc_id: filename_to_checksum[filename]
+                for filename, doc_id in doc_id_dict.items()
+                if filename in filename_to_checksum
+            }
 
             await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
             await _wait_for_job(job_id, connector_id, sync_seq)
+
+            job_stats = get_job_document_stats(job_id)
+            for doc in job_stats["completed_docs"]:
+                checksum = doc_id_to_checksum.get(doc["id"])
+                if checksum is not None:
+                    add_connector_checksum_entry(connector_id, checksum, doc["id"])
+
+            if job_stats["failed_count"] > 0:
+                logger.warning(
+                    f"Batch {batch_number} for connector {connector_id!r}: "
+                    f"{job_stats['failed_count']} of {job_stats['total_docs']} "
+                    f"document(s) failed ingestion"
+                )
+                batch_failed = True
 
         except asyncio.CancelledError:
             raise

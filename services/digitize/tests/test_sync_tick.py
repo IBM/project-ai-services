@@ -198,6 +198,18 @@ class TestProcessNewFiles:
         scanner.verify_integrity.return_value = True
         return scanner
 
+    @staticmethod
+    def _completed_stats(filename: str, doc_id: str) -> dict:
+        """Helper: stats dict where the single doc completed successfully."""
+        doc = {"id": doc_id, "name": filename, "status": "completed"}
+        return {"completed_docs": [doc], "failed_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1}
+
+    @staticmethod
+    def _failed_stats(filename: str, doc_id: str) -> dict:
+        """Helper: stats dict where the single doc failed."""
+        doc = {"id": doc_id, "name": filename, "status": "failed"}
+        return {"completed_docs": [], "failed_docs": [doc], "total_docs": 1, "failed_count": 1, "completed_count": 0}
+
     def _patches(self, ingest_raises=None):
         """Return a context-manager stack that patches all external calls."""
         from contextlib import ExitStack
@@ -217,6 +229,12 @@ class TestProcessNewFiles:
         # job reaches a terminal state.  With get_job mocked to return None the
         # status never becomes terminal → infinite sleep → test hangs.
         stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
+        stack.enter_context(
+            patch(
+                f"{DB_MODULE}.get_job_document_stats",
+                return_value=self._completed_stats("report.pdf", "doc-1"),
+            )
+        )
         stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
         # cancellation checkpoint must not fire in normal test runs
         stack.enter_context(
@@ -263,6 +281,12 @@ class TestProcessNewFiles:
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid"))
             stack.enter_context(patch(f"{DB_MODULE}.ingest"))
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
+            stack.enter_context(
+                patch(
+                    f"{DB_MODULE}.get_job_document_stats",
+                    return_value=self._completed_stats("b.pdf", "doc-2"),
+                )
+            )
             stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING)
@@ -293,11 +317,70 @@ class TestProcessNewFiles:
                 asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
 
     def test_add_checksum_entry_called_on_success(self):
+        """Checksum entry is written only for docs that completed successfully."""
         scanner = self._make_scanner()
         ingest_list = [("docs/report.pdf", "ck1")]
-        with self._patches() as stack:
+        with self._patches():
             with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
                 asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
+        mock_add.assert_called_once_with("conn-1", "ck1", "doc-1")
+
+    def test_add_checksum_entry_not_called_when_doc_fails(self):
+        """If every doc in the batch failed, no checksum entries must be written."""
+        scanner = self._make_scanner()
+        ingest_list = [("docs/report.pdf", "ck1")]
+        with self._patches():
+            with patch(f"{DB_MODULE}.get_job_document_stats",
+                       return_value=self._failed_stats("report.pdf", "doc-1")), \
+                 patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
+                with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
+                    asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
+        mock_add.assert_not_called()
+
+    def test_partial_failure_registers_only_successful_checksums(self):
+        """Partial batch: one doc succeeds, one fails → only the successful checksum is stored."""
+        import digitize.connectors.sync_tick as _st_mod
+
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        # Two files in separate batches so we control per-batch stats independently.
+        # Use a single batch with two docs instead; doc-1 completes, doc-2 fails.
+        ingest_list = [("a.pdf", "ck1"), ("b.pdf", "ck2")]
+        partial_stats = {
+            "completed_docs": [{"id": "doc-1", "name": "a.pdf", "status": "completed"}],
+            "failed_docs":    [{"id": "doc-2", "name": "b.pdf", "status": "failed"}],
+            "total_docs": 2,
+            "failed_count": 1,
+            "completed_count": 1,
+        }
+
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            mock_settings = stack.enter_context(patch(f"{DB_MODULE}.settings"))
+            mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
+            stack.enter_context(
+                patch(f"{DB_MODULE}.initialize_job_state", return_value={"a.pdf": "doc-1", "b.pdf": "doc-2"})
+            )
+            stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid"))
+            stack.enter_context(patch(f"{DB_MODULE}.ingest"))
+            stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_job_document_stats", return_value=partial_stats)
+            )
+            stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING)
+            )
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
+            )
+            with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
+                with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
+                    asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
+
+        # Only ck1 (a.pdf) should be stored; ck2 (b.pdf) must not be.
         mock_add.assert_called_once_with("conn-1", "ck1", "doc-1")
 
 
@@ -817,6 +900,11 @@ class TestWaitForJob:
 # ---------------------------------------------------------------------------
 
 class TestProcessNewFilesExtra:
+    @staticmethod
+    def _completed_stats(filename: str = "report.pdf", doc_id: str = "doc-1") -> dict:
+        doc = {"id": doc_id, "name": filename, "status": "completed"}
+        return {"completed_docs": [doc], "failed_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1}
+
     def _base_patches(self):
         from contextlib import ExitStack
         stack = ExitStack()
@@ -829,6 +917,9 @@ class TestProcessNewFilesExtra:
         stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid-1"))
         stack.enter_context(patch(f"{DB_MODULE}.ingest"))
         stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
+        stack.enter_context(
+            patch(f"{DB_MODULE}.get_job_document_stats", return_value=self._completed_stats())
+        )
         stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
         stack.enter_context(
             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING)
@@ -893,6 +984,9 @@ class TestProcessNewFilesExtra:
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid-1"))
             stack.enter_context(patch(f"{DB_MODULE}.ingest"))
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_job_document_stats", return_value=self._completed_stats("file.pdf", "doc-1"))
+            )
             stack.enter_context(patch(f"{DB_MODULE}.cleanup_staging_directory"))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING)
@@ -930,6 +1024,10 @@ class TestProcessNewFilesExtra:
             with patch.object(_st_mod, "_BATCH_SIZE", 1), \
                  patch(f"{DB_MODULE}.initialize_job_state", side_effect=[
                      {"a.pdf": "doc-1"}, {"b.pdf": "doc-2"}
+                 ]), \
+                 patch(f"{DB_MODULE}.get_job_document_stats", side_effect=[
+                     self._completed_stats("a.pdf", "doc-1"),
+                     self._completed_stats("b.pdf", "doc-2"),
                  ]):
                 asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
                                                [("a.pdf", "ck1"), ("b.pdf", "ck2")]))
