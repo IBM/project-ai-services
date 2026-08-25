@@ -489,7 +489,7 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated Name"),
 		"values.yaml":   "key: value\n",
 	}, true)
-	archiveBytes, _, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, _, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	meta := &bundlemetadata.ServiceMetadata{ID: "my-service", Type: bundlemetadata.CatalogTypeService, Ver: "2.0.0", DisplayName: "Updated Name"}
@@ -559,7 +559,7 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", "Same Version"),
 	}, true)
-	archiveBytes, meta, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	repo := &mockBundleRepo{
@@ -643,7 +643,7 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
-	archiveBytes, meta, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	existing := &BundleResponse{
@@ -1346,15 +1346,28 @@ func TestDeleteBundle_NoRunningInstances_Proceeds(t *testing.T) {
 
 // mockCatalogProvider is a test double for CatalogProvider.
 type mockCatalogProvider struct {
-	reload func(ctx context.Context) error
+	reload          func(ctx context.Context) error
+	serviceExists   func(id string) bool
+	componentExists func(componentType, id string) bool
 }
 
 func (m *mockCatalogProvider) Reload(ctx context.Context) error {
 	return m.reload(ctx)
 }
 
-func (m *mockCatalogProvider) ServiceExists(_ string) bool         { return false }
-func (m *mockCatalogProvider) ComponentExists(_, _ string) bool   { return false }
+func (m *mockCatalogProvider) ServiceExists(id string) bool {
+	if m.serviceExists != nil {
+		return m.serviceExists(id)
+	}
+	return false
+}
+
+func (m *mockCatalogProvider) ComponentExists(componentType, id string) bool {
+	if m.componentExists != nil {
+		return m.componentExists(componentType, id)
+	}
+	return false
+}
 
 // alwaysReloads returns a reloader that records the number of calls and always succeeds.
 func alwaysReloads() (*mockCatalogProvider, *int) {
@@ -1373,6 +1386,63 @@ func failsOnReload(err error) *mockCatalogProvider {
 	return &mockCatalogProvider{
 		reload: func(_ context.Context) error { return err },
 	}
+}
+
+// -----------------------------------------------------------------------
+// checkCatalogCollision — ValidateBundle catalog-collision tests
+// -----------------------------------------------------------------------
+
+// TestValidateBundle_ServiceCollision_Returns422 verifies that when the catalog
+// already has a service registered under the archive's id, ValidateBundle
+// returns a 422 ValidationError instead of bypassing the check.
+func TestValidateBundle_ServiceCollision_Returns422(t *testing.T) {
+	catalog := &mockCatalogProvider{
+		serviceExists: func(id string) bool { return id == "my-service" },
+	}
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog service")
+}
+
+// TestValidateBundle_ComponentCollision_Returns422 verifies that when the catalog
+// already has a component registered under the archive's type/id, ValidateBundle
+// returns a 422 ValidationError instead of bypassing the check.
+func TestValidateBundle_ComponentCollision_Returns422(t *testing.T) {
+	catalog := &mockCatalogProvider{
+		componentExists: func(componentType, id string) bool {
+			return componentType == "llm" && id == "my-provider"
+		},
+	}
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog component")
+}
+
+// TestValidateBundle_NoCollision_Passes verifies that when the catalog does not
+// report a collision, ValidateBundle proceeds past checkCatalogCollision.
+func TestValidateBundle_NoCollision_Passes(t *testing.T) {
+	catalog := &mockCatalogProvider{
+		serviceExists: func(_ string) bool { return false },
+	}
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
+	}, true)
+
+	result, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }
 
 // TestReloadAfterProcess_CalledOnSuccess verifies that Reload is invoked after
@@ -1474,7 +1544,7 @@ func TestReloadAfterProcess_FailureMarksRowFailed(t *testing.T) {
 	}
 
 	svc := &bundleService{
-		repo:            repo,
+		repo:    repo,
 		catalog: failsOnReload(reloadErr),
 	}
 
@@ -1619,10 +1689,10 @@ func TestDeleteBundle_ReloadCalledOnSuccess(t *testing.T) {
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
 	svc := &bundleService{
-		repo:            repo,
-		svcRepo:         noSvcRepo,
-		compRepo:        noCompRepo,
-		catalog: reloader,
+		repo:     repo,
+		svcRepo:  noSvcRepo,
+		compRepo: noCompRepo,
+		catalog:  reloader,
 	}
 
 	resp := existingBundleResponse()
@@ -1655,10 +1725,10 @@ func TestDeleteBundle_ReloadFailureMarksRowFailed(t *testing.T) {
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
 	svc := &bundleService{
-		repo:            repo,
-		svcRepo:         noSvcRepo,
-		compRepo:        noCompRepo,
-		catalog: failsOnReload(reloadErr),
+		repo:     repo,
+		svcRepo:  noSvcRepo,
+		compRepo: noCompRepo,
+		catalog:  failsOnReload(reloadErr),
 	}
 
 	resp := existingBundleResponse()

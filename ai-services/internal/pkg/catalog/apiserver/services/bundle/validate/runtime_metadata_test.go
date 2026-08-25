@@ -87,7 +87,7 @@ func TestPodmanValidator_ValidMetadata(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -100,7 +100,7 @@ func TestPodmanValidator_MetadataMissingName(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'name' is required")
 }
 
@@ -113,7 +113,7 @@ func TestPodmanValidator_MetadataMissingVersion(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'version' is required")
 }
 
@@ -126,7 +126,7 @@ func TestPodmanValidator_MetadataZeroCPU(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
 }
 
@@ -139,7 +139,7 @@ func TestPodmanValidator_MetadataZeroMemory(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.memory' must be greater than 0")
 }
 
@@ -152,7 +152,7 @@ func TestPodmanValidator_MetadataStorageZeroIsValid(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -166,7 +166,7 @@ func TestPodmanValidator_VersionMismatch(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "podman/metadata.yaml")
 }
@@ -181,7 +181,7 @@ func TestPodmanValidator_MetadataWithPodTemplateExecutions(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -194,7 +194,7 @@ func TestPodmanValidator_MetadataInvalidYAML(t *testing.T) {
 		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusBadRequest, "podman/metadata.yaml")
 }
 
@@ -203,7 +203,7 @@ func TestPodmanValidator_NoPodmanDir_SkipsMetadataCheck(t *testing.T) {
 		"metadata.yaml": validRootMeta(),
 	})
 
-	err := validate.NewPodmanBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -221,7 +221,7 @@ func TestOpenShiftValidator_ValidMetadata(t *testing.T) {
 		"openshift/templates/svc.yaml":  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -234,7 +234,7 @@ func TestOpenShiftValidator_MetadataMissing(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "openshift/metadata.yaml")
 }
 
@@ -248,7 +248,7 @@ func TestOpenShiftValidator_MetadataMissingName(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'name' is required")
 }
 
@@ -263,7 +263,7 @@ func TestOpenShiftValidator_MetadataVersionMismatch(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "openshift/metadata.yaml")
 }
@@ -279,7 +279,7 @@ func TestOpenShiftValidator_ChartVersionMismatch(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "openshift/Chart.yaml")
 }
@@ -294,7 +294,7 @@ func TestOpenShiftValidator_MetadataZeroCPU(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
 }
 
@@ -308,7 +308,7 @@ func TestOpenShiftValidator_MetadataStorageZeroIsValid(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }
 
@@ -322,7 +322,7 @@ func TestOpenShiftValidator_MetadataInvalidYAML(t *testing.T) {
 		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusBadRequest, "openshift/metadata.yaml")
 }
 
@@ -331,6 +331,6 @@ func TestOpenShiftValidator_NoOpenShiftDir_SkipsMetadataCheck(t *testing.T) {
 		"metadata.yaml": validRootMeta(),
 	})
 
-	err := validate.NewOpenShiftBundleValidator().Validate(archive, "", "1.0.0")
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	require.NoError(t, err)
 }

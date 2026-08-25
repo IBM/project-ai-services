@@ -39,22 +39,20 @@ func NewOpenShiftBundleValidator() *OpenShiftBundleValidator {
 // Validate checks that the archive contains a valid OpenShift runtime sub-directory.
 // If no openshift/ directory is present the validator returns nil early — the bundle
 // simply does not target the OpenShift runtime.
-// When openshift/ is present, Validate runs three checks in order:
-//  1. Structural: required files (Chart.yaml, values.yaml, values.schema.json,
-//     templates/*.yaml) must exist.
-//  2. Semantic: openshift/metadata.yaml and openshift/Chart.yaml are parsed; all
-//     required fields are validated and both versions must equal rootVersion.
-//  3. Helm validation: the openshift/ sub-tree is loaded in-memory as a Helm chart
-//     and validated in two stages:
+// When openshift/ is present, Validate runs two passes over the archive:
+//  1. collectOpenShiftPaths — one gzip/tar stream that records structural presence,
+//     captures openshift/metadata.yaml and Chart.yaml bytes for semantic checks, and
+//     also builds the []*archive.BufferedFile slice needed for Helm loading.
+//  2. Helm validation — loads the in-memory file slice (no further archive scan) and
+//     validates in two stages:
 //     a. chart.Validate() — checks Chart.yaml metadata (apiVersion, name, semver version, type).
 //     b. engine.Render()  — renders all templates against default values to surface
 //     Go template syntax errors and undefined variable references.
+//
+// The Chart.yaml version equality check is done inside helmValidateOpenShift after
+// loader.LoadFiles populates chrt.Metadata.Version, removing the need for a separate
+// ValidateOpenShiftChartVersion YAML decode.
 func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVersion string) error {
-	topDir, err := resolveTopDir(archiveBytes, topDir)
-	if err != nil {
-		return err
-	}
-
 	found, err := collectOpenShiftPaths(archiveBytes, topDir)
 	if err != nil {
 		return err
@@ -71,15 +69,13 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 		return err
 	}
 
-	if err := bundlemetadata.ValidateOpenShiftChartVersion(found.chartBytes, rootVersion); err != nil {
-		return err
-	}
-
-	return helmValidateOpenShift(archiveBytes, topDir)
+	return helmValidateOpenShift(found.bufferedFiles, rootVersion)
 }
 
-// openShiftPaths tracks the presence of files required by the OpenShift layout and
-// carries the raw bytes of openshift/metadata.yaml and Chart.yaml for semantic validation.
+// openShiftPaths tracks the presence of files required by the OpenShift layout,
+// carries the raw bytes of openshift/metadata.yaml for semantic validation, and
+// accumulates the []*archive.BufferedFile slice used by Helm loading — all
+// collected in a single archive scan.
 type openShiftPaths struct {
 	runtimeDirSeen bool // set on the first entry under openshift/
 	hasMetadata    bool
@@ -87,8 +83,8 @@ type openShiftPaths struct {
 	hasValues      bool
 	hasSchema      bool
 	hasTemplFile   bool
-	metadataBytes  []byte // raw content of openshift/metadata.yaml
-	chartBytes     []byte // raw content of openshift/Chart.yaml
+	metadataBytes  []byte                 // raw content of openshift/metadata.yaml
+	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
 }
 
 // collectOpenShiftPaths walks the archive once, records which required OpenShift paths
@@ -114,6 +110,7 @@ func collectOpenShiftPaths(archiveBytes []byte, topDir string) (*openShiftPaths,
 }
 
 // recordEntry updates found based on the archive entry sub-path (relative to openshift/).
+// Every regular file is also appended to bufferedFiles for Helm loading.
 func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []byte) {
 	if hdr.Typeflag == tar.TypeDir {
 		return
@@ -124,7 +121,6 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 		found.metadataBytes = content
 	case sub == "Chart.yaml":
 		found.hasChart = true
-		found.chartBytes = content
 	case sub == "values.yaml":
 		found.hasValues = true
 	case sub == "values.schema.json":
@@ -132,6 +128,8 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml"):
 		found.hasTemplFile = true
 	}
+	// Accumulate every regular file for Helm loading (eliminates collectOpenShiftBufferedFiles).
+	found.bufferedFiles = append(found.bufferedFiles, &archive.BufferedFile{Name: sub, Data: content})
 }
 
 // validateOpenShiftPaths returns a ValidationError when any required OpenShift path is absent.
@@ -173,20 +171,17 @@ func collectMissingOpenShiftFiles(found *openShiftPaths) []string {
 	return missing
 }
 
-// helmValidateOpenShift loads the openshift/ sub-tree from the archive entirely
-// in-memory as a Helm chart (using the same archive.BufferedFile + loader.LoadFiles
-// pattern as LoadChartFromCatalogFS) and runs two validation stages:
+// helmValidateOpenShift loads the provided openshift/ file slice (already collected
+// by collectOpenShiftPaths — no further archive scan) as an in-memory Helm chart and
+// runs two validation stages:
 //  1. chart.Validate() — verifies Chart.yaml metadata (apiVersion, name, semver version, type).
-//  2. engine.Render()  — renders all templates against the chart's default values to
+//  2. Chart version equality — chrt.Metadata.Version must equal rootVersion; using the
+//     already-parsed value avoids a redundant YAML decode of Chart.yaml.
+//  3. engine.Render()  — renders all templates against the chart's default values to
 //     surface Go template syntax errors and undefined variable references.
 //
 // No filesystem writes are performed.
-func helmValidateOpenShift(archiveBytes []byte, topDir string) error {
-	files, err := collectOpenShiftBufferedFiles(archiveBytes, topDir)
-	if err != nil {
-		return err
-	}
-
+func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion string) error {
 	chrt, err := loader.LoadFiles(files)
 	if err != nil {
 		return &validators.ValidationError{
@@ -199,6 +194,18 @@ func helmValidateOpenShift(archiveBytes []byte, topDir string) error {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf("openshift Chart.yaml is invalid: %s", err),
+		}
+	}
+
+	// chart version equality check — reuses the already-parsed chrt.Metadata.Version
+	// instead of re-decoding Chart.yaml bytes a second time.
+	if chrt.Metadata.Version != rootVersion {
+		return &validators.ValidationError{
+			Code: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf(
+				"version mismatch: root metadata.yaml has %q but openshift/Chart.yaml has %q",
+				rootVersion, chrt.Metadata.Version,
+			),
 		}
 	}
 
@@ -221,36 +228,6 @@ func helmValidateOpenShift(archiveBytes []byte, topDir string) error {
 	}
 
 	return nil
-}
-
-// collectOpenShiftBufferedFiles walks the archive and collects every file under
-// the openshift/ sub-directory into []*archive.BufferedFile, with paths relative
-// to the chart root (e.g. "Chart.yaml", "templates/svc.yaml"). This mirrors the
-// pattern used by LoadChartFromCatalogFS and embed.go's LoadChart.
-func collectOpenShiftBufferedFiles(archiveBytes []byte, topDir string) ([]*archive.BufferedFile, error) {
-	prefix := openShiftRuntime + "/"
-	var files []*archive.BufferedFile
-
-	err := scanEntriesWithContent(archiveBytes, func(name string, hdr *tar.Header, content []byte) (bool, error) {
-		rel := stripTopDir(name, topDir)
-		if !strings.HasPrefix(rel, prefix) || hdr.Typeflag == tar.TypeDir {
-			return false, nil
-		}
-
-		chartRel := strings.TrimPrefix(rel, prefix)
-		if chartRel == "" {
-			return false, nil
-		}
-
-		files = append(files, &archive.BufferedFile{Name: chartRel, Data: content})
-
-		return false, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return files, nil
 }
 
 // Ensure OpenShiftBundleValidator implements BundleValidator at compile time.

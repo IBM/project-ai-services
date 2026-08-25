@@ -113,7 +113,7 @@ func TestPeekMetadata_ServiceWrapped(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", "My Service"),
 	}, true)
 
-	data, meta, err := peekMetadata(bytes.NewReader(archive))
+	data, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 	// raw bytes returned must equal the original archive
 	assert.Equal(t, archive, data)
@@ -130,7 +130,7 @@ func TestPeekMetadata_ServiceFlat(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("flat-svc", "2.0.0", "Flat"),
 	}, false)
 
-	_, meta, err := peekMetadata(bytes.NewReader(archive))
+	_, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 	sm := meta.(*bundlemetadata.ServiceMetadata)
 	assert.Equal(t, "flat-svc", sm.ID)
@@ -143,7 +143,7 @@ func TestPeekMetadata_ComponentWrapped(t *testing.T) {
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
 	}, true)
 
-	_, meta, err := peekMetadata(bytes.NewReader(archive))
+	_, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 	cm := meta.(*bundlemetadata.ComponentMetadata)
 	// CatalogID is the composite <component_type>--<id>
@@ -159,7 +159,7 @@ func TestPeekMetadata_MetadataNestedDeeper_NotFound(t *testing.T) {
 		"subdir/metadata.yaml": serviceMetaYAML("deep", "1.0.0", ""),
 	}, true)
 
-	_, _, err := peekMetadata(bytes.NewReader(archive))
+	_, _, _, err := peekMetadata(bytes.NewReader(archive))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -167,7 +167,7 @@ func TestPeekMetadata_MetadataNestedDeeper_NotFound(t *testing.T) {
 }
 
 func TestPeekMetadata_NotGzip(t *testing.T) {
-	_, _, err := peekMetadata(bytes.NewReader([]byte("not a gzip")))
+	_, _, _, err := peekMetadata(bytes.NewReader([]byte("not a gzip")))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -180,7 +180,7 @@ func TestPeekMetadata_EmptyArchive(t *testing.T) {
 	require.NoError(t, gzip.NewWriter(&buf).Close()) // minimal valid gzip, no tar content
 	require.NoError(t, gw.Close())
 
-	_, _, err := peekMetadata(bytes.NewReader(buf.Bytes()))
+	_, _, _, err := peekMetadata(bytes.NewReader(buf.Bytes()))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -191,7 +191,7 @@ func TestPeekMetadata_NoMetadataYAML(t *testing.T) {
 		"other.yaml": "irrelevant: true\n",
 	}, true)
 
-	_, _, err := peekMetadata(bytes.NewReader(archive))
+	_, _, _, err := peekMetadata(bytes.NewReader(archive))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -205,11 +205,11 @@ func TestPeekMetadata_ReturnedBytesCanBeReused(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
 	}, true)
 
-	data, _, err := peekMetadata(bytes.NewReader(archive))
+	data, _, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	// A second peek on the returned bytes must succeed.
-	_, meta2, err := peekMetadata(bytes.NewReader(data))
+	_, meta2, _, err := peekMetadata(bytes.NewReader(data))
 	require.NoError(t, err)
 	assert.Equal(t, "svc", meta2.(*bundlemetadata.ServiceMetadata).ID)
 }

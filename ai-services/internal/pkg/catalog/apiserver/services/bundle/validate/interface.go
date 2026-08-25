@@ -43,10 +43,12 @@ import (
 // A nil error means the archive is valid for this runtime.
 type BundleValidator interface {
 	// Validate inspects the archive for runtime-specific structural requirements.
-	// archiveBytes is the raw .tar.gz content; topDir is the inferred top-level
-	// directory name inside the archive (may be empty for flat archives);
+	// archiveBytes is the raw .tar.gz content; topDir is the top-level directory
+	// name inferred by peekMetadata (empty string for flat archives);
 	// rootVersion is the version from the root metadata.yaml that all runtime
 	// metadata versions must match.
+	// Callers must supply the topDir resolved from peekMetadata — validators no
+	// longer infer it themselves.
 	Validate(archiveBytes []byte, topDir, rootVersion string) error
 }
 
@@ -118,29 +120,3 @@ func stripTopDir(path, topDir string) string {
 	return strings.TrimPrefix(path, prefix)
 }
 
-// inferTopDir returns the top-level directory name from the first archive entry
-// that contains a slash, or "" for flat archives.
-func inferTopDir(archiveBytes []byte) (string, error) {
-	var topDir string
-	err := scanEntriesWithContent(archiveBytes, func(name string, _ *tar.Header, _ []byte) (bool, error) {
-		if strings.Contains(name, "/") {
-			topDir = strings.SplitN(name, "/", 2)[0] //nolint:mnd
-
-			return true, nil
-		}
-
-		return false, nil
-	})
-
-	return topDir, err
-}
-
-// resolveTopDir returns topDir unchanged when it is already known, or infers it
-// from the archive when it is empty. Used by both runtime validators.
-func resolveTopDir(archiveBytes []byte, topDir string) (string, error) {
-	if topDir != "" {
-		return topDir, nil
-	}
-
-	return inferTopDir(archiveBytes)
-}

@@ -38,11 +38,6 @@ func NewPodmanBundleValidator() *PodmanBundleValidator {
 //  2. Semantic: podman/metadata.yaml is parsed, required fields are validated, and
 //     its version is checked against rootVersion (the root metadata.yaml version).
 func (v *PodmanBundleValidator) Validate(archiveBytes []byte, topDir, rootVersion string) error {
-	topDir, err := resolveTopDir(archiveBytes, topDir)
-	if err != nil {
-		return err
-	}
-
 	found, err := collectPodmanPaths(archiveBytes, topDir)
 	if err != nil {
 		return err

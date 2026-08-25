@@ -30,20 +30,20 @@ type CatalogProvider interface {
 
 // bundleService implements BundleServiceInterface.
 type bundleService struct {
-	repo            repository.BundleRepository
-	svcRepo         repository.ServiceRepository
-	compRepo        repository.ComponentRepository
-	catalog         CatalogProvider // nil on CLI / test paths
+	repo     repository.BundleRepository
+	svcRepo  repository.ServiceRepository
+	compRepo repository.ComponentRepository
+	catalog  CatalogProvider // nil on CLI / test paths
 }
 
 // NewBundleService creates a new bundleService backed by the given repositories.
 // catalog may be nil on CLI / test paths — Reload and catalog-check calls are skipped when nil.
 func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository, catalog CatalogProvider) BundleServiceInterface {
 	return &bundleService{
-		repo:    repo,
-		svcRepo: svcRepo,
+		repo:     repo,
+		svcRepo:  svcRepo,
 		compRepo: compRepo,
-		catalog: catalog,
+		catalog:  catalog,
 	}
 }
 
@@ -71,7 +71,7 @@ func metaFields(meta any) (catalogType, catalogID, version, name string) {
 //
 // No DB row is written and CatalogProvider is not reloaded.
 func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, error) {
-	archiveBytes, meta, err := peekMetadata(file)
+	archiveBytes, meta, topDir, err := peekMetadata(file)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,8 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 	}
 
 	// Podman and OpenShift validations are independent — run them concurrently.
-	// Each validator resolves topDir lazily from the archive bytes.
+	// topDir is threaded in from peekMetadata so each validator skips its own
+	// inferTopDir scan of the same bytes.
 	_, _, rootVersion, _ := metaFields(meta)
 	runtimeValidators := []validate.BundleValidator{
 		validate.NewPodmanBundleValidator(),
@@ -93,7 +94,7 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 		wg.Add(1)
 		go func(validator validate.BundleValidator) {
 			defer wg.Done()
-			if err := validator.Validate(archiveBytes, "", rootVersion); err != nil {
+			if err := validator.Validate(archiveBytes, topDir, rootVersion); err != nil {
 				errCh <- err
 			}
 		}(v)
@@ -101,8 +102,10 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 	wg.Wait()
 	close(errCh)
 
-	if err := <-errCh; err != nil {
-		return nil, err
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return buildValidationResult(meta)
@@ -178,7 +181,7 @@ func buildValidationResult(meta any) (any, error) {
 //     On failure after step 5: mark row failed and store the error message.
 func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userID string) (*BundleResponse, error) {
 	// Step 1: peek minimal identity fields from root metadata.yaml.
-	archiveBytes, meta, err := peekMetadata(file)
+	archiveBytes, meta, _, err := peekMetadata(file)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +283,7 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, catalogType,
 //     On failure after step 4: mark row failed, store error message.
 func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleResponse, file io.Reader, _ string) (*BundleResponse, error) {
 	// Step 1: peek minimal identity fields from root metadata.yaml.
-	archiveBytes, meta, err := peekMetadata(file)
+	archiveBytes, meta, _, err := peekMetadata(file)
 	if err != nil {
 		return nil, err
 	}

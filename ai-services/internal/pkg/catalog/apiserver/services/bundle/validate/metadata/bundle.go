@@ -19,18 +19,6 @@ const (
 	CatalogTypeComponent = "component"
 )
 
-// CatalogChecker provides catalog-state queries during metadata validation.
-// It is satisfied by *catalog.CatalogProvider but defined here so neither the
-// validate package nor its callers need to import the concrete catalog package.
-type CatalogChecker interface {
-	// ServiceExists reports whether a service with the given ID is registered
-	// in the catalog (embedded or active bundle).
-	ServiceExists(id string) bool
-	// ComponentExists reports whether a component with the given type and ID is
-	// registered in the catalog (embedded or active bundle).
-	ComponentExists(componentType, id string) bool
-}
-
 // ServiceMetadata holds the parsed identity fields for a service bundle.
 type ServiceMetadata struct {
 	ID          string

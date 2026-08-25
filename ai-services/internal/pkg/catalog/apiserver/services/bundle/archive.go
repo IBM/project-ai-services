@@ -60,35 +60,40 @@ func catalogTypeToDir(catalogType string) string {
 // peekMetadata reads the entire archive into memory, locates the root metadata.yaml,
 // parses all required fields, and returns:
 //   - the raw archive bytes (so callers can hand the same bytes to extractAndMeasure
-//     without re-reading the original io.Reader), and
-//   - either a *bundlemetadata.ServiceMetadata or *bundlemetadata.ComponentMetadata.
+//     without re-reading the original io.Reader),
+//   - either a *bundlemetadata.ServiceMetadata or *bundlemetadata.ComponentMetadata, and
+//   - the top-level directory name inferred from the archive structure (empty for flat archives).
+//
+// Threading topDir out avoids a redundant extra scan by each runtime validator, which
+// would otherwise call resolveTopDir / inferTopDir on the same bytes a second time.
 //
 // Returns *ValidationError{Code:400} on I/O or archive errors and
 // *ValidationError{Code:422} on missing/invalid metadata fields.
-func peekMetadata(r io.Reader) ([]byte, any, error) {
+func peekMetadata(r io.Reader) ([]byte, any, string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, nil, &validators.ValidationError{
+		return nil, nil, "", &validators.ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("failed to read archive: %s", err),
 		}
 	}
 
-	meta, err := parseMetadataFromBytes(data)
+	meta, topDir, err := parseMetadataFromBytes(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
-	return data, meta, nil
+	return data, meta, topDir, nil
 }
 
 // parseMetadataFromBytes walks the gzip-compressed tar archive stored in data,
 // finds the root metadata.yaml (either at the top level or one directory deep),
 // and delegates to parseMetadataYAML.
-func parseMetadataFromBytes(data []byte) (any, error) {
+// It also returns the inferred topDir so callers do not need a second scan.
+func parseMetadataFromBytes(data []byte) (any, string, error) {
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, &validators.ValidationError{
+		return nil, "", &validators.ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("invalid gzip archive: %s", err),
 		}
@@ -102,7 +107,8 @@ func parseMetadataFromBytes(data []byte) (any, error) {
 // and delegates to parseMetadataYAML once found.
 // topDir is inferred from the first entry that contains a slash; flat archives
 // (no top-level directory) are handled via the bare "metadata.yaml" match.
-func scanArchiveForMetadata(tr *tar.Reader) (any, error) {
+// It returns both the parsed metadata and the inferred topDir.
+func scanArchiveForMetadata(tr *tar.Reader) (any, string, error) {
 	var topDir string
 
 	for {
@@ -111,7 +117,7 @@ func scanArchiveForMetadata(tr *tar.Reader) (any, error) {
 			break
 		}
 		if err != nil {
-			return nil, &validators.ValidationError{
+			return nil, "", &validators.ValidationError{
 				Code:    http.StatusBadRequest,
 				Message: fmt.Sprintf("error reading archive: %s", err),
 			}
@@ -123,14 +129,14 @@ func scanArchiveForMetadata(tr *tar.Reader) (any, error) {
 
 		meta, done, err := tryReadMetadataEntry(tr, hdr, topDir)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if done {
-			return meta, nil
+			return meta, topDir, nil
 		}
 	}
 
-	return nil, &validators.ValidationError{
+	return nil, "", &validators.ValidationError{
 		Code:    http.StatusBadRequest,
 		Message: "metadata.yaml not found in archive root",
 	}
@@ -185,7 +191,7 @@ func parseMetadataYAML(data []byte) (any, error) {
 			Ver:         m.Version,
 			DisplayName: m.Name,
 		}, nil
-	default: // CatalogTypeComponent — ValidateRootMetadata already rejected unknown types
+	case bundlemetadata.CatalogTypeComponent:
 		return &bundlemetadata.ComponentMetadata{
 			ID:            m.ID,
 			Type:          m.Type,
@@ -193,6 +199,10 @@ func parseMetadataYAML(data []byte) (any, error) {
 			Ver:           m.Version,
 			DisplayName:   m.Name,
 		}, nil
+	default:
+		// ValidateRootMetadata already rejects unknown types before we reach here,
+		// so this branch is only reachable if a new type is added without a matching case.
+		return nil, fmt.Errorf("parseMetadataYAML: unhandled catalog type %q — add a case branch", m.Type)
 	}
 }
 
