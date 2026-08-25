@@ -17,31 +17,23 @@ type OpenShiftMetadataYAML struct {
 	Resources runtimeResources `yaml:"resources"`
 }
 
-// ValidateOpenShiftMetadata parses and validates openshift/metadata.yaml.
-// rootVersion is the version from the root metadata.yaml; it must match the
-// version declared in openshift/metadata.yaml.
-func ValidateOpenShiftMetadata(data []byte, rootVersion string) error {
+// ParseAndValidateOpenShiftMetadata parses openshift/metadata.yaml, validates all
+// required fields, and returns the parsed version string so the caller can perform
+// a three-way version equality check (root == openshift/metadata.yaml == Chart.yaml)
+// in one place.
+func ParseAndValidateOpenShiftMetadata(data []byte) (version string, err error) {
 	var m OpenShiftMetadataYAML
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		return &validators.ValidationError{
+		return "", &validators.ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("openshift/metadata.yaml: failed to parse: %s", err),
 		}
 	}
 	if err := validateCommonRuntimeFields(m.Name, m.Version, m.Resources, "openshift/metadata.yaml:"); err != nil {
-		return err
-	}
-	if m.Version != rootVersion {
-		return &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"version mismatch: root metadata.yaml has %q but openshift/metadata.yaml has %q",
-				rootVersion, m.Version,
-			),
-		}
+		return "", err
 	}
 
-	return nil
+	return m.Version, nil
 }
 
 // ValidateOpenShiftChartVersion parses Chart.yaml and checks that its version

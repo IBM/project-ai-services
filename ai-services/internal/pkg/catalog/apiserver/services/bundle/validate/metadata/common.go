@@ -18,6 +18,13 @@ type runtimeResources struct {
 // validateCommonRuntimeFields checks the fields that are required in every runtime
 // metadata.yaml regardless of which runtime (podman or openshift) owns the file.
 // prefix is the error message prefix, e.g. "podman/metadata.yaml:".
+//
+// Rules:
+//   - name:             required, non-blank
+//   - version:          required, non-blank
+//   - resources.cpu:    must be > 0
+//   - resources.memory: must be > 0
+//   - resources.storage: must be >= 0 (0 is valid — cloud-based components have no local storage)
 func validateCommonRuntimeFields(name, version string, res runtimeResources, prefix string) error {
 	if strings.TrimSpace(name) == "" {
 		return &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: prefix + " 'name' is required"}
@@ -31,6 +38,9 @@ func validateCommonRuntimeFields(name, version string, res runtimeResources, pre
 	if res.Memory <= 0 {
 		return &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: prefix + " 'resources.memory' must be greater than 0"}
 	}
-	// storage: 0 is valid — cloud-based components have no local storage requirement.
+	if res.Storage < 0 {
+		return &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: prefix + " 'resources.storage' must be 0 or greater"}
+	}
+
 	return nil
 }

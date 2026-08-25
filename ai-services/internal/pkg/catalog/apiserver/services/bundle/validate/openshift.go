@@ -65,11 +65,17 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 		return err
 	}
 
-	if err := bundlemetadata.ValidateOpenShiftMetadata(found.metadataBytes, rootVersion); err != nil {
+	// Parse openshift/metadata.yaml and retrieve its version for the three-way check below.
+	metaVersion, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(found.metadataBytes)
+	if err != nil {
 		return err
 	}
 
-	return helmValidateOpenShift(found.bufferedFiles, rootVersion)
+	// All three versions — root metadata.yaml, openshift/metadata.yaml, and
+	// openshift/Chart.yaml — must be identical. helmValidateOpenShift carries out
+	// the Chart.yaml check and receives both versions so it can report exactly
+	// which pair mismatches.
+	return helmValidateOpenShift(found.bufferedFiles, rootVersion, metaVersion)
 }
 
 // openShiftPaths tracks the presence of files required by the OpenShift layout,
@@ -173,15 +179,15 @@ func collectMissingOpenShiftFiles(found *openShiftPaths) []string {
 
 // helmValidateOpenShift loads the provided openshift/ file slice (already collected
 // by collectOpenShiftPaths — no further archive scan) as an in-memory Helm chart and
-// runs two validation stages:
+// enforces a three-way version equality check plus two Helm validation stages:
 //  1. chart.Validate() — verifies Chart.yaml metadata (apiVersion, name, semver version, type).
-//  2. Chart version equality — chrt.Metadata.Version must equal rootVersion; using the
-//     already-parsed value avoids a redundant YAML decode of Chart.yaml.
+//  2. Three-way version check — rootVersion == metaVersion == Chart.yaml version.
+//     Each mismatch pair is reported with a precise error message.
 //  3. engine.Render()  — renders all templates against the chart's default values to
 //     surface Go template syntax errors and undefined variable references.
 //
 // No filesystem writes are performed.
-func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion string) error {
+func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion, metaVersion string) error {
 	chrt, err := loader.LoadFiles(files)
 	if err != nil {
 		return &validators.ValidationError{
@@ -197,14 +203,24 @@ func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion string) er
 		}
 	}
 
-	// chart version equality check — reuses the already-parsed chrt.Metadata.Version
-	// instead of re-decoding Chart.yaml bytes a second time.
-	if chrt.Metadata.Version != rootVersion {
+	// Three-way version equality: root metadata.yaml == openshift/metadata.yaml == openshift/Chart.yaml.
+	// Check each pair independently so the error message names the exact mismatch.
+	chartVersion := chrt.Metadata.Version
+	if metaVersion != rootVersion {
+		return &validators.ValidationError{
+			Code: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf(
+				"version mismatch: root metadata.yaml has %q but openshift/metadata.yaml has %q",
+				rootVersion, metaVersion,
+			),
+		}
+	}
+	if chartVersion != rootVersion {
 		return &validators.ValidationError{
 			Code: http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf(
 				"version mismatch: root metadata.yaml has %q but openshift/Chart.yaml has %q",
-				rootVersion, chrt.Metadata.Version,
+				rootVersion, chartVersion,
 			),
 		}
 	}
