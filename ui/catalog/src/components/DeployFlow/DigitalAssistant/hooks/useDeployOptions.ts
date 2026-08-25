@@ -7,8 +7,8 @@ import {
 } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 
-// Fetches deploy options and all component provider schemas eagerly on mount. Failed schemas are skipped,  reopening the tearsheet re-triggers them; StepOne warns if any are still missing.
-export const useDeployOptions = () => {
+// Fetches deploy options and all component provider schemas eagerly on mount. Failed schemas are skipped, reopening the tearsheet re-triggers them; StepOne warns if any are still missing.
+export const useDeployOptions = (open: boolean) => {
   const {
     selectedArchitectureId,
     getDeployOptions,
@@ -45,9 +45,9 @@ export const useDeployOptions = () => {
     !deployOptionsError &&
     !deployOptionsLoading;
 
-  // Step 1 — fetch deploy options
+  // Step 1 — fetch deploy options; re-runs when the tearsheet reopens after an error.
   useEffect(() => {
-    if (!selectedArchitectureId) return;
+    if (!open || !selectedArchitectureId) return;
 
     const isStale = isDeployOptionsStale(selectedArchitectureId);
 
@@ -71,6 +71,7 @@ export const useDeployOptions = () => {
         });
     }
   }, [
+    open,
     selectedArchitectureId,
     deployOptions,
     deployOptionsLoading,
@@ -86,7 +87,7 @@ export const useDeployOptions = () => {
   // Service-component and service-level schemas are fetched in the background
   // without blocking the StepOne Next button.
   useEffect(() => {
-    if (!deployOptions) return;
+    if (!open || !deployOptions) return;
 
     const seen = new Set<string>();
     const globalPairs: Array<{ componentType: string; providerId: string }> =
@@ -235,6 +236,7 @@ export const useDeployOptions = () => {
       }),
     ]);
   }, [
+    open,
     deployOptions,
     getProviderParams,
     setProviderParams,

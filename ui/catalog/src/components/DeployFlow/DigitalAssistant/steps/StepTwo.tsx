@@ -203,6 +203,9 @@ export const StepTwo: React.FC<DAStepProps> = ({
   const serviceParamsError = useDeployStore(
     (state) => state.serviceParamsError,
   );
+  const providerParamsError = useDeployStore(
+    (state) => state.providerParamsError,
+  );
 
   // Check if any service's schema failed to load
   const failedServiceNames = useMemo(() => {
@@ -211,10 +214,19 @@ export const StepTwo: React.FC<DAStepProps> = ({
       .map((s) => s.name || s.id);
   }, [deployOptions.services, serviceParamsError]);
 
+  // Check if any service-component provider schema failed to load (background pairs).
+  const hasProviderParamsError = useMemo(() => {
+    return deployOptions.services.some((s) =>
+      s.components.some((c) =>
+        c.providers.some((p) => !!providerParamsError[`${c.type}:${p.id}`]),
+      ),
+    );
+  }, [deployOptions.services, providerParamsError]);
+
   // Notify parent so it can gate the Deploy button.
   useEffect(() => {
-    onComponentError?.(failedServiceNames.length > 0);
-  }, [failedServiceNames, onComponentError]);
+    onComponentError?.(failedServiceNames.length > 0 || hasProviderParamsError);
+  }, [failedServiceNames, hasProviderParamsError, onComponentError]);
 
   const { resources, resourcesLoading, resourcesError } = useResources();
   const calculatedResources = useMemo(
@@ -583,10 +595,14 @@ export const StepTwo: React.FC<DAStepProps> = ({
         onResourceStatusChange={onResourceStatusChange}
       />
 
-      {failedServiceNames.length > 0 && (
+      {(failedServiceNames.length > 0 || hasProviderParamsError) && (
         <InlineNotification
           kind="error"
-          title={`Failed to load configuration for ${failedServiceNames.join(", ")}.`}
+          title={
+            failedServiceNames.length > 0
+              ? `Failed to load configuration for ${failedServiceNames.join(", ")}.`
+              : "Failed to load service configuration options."
+          }
           subtitle="Cancel and reopen to try again."
           lowContrast
           hideCloseButton

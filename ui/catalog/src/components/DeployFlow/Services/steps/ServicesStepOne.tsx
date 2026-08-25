@@ -91,7 +91,7 @@ export const StepOne: React.FC<StepProps> = ({
     providerSchemas,
   ]);
 
-  // Set default model param for each component when its models arrive from the store.
+  // Set default model param for step 1 components (excludes llm/reranker — those are seeded in StepTwo).
   useEffect(() => {
     if (!selectedServiceId || !deployOptions.components) return;
 
@@ -101,24 +101,26 @@ export const StepOne: React.FC<StepProps> = ({
     const updates: Record<string, ComponentConfig> = {};
     let hasUpdates = false;
 
-    deployOptions.components.forEach((component) => {
-      const componentConfig = serviceConfig.components[component.type];
-      if (!componentConfig || componentConfig.params?.model) return;
+    deployOptions.components
+      .filter((c) => !["llm", "reranker"].includes(c.type))
+      .forEach((component) => {
+        const componentConfig = serviceConfig.components[component.type];
+        if (!componentConfig || componentConfig.params?.model) return;
 
-      const models =
-        componentModels[`${selectedServiceId}:${component.type}`] || [];
-      const matchingModel = models.find(
-        (m) => m.providerId === componentConfig.providerId,
-      );
+        const models =
+          componentModels[`${selectedServiceId}:${component.type}`] || [];
+        const matchingModel = models.find(
+          (m) => m.providerId === componentConfig.providerId,
+        );
 
-      if (matchingModel) {
-        updates[component.type] = {
-          ...componentConfig,
-          params: { ...componentConfig.params, model: matchingModel.id },
-        };
-        hasUpdates = true;
-      }
-    });
+        if (matchingModel) {
+          updates[component.type] = {
+            ...componentConfig,
+            params: { ...componentConfig.params, model: matchingModel.id },
+          };
+          hasUpdates = true;
+        }
+      });
 
     if (hasUpdates) {
       onChange({
