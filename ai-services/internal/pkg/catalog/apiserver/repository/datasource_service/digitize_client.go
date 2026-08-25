@@ -3,6 +3,7 @@ package datasourceservice
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,9 +18,16 @@ const (
 )
 
 // digitizeClient is a dedicated HTTP client for Digitize propagation calls.
+// TLS verification is skipped because Digitize services are deployed with
+// cluster-internal self-signed certificates (nip.io / OpenShift routes).
 // Using a named client (rather than http.DefaultClient) ensures Transport-level
 // timeouts are set and the shared global is not inadvertently modified.
-var digitizeClient = &http.Client{Timeout: digitizeHTTPTimeout}
+var digitizeClient = &http.Client{
+	Timeout: digitizeHTTPTimeout,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // internal service-to-service call with self-signed cert
+	},
+}
 
 // digitizeUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
 // Only the fields being updated are sent; the digitize service performs a partial update.
