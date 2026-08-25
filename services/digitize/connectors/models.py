@@ -102,6 +102,23 @@ class ConnectorCreateRequest(BaseModel):
     allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "prod-sftp-reports",
+                "type": "ssh",
+                "allowed_extensions": [".pdf", ".docx"],
+                "connection_details": {
+                    "host": "sftp.example.com",
+                    "port": 22,
+                    "username": "sync_user",
+                    "password": "secret_password",
+                    "remote_path": "/exports",
+                },
+            }
+        }
+    }
+
     @field_validator("id", mode="before")
     @classmethod
     def validate_id(cls, v: Optional[str]) -> Optional[str]:
@@ -129,10 +146,36 @@ class ConnectorUpdateRequest(BaseModel):
         description="Partial connection details — only supplied keys are overwritten",
     )
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "prod-sftp-reports-updated",
+                "allowed_extensions": [".pdf", ".docx"],
+                "connection_details": {
+                    "remote_path": "/exports/v2",
+                },
+            }
+        }
+    }
+
 
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
+
+class ConnectorCreateResponse(BaseModel):
+    """Response body for POST /v1/connectors (202 Accepted)."""
+
+    id: str = Field(..., description="Unique identifier of the created connector")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890"
+            }
+        }
+    }
+
 
 class ConnectorListItem(BaseModel):
     """One connector in GET /v1/connectors list."""
@@ -145,6 +188,21 @@ class ConnectorListItem(BaseModel):
     sync_status: str
     error: Optional[str]
     total_files: int
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
+                "name": "prod-sftp-reports",
+                "type": "ssh",
+                "attached_at": "2025-01-15T10:00:00Z",
+                "last_sync_at": "2025-01-15T10:30:00Z",
+                "sync_status": "up to date",
+                "error": None,
+                "total_files": 15,
+            }
+        }
+    }
 
 
 class ConnectorDetailResponse(BaseModel):
@@ -162,6 +220,29 @@ class ConnectorDetailResponse(BaseModel):
     connection_details: Dict[str, Any]
     total_files: int
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
+                "name": "prod-sftp-reports",
+                "type": "ssh",
+                "allowed_extensions": [".pdf", ".docx"],
+                "sync_interval_seconds": 60,
+                "attached_at": "2025-01-15T10:00:00Z",
+                "last_sync_at": "2025-01-15T10:30:00Z",
+                "sync_status": "up to date",
+                "error": None,
+                "connection_details": {
+                    "host": "sftp.example.com",
+                    "port": 22,
+                    "username": "sync_user",
+                    "remote_path": "/exports",
+                },
+                "total_files": 15,
+            }
+        }
+    }
+
 
 class SyncLogItem(BaseModel):
     """One tick entry in GET /v1/connectors/{connector_id}/syncs."""
@@ -175,6 +256,21 @@ class SyncLogItem(BaseModel):
     status: str
     error: str
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "seq": 1,
+                "started_at": "2025-01-15T10:30:00Z",
+                "finished_at": "2025-01-15T10:30:15Z",
+                "total_files": 15,
+                "new_files": 3,
+                "removed_files": 0,
+                "status": "completed",
+                "error": "",
+            }
+        }
+    }
+
 
 class SyncLogResponse(BaseModel):
     """Paginated response for GET /v1/connectors/{connector_id}/syncs."""
@@ -183,6 +279,28 @@ class SyncLogResponse(BaseModel):
     limit: int
     offset: int
     items: List[SyncLogItem]
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "total": 1,
+                "limit": 50,
+                "offset": 0,
+                "items": [
+                    {
+                        "seq": 1,
+                        "started_at": "2025-01-15T10:30:00Z",
+                        "finished_at": "2025-01-15T10:30:15Z",
+                        "total_files": 15,
+                        "new_files": 3,
+                        "removed_files": 0,
+                        "status": "completed",
+                        "error": "",
+                    }
+                ],
+            }
+        }
+    }
 
 
 class SyncLogDetailResponse(BaseModel):
@@ -197,10 +315,33 @@ class SyncLogDetailResponse(BaseModel):
     status: str
     error: str
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "seq": 1,
+                "started_at": "2025-01-15T10:30:00Z",
+                "finished_at": "2025-01-15T10:30:15Z",
+                "total_files": 15,
+                "new_files": 3,
+                "removed_files": 0,
+                "status": "completed",
+                "error": "",
+            }
+        }
+    }
+
 
 class SyncTriggerResponse(BaseModel):
     """Response body for POST /v1/connectors/{connector_id}/sync."""
 
     sync_seq: int = Field(..., description="Sequence number of the active or newly-started sync")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "sync_seq": 1
+            }
+        }
+    }
 
 # Made with Bob

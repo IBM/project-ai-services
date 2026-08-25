@@ -26,6 +26,7 @@ from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_tim
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from digitize.connectors.models import (
     ConnectorCreateRequest,
+    ConnectorCreateResponse,
     ConnectorDetailResponse,
     ConnectorListItem,
     ConnectorUpdateRequest,
@@ -54,6 +55,7 @@ logger = get_logger("connectors_router")
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=ConnectorCreateResponse,
     responses={
         409: http_error_responses[409],
         500: http_error_responses[500],
@@ -112,7 +114,7 @@ async def create_connector(body: ConnectorCreateRequest):
 
         return Response(
             content=f'{{"id": "{connector_id}"}}',
-            status_code=201,
+            status_code=202,
             media_type="application/json",
         )
 
