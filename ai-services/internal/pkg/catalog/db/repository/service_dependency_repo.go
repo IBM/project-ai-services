@@ -20,6 +20,11 @@ type LinkedServiceEndpoint struct {
 	ApplicationID uuid.UUID
 	// ApplicationName is the display name of the application.
 	ApplicationName string
+	// ApplicationCatalogID is the catalog_id of the owning application (e.g. "rag").
+	ApplicationCatalogID string
+	// ApplicationDeploymentType is the deployment_type of the owning application
+	// ("architectures" or "services"), used to resolve the display name from catalog metadata.
+	ApplicationDeploymentType string
 	// URL is the first api-type endpoint URL for this service (empty when none registered).
 	URL string
 }
@@ -171,7 +176,7 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 // A single query is issued regardless of how many services are linked.
 func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error) {
 	query := `
-		SELECT sd.service_id, a.id, a.name, s.endpoints
+		SELECT sd.service_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM service_dependencies sd
 		INNER JOIN services     s ON s.id = sd.service_id
 		INNER JOIN applications a ON a.id = s.app_id
@@ -192,7 +197,7 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 			endpointsJSON []byte
 		)
 
-		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &endpointsJSON); err != nil {
+		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &ep.ApplicationCatalogID, &ep.ApplicationDeploymentType, &endpointsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan linked service endpoint row: %w", err)
 		}
 

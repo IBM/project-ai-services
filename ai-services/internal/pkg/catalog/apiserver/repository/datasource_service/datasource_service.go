@@ -255,12 +255,32 @@ func (s *DatasourceService) buildConnectedServices(ctx context.Context, connecto
 			ServiceID:       svc.ServiceID.String(),
 			ApplicationID:   svc.ApplicationID.String(),
 			ApplicationName: svc.ApplicationName,
+			Service:         s.resolveServiceInfo(svc.ApplicationCatalogID, svc.ApplicationDeploymentType),
 			SyncStatus:      syncStatus,
 			LastSyncAt:      lastSyncAt,
 		})
 	}
 
 	return services
+}
+
+// resolveServiceInfo builds a ConnectedServiceInfo by loading the display name from catalog
+// metadata for the given catalogID + deploymentType. Falls back gracefully: when the catalog
+// entry cannot be loaded the id is used as the name so the response is never blocked.
+func (s *DatasourceService) resolveServiceInfo(catalogID, deploymentType string) apimodels.ConnectedServiceInfo {
+	info := apimodels.ConnectedServiceInfo{ID: catalogID, Name: catalogID}
+
+	if deploymentType == string(dbmodels.DeploymentTypeArchitectures) {
+		if arch, err := s.catalogProvider.LoadArchitecture(catalogID); err == nil {
+			info.Name = arch.Name
+		}
+	} else {
+		if svc, err := s.catalogProvider.LoadService(catalogID); err == nil {
+			info.Name = svc.Name
+		}
+	}
+
+	return info
 }
 
 // stripSensitiveFields returns a copy of metadata with all keys listed in sensitiveFields removed.

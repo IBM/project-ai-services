@@ -30,6 +30,14 @@ type DatasourceProviderInfo struct {
 	Name string `json:"name"`
 }
 
+// ConnectedServiceInfo is the service sub-object embedded in ConnectedServiceItem.
+// id is the catalog_id of the owning application (e.g. "rag"); name is its resolved
+// display name from catalog metadata (e.g. "Digital Assistants").
+type ConnectedServiceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
 // Identity fields are sourced from the service_dependencies → services → applications DB join;
 // sync fields are fetched live from the service's Digitize pod and gracefully degrade to
@@ -41,6 +49,8 @@ type ConnectedServiceItem struct {
 	ApplicationID string `json:"application_id"`
 	// ApplicationName is the human-readable display name of the owning application.
 	ApplicationName string `json:"application_name"`
+	// Service contains the catalog identity (id + resolved name) of the owning application.
+	Service ConnectedServiceInfo `json:"service"`
 	// SyncStatus is the current sync state sourced from the Digitize pod.
 	// Set to "unknown" when the Digitize pod is unreachable.
 	SyncStatus string `json:"sync_status"`
