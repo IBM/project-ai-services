@@ -23,6 +23,8 @@ digitize:
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
   database: "digitize_metadata"
+  # @description AES-256 encryption key for the DIGITIZE database (32 raw bytes, base64-encoded).
+  dbEncryptionKey: "B374A26A71490437AA024E4FADD5B497FDFF1A8EA6FF12F6FB65AF2720B59CCF"
 
 digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
