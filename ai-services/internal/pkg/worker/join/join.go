@@ -33,23 +33,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
 const (
-	// metaKeyBaseDir is the metadata key used to transmit the worker's base
-	// directory to the control plane during registration.
-	metaKeyBaseDir = "basedir"
-
-	// metaKeyDomainSuffix is the metadata key used to transmit the resolved
-	// domain suffix to the control plane during registration.
-	metaKeyDomainSuffix = "domainSuffix"
-
-	// metaKeyHTTPSPort is the metadata key used to transmit the HTTPS port
-	// the worker's Caddy proxy listens on.
-	metaKeyHTTPSPort = "httpsPort"
-
 	// heartbeatInterval is how often the worker sends a keep-alive to the control plane.
 	heartbeatInterval = 30 * time.Second
 
@@ -120,9 +109,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	// ── Step 3: Register + stream loop ───────────────────────────────────────
 	meta := map[string]string{
-		metaKeyBaseDir:      opts.Setup.BaseDir,
-		metaKeyDomainSuffix: domainSuffix,
-		metaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
+		workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
+		workerconstants.MetaKeyDomainSuffix: domainSuffix,
+		workerconstants.MetaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
 	}
 
 	return runRegistrationLoop(ctx, rt, client, opts.Token, meta)
