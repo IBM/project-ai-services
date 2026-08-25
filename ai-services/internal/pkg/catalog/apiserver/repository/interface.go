@@ -13,6 +13,10 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
+	// GetDatasource retrieves a single datasource by ID with non-sensitive metadata and
+	// connected services enriched with live sync state from each service's Digitize pod.
+	// Returns a *ValidationError with code 404 when the connector does not exist.
+	GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

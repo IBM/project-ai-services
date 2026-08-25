@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -12,6 +13,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -22,13 +24,14 @@ const (
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
-// DatasourceService is the single implementation of the create-datasource flow.
+// DatasourceService is the implementation of the datasource business logic.
 // It is provider-agnostic: provider-specific behaviour (connection testing) is
 // delegated to a ConnectionTester looked up from the testers registry.
 // Sensitive-field identification is derived at runtime from each provider's
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
+	serviceDepsRepo dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
 	encryptionKey   string
@@ -42,12 +45,14 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
+		serviceDepsRepo: serviceDepsRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
@@ -164,6 +169,127 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	}
 
 	return result, nil
+}
+
+// GetDatasource retrieves a single datasource connector by UUID, returns its non-sensitive
+// metadata, and enriches it with a list of connected services sourced from service_dependencies,
+// each augmented with live sync state from the service's Digitize pod.
+//
+// Flow:
+//  1. Fetch the connector (without credentials) — return 404 if absent.
+//  2. Resolve the sensitive fields for this provider so they can be stripped from metadata.
+//  3. Query service_dependencies for all services linked to this connector.
+//  4. For each linked service, call GET /v1/connectors/{id} on its Digitize pod to obtain
+//     sync_status and last_sync_at. Failures degrade gracefully to sync_status="unknown".
+func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error) {
+	// Step 1: fetch connector (no credentials — safe for API response).
+	connector, err := s.connectorRepo.GetByID(ctx, id, false)
+	if err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return nil, &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: "datasource not found",
+			}
+		}
+
+		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
+	}
+
+	// Step 2: resolve provider display name and load schema to derive sensitive fields for stripping.
+	providerName := connector.Provider
+	if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
+		providerName = catalogConn.Name
+	}
+
+	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+	}
+
+	sensitiveFields := sensitiveFieldsFromSchema(schema)
+
+	// Steps 3–4: fetch linked services and enrich each with live Digitize sync state.
+	services := s.buildConnectedServices(ctx, id)
+
+	return &apimodels.GetDatasourceResponse{
+		ID:   connector.ID.String(),
+		Name: connector.Name,
+		Type: connector.Type,
+		Provider: apimodels.DatasourceProviderInfo{
+			ID:   connector.Provider,
+			Name: providerName,
+		},
+		Status:    string(connector.Status),
+		Message:   connector.Message,
+		Metadata:  stripSensitiveFields(connector.Metadata, sensitiveFields),
+		Services:  services,
+		CreatedAt: connector.CreatedAt,
+		UpdatedAt: connector.UpdatedAt,
+	}, nil
+}
+
+// buildConnectedServices queries service_dependencies for all services linked to the given
+// connector and enriches each with live sync state from its Digitize pod.
+// GetLinkedServiceEndpoints issues a single JOIN query (service_dependencies → services →
+// applications) returning the application identity and the first "api"-typed endpoint URL.
+// A query failure is non-fatal: a warning is logged and an empty slice is returned so that
+// the caller can still return the connector record successfully.
+func (s *DatasourceService) buildConnectedServices(ctx context.Context, connectorID uuid.UUID) []apimodels.ConnectedServiceItem {
+	linkedServices, err := s.serviceDepsRepo.GetLinkedServiceEndpoints(
+		ctx,
+		connectorID,
+		dbmodels.DependencyTypeConnector,
+	)
+	if err != nil {
+		logger.WarningfCtx(ctx, "failed to query linked services for datasource %s: %v", connectorID, err)
+
+		return nil
+	}
+
+	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedServices))
+	for _, svc := range linkedServices {
+		syncStatus, lastSyncAt := fetchDigitzeSyncState(ctx, connectorID, svc.URL)
+		services = append(services, apimodels.ConnectedServiceItem{
+			ServiceID:       svc.ServiceID.String(),
+			ApplicationID:   svc.ApplicationID.String(),
+			ApplicationName: svc.ApplicationName,
+			SyncStatus:      syncStatus,
+			LastSyncAt:      lastSyncAt,
+		})
+	}
+
+	return services
+}
+
+// stripSensitiveFields returns a copy of metadata with all keys listed in sensitiveFields removed.
+// The original map is never mutated. A nil or empty metadata returns an empty map.
+func stripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bool) map[string]any {
+	result := make(map[string]any, len(metadata))
+	for k, v := range metadata {
+		if !sensitiveFields[k] {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
+// and returns the sync_status and last_sync_at values.
+// If the Digitize pod is unreachable or baseURL is empty, it degrades gracefully:
+// sync_status is set to "unknown" and last_sync_at is nil. No error is returned to the caller
+// because sync state degradation must never prevent the catalog record from being returned.
+func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string) {
+	if baseURL == "" {
+		return "unknown", nil
+	}
+
+	syncStatus, lastSyncAt, err := fetchConnectorSyncFromDigitize(ctx, baseURL, connectorID.String())
+	if err != nil {
+		return "unknown", nil
+	}
+
+	return syncStatus, lastSyncAt
 }
 
 // Made with Bob

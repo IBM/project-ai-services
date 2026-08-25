@@ -16,6 +16,7 @@ import (
 // so that a missing or empty key causes a fast failure before the server accepts any requests.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	serviceDependency dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
 ) (DatasourceServiceInterface, error) {
 	encryptionKey := os.Getenv(catalogconstants.DBEncryptionKeyEnv)
@@ -25,7 +26,7 @@ func NewDatasourceService(
 
 	validator := validators.NewConnectorValidator(provider)
 
-	return datasourceservice.NewDatasourceService(connectorRepo, validator, provider, encryptionKey), nil
+	return datasourceservice.NewDatasourceService(connectorRepo, serviceDependency, validator, provider, encryptionKey), nil
 }
 
 // Made with Bob

@@ -47,11 +47,18 @@ type ConnectionTester interface {
 // fields that require encryption to be driven by the connector's schema.json rather than
 // being hardcoded in each provider implementation.
 func sensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
-	sensitive := make(map[string]bool)
+	return schemaFieldsBySection(schema, "password", "format")
+}
+
+// schemaFieldsBySection returns the set of top-level property names from a JSON Schema
+// where the given key equals the given value. Used to derive both sensitive fields
+// (format=password) and updatable fields (ui:section=Authentication) from the schema.
+func schemaFieldsBySection(schema map[string]any, value, key string) map[string]bool {
+	result := make(map[string]bool)
 
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
-		return sensitive
+		return result
 	}
 
 	for name, raw := range properties {
@@ -59,12 +66,12 @@ func sensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
 		if !ok {
 			continue
 		}
-		if fmt, ok := prop["format"].(string); ok && fmt == "password" {
-			sensitive[name] = true
+		if v, ok := prop[key].(string); ok && v == value {
+			result[name] = true
 		}
 	}
 
-	return sensitive
+	return result
 }
 
 // Made with Bob

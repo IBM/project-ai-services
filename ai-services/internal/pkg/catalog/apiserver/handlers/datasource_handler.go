@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -78,6 +79,49 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// GetDatasource godoc
+//
+//	@Summary		Get a single datasource connector
+//	@Description	Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string							true	"Datasource UUID"
+//	@Success		200	{object}	models.GetDatasourceResponse	"Datasource detail"
+//	@Failure		400	{object}	ErrorResponse					"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse					"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse					"Internal Server Error"
+//	@Router			/datasources/{id} [get]
+func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetDatasource(c.Request.Context(), id)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // Made with Bob
