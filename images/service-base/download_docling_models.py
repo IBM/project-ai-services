@@ -23,4 +23,3 @@ model_downloader.download_models(
 )
 
 print("Download complete.")
-os._exit(0)
