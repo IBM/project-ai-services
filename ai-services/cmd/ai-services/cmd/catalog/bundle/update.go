@@ -34,6 +34,7 @@ Note:
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			bundleID := args[0]
 
 			c, err := client.NewBundleClient()
@@ -41,18 +42,18 @@ Note:
 				return err
 			}
 
-			logger.Infof("Updating bundle %s from %s...\n", bundleID, filePath)
+			logger.InfofCtx(ctx, "Updating bundle %s from %s...\n", bundleID, filePath)
 
 			resp, err := c.UpdateBundle(bundleID, filePath)
 			if err != nil {
 				return err
 			}
 
-			logger.Infof("✓ Bundle updated successfully (status: %s)\n", resp.Status)
-			logger.Infof("  Catalog type: %s  |  Catalog ID: %s  |  Version: %s\n",
+			logger.InfofCtx(ctx, "✓ Bundle updated successfully (status: %s)\n", resp.Status)
+			logger.InfofCtx(ctx, "  Catalog type: %s  |  Catalog ID: %s  |  Version: %s\n",
 				resp.CatalogType, resp.CatalogID, resp.Version)
-			logger.Infof("  Dir name:     %s-%s\n", resp.CatalogID, resp.Version)
-			logger.Infoln("")
+			logger.InfofCtx(ctx, "  Dir name:     %s-%s\n", resp.CatalogID, resp.Version)
+			logger.InfolnCtx(ctx, "")
 
 			return nil
 		},

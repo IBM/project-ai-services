@@ -32,30 +32,32 @@ Note:
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			c, err := client.NewBundleClient()
 			if err != nil {
 				return err
 			}
 
-			logger.Infof("Creating bundle from %s...\n", filePath)
+			logger.InfofCtx(ctx, "Creating bundle from %s...\n", filePath)
 
 			resp, err := c.CreateBundle(filePath)
 			if err != nil {
 				return err
 			}
 
-			logger.Infoln("✓ Bundle created successfully")
-			logger.Infof("  ID:           %s\n", resp.ID)
-			logger.Infof("  Catalog type: %s\n", resp.CatalogType)
-			logger.Infof("  Catalog ID:   %s\n", resp.CatalogID)
-			logger.Infof("  Dir name:     %s-%s\n", resp.CatalogID, resp.Version)
-			logger.Infof("  Version:      %s\n", resp.Version)
-			logger.Infof("  Status:       %s\n", resp.Status)
+			logger.InfolnCtx(ctx, "✓ Bundle created successfully")
+			logger.InfofCtx(ctx, "  ID:           %s\n", resp.ID)
+			logger.InfofCtx(ctx, "  Catalog type: %s\n", resp.CatalogType)
+			logger.InfofCtx(ctx, "  Catalog ID:   %s\n", resp.CatalogID)
+			logger.InfofCtx(ctx, "  Dir name:     %s-%s\n", resp.CatalogID, resp.Version)
+			logger.InfofCtx(ctx, "  Version:      %s\n", resp.Version)
+			logger.InfofCtx(ctx, "  Status:       %s\n", resp.Status)
 			if resp.SizeBytes != nil {
-				logger.Infof("  Size:         %s\n", formatBytes(*resp.SizeBytes))
+				logger.InfofCtx(ctx, "  Size:         %s\n", formatBytes(*resp.SizeBytes))
 			}
 
-			logger.Infoln("")
+			logger.InfolnCtx(ctx, "")
 
 			return nil
 		},

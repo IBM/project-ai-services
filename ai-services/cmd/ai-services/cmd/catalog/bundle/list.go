@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -36,6 +37,8 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			c, err := client.NewBundleClient()
 			if err != nil {
 				return err
@@ -46,7 +49,7 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 				return err
 			}
 
-			return printBundleTable(resp)
+			return printBundleTable(ctx, resp)
 		},
 	}
 
@@ -59,11 +62,11 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 
 const tablePadding = 3
 
-func printBundleTable(resp *client.BundleListResponse) error {
+func printBundleTable(ctx context.Context, resp *client.BundleListResponse) error {
 	p := resp.Pagination
 
 	if p.TotalItems == 0 {
-		logger.Infoln("No bundles registered.")
+		logger.InfolnCtx(ctx, "No bundles registered.")
 
 		return nil
 	}
@@ -88,13 +91,13 @@ func printBundleTable(resp *client.BundleListResponse) error {
 
 	// Pagination summary — only shown when there is more than one page.
 	if p.TotalPages > 1 {
-		logger.Infof("\nPage %d of %d  (%d total)\n", p.Page, p.TotalPages, p.TotalItems)
+		logger.InfofCtx(ctx, "\nPage %d of %d  (%d total)\n", p.Page, p.TotalPages, p.TotalItems)
 		if p.HasNext {
-			logger.Infof("Use --page %d to see the next page.\n", p.Page+1)
+			logger.InfofCtx(ctx, "Use --page %d to see the next page.\n", p.Page+1)
 		}
 	}
 
-	logger.Infoln("")
+	logger.InfolnCtx(ctx, "")
 
 	return nil
 }

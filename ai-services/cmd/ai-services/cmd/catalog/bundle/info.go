@@ -25,6 +25,7 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			bundleID := args[0]
 
 			c, err := client.NewBundleClient()
@@ -37,23 +38,23 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 				return err
 			}
 
-			logger.Infof("ID:           %s\n", b.ID)
+			logger.InfofCtx(ctx, "ID:           %s\n", b.ID)
 			if b.Name != "" {
-				logger.Infof("Name:         %s\n", b.Name)
+				logger.InfofCtx(ctx, "Name:         %s\n", b.Name)
 			}
-			logger.Infof("Catalog type: %s\n", b.CatalogType)
-			logger.Infof("Catalog ID:   %s\n", b.CatalogID)
-			logger.Infof("Dir name:     %s-%s\n", b.CatalogID, b.Version)
-			logger.Infof("Version:      %s\n", b.Version)
-			logger.Infof("Status:       %s\n", b.Status)
+			logger.InfofCtx(ctx, "Catalog type: %s\n", b.CatalogType)
+			logger.InfofCtx(ctx, "Catalog ID:   %s\n", b.CatalogID)
+			logger.InfofCtx(ctx, "Dir name:     %s-%s\n", b.CatalogID, b.Version)
+			logger.InfofCtx(ctx, "Version:      %s\n", b.Version)
+			logger.InfofCtx(ctx, "Status:       %s\n", b.Status)
 			if b.SizeBytes != nil {
-				logger.Infof("Size:         %s\n", formatBytes(*b.SizeBytes))
+				logger.InfofCtx(ctx, "Size:         %s\n", formatBytes(*b.SizeBytes))
 			}
 			if b.CreatedBy != "" {
-				logger.Infof("Created by:   %s\n", b.CreatedBy)
+				logger.InfofCtx(ctx, "Created by:   %s\n", b.CreatedBy)
 			}
-			logger.Infof("Created at:   %s\n", b.CreatedAt.Format("2006-01-02 15:04:05"))
-			logger.Infoln("")
+			logger.InfofCtx(ctx, "Created at:   %s\n", b.CreatedAt.Format("2006-01-02 15:04:05"))
+			logger.InfolnCtx(ctx, "")
 
 			return nil
 		},

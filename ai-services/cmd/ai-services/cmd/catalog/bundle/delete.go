@@ -37,6 +37,7 @@ Note:
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			bundleID := args[0]
 
 			if !skipConfirm {
@@ -46,7 +47,7 @@ Note:
 				}
 
 				if !confirmed {
-					logger.Infoln("Aborted.")
+					logger.InfolnCtx(ctx, "Aborted.")
 
 					return nil
 				}
@@ -61,8 +62,8 @@ Note:
 				return err
 			}
 
-			logger.Infoln("✓ Bundle deleted.")
-			logger.Infoln("")
+			logger.InfolnCtx(ctx, "✓ Bundle deleted.")
+			logger.InfolnCtx(ctx, "")
 
 			return nil
 		},

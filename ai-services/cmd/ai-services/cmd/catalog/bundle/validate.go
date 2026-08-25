@@ -28,33 +28,35 @@ The command exits with a non-zero status if validation fails.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			c, err := client.NewBundleClient()
 			if err != nil {
 				return err
 			}
 
-			logger.Infof("Validating bundle from %s...\n", filePath)
+			logger.InfofCtx(ctx, "Validating bundle from %s...\n", filePath)
 
 			result, err := c.ValidateBundle(filePath)
 			if err != nil {
-				logger.Errorf("✗ Bundle validation failed: %v\n", err)
+				logger.ErrorfCtx(ctx, "✗ Bundle validation failed: %v\n", err)
 
 				return err
 			}
 
-			logger.Infoln("✓ Bundle is valid")
-			logger.Infof("  Catalog type: %s\n", result.CatalogType)
+			logger.InfolnCtx(ctx, "✓ Bundle is valid")
+			logger.InfofCtx(ctx, "  Catalog type: %s\n", result.CatalogType)
 			if result.ComponentType != "" {
-				logger.Infof("  Component type: %s\n", result.ComponentType)
+				logger.InfofCtx(ctx, "  Component type: %s\n", result.ComponentType)
 			}
-			logger.Infof("  Catalog ID:   %s\n", result.CatalogID)
-			logger.Infof("  Dir name:     %s-%s\n", result.CatalogID, result.Version)
-			logger.Infof("  Version:      %s\n", result.Version)
+			logger.InfofCtx(ctx, "  Catalog ID:   %s\n", result.CatalogID)
+			logger.InfofCtx(ctx, "  Dir name:     %s-%s\n", result.CatalogID, result.Version)
+			logger.InfofCtx(ctx, "  Version:      %s\n", result.Version)
 			if result.Name != "" {
-				logger.Infof("  Name:         %s\n", result.Name)
+				logger.InfofCtx(ctx, "  Name:         %s\n", result.Name)
 			}
 
-			logger.Infoln("")
+			logger.InfolnCtx(ctx, "")
 
 			return nil
 		},
