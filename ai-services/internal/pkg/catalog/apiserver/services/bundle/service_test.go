@@ -129,7 +129,7 @@ func TestProcessBundle_BadArchive(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader([]byte("not-gzip")), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
@@ -141,7 +141,7 @@ func TestProcessBundle_MissingMetadataYAML(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{"other.yaml": "key: val\n"}, true)
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
@@ -154,7 +154,7 @@ func TestProcessBundle_InvalidMetadataYAML(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: svc\ntype: service\n"}, true) // missing version
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
@@ -168,7 +168,7 @@ func TestProcessBundle_ConflictReturns409(t *testing.T) {
 			return &models.CatalogBundle{ID: existingID}, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
@@ -184,7 +184,7 @@ func TestProcessBundle_ConflictCheckRepoError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
@@ -202,7 +202,7 @@ func TestProcessBundle_ExtractFailsBeforeInsert(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewBundleService(repo, nil, nil, nil, nil)
+	svc := NewBundleService(repo, nil, nil, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
@@ -300,20 +300,20 @@ func existingServiceRecord() *BundleResponse {
 }
 
 func TestReplaceBundle_BadArchive(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader([]byte("not-gzip")), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
 }
 
 func TestReplaceBundle_MissingMetadataYAML(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	archive := buildArchive(t, map[string]string{"other.yaml": "key: val\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusBadRequest, "metadata.yaml not found")
 }
 
 func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	// missing version field → 422
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: my-service\ntype: service\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
@@ -321,7 +321,7 @@ func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
 }
 
 func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	// Archive has catalog_id "other-service" but existing record is "my-service".
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("other-service", "2.0.0", ""),
@@ -331,7 +331,7 @@ func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {
 }
 
 func TestReplaceBundle_CatalogTypeMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	// Existing record is a component with catalog_id "llm--my-provider".
 	// Archive also has catalog_id "llm--my-provider" but as a service type →
 	// catalog_id check passes, catalog_type check fires.
@@ -353,7 +353,7 @@ func TestReplaceBundle_CatalogTypeMismatch(t *testing.T) {
 func TestReplaceBundle_InvalidExistingID(t *testing.T) {
 	svc := func() BundleServiceInterface {
 		s, c := noRunningInstances()
-		return NewBundleService(&mockBundleRepo{}, s, c, nil, nil)
+		return NewBundleService(&mockBundleRepo{}, s, c, nil)
 	}()
 	badRecord := &BundleResponse{
 		ID:          "not-a-uuid",
@@ -377,7 +377,7 @@ func TestReplaceBundle_MarkProcessingFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
 	}, true)
@@ -401,7 +401,7 @@ func TestReplaceBundle_ExtractionFailsAfterMarkProcessing(t *testing.T) {
 		},
 	}
 	noSvcRepo2, noCompRepo2 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo2, noCompRepo2, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo2, noCompRepo2, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
 	}, true)
@@ -455,7 +455,7 @@ func TestReplaceBundle_HappyPath(t *testing.T) {
 		},
 	}
 	noSvcRepo3, noCompRepo3 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo3, noCompRepo3, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo3, noCompRepo3, nil)
 
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated Name"),
@@ -685,7 +685,7 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 // TestReplaceBundle_ComponentBundle verifies that a component bundle whose
 // catalog_id matches the existing record replaces successfully.
 func TestReplaceBundle_ComponentBundle_CatalogIDMismatch(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
 		CatalogType: bundlemetadata.CatalogTypeComponent,
@@ -705,7 +705,7 @@ func TestReplaceBundle_ComponentBundle_CatalogIDMismatch(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestGetBundleByID_InvalidUUID(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	_, err := svc.GetBundleByID(context.Background(), "not-a-uuid")
 	assertValidationError(t, err, http.StatusBadRequest, "invalid bundle id")
 }
@@ -716,7 +716,7 @@ func TestGetBundleByID_NotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	resp, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
+	resp, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
 	require.NoError(t, err)
 	assert.Nil(t, resp)
 }
@@ -727,7 +727,7 @@ func TestGetBundleByID_RepoError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	_, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
+	_, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), uuid.New().String())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get bundle")
 }
@@ -755,7 +755,7 @@ func TestGetBundleByID_Found(t *testing.T) {
 		},
 	}
 
-	resp, err := NewBundleService(repo, nil, nil, nil, nil).GetBundleByID(context.Background(), fixedID.String())
+	resp, err := NewBundleService(repo, nil, nil, nil).GetBundleByID(context.Background(), fixedID.String())
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, fixedID.String(), resp.ID)
@@ -774,14 +774,14 @@ func TestGetBundleByID_Found(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestListBundles_InvalidPage(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 0, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "page must be greater than 0")
 }
 
 func TestListBundles_InvalidPageSize(t *testing.T) {
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	_, err := svc.ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pageSize must be greater than 0")
@@ -791,7 +791,7 @@ func TestListBundles_GetCountError(t *testing.T) {
 	repo := &mockBundleRepo{
 		getCount: func(_ context.Context) (int, error) { return 0, assert.AnError },
 	}
-	_, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	_, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get bundle count")
 }
@@ -803,7 +803,7 @@ func TestListBundles_GetAllError(t *testing.T) {
 			return nil, assert.AnError
 		},
 	}
-	_, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	_, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to retrieve bundles")
 }
@@ -814,7 +814,7 @@ func TestListBundles_Empty(t *testing.T) {
 		getCount: func(_ context.Context) (int, error) { return 0, nil },
 		getAll:   func(_ context.Context, _ *repository.BundleFilters) ([]models.CatalogBundle, error) { return nil, nil },
 	}
-	resp, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
+	resp, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 1, PageSize: 20})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Empty(t, resp.Bundles)
@@ -849,7 +849,7 @@ func TestListBundles_PaginationMetadata(t *testing.T) {
 		},
 	}
 
-	resp, err := NewBundleService(repo, nil, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 2, PageSize: 10})
+	resp, err := NewBundleService(repo, nil, nil, nil).ListBundles(context.Background(), BundleListRequest{Page: 2, PageSize: 10})
 	require.NoError(t, err)
 	require.Len(t, resp.Bundles, 2)
 
@@ -887,7 +887,7 @@ func TestReplaceBundle_ServiceRunning(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -909,7 +909,7 @@ func TestReplaceBundle_ServiceRunningRepoError(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -941,7 +941,7 @@ func TestReplaceBundle_ComponentRunning(t *testing.T) {
 			return true, nil // simulate a running component
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
 	}, true)
@@ -969,7 +969,7 @@ func TestReplaceBundle_ComponentRunningRepoError(t *testing.T) {
 			return false, assert.AnError
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
 	}, true)
@@ -993,7 +993,7 @@ func TestReplaceBundle_NoRunningInstances_Proceeds(t *testing.T) {
 		},
 	}
 	noSvcRepo4, noCompRepo4 := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo4, noCompRepo4, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo4, noCompRepo4, nil)
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
@@ -1090,7 +1090,7 @@ func TestDeleteBundle_HappyPath(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1114,7 +1114,7 @@ func TestDeleteBundle_HappyPath(t *testing.T) {
 // before any repo call is made.
 func TestDeleteBundle_InvalidExistingID(t *testing.T) {
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(&mockBundleRepo{}, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, noSvcRepo, noCompRepo, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = "not-a-uuid"
@@ -1135,7 +1135,7 @@ func TestDeleteBundle_MarkDeletingFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1169,7 +1169,7 @@ func TestDeleteBundle_DeleteRepoFails(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1198,7 +1198,7 @@ func TestDeleteBundle_ServiceRunning(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 
 	err := svc.DeleteBundle(context.Background(), existingBundleResponse())
 	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
@@ -1218,7 +1218,7 @@ func TestDeleteBundle_ServiceRunningRepoError(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 
 	err := svc.DeleteBundle(context.Background(), existingBundleResponse())
 	require.Error(t, err)
@@ -1248,7 +1248,7 @@ func TestDeleteBundle_ComponentRunning(t *testing.T) {
 			return true, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	assertValidationError(t, err, http.StatusConflict, "cannot delete bundle")
@@ -1274,7 +1274,7 @@ func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 			return false, assert.AnError
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	require.Error(t, err)
@@ -1302,7 +1302,7 @@ func TestDeleteBundle_MalformedComponentCatalogID(t *testing.T) {
 			return false, nil
 		},
 	}
-	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil, nil)
+	svc := NewBundleService(&mockBundleRepo{}, svcRepo, compRepo, nil)
 
 	err := svc.DeleteBundle(context.Background(), resp)
 	require.Error(t, err)
@@ -1325,7 +1325,7 @@ func TestDeleteBundle_NoRunningInstances_Proceeds(t *testing.T) {
 		},
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
-	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil, nil)
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, nil)
 
 	resp := existingBundleResponse()
 	resp.ID = fixedID.String()
@@ -1344,19 +1344,22 @@ func TestDeleteBundle_NoRunningInstances_Proceeds(t *testing.T) {
 // CatalogReloader — mock and reload tests
 // -----------------------------------------------------------------------
 
-// mockCatalogReloader is a test double for CatalogReloader.
-type mockCatalogReloader struct {
+// mockCatalogProvider is a test double for CatalogProvider.
+type mockCatalogProvider struct {
 	reload func(ctx context.Context) error
 }
 
-func (m *mockCatalogReloader) Reload(ctx context.Context) error {
+func (m *mockCatalogProvider) Reload(ctx context.Context) error {
 	return m.reload(ctx)
 }
 
+func (m *mockCatalogProvider) ServiceExists(_ string) bool         { return false }
+func (m *mockCatalogProvider) ComponentExists(_, _ string) bool   { return false }
+
 // alwaysReloads returns a reloader that records the number of calls and always succeeds.
-func alwaysReloads() (*mockCatalogReloader, *int) {
+func alwaysReloads() (*mockCatalogProvider, *int) {
 	count := 0
-	r := &mockCatalogReloader{
+	r := &mockCatalogProvider{
 		reload: func(_ context.Context) error {
 			count++
 			return nil
@@ -1366,8 +1369,8 @@ func alwaysReloads() (*mockCatalogReloader, *int) {
 }
 
 // failsOnReload returns a reloader that always returns an error.
-func failsOnReload(err error) *mockCatalogReloader {
-	return &mockCatalogReloader{
+func failsOnReload(err error) *mockCatalogProvider {
+	return &mockCatalogProvider{
 		reload: func(_ context.Context) error { return err },
 	}
 }
@@ -1413,7 +1416,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 
 	// Call the activate → reload → re-fetch path directly, bypassing the
 	// filesystem step that requires bundleStorageRoot to exist.
-	svc := &bundleService{repo: repo, catalogReloader: reloader}
+	svc := &bundleService{repo: repo, catalog: reloader}
 
 	// Simulate what ProcessBundle does after a successful insert (steps 6–8).
 	ctx := context.Background()
@@ -1430,7 +1433,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 	}))
 
 	// Step 7: reload — loadBundleItems now sees the active row.
-	require.NoError(t, svc.catalogReloader.Reload(ctx))
+	require.NoError(t, svc.catalog.Reload(ctx))
 
 	// Step 8: re-fetch.
 	resp, err := svc.GetBundleByID(ctx, fixedID.String())
@@ -1472,14 +1475,14 @@ func TestReloadAfterProcess_FailureMarksRowFailed(t *testing.T) {
 
 	svc := &bundleService{
 		repo:            repo,
-		catalogReloader: failsOnReload(reloadErr),
+		catalog: failsOnReload(reloadErr),
 	}
 
 	// Drive the reload + markFailed path directly (extraction would fail against
 	// bundleStorageRoot, so we replicate just the post-insert steps).
 	ctx := context.Background()
 
-	if err := svc.catalogReloader.Reload(ctx); err != nil {
+	if err := svc.catalog.Reload(ctx); err != nil {
 		svc.markFailed(ctx, fixedID, err.Error())
 		require.ErrorContains(t, err, "reload boom")
 	}
@@ -1526,7 +1529,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 		},
 	}
 
-	svc := &bundleService{repo: repo, catalogReloader: reloader}
+	svc := &bundleService{repo: repo, catalog: reloader}
 	ctx := context.Background()
 
 	// Step 7: activate (mirrors what replaceBundleFiles does after rename).
@@ -1541,7 +1544,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 	}))
 
 	// Step 8: reload.
-	require.NoError(t, svc.catalogReloader.Reload(ctx))
+	require.NoError(t, svc.catalog.Reload(ctx))
 
 	// Step 10: re-fetch.
 	resp, err := svc.GetBundleByID(ctx, fixedID.String())
@@ -1568,7 +1571,7 @@ func TestReloadAfterReplace_FailureMarksRowFailed(t *testing.T) {
 			return nil
 		},
 	}
-	svc := &bundleService{repo: repo, catalogReloader: failsOnReload(reloadErr)}
+	svc := &bundleService{repo: repo, catalog: failsOnReload(reloadErr)}
 
 	ctx := context.Background()
 
@@ -1585,7 +1588,7 @@ func TestReloadAfterReplace_FailureMarksRowFailed(t *testing.T) {
 	}))
 
 	// Step 8: reload fails — replaceBundleFiles returns the error, ReplaceBundle calls markFailed.
-	if err := svc.catalogReloader.Reload(ctx); err != nil {
+	if err := svc.catalog.Reload(ctx); err != nil {
 		svc.markFailed(ctx, fixedID, err.Error())
 		require.ErrorContains(t, err, "reload after replace failed")
 	}
@@ -1619,7 +1622,7 @@ func TestDeleteBundle_ReloadCalledOnSuccess(t *testing.T) {
 		repo:            repo,
 		svcRepo:         noSvcRepo,
 		compRepo:        noCompRepo,
-		catalogReloader: reloader,
+		catalog: reloader,
 	}
 
 	resp := existingBundleResponse()
@@ -1655,7 +1658,7 @@ func TestDeleteBundle_ReloadFailureMarksRowFailed(t *testing.T) {
 		repo:            repo,
 		svcRepo:         noSvcRepo,
 		compRepo:        noCompRepo,
-		catalogReloader: failsOnReload(reloadErr),
+		catalog: failsOnReload(reloadErr),
 	}
 
 	resp := existingBundleResponse()

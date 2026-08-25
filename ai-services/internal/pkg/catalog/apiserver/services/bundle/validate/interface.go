@@ -54,50 +54,10 @@ type BundleValidator interface {
 // Shared archive helpers
 // -----------------------------------------------------------------------
 
-// scanEntries walks a gzip-compressed tar archive and calls visit for every
-// entry. visit receives the normalised forward-slash path (header name) and
-// the tar.Header. The visit function should return true to stop iteration.
-func scanEntries(archiveBytes []byte, visit func(name string, hdr *tar.Header) (stop bool, err error)) error {
-	gr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
-	if err != nil {
-		return &validators.ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("invalid gzip archive: %s", err),
-		}
-	}
-	defer func() { _ = gr.Close() }()
-
-	tr := tar.NewReader(gr)
-
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return &validators.ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("error reading archive: %s", err),
-			}
-		}
-
-		name := filepath.ToSlash(hdr.Name)
-		stop, visitErr := visit(name, hdr)
-		if visitErr != nil {
-			return visitErr
-		}
-		if stop {
-			break
-		}
-	}
-
-	return nil
-}
-
-// scanEntriesWithContent is like scanEntries but also reads each entry's content
-// and passes it to visit. It is used when callers need the raw bytes of each
-// file (e.g. to build []*archive.BufferedFile for in-memory Helm chart loading).
-// Directory entries are also visited, but content will be nil for them.
+// scanEntriesWithContent walks a gzip-compressed tar archive and calls visit
+// for every entry, passing the normalised forward-slash path, the tar.Header,
+// and the raw file bytes (nil for directory entries). The visit function should
+// return true to stop iteration early.
 func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *tar.Header, content []byte) (stop bool, err error)) error {
 	gr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
 	if err != nil {
@@ -158,13 +118,11 @@ func stripTopDir(path, topDir string) string {
 	return strings.TrimPrefix(path, prefix)
 }
 
-// InferTopDir returns the top-level directory name from the first archive entry
+// inferTopDir returns the top-level directory name from the first archive entry
 // that contains a slash, or "" for flat archives.
-// It is exported so callers in the parent bundle package can reuse the same
-// inference without duplicating archive-walking logic.
-func InferTopDir(archiveBytes []byte) (string, error) {
+func inferTopDir(archiveBytes []byte) (string, error) {
 	var topDir string
-	err := scanEntries(archiveBytes, func(name string, _ *tar.Header) (bool, error) {
+	err := scanEntriesWithContent(archiveBytes, func(name string, _ *tar.Header, _ []byte) (bool, error) {
 		if strings.Contains(name, "/") {
 			topDir = strings.SplitN(name, "/", 2)[0] //nolint:mnd
 
@@ -184,5 +142,5 @@ func resolveTopDir(archiveBytes []byte, topDir string) (string, error) {
 		return topDir, nil
 	}
 
-	return InferTopDir(archiveBytes)
+	return inferTopDir(archiveBytes)
 }

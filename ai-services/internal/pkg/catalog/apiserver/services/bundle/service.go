@@ -19,11 +19,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
-// CatalogReloader is satisfied by *catalog.CatalogProvider.
-// It is defined here so the bundle service can be tested without importing the
-// concrete provider type.
-type CatalogReloader interface {
+// CatalogProvider is satisfied by *catalog.CatalogProvider.
+// It combines catalog reload and catalog-state query capabilities so both
+// concerns are passed as a single dependency. May be nil on CLI / test paths.
+type CatalogProvider interface {
 	Reload(ctx context.Context) error
+	ServiceExists(id string) bool
+	ComponentExists(componentType, id string) bool
 }
 
 // bundleService implements BundleServiceInterface.
@@ -31,19 +33,17 @@ type bundleService struct {
 	repo            repository.BundleRepository
 	svcRepo         repository.ServiceRepository
 	compRepo        repository.ComponentRepository
-	catalogReloader CatalogReloader               // nil on CLI / test paths — Reload() calls are skipped when nil
-	catalogChecker  bundlemetadata.CatalogChecker // nil on CLI / test paths — catalog checks are skipped when nil
+	catalog         CatalogProvider // nil on CLI / test paths
 }
 
 // NewBundleService creates a new bundleService backed by the given repositories.
-// catalogReloader and catalogChecker may be nil (CLI / test paths).
-func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository, catalogReloader CatalogReloader, catalogChecker bundlemetadata.CatalogChecker) BundleServiceInterface {
+// catalog may be nil on CLI / test paths — Reload and catalog-check calls are skipped when nil.
+func NewBundleService(repo repository.BundleRepository, svcRepo repository.ServiceRepository, compRepo repository.ComponentRepository, catalog CatalogProvider) BundleServiceInterface {
 	return &bundleService{
-		repo:            repo,
-		svcRepo:         svcRepo,
-		compRepo:        compRepo,
-		catalogReloader: catalogReloader,
-		catalogChecker:  catalogChecker,
+		repo:    repo,
+		svcRepo: svcRepo,
+		compRepo: compRepo,
+		catalog: catalog,
 	}
 }
 
@@ -64,7 +64,7 @@ func metaFields(meta any) (catalogType, catalogID, version, name string) {
 //
 //  1. Read the archive into memory and parse the root metadata.yaml — all required-field
 //     checks (name, description, standalone, component_type) happen here.
-//  2. Check for a catalog collision (skipped when catalogChecker is nil).
+//  2. Check for a catalog collision (skipped when catalog is nil).
 //  3. Run Podman and OpenShift validators concurrently; each skips gracefully when its
 //     runtime directory is absent.
 //  4. Return a *ServiceValidationResult or *ComponentValidationResult.
@@ -109,22 +109,22 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 }
 
 // checkCatalogCollision returns a ValidationError when the metadata conflicts with a
-// registered catalog entry. Returns nil when catalogChecker is nil (CLI/test paths).
+// registered catalog entry. Returns nil when catalog is nil (CLI/test paths).
 func (s *bundleService) checkCatalogCollision(meta any) error {
-	if s.catalogChecker == nil {
+	if s.catalog == nil {
 		return nil
 	}
 
 	switch m := meta.(type) {
 	case *bundlemetadata.ServiceMetadata:
-		if s.catalogChecker.ServiceExists(m.ID) {
+		if s.catalog.ServiceExists(m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: service id %q conflicts with an existing catalog service; choose a unique id", m.ID),
 			}
 		}
 	case *bundlemetadata.ComponentMetadata:
-		if s.catalogChecker.ComponentExists(m.ComponentType, m.ID) {
+		if s.catalog.ComponentExists(m.ComponentType, m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: component %q (type: %s) conflicts with an existing catalog component; choose a unique id", m.ID, m.ComponentType),
@@ -251,8 +251,8 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, catalogType,
 	}
 
 	// Step 7: reload the catalog so the now-active bundle is immediately visible.
-	if s.catalogReloader != nil {
-		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+	if s.catalog != nil {
+		if reloadErr := s.catalog.Reload(ctx); reloadErr != nil {
 			s.markFailed(ctx, row.ID, reloadErr.Error())
 
 			return nil, fmt.Errorf("catalog reload failed after bundle creation: %w", reloadErr)
@@ -378,8 +378,8 @@ func (s *bundleService) replaceBundleFiles(ctx context.Context, existingID uuid.
 	}
 
 	// Step 8: reload the catalog so the replaced bundle is immediately visible.
-	if s.catalogReloader != nil {
-		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+	if s.catalog != nil {
+		if reloadErr := s.catalog.Reload(ctx); reloadErr != nil {
 			return nil, fmt.Errorf("catalog reload failed after bundle replacement: %w", reloadErr)
 		}
 	}
@@ -469,8 +469,8 @@ func (s *bundleService) deleteBundleFiles(ctx context.Context, existingID uuid.U
 	}
 
 	// Step 4: reload the catalog so the deleted bundle is no longer served.
-	if s.catalogReloader != nil {
-		if reloadErr := s.catalogReloader.Reload(ctx); reloadErr != nil {
+	if s.catalog != nil {
+		if reloadErr := s.catalog.Reload(ctx); reloadErr != nil {
 			return fmt.Errorf("catalog reload failed after bundle deletion: %w", reloadErr)
 		}
 	}
