@@ -119,3 +119,10 @@ spec:
             limits:
               cpu: {{ .Values.extract.resources.limits.cpu | quote }}
               memory: {{ .Values.extract.resources.limits.memory | quote }}
+          volumeMounts:
+            - mountPath: /var/cache/extract
+              name: cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: extract-cache

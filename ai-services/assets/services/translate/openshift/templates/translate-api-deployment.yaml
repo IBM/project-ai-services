@@ -119,3 +119,10 @@ spec:
             limits:
               cpu: {{ .Values.translate.resources.limits.cpu | quote }}
               memory: {{ .Values.translate.resources.limits.memory | quote }}
+          volumeMounts:
+            - mountPath: /var/cache/translate
+              name: cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: translate-cache
