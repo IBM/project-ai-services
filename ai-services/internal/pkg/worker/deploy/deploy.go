@@ -20,6 +20,7 @@ import (
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -28,10 +29,6 @@ const (
 	// workerApp is the app name passed to the template provider.
 	// Resolves to assets/worker/<runtime>/templates/.
 	workerApp = "worker"
-
-	// workerProxyLabel is the label used to check whether the worker proxy
-	// pod is already running — more resilient than checking by name.
-	workerProxyLabel = "ai-services.io/component=worker-proxy"
 
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
@@ -73,7 +70,7 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
 	pods, err := rt.ListPods(map[string][]string{
-		"label": {workerProxyLabel},
+		"label": {workerconstants.WorkerProxyLabel},
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: list pods: %w", err)
@@ -127,7 +124,7 @@ func writeCaddyfile(baseDir string) error {
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
 func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
-	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, workerApp)
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {

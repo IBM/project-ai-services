@@ -18,6 +18,10 @@ import (
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
+// ErrWorkerAlreadyActive is returned by Register when the named worker already
+// has an active in-memory entry (i.e. a live CommandStream is open).
+var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
+
 const (
 	// commandChannelSize is the buffer size for the per-worker command channel.
 	// Each concurrent deployment to the same worker writes one command to this
@@ -97,18 +101,19 @@ func New(repo repository.WorkerRepository) *Registry {
 // the worker declares in its RegisterRequest.
 func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
 	r.mu.Lock()
-	entry, exists := r.workers[workerName]
-	if !exists {
-		entry = &WorkerEntry{
-			WorkerName:  workerName,
-			RuntimeType: runtimeType,
-			CommandCh:   make(chan *workerpb.Command, commandChannelSize),
-			results:     make(map[string]chan *workerpb.CommandResult),
-		}
-		r.workers[workerName] = entry
-	} else {
-		entry.RuntimeType = runtimeType
+	if _, exists := r.workers[workerName]; exists {
+		r.mu.Unlock()
+
+		return nil, fmt.Errorf("%w: %s", ErrWorkerAlreadyActive, workerName)
 	}
+
+	entry := &WorkerEntry{
+		WorkerName:  workerName,
+		RuntimeType: runtimeType,
+		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
+		results:     make(map[string]chan *workerpb.CommandResult),
+	}
+	r.workers[workerName] = entry
 	r.mu.Unlock()
 
 	if r.repo != nil {

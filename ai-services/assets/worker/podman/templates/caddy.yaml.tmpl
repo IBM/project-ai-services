@@ -18,6 +18,10 @@ spec:
           # Bind to all interfaces inside the container so the host-side
           # port mapping (127.0.0.1:<random>:2019) can reach it.
           value: "0.0.0.0:2019"
+        - name: AI_SERVICES_BASE_DIR
+          # Required by 'worker uninstall': inspected at uninstall time to
+          # recover the base directory without requiring --basedir explicitly.
+          value: "{{ .BaseDir }}"
       volumeMounts:
         - name: caddy-data
           mountPath: /data/caddy:z
