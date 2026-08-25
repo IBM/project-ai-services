@@ -1287,14 +1287,14 @@ The batch capability reuses the existing extraction pipeline (tokenize → guard
 
 ### A1.1 Design Decisions
 
-| Decision | Choice | Rationale |
-|:---|:---|:---|
-| Job model | One parent job, N sub-tasks | Single job ID for tracking; per-file status via `extract_documents` table |
-| Schema scope | One schema per batch | Covers primary use case (N invoices, one schema); simplifies validation and budgeting |
+| Decision | Choice                         | Rationale |
+|:---|:-------------------------------|:---|
+| Job model | One parent job, N sub-tasks    | Single job ID for tracking; per-file status via `extract_documents` table |
+| Schema scope | One schema per batch           | Covers primary use case (N invoices, one schema); simplifies validation and budgeting |
 | Partial failure | `completed_with_errors` status | Users retrieve successful results without resubmitting the batch |
-| Intra-batch processing | Sequential | Avoids multiplying vLLM pressure; text-only files process in seconds |
-| Deletion of active batch | Blocked entirely | Consistent with single-file behavior; no partial cancellation in v1 |
-| Idempotency | Not implemented | Failed uploads create no job; client retries from scratch |
+| Intra-batch processing | Semi-parallel (with a cap)     | Avoids multiplying vLLM pressure; text-only files process in seconds |
+| Deletion of active batch | Blocked entirely               | Consistent with single-file behavior; no partial cancellation in v1 |
+| Idempotency | Not implemented                | Failed uploads create no job; client retries from scratch |
 
 ---
 
@@ -1333,7 +1333,7 @@ All file validations run before any job is created. If any file fails, the entir
 4. Stage all files to `/var/cache/extract/staging/{job_id}/`.
 5. Insert one row into `extract_jobs` with `status='accepted'`, `file_count=N`, `is_batch=true`.
 6. Insert N rows into `extract_documents` with `status='pending'`.
-7. Launch background processing via `BackgroundTasks`.
+7. Launch background processing via `asyncio.create_task`.
 8. Return `202 Accepted`.
 
 **Sample request:**
@@ -1358,16 +1358,16 @@ curl -X POST http://localhost:9500/v1/extract/jobs \
 
 **Response codes:**
 
-| Status | Description |
-|:---|:---|
-| 202 Accepted | Batch job created. |
-| 400 Bad Request | No files, too many files, or missing `schema_id`. |
-| 404 Not Found | Unknown `schema_id`. |
-| 413 Payload Too Large | Total upload size exceeds `MAX_BATCH_BYTES`. |
-| 400 Bad Request | Duplicate files or missing parameters | 
+| Status | Description                                                                    |
+|:---|:-------------------------------------------------------------------------------|
+| 202 Accepted | Batch job created.                                                             |
+| 400 Bad Request | No files, too many files, or missing `schema_id`.                              |
+| 404 Not Found | Unknown `schema_id`.                                                           |
+| 413 Payload Too Large | Total upload size exceeds `MAX_BATCH_SIZE`.                                    |
+| 400 Bad Request | Duplicate files or missing parameters                                          | 
 | 415 Unsupported Media Type | One or more files failed content validation. Error identifies failing file(s). |
-| 429 Too Many Requests | Job concurrency at capacity. |
-| 500 Internal Server Error | Unexpected failure. |
+| 429 Too Many Requests | Job concurrency at capacity.                                                   |
+| 500 Internal Server Error | Unexpected failure.                                                            |
 
 **Sample error (415):**
 
@@ -1487,40 +1487,38 @@ Extended to include batch progress counters and per-document summary.
     "job_name": "Q3 invoice batch",
     "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
     "status": "in_progress",
-    "is_batch": true,
     "file_count": 20,
     "files_completed": 12,
     "files_failed": 1,
     "files_pending": 7,
-    "metadata": {
-        "current_file": "invoice_013.txt",
-        "current_phase": "extracting"
-    },
     "documents": [
         {
             "doc_id": "a1b2c3d4-...",
             "filename": "invoice_001.txt",
             "status": "completed",
             "result_url": "/v1/extract/jobs/b6d1f0aa-.../results/a1b2c3d4-...",
-            "result_download_url": "/v1/extract/jobs/b6d1f0aa-.../results/a1b2c3d4-.../download"
+            "error": ""
         },
         {
             "doc_id": "e5f6g7h8-...",
             "filename": "invoice_002.txt",
             "status": "failed",
-            "error_code": "CONTEXT_LIMIT_EXCEEDED",
+            "result_url": "",
             "error": "Input does not fit in the model context window."
         },
         {
             "doc_id": "i9j0k1l2-...",
             "filename": "invoice_003.txt",
             "status": "in_progress",
-            "phase": "extracting"
+            "result_url": "",
+            "error": ""
         },
         {
             "doc_id": "m3n4o5p6-...",
             "filename": "invoice_004.txt",
-            "status": "pending"
+            "status": "pending",
+            "result_url": "",
+            "error": ""
         }
     ],
     "submitted_at": "2026-07-07T10:15:00Z",
@@ -1624,7 +1622,7 @@ Each document's result is retrieved individually via the `result_url` provided i
 
 ### A2.5 GET /v1/extract/jobs/{job_id}/results/{doc_id}/download — Download Result File
 
-Returns the result JSON as a downloadable file in the same format as input file.
+Returns the result JSON as a downloadable file in .json format.
 
 | Status | Description |
 |:---|:---|
@@ -1636,7 +1634,7 @@ Returns the result JSON as a downloadable file in the same format as input file.
 
 ### A2.6 Existing Single-File Result Endpoint
 
-`GET /v1/extract/jobs/{job_id}/result` (no `doc_id`) continues to work for single-file jobs. When called on a batch job (`is_batch=true`), it returns `400` directing the user to the per-document result URLs in the job details response.
+`GET /v1/extract/jobs/{job_id}/result` will now be invalid endpoint.
 
 ### A2.7 DELETE /v1/extract/jobs/{job_id}
 
@@ -1733,7 +1731,6 @@ Per-document metadata mirrors the single-file job metadata structure:
 ```sql
 -- Batch columns on extract_jobs
 ALTER TABLE extract_jobs ADD COLUMN IF NOT EXISTS file_count INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE extract_jobs ADD COLUMN IF NOT EXISTS is_batch BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Update status constraint to include completed_with_errors
 ALTER TABLE extract_jobs DROP CONSTRAINT IF EXISTS chk_extract_job_status;
