@@ -8,11 +8,17 @@ import (
 )
 
 // runtimeResources is the shared resources block present in every runtime metadata.yaml.
+// Exactly four keys are permitted: cpu, memory, storage, accelerators.
+// Any other key is rejected by the strict decoder used in ValidatePodmanMetadata and
+// ParseAndValidateOpenShiftMetadata.
 // storage is allowed to be 0 (cloud-based components carry no local model storage).
+// accelerators is an optional map of resource-name → count (e.g. {"ibm.com/spyre_pf": 4});
+// omitting it entirely is valid for CPU-only bundles.
 type runtimeResources struct {
-	CPU     int   `yaml:"cpu"`
-	Memory  int64 `yaml:"memory"`
-	Storage int64 `yaml:"storage"`
+	CPU          int            `yaml:"cpu"`
+	Memory       int64          `yaml:"memory"`
+	Storage      int64          `yaml:"storage"`
+	Accelerators map[string]int `yaml:"accelerators"`
 }
 
 // validateCommonRuntimeFields checks the fields that are required in every runtime

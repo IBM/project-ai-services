@@ -122,3 +122,62 @@ func TestValidatePodmanMetadata_ResourcesBlockAbsent(t *testing.T) {
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
 }
 
+
+// -----------------------------------------------------------------------
+// resources key restriction — unknown keys must be rejected
+// -----------------------------------------------------------------------
+
+func TestValidatePodmanMetadata_UnknownResourcesKey(t *testing.T) {
+	// "gpu" is not one of the four permitted resource keys.
+	err := bundlemetadata.ValidatePodmanMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: 0\n  gpu: 2\n"),
+		"1.0.0",
+	)
+	assertValidationError(t, err, http.StatusBadRequest, "gpu")
+}
+
+func TestValidatePodmanMetadata_UnknownTopLevelKey(t *testing.T) {
+	err := bundlemetadata.ValidatePodmanMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nunknownField: true\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: 0\n"),
+		"1.0.0",
+	)
+	assertValidationError(t, err, http.StatusBadRequest, "unknownField")
+}
+
+func TestValidatePodmanMetadata_AcceleratorsMap(t *testing.T) {
+	// accelerators as a map is valid (e.g. IBM Spyre bundles).
+	require.NoError(t, bundlemetadata.ValidatePodmanMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 8\n  memory: 161061273600\n  storage: 53687091200\n  accelerators:\n    ibm.com/spyre_pf: 4\n"),
+		"1.0.0",
+	))
+}
+
+func TestValidatePodmanMetadata_NoAccelerators(t *testing.T) {
+	// accelerators may be omitted entirely (CPU-only bundles).
+	require.NoError(t, bundlemetadata.ValidatePodmanMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 2\n  memory: 4294967296\n  storage: 10737418240\n"),
+		"1.0.0",
+	))
+}
+
+func TestParseAndValidateOpenShiftMetadata_UnknownResourcesKey(t *testing.T) {
+	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: 0\n  disk: 100\n"),
+	)
+	assertValidationError(t, err, http.StatusBadRequest, "disk")
+}
+
+func TestParseAndValidateOpenShiftMetadata_UnknownTopLevelKey(t *testing.T) {
+	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nextraKey: value\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: 0\n"),
+	)
+	assertValidationError(t, err, http.StatusBadRequest, "extraKey")
+}
+
+func TestParseAndValidateOpenShiftMetadata_AcceleratorsMap(t *testing.T) {
+	ver, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
+		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 12\n  memory: 161061273600\n  storage: 53687091200\n  accelerators:\n    ibm.com/spyre_pf: 4\n"),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", ver)
+}
