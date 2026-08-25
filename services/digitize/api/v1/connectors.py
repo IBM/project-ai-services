@@ -322,26 +322,24 @@ async def _run_teardown(connector_id: str) -> None:
             import digitize.connectors.scheduler as _sched
             await _sched.remove_connector_job(connector_id)
         except Exception as sched_exc:
-            deletion_errors.append(f"scheduler job removal failed: {sched_exc}")
+            deletion_errors.append(f"Failed to remove scheduler job: {sched_exc}")
             logger.warning(
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
 
         # Steps 2+3: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-        for checksum in owned_checksums:
-            try:
-                remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
-                if remaining == 0 and doc_id:
-                    if not _best_effort_delete_document(doc_id):
-                        deletion_errors.append(f"document deletion failed for checksum {checksum!r}")
-            except Exception as exc:
-                deletion_errors.append(f"checksum removal failed for {checksum!r}: {exc}")
-                logger.error(
-                    f"Error removing checksum {checksum!r} for connector "
-                    f"{connector_id!r}: {exc}",
-                    exc_info=True,
-                )
+        checksum_removal_failures, doc_deletion_failures = _remove_checksums(
+            connector_id, owned_checksums
+        )
+        if checksum_removal_failures:
+            deletion_errors.append(
+                f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
+            )
+        if doc_deletion_failures:
+            deletion_errors.append(
+                f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+            )
 
         # Step 4: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
@@ -368,6 +366,42 @@ async def _run_teardown(connector_id: str) -> None:
             exc_info=True,
         )
         db_ops.set_connector_error(connector_id, f"Unexpected error during teardown: {exc}")
+
+
+def _remove_checksums(
+    connector_id: str,
+    checksums: list[str] | set[str],
+) -> tuple[list[str], list[str]]:
+    """
+    Remove checksum ownership rows for *connector_id* and delete any document
+    that loses its last owner.
+
+    Iterates all *checksums*, accumulating failures rather than stopping on the
+    first error so that as many checksums as possible are cleaned up in one pass.
+
+    Returns
+    -------
+    checksum_removal_failures:
+        Checksums for which ``remove_connector_checksum_entry`` raised.
+    doc_deletion_failures:
+        Checksums whose associated document could not be deleted (best-effort).
+    """
+    checksum_removal_failures: list[str] = []
+    doc_deletion_failures: list[str] = []
+    for checksum in checksums:
+        try:
+            remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
+            if remaining == 0 and doc_id:
+                if not _best_effort_delete_document(doc_id):
+                    doc_deletion_failures.append(checksum)
+        except Exception as exc:
+            checksum_removal_failures.append(checksum)
+            logger.error(
+                f"Error removing checksum {checksum!r} for connector "
+                f"{connector_id!r}: {exc}",
+                exc_info=True,
+            )
+    return checksum_removal_failures, doc_deletion_failures
 
 
 def _best_effort_delete_document(doc_id: str) -> bool:

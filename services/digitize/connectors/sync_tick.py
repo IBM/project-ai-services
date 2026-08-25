@@ -53,7 +53,6 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    remove_connector_checksum_entry,
     update_connector_total_files,
     update_sync_log,
 )
@@ -373,22 +372,19 @@ async def _process_new_files(
 
 async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None:
     """Remove orphaned checksum rows and delete documents that lose their last owner."""
-    from digitize.api.v1.connectors import _best_effort_delete_document
+    from digitize.api.v1.connectors import _remove_checksums
 
-    for checksum in orphan_checksums:
-        doc_id: str | None = None
-        try:
-            remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
-            if remaining == 0 and doc_id:
-                await asyncio.to_thread(_best_effort_delete_document, doc_id)
-        except Exception as exc:
-            logger.error(
-                f"Error removing orphan checksum {checksum!r} "
-                f"for connector {connector_id!r} "
-                f"(doc_id={doc_id!r}): {exc}",
-                exc_info=True,
-            )
-            raise
+    checksum_removal_failures, doc_deletion_failures = await asyncio.to_thread(
+        _remove_checksums, connector_id, orphan_checksums
+    )
+    if checksum_removal_failures:
+        raise RuntimeError(
+            f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
+        )
+    if doc_deletion_failures:
+        raise RuntimeError(
+            f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+        )
 
 
 # ---------------------------------------------------------------------------
