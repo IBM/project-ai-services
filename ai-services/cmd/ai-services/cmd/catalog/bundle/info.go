@@ -53,6 +53,7 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 				logger.Infof("Created by:   %s\n", b.CreatedBy)
 			}
 			logger.Infof("Created at:   %s\n", b.CreatedAt.Format("2006-01-02 15:04:05"))
+			logger.Infoln("")
 
 			return nil
 		},

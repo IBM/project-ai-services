@@ -52,6 +52,7 @@ Note:
 			logger.Infof("  Catalog type: %s  |  Catalog ID: %s  |  Version: %s\n",
 				resp.CatalogType, resp.CatalogID, resp.Version)
 			logger.Infof("  Dir name:     %s-%s\n", resp.CatalogID, resp.Version)
+			logger.Infoln("")
 
 			return nil
 		},

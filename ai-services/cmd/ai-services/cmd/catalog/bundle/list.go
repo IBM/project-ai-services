@@ -24,7 +24,7 @@ func NewListCmd() *cobra.Command {
 		Long: `List all custom bundles registered with the catalog.
 
 Bundles are shown in a table ordered by registration time, most recent first.
-Each row includes the bundle ID, catalog type, catalog ID, version, status,
+Each row includes the bundle ID, name, catalog type, catalog ID, version, status,
 and creation timestamp.
 
 Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
@@ -69,13 +69,13 @@ func printBundleTable(resp *client.BundleListResponse) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, tablePadding, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tCATALOG TYPE\tCATALOG ID\tVERSION\tSTATUS\tCREATED AT"); err != nil {
+	if _, err := fmt.Fprintln(w, "ID\tNAME\tCATALOG TYPE\tCATALOG ID\tVERSION\tSTATUS\tCREATED AT"); err != nil {
 		return err
 	}
 
 	for _, b := range resp.Bundles {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			b.ID, b.CatalogType, b.CatalogID, b.Version, b.Status,
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			b.ID, b.Name, b.CatalogType, b.CatalogID, b.Version, b.Status,
 			b.CreatedAt.Format("2006-01-02 15:04:05"),
 		); err != nil {
 			return err
@@ -93,6 +93,8 @@ func printBundleTable(resp *client.BundleListResponse) error {
 			logger.Infof("Use --page %d to see the next page.\n", p.Page+1)
 		}
 	}
+
+	logger.Infoln("")
 
 	return nil
 }

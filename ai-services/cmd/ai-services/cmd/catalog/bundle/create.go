@@ -55,6 +55,8 @@ Note:
 				logger.Infof("  Size:         %s\n", formatBytes(*resp.SizeBytes))
 			}
 
+			logger.Infoln("")
+
 			return nil
 		},
 	}

@@ -62,6 +62,7 @@ Note:
 			}
 
 			logger.Infoln("✓ Bundle deleted.")
+			logger.Infoln("")
 
 			return nil
 		},

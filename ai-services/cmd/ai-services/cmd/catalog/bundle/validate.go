@@ -54,6 +54,8 @@ The command exits with a non-zero status if validation fails.`,
 				logger.Infof("  Name:         %s\n", result.Name)
 			}
 
+			logger.Infoln("")
+
 			return nil
 		},
 	}
