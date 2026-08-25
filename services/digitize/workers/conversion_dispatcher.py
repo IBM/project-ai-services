@@ -18,6 +18,16 @@ If the oldest queued task for an operation needs more capacity (weight)
 than is currently available, the dispatcher skips that operation *and*
 reserves those units — it does NOT hand them to the other operation.
 This prevents indefinite starvation of large files.
+
+The reservation is applied symmetrically:
+
+  budget_for_first  = available - second_needed
+  budget_for_second = available - first_needed
+
+This means: if the second queue's head is a blocked large task, the
+first queue is also prevented from consuming the slot(s) that the large
+task is waiting to accumulate.  Without this, the first queue could
+drain the last free slot and push the large task's wait indefinitely.
 """
 
 import asyncio
@@ -171,11 +181,18 @@ async def dispatch_loop() -> None:
             if available > 0:
                 first, second = _rr_turn, _other(_rr_turn)
 
-                # Peek at first type's head weight whether or not we can claim it.
-                first_head = db_manager.peek_head(first)
-                first_needed = (2 if first_head.is_large else 1) if first_head else 0
+                # Peek at both heads up-front so each queue's budget can account
+                # for the other queue's pending weight requirement.
+                first_head  = db_manager.peek_head(first)
+                second_head = db_manager.peek_head(second)
+                first_needed  = (2 if first_head.is_large  else 1) if first_head  else 0
+                second_needed = (2 if second_head.is_large else 1) if second_head else 0
 
-                first_task = _try_claim_if_fits(first, available)
+                # Budget for first = capacity minus whatever the second queue's
+                # blocked head is waiting to accumulate.  This prevents first from
+                # consuming a slot that would strand a large task in second.
+                budget_for_first = max(0, available - second_needed)
+                first_task = _try_claim_if_fits(first, budget_for_first)
                 if first_task:
                     weight = 2 if first_task.is_large else 1
                     await conversion_semaphore.acquire(weight)

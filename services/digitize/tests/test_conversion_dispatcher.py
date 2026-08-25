@@ -231,14 +231,14 @@ class TestDispatchLoop:
 
     def test_second_gets_no_budget_when_first_head_is_large_and_unavailable(self):
         """
-        First head needs 2 units but only 1 is free → budget_for_second = 0.
-        _try_claim_if_fits for second must receive available=0.
+        First (ING) head needs 2 units but only 1 is free → budget_for_second = 0.
+        No DIG task is queued so second_needed=0 → budget_for_first = available=1.
+        _try_claim_if_fits calls: ingestion receives 1, digitization receives 0.
         """
         import digitize.workers.conversion_dispatcher as mod
         mod._rr_turn = "ingestion"
 
-        large_head = _make_task(task_id="t-ing-large", operation="ingestion", is_large=True)
-        normal_dig = _make_task(task_id="t-dig-normal", operation="digitization", is_large=False)
+        large_ing = _make_task(task_id="t-ing-large", operation="ingestion", is_large=True)
 
         calls = []
 
@@ -253,9 +253,9 @@ class TestDispatchLoop:
             async def _run():
                 with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_try_claim), \
                      patch.object(mod.db_manager, "peek_head",
-                                   side_effect=lambda op: large_head if op == "ingestion" else normal_dig), \
+                                   side_effect=lambda op: large_ing if op == "ingestion" else None), \
                      patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 5, "digitization": 5}), \
+                                   return_value={"ingestion": 5, "digitization": 0}), \
                      patch.object(mod.db_manager, "promote_pending", return_value=0), \
                      patch("asyncio.create_task", new=_make_create_task_mock()), \
                      patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -269,10 +269,75 @@ class TestDispatchLoop:
         finally:
             _set_semaphore_available(mod, original_available)
 
-        # First call: ingestion with available=1
-        # Second call: digitization with budget=max(0, 1-2)=0
+        # second_needed=0 (no DIG head) → budget_for_first = max(0, 1-0) = 1
+        # first_needed=2  (large ING)   → budget_for_second = max(0, 1-2) = 0
         assert ("ingestion", 1) in calls
         assert ("digitization", 0) in calls
+
+    def test_first_gets_no_budget_when_second_head_is_large_and_slot_needed(self):
+        """
+        Regression test for large-file starvation via the other queue.
+
+        Scenario (mirrors hol_blocking probe tick 1):
+          - _rr_turn = "digitization"  (turn just flipped to DIG as first)
+          - available = 1
+          - second queue (ING) head is a large task needing weight=2
+          - first queue (DIG) head is a normal task needing weight=1
+
+        Before the fix, DIG normal would be dispatched (budget=available=1 ≥ 1),
+        consuming the last slot and leaving the large ING task unable to ever
+        accumulate its required 2 free slots until DIG *and* all other running
+        tasks finished — indefinite starvation.
+
+        After the fix:
+          budget_for_first = max(0, available - second_needed)
+                           = max(0,     1     -      2       ) = 0
+        DIG must also be blocked; neither queue dispatches on this tick.
+        """
+        import digitize.workers.conversion_dispatcher as mod
+        mod._rr_turn = "digitization"
+
+        normal_dig = _make_task(task_id="t-dig-normal", operation="digitization", is_large=False)
+        large_ing  = _make_task(task_id="t-ing-large",  operation="ingestion",    is_large=True)
+
+        calls = []
+
+        def _mock_try_claim(op, avail):
+            calls.append((op, avail))
+            return None  # nothing should run
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 1)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_try_claim), \
+                     patch.object(mod.db_manager, "peek_head",
+                                   side_effect=lambda op: normal_dig if op == "digitization" else large_ing), \
+                     patch.object(mod.db_manager, "get_queued_counts",
+                                   return_value={"ingestion": 1, "digitization": 1}), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.create_task", new=_make_create_task_mock()), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+        # second_needed=2 (large ING) → budget_for_first = max(0, 1-2) = 0
+        # first_needed=1  (normal DIG) → budget_for_second = max(0, 1-1) = 0
+        # Both queues receive budget=0 — neither dispatches.
+        assert ("digitization", 0) in calls, (
+            "DIG normal must NOT be dispatched when large ING is waiting for 2 slots"
+        )
+        assert ("ingestion", 0) in calls, (
+            "ING budget_for_second must also be 0 (first_needed=1, available=1)"
+        )
 
     def test_promote_pending_called_each_tick(self):
         import digitize.workers.conversion_dispatcher as mod
