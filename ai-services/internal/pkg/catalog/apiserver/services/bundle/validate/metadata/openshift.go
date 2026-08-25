@@ -35,4 +35,3 @@ func ParseAndValidateOpenShiftMetadata(data []byte) (version string, err error) 
 
 	return m.Version, nil
 }
-

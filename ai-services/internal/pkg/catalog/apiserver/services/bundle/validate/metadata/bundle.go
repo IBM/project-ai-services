@@ -123,6 +123,7 @@ func parseServiceMetadataYAML(data []byte) (*ServiceMetadataYAML, error) {
 	if len(m.About) == 0 {
 		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'about' is required for type=service"}
 	}
+
 	return &m, nil
 }
 
@@ -140,6 +141,7 @@ func parseComponentMetadataYAML(data []byte) (*ComponentMetadataYAML, error) {
 	if m.ComponentType == "" {
 		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'component_type' is required for type=component"}
 	}
+
 	return &m, nil
 }
 
@@ -160,5 +162,6 @@ func validateCommonFields(id, typ, version, name, description string) error {
 	if strings.TrimSpace(description) == "" {
 		return &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'description' is required"}
 	}
+
 	return nil
 }
