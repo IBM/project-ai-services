@@ -225,10 +225,10 @@ func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion, metaVersi
 		}
 	}
 
-	renderVals, err := chartcommonutil.ToRenderValues(chrt, nil, common.ReleaseOptions{
+	renderVals, err := chartcommonutil.ToRenderValuesWithSchemaValidation(chrt, nil, common.ReleaseOptions{
 		Name:      "validation",
 		Namespace: "default",
-	}, nil)
+	}, nil, true)
 	if err != nil {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
