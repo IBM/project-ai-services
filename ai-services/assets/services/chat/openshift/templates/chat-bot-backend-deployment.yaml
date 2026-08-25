@@ -22,6 +22,31 @@ spec:
         ai-services.io/component-type: api
     spec:
       automountServiceAccountToken: false
+      initContainers:
+        - name: llm-wait
+          image: "registry.access.redhat.com/ubi9/ubi-minimal:latest"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              echo "Waiting for LLM endpoint to become ready..."
+              until wget -q -O /dev/null http://llm-predictor:8000/v1/models; do
+                echo "LLM not ready, retrying in 10s..."
+                sleep 10
+              done
+              echo "LLM endpoint is ready."
+        - name: emb-wait
+          image: "registry.access.redhat.com/ubi9/ubi-minimal:latest"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              echo "Waiting for embedding endpoint to become ready..."
+              until wget -q -O /dev/null http://embedding-predictor:8080/v1/models; do
+                echo "Embedding not ready, retrying in 10s..."
+                sleep 10
+              done
+              echo "Embedding endpoint is ready."
       containers:
         - name: backend-server
           image: "{{ .Values.backend.image }}"

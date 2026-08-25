@@ -23,6 +23,18 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
+        - name: llm-wait
+          image: "registry.access.redhat.com/ubi9/ubi-minimal:latest"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              echo "Waiting for LLM endpoint to become ready..."
+              until wget -q -O /dev/null http://llm-predictor:8000/v1/models; do
+                echo "LLM not ready, retrying in 10s..."
+                sleep 10
+              done
+              echo "LLM endpoint is ready."
         - name: summarize-db-init
           image: "{{ .Values.summarize.image }}"
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
