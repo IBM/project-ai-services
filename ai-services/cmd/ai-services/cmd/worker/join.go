@@ -13,7 +13,6 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
@@ -106,8 +105,6 @@ func joinRunE(_ *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger.Infoln("Starting worker join — press Ctrl-C to stop.")
-
 	return join.Run(ctx, opts)
 }
 
@@ -119,7 +116,7 @@ func newJoinCmd() *cobra.Command {
 
 	cmdcommon.ConfigureRuntimeFlag(cmd, &runtimeType)
 
-	cmd.Flags().StringVar(&baseDir, "basedir", constants.DefaultBaseDir,
+	cmd.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+

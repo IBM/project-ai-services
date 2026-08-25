@@ -124,7 +124,7 @@ func writeCaddyfile(baseDir string) error {
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
 func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
-	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, workerApp)
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
