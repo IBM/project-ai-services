@@ -94,8 +94,8 @@ class ConnectorType(str, Enum):
     compared with raw DB strings without calling .value.
     """
 
-    SSH = "ssh"
-    S3 = "s3"
+    FILE_SYSTEM = "file_system"
+    OBJECT_STORAGE = "object_storage"
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ class ConnectorCreateRequest(BaseModel):
         ),
     )
     name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
-    type: str = Field(..., description="Connector transport type: 'ssh' or 's3'")
+    type: str = Field(..., description="Connector transport type: 'file_system' or 'object_storage'")
     allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
 
@@ -121,7 +121,7 @@ class ConnectorCreateRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "name": "prod-sftp-reports",
-                "type": "ssh",
+                "type": "file_system",
                 "allowed_extensions": [".pdf", ".docx"],
                 "connection_details": {
                     "host": "sftp.example.com",
@@ -238,7 +238,7 @@ class ConnectorListItem(BaseModel):
             "example": {
                 "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
                 "name": "prod-sftp-reports",
-                "type": "ssh",
+                "type": "file_system",
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
                 "sync_status": "up to date",
@@ -269,7 +269,7 @@ class ConnectorDetailResponse(BaseModel):
             "example": {
                 "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
                 "name": "prod-sftp-reports",
-                "type": "ssh",
+                "type": "file_system",
                 "allowed_extensions": [".pdf", ".docx"],
                 "sync_interval_seconds": 60,
                 "attached_at": "2025-01-15T10:00:00Z",

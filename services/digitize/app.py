@@ -270,7 +270,7 @@ tags_metadata = [
     },
     {
         "name": "connectors",
-        "description": "Data-source connector lifecycle management (SFTP, S3)",
+        "description": "Data-source connector lifecycle management (file_system, object_storage)",
     },
 ]
 
