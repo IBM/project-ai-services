@@ -8,11 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -22,17 +18,8 @@ import (
 )
 
 const (
-	dirPerm          = 0755
-	filePerm         = 0644
-	maxLogLines      = "1000"
 	modelsSeparatorW = 60 // width of the separator line in models.txt
 )
-
-// gatherOptions carries options forwarded from the cobra command.
-type gatherOptions struct {
-	outputDir       string
-	applicationName string
-}
 
 // podmanGatherer collects must-gather data from a Podman runtime via the
 // catalog framework (for pod/container discovery) and direct podman CLI
@@ -69,7 +56,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 		return "", fmt.Errorf("failed to connect to Podman: %w", err)
 	}
 
-	outDir, err := g.createOutputDir(opts.outputDir)
+	outDir, err := createOutputDir(opts.outputDir)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +74,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	if catalogInstalled {
 		g.collectCatalogArtifacts(ctx, outDir)
-		g.collectApplicationPods(ctx, outDir, opts.applicationName)
+		collectApplicationPods(ctx, g, outDir, opts.applicationName)
 		g.collectModelsInfo(ctx, outDir)
 	} else {
 		logger.WarninglnCtx(ctx, "No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")
@@ -100,21 +87,6 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 	g.collectVolumeInfo(ctx, outDir)
 
 	return outDir, nil
-}
-
-// checkCatalogInstalled returns true if any pod carrying the
-// ai-services.io/application=ai-services label is present, confirming that
-// the catalog has been installed (covers catalog, db, and caddy pods — any one
-// of them is sufficient).
-func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
-	pods, err := rt.ListPods(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
-	})
-	if err != nil {
-		return false, fmt.Errorf("failed to list catalog pods: %w", err)
-	}
-
-	return len(pods) > 0, nil
 }
 
 // resolveBaseDir attempts to read AI_SERVICES_BASE_DIR from the running
@@ -142,93 +114,8 @@ func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.P
 	logger.InfofCtx(ctx, "Using base directory: %s\n", g.baseDir)
 }
 
-func (g *podmanGatherer) createOutputDir(base string) (string, error) {
-	dir := filepath.Join(base, fmt.Sprintf("must-gather.local.%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return "", fmt.Errorf("failed to create output directory %s: %w", dir, err)
-	}
-
-	return dir, nil
-}
-
-// ── application pod collection ────────────────────────────────────────────────
-
-// collectApplicationPods uses the catalog API to discover pod names for every
-// application (or a single named one), then collects inspect/logs/env for each.
-func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, appName string) {
-	appClient, err := catalogClient.NewApplicationClient()
-	if err != nil {
-		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
-
-		return
-	}
-
-	apps, ok := fetchApplicationsForGather(ctx, appClient, appName)
-	if !ok {
-		return
-	}
-
-	podsDir := filepath.Join(outDir, "pods")
-	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
-		logger.WarningfCtx(ctx, "Failed to create pods directory: %v\n", err)
-
-		return
-	}
-
-	g.collectPodsForApps(ctx, appClient, podsDir, apps)
-}
-
-// fetchApplicationsForGather fetches the application list and logs the
-// appropriate warning on error or empty result. Returns (apps, true) on
-// success, (nil, false) when the caller should skip collection.
-func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
-	apps, err := cliUtils.FetchApplications(appClient, appName)
-	if err != nil {
-		if appName != "" {
-			logger.WarningfCtx(ctx, "Application %q not found: %v\n", appName, err)
-		} else {
-			logger.WarningfCtx(ctx, "Failed to fetch applications: %v\n", err)
-		}
-
-		return nil, false
-	}
-
-	if len(apps) == 0 {
-		if appName != "" {
-			logger.WarningfCtx(ctx, "No application named %q found; skipping application pod collection.\n", appName)
-		} else {
-			logger.WarninglnCtx(ctx, "No applications found; skipping application pod collection.")
-		}
-
-		return nil, false
-	}
-
-	return apps, true
-}
-
-// collectPodsForApps iterates over apps, fetches their PS data, and collects
-// each pod. Extracted to keep collectApplicationPods within complexity limits.
-func (g *podmanGatherer) collectPodsForApps(ctx context.Context, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
-	for _, app := range apps {
-		psResp, err := appClient.GetApplicationPS(app.ID)
-		if err != nil {
-			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
-
-			continue
-		}
-
-		for _, p := range psResp.Services {
-			g.collectPod(ctx, podsDir, p.PodName)
-		}
-
-		for _, p := range psResp.Components {
-			g.collectPod(ctx, podsDir, p.PodName)
-		}
-	}
-}
-
 // collectPod collects inspect JSON, container logs, and env vars for one pod.
-func (g *podmanGatherer) collectPod(ctx context.Context, podsDir, podName string) {
+func (g *podmanGatherer) collectPod(ctx context.Context, podsDir, podName, _ string) {
 	podDir := filepath.Join(podsDir, podName)
 	if err := os.MkdirAll(podDir, dirPerm); err != nil {
 		logger.WarningfCtx(ctx, "Failed to create directory for pod %q: %v\n", podName, err)
@@ -248,7 +135,7 @@ func (g *podmanGatherer) collectPodInspect(ctx context.Context, podDir, podName 
 		return
 	}
 
-	g.writeFile(ctx, podDir, "inspect.json", g.sanitizer.SanitizeJSON(raw))
+	writeFile(ctx, podDir, "inspect.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // collectContainersForPod lists every non-infra container in podName and
@@ -297,7 +184,7 @@ func (g *podmanGatherer) collectContainerInspect(ctx context.Context, podDir, na
 		return
 	}
 
-	g.writeFile(ctx, inspectDir, name+".json", g.sanitizer.SanitizeJSON(raw))
+	writeFile(ctx, inspectDir, name+".json", g.sanitizer.SanitizeJSON(raw))
 }
 
 func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name string) {
@@ -315,7 +202,7 @@ func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name 
 		return
 	}
 
-	g.writeFile(ctx, logsDir, name+".log", g.sanitizer.SanitizeText(raw))
+	writeFile(ctx, logsDir, name+".log", g.sanitizer.SanitizeText(raw))
 }
 
 // ── catalog artifact collection ───────────────────────────────────────────────
@@ -337,7 +224,7 @@ func (g *podmanGatherer) collectCatalogArtifacts(ctx context.Context, outDir str
 
 	g.collectCatalogPods(ctx, catDir)
 	g.collectCaddyfile(ctx, catDir)
-	g.collectCatalogCredentials(ctx, catDir)
+	collectCatalogCredentials(ctx, g.sanitizer, catDir)
 }
 
 // collectCatalogPods lists all pods labelled ai-services.io/application=ai-services
@@ -381,7 +268,7 @@ func (g *podmanGatherer) collectCatalogPods(ctx context.Context, catDir string) 
 			continue
 		}
 
-		g.collectPod(ctx, podsDir, name)
+		g.collectPod(ctx, podsDir, name, "") // catalog pods have no app-scoped namespace
 	}
 }
 
@@ -418,34 +305,8 @@ func (g *podmanGatherer) collectCaddyfile(ctx context.Context, catDir string) {
 			continue
 		}
 
-		g.writeFile(ctx, catDir, f.dst, f.sanitize(data))
+		writeFile(ctx, catDir, f.dst, f.sanitize(data))
 	}
-}
-
-// collectCatalogCredentials saves the CLI credentials file
-// (~/.config/ai-services/catalog-credentials.json) with tokens redacted.
-func (g *podmanGatherer) collectCatalogCredentials(ctx context.Context, catDir string) {
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		logger.WarningfCtx(ctx, "Cannot determine user config dir: %v\n", err)
-
-		return
-	}
-
-	credsPath := filepath.Join(cfgDir, "ai-services", "catalog-credentials.json")
-
-	data, err := os.ReadFile(credsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.WarninglnCtx(ctx, "Catalog credentials file not found (not logged in).")
-		} else {
-			logger.WarningfCtx(ctx, "Failed to read catalog credentials: %v\n", err)
-		}
-
-		return
-	}
-
-	g.writeFile(ctx, catDir, "catalog-credentials.json", g.sanitizer.SanitizeJSON(data))
 }
 
 // ── models info collection ────────────────────────────────────────────────────
@@ -508,7 +369,7 @@ func (g *podmanGatherer) collectModelsInfo(ctx context.Context, outDir string) {
 		}
 	}
 
-	g.writeFile(ctx, modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
+	writeFile(ctx, modelsDir, "models.txt", []byte(strings.Join(lines, "\n")+"\n"))
 }
 
 // ── secret metadata collection ────────────────────────────────────────────────
@@ -533,7 +394,7 @@ func (g *podmanGatherer) collectSecretInfo(ctx context.Context, outDir string) {
 		return
 	}
 
-	g.writeFile(ctx, secDir, "secrets.json", g.sanitizer.SanitizeJSON(raw))
+	writeFile(ctx, secDir, "secrets.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // ── system / network / volume collection ──────────────────────────────────────
@@ -565,7 +426,7 @@ func (g *podmanGatherer) collectSystemInfo(ctx context.Context, outDir string) {
 			continue
 		}
 
-		g.writeFile(ctx, sysDir, c.filename, g.sanitizer.SanitizeText(raw))
+		writeFile(ctx, sysDir, c.filename, g.sanitizer.SanitizeText(raw))
 	}
 }
 
@@ -586,7 +447,7 @@ func (g *podmanGatherer) collectNetworkInfo(ctx context.Context, outDir string) 
 		return
 	}
 
-	g.writeFile(ctx, netDir, "networks.json", g.sanitizer.SanitizeJSON(raw))
+	writeFile(ctx, netDir, "networks.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 func (g *podmanGatherer) collectVolumeInfo(ctx context.Context, outDir string) {
@@ -606,14 +467,5 @@ func (g *podmanGatherer) collectVolumeInfo(ctx context.Context, outDir string) {
 		return
 	}
 
-	g.writeFile(ctx, volDir, "volumes.json", g.sanitizer.SanitizeJSON(raw))
-}
-
-// ── file I/O ──────────────────────────────────────────────────────────────────
-
-func (g *podmanGatherer) writeFile(ctx context.Context, dir, filename string, content []byte) {
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, content, filePerm); err != nil {
-		logger.WarningfCtx(ctx, "Failed to write %s: %v\n", path, err)
-	}
+	writeFile(ctx, volDir, "volumes.json", g.sanitizer.SanitizeJSON(raw))
 }
