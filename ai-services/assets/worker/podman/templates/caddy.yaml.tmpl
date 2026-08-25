@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "ai-services--worker-caddy"
+  labels:
+    ai-services.io/component: "worker-proxy"
+  annotations:
+    ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
+spec:
+  restartPolicy: always
+  containers:
+    - name: caddy
+      image: "{{ .Values.caddy.image }}"
+      imagePullPolicy: IfNotPresent
+      args: ["caddy", "run", "--config", "/data/caddy/Caddyfile", "--resume"]
+      env:
+        - name: CADDY_ADMIN
+          # Bind to all interfaces inside the container so the host-side
+          # port mapping (127.0.0.1:<random>:2019) can reach it.
+          value: "0.0.0.0:2019"
+      volumeMounts:
+        - name: caddy-data
+          mountPath: /data/caddy:z
+        - name: caddy-config
+          mountPath: /config:z
+      resources:
+        requests:
+          memory: "256Mi"
+        limits:
+          memory: "512Mi"
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+          scheme: HTTP
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+  volumes:
+    - name: caddy-data
+      hostPath:
+        path: {{ .BaseDir }}/worker/caddy
+        type: DirectoryOrCreate
+    - name: caddy-config
+      hostPath:
+        path: {{ .BaseDir }}/worker/caddy-config
+        type: DirectoryOrCreate

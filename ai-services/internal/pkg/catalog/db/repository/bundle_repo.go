@@ -16,6 +16,12 @@ import (
 // ErrNotFound is returned by Update when no row matches the given id.
 var ErrNotFound = errors.New("catalog bundle not found")
 
+// BundleFilters defines optional pagination inputs for querying catalog bundles.
+type BundleFilters struct {
+	Limit  int // Number of records to return (for pagination).
+	Offset int // Number of records to skip (for pagination).
+}
+
 // BundleRepository defines the interface for catalog_bundles data operations.
 type BundleRepository interface {
 	// Insert creates a new bundle row with status 'processing'.
@@ -37,8 +43,11 @@ type BundleRepository interface {
 	// Delete permanently removes the row.
 	Delete(ctx context.Context, id uuid.UUID) error
 
-	// ListAll returns all bundle rows ordered by created_at DESC.
-	ListAll(ctx context.Context) ([]models.CatalogBundle, error)
+	// GetCount returns the total number of bundle rows.
+	GetCount(ctx context.Context) (int, error)
+
+	// GetAll returns bundle rows ordered by created_at DESC, applying the pagination in filters.
+	GetAll(ctx context.Context, filters *BundleFilters) ([]models.CatalogBundle, error)
 }
 
 // bundleRepo implements BundleRepository using pgx.
@@ -225,11 +234,33 @@ func (r *bundleRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// ListAll returns all bundle rows ordered by created_at DESC.
-func (r *bundleRepo) ListAll(ctx context.Context) ([]models.CatalogBundle, error) {
-	query := `SELECT ` + selectCols + ` FROM catalog_bundles ORDER BY created_at DESC`
+// GetCount returns the total number of bundle rows.
+func (r *bundleRepo) GetCount(ctx context.Context) (int, error) {
+	var count int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM catalog_bundles`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to get catalog bundle count: %w", err)
+	}
 
-	rows, err := r.pool.Query(ctx, query)
+	return count, nil
+}
+
+// GetAll returns bundle rows ordered by created_at DESC, applying pagination from filters.
+func (r *bundleRepo) GetAll(ctx context.Context, filters *BundleFilters) ([]models.CatalogBundle, error) {
+	query := `SELECT ` + selectCols + ` FROM catalog_bundles ORDER BY created_at DESC`
+	args := []any{}
+
+	if filters != nil {
+		if filters.Limit > 0 {
+			args = append(args, filters.Limit)
+			query += fmt.Sprintf(" LIMIT $%d", len(args))
+		}
+		if filters.Offset > 0 {
+			args = append(args, filters.Offset)
+			query += fmt.Sprintf(" OFFSET $%d", len(args))
+		}
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list catalog bundles: %w", err)
 	}

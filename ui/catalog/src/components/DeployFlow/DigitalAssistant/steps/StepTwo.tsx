@@ -1,20 +1,18 @@
 import { useReducer, useMemo, useEffect } from "react";
+import { InlineNotification } from "@carbon/react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps, ServiceConfig } from "../types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
 import { ResourceRequirementsPanel } from "../../Shared/components/ResourceRequirementsPanel";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
 import { useResources } from "../../Shared/hooks/useResources";
-import {
-  useBatchProviderParams,
-  useMultiTypeProviderParams,
-} from "../hooks/useProviderParams";
 import { getResourceSharingKey } from "../utils/resourceSharing";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { useDeployStore } from "@/store/deploy.store";
 import type {
   DeployOptionsResponse,
   DeployOptionsComponent as Component,
+  ProviderSchema,
 } from "@/types/api.types";
 import type { StepTwoState, StepTwoAction } from "../types/StepTwo.types";
 
@@ -196,11 +194,27 @@ export const StepTwo: React.FC<DAStepProps> = ({
   deployOptions,
   onEditingChange,
   onResourceStatusChange,
+  onSchemaError,
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
 
   // Get service description helper from store
   const { getServiceDescription } = useDeployStore();
+  const serviceParamsError = useDeployStore(
+    (state) => state.serviceParamsError,
+  );
+
+  // Check if any service's schema failed to load
+  const failedServiceNames = useMemo(() => {
+    return deployOptions.services
+      .filter((s) => !!serviceParamsError[s.id])
+      .map((s) => s.name || s.id);
+  }, [deployOptions.services, serviceParamsError]);
+
+  // Notify parent so it can gate the Deploy button.
+  useEffect(() => {
+    onSchemaError?.(failedServiceNames.length > 0);
+  }, [failedServiceNames, onSchemaError]);
 
   const { resources, resourcesLoading, resourcesError } = useResources();
   const calculatedResources = useMemo(
@@ -214,89 +228,61 @@ export const StepTwo: React.FC<DAStepProps> = ({
     [deployOptions.version],
   );
 
-  // Get all provider IDs for batch fetching params
-  const allProviderIds = useMemo(() => {
-    const providersByType: Record<string, Set<string>> = {};
+  // Provider schemas from store, keyed by componentType → providerId.
+  const providerParams = useDeployStore((state) => state.providerParams);
+  const providerParamsByType = useMemo(() => {
+    const result: Record<string, Record<string, ProviderSchema>> = {};
 
     deployOptions.services.forEach((service) => {
       service.components.forEach((component) => {
-        if (!providersByType[component.type]) {
-          providersByType[component.type] = new Set();
-        }
+        if (!result[component.type]) result[component.type] = {};
         component.providers.forEach((provider) => {
-          providersByType[component.type].add(provider.id);
+          const cached = providerParams[`${component.type}:${provider.id}`];
+          if (cached) result[component.type][provider.id] = cached.data;
         });
       });
     });
 
-    // Convert Sets to arrays
-    const result: Record<string, string[]> = {};
-    Object.entries(providersByType).forEach(([type, ids]) => {
-      result[type] = Array.from(ids);
-    });
-
     return result;
-  }, [deployOptions.services]);
-
-  // Fetch provider parameters for all component types dynamically
-  // This single hook call handles all component types, respecting Rules of Hooks
-  const { paramsByType, errorsByType } =
-    useMultiTypeProviderParams(allProviderIds);
-
-  // Transform to match the interface expected by the rest of the component
-  const providerParamsByType = useMemo(() => {
-    const result: Record<
-      string,
-      ReturnType<typeof useBatchProviderParams>
-    > = {};
-
-    Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
-      result[componentType] = {
-        paramsMap,
-        isLoading: false, // Already loaded by useMultiTypeProviderParams
-        errors: errorsByType[componentType] || {},
-      };
-    });
-
-    return result;
-  }, [paramsByType, errorsByType]);
+  }, [deployOptions.services, providerParams]);
 
   // Extract model names from params for display - DYNAMIC for all component types
   useEffect(() => {
     // Iterate through all component types dynamically
-    Object.entries(providerParamsByType).forEach(([componentType, data]) => {
-      const paramsMap = data.paramsMap || {};
-      const modelNamesMap: Record<string, string> = {};
+    Object.entries(providerParamsByType).forEach(
+      ([componentType, paramsMap]) => {
+        const modelNamesMap: Record<string, string> = {};
 
-      // Extract model names for this component type
-      for (const [providerId, params] of Object.entries(paramsMap)) {
-        const properties = params?.properties as Record<
-          string,
-          { oneOf?: Array<{ title?: string }> }
-        >;
+        for (const [providerId, params] of Object.entries(paramsMap)) {
+          const properties = params?.properties as Record<
+            string,
+            { oneOf?: Array<{ title?: string }> }
+          >;
 
-        const modelTitle = properties?.model?.oneOf?.[0]?.title;
+          const modelTitle = properties?.model?.oneOf?.[0]?.title;
 
-        if (modelTitle) {
-          modelNamesMap[providerId] = modelTitle;
+          if (modelTitle) {
+            modelNamesMap[providerId] = modelTitle;
+          }
         }
-      }
 
-      // Only dispatch if we have model names and they've changed
-      if (Object.keys(modelNamesMap).length > 0) {
-        const existingNames = state.modelNamesByComponent[componentType] || {};
-        const hasChanges = Object.keys(modelNamesMap).some(
-          (key) => existingNames[key] !== modelNamesMap[key],
-        );
+        // Only dispatch if we have model names and they've changed
+        if (Object.keys(modelNamesMap).length > 0) {
+          const existingNames =
+            state.modelNamesByComponent[componentType] || {};
+          const hasChanges = Object.keys(modelNamesMap).some(
+            (key) => existingNames[key] !== modelNamesMap[key],
+          );
 
-        if (hasChanges || Object.keys(existingNames).length === 0) {
-          dispatch({
-            type: "SET_MODEL_NAMES",
-            payload: { componentType, modelNames: modelNamesMap },
-          });
+          if (hasChanges || Object.keys(existingNames).length === 0) {
+            dispatch({
+              type: "SET_MODEL_NAMES",
+              payload: { componentType, modelNames: modelNamesMap },
+            });
+          }
         }
-      }
-    });
+      },
+    );
   }, [providerParamsByType, state.modelNamesByComponent]);
 
   // Populate model parameters for default providers once params are loaded
@@ -317,8 +303,7 @@ export const StepTwo: React.FC<DAStepProps> = ({
           // Skip if already has model parameter
           if (config.params?.model) return;
 
-          const paramsMap =
-            providerParamsByType[componentType]?.paramsMap || {};
+          const paramsMap = providerParamsByType[componentType] || {};
           const cachedParams = paramsMap[config.providerId];
           const properties = cachedParams?.properties as Record<
             string,
@@ -431,6 +416,24 @@ export const StepTwo: React.FC<DAStepProps> = ({
     );
   };
 
+  const buildInferenceBackendOptions = (
+    component: Component,
+    selectedModel: unknown,
+    paramsMap: Record<string, ProviderSchema>,
+  ): Array<{ id: string; text: string }> =>
+    component.providers
+      .filter((provider) => {
+        if (!selectedModel) return true;
+        const providerSchema = paramsMap[provider.id];
+        if (!providerSchema?.properties) return false;
+        const properties = providerSchema.properties as Record<
+          string,
+          { default?: unknown }
+        >;
+        return properties.model?.default === selectedModel;
+      })
+      .map((provider) => ({ id: provider.id, text: provider.name }));
+
   // Build service configurations dynamically from API
   const serviceConfigurations = useMemo(() => {
     return deployOptions.services
@@ -514,85 +517,28 @@ export const StepTwo: React.FC<DAStepProps> = ({
           });
         });
 
-        // Add Inference Backend field if service has LLM component
+        // Add Inference Backend field if service has LLM or reranker component
         if (llmComponent) {
-          // Get the currently selected LLM model
-          const selectedLlmModel = serviceConfig.components?.llm?.params?.model;
-
-          // Get LLM provider params to check which providers support the selected model
-          const llmParamsMap = providerParamsByType["llm"]?.paramsMap || {};
-
-          // Filter providers that support the same model as the selected LLM
-          const inferenceBackendOptions = (llmComponent as Component).providers
-            .filter((provider) => {
-              // If no LLM model selected yet, show all providers
-              if (!selectedLlmModel) return true;
-
-              // Get this provider's schema
-              const providerSchema = llmParamsMap[provider.id];
-              if (!providerSchema || !providerSchema.properties) return false;
-
-              const properties = providerSchema.properties as Record<
-                string,
-                { default?: unknown }
-              >;
-              const providerDefaultModel = properties.model?.default;
-
-              // Check if this provider's default model matches the selected model
-              return providerDefaultModel === selectedLlmModel;
-            })
-            .map((provider) => ({
-              id: provider.id,
-              text: provider.name, // Use provider name, not model name
-            }));
-
           fields.push({
             key: "inferenceBackend" as keyof ServiceConfig,
             label: "Inference backend",
-            options: inferenceBackendOptions,
+            options: buildInferenceBackendOptions(
+              llmComponent as Component,
+              serviceConfig.components?.llm?.params?.model,
+              providerParamsByType["llm"] || {},
+            ),
           });
         }
 
-        // Add Inference Backend field if service has reranker component
         if (rerankerComponent) {
-          // Get the currently selected reranker model
-          const selectedRerankerModel =
-            serviceConfig.components?.reranker?.params?.model;
-
-          // Get reranker provider params to check which providers support the selected model
-          const rerankerParamsMap =
-            providerParamsByType["reranker"]?.paramsMap || {};
-
-          // Filter providers that support the same model as the selected reranker
-          const inferenceBackendOptions = (
-            rerankerComponent as Component
-          ).providers
-            .filter((provider) => {
-              // If no reranker model selected yet, show all providers
-              if (!selectedRerankerModel) return true;
-
-              // Get this provider's schema
-              const providerSchema = rerankerParamsMap[provider.id];
-              if (!providerSchema || !providerSchema.properties) return false;
-
-              const properties = providerSchema.properties as Record<
-                string,
-                { default?: unknown }
-              >;
-              const providerDefaultModel = properties.model?.default;
-
-              // Check if this provider's default model matches the selected model
-              return providerDefaultModel === selectedRerankerModel;
-            })
-            .map((provider) => ({
-              id: provider.id,
-              text: provider.name, // Use provider name, not model name
-            }));
-
           fields.push({
             key: "inferenceBackend" as keyof ServiceConfig,
             label: "Inference backend",
-            options: inferenceBackendOptions,
+            options: buildInferenceBackendOptions(
+              rerankerComponent as Component,
+              serviceConfig.components?.reranker?.params?.model,
+              providerParamsByType["reranker"] || {},
+            ),
           });
         }
 
@@ -636,6 +582,16 @@ export const StepTwo: React.FC<DAStepProps> = ({
         resourcesError={resourcesError}
         onResourceStatusChange={onResourceStatusChange}
       />
+
+      {failedServiceNames.length > 0 && (
+        <InlineNotification
+          kind="error"
+          title={`Failed to load configuration for ${failedServiceNames.join(", ")}.`}
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
 
       {/* Service Configurations - Rendered Dynamically */}
       <div className={styles.formSection}>

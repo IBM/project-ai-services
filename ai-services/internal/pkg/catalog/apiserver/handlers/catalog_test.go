@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -27,9 +28,18 @@ func setupTestRouter() *gin.Engine {
 	return router
 }
 
+// newTestCatalogHandler creates a CatalogHandler backed by embedded-only catalog items
+// (no bundle DB) — sufficient for unit tests that exercise built-in catalog entries.
+func newTestCatalogHandler(t *testing.T) *CatalogHandler {
+	t.Helper()
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+	return NewCatalogHandler(provider)
+}
+
 func TestListArchitectures(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/architectures", handler.ListArchitectures)
 
 	tests := []struct {
@@ -77,7 +87,7 @@ func TestListArchitectures(t *testing.T) {
 
 func TestGetArchitecture(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/architectures/:id", handler.GetArchitectureDetails)
 
 	tests := []struct {
@@ -146,7 +156,7 @@ func validateArchitectureNotFound(t *testing.T, body []byte) {
 
 func TestListServices(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/services", handler.ListServices)
 
 	tests := []struct {
@@ -206,7 +216,7 @@ func TestListServices(t *testing.T) {
 
 func TestGetService(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/services/:id", handler.GetServiceDetails)
 
 	tests := []struct {

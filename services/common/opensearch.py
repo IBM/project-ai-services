@@ -29,7 +29,6 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
 
 class OpensearchVectorStore(VectorStore):
     def __init__(self):
-        logger.debug("Initializing OpensearchVectorStore")
 
         self.host = settings.vector_store.opensearch_host
         self.port = settings.vector_store.opensearch_port
@@ -41,7 +40,6 @@ class OpensearchVectorStore(VectorStore):
         self.num_shards = settings.vector_store.opensearch_num_shards
         
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
-        logger.debug(f"Index configuration: shards={self.num_shards}")
 
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],
@@ -162,8 +160,8 @@ class OpensearchVectorStore(VectorStore):
 
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
-        """
-        Supports 2 modes of insertion with retry logic for transient failures.
+        """Supports 2 modes of insertion with retry logic for transient failures.
+
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
 

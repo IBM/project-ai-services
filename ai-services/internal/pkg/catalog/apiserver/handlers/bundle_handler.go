@@ -3,10 +3,22 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+)
+
+const (
+	// maxBundleSizeBytes is the maximum allowed compressed (.tar.gz) upload size (20 MB).
+	// The uncompressed on-disk limit is enforced separately by maxExtractedFileSize in
+	// archive.go (50 MB). A 20 MB compressed ceiling is sufficient because catalog bundles
+	// consist mainly of YAML and Go templates which compress at 5–10×.
+	maxBundleSizeBytes = 20 * 1024 * 1024
 )
 
 // BundleHandler handles catalog bundle creation, replacement, deletion, and listing.
@@ -36,15 +48,34 @@ func NewBundleHandler(svc bundlesvc.BundleServiceInterface) *BundleHandler {
 //	@Failure		422		{object}	ErrorResponse	"Unprocessable Entity — validation failed"
 //	@Router			/catalog/bundles [post]
 func (h *BundleHandler) CreateBundle(c *gin.Context) {
-	// TODO: enforce MAX_BUNDLE_SIZE via http.MaxBytesReader
-	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
-	// TODO: extract userID from context via middleware.CtxUserIDKey
-	// TODO: call h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
-	// TODO: map errors to 409 / 422 / 500
-	// TODO: set Location header and return 201 with BundleResponse body
+	// Enforce MAX_BUNDLE_SIZE before form parsing.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), bundlesvc.BundleFileExtension) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a " + bundlesvc.BundleFileExtension + " archive"})
+
+		return
+	}
+
 	userID := c.GetString(middleware.CtxUserIDKey)
-	_ = userID
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+
+	resp, err := h.bundleService.ProcessBundle(c.Request.Context(), file, userID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
+	c.JSON(http.StatusCreated, resp)
 }
 
 // ValidateBundle godoc
@@ -88,15 +119,48 @@ func (h *BundleHandler) ValidateBundle(c *gin.Context) {
 //	@Failure		422		{object}	ErrorResponse	"catalog_id or catalog_type mismatch, or validation failed"
 //	@Router			/catalog/bundles/{id} [put]
 func (h *BundleHandler) UpdateBundle(c *gin.Context) {
-	// TODO: read id path param via c.Param("id")
-	// TODO: call h.bundleService.GetByBundleID — return 404 if nil
-	// TODO: read the "file" form field; return 400 if missing or not .tar.gz
-	// TODO: extract userID from context via middleware.CtxUserIDKey
-	// TODO: call h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
-	// TODO: set Location header and return 200 with updated BundleResponse
+	// Enforce MAX_BUNDLE_SIZE before any further parsing.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBundleSizeBytes)
+
 	bundleID := c.Param("id")
-	_ = fmt.Sprintf("/api/v1/catalog/bundles/%s", bundleID)
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+
+	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: fmt.Sprintf("bundle %q not found", bundleID)})
+
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or unreadable 'file' field: " + err.Error()})
+
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), bundlesvc.BundleFileExtension) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file must be a " + bundlesvc.BundleFileExtension + " archive"})
+
+		return
+	}
+
+	userID := c.GetString(middleware.CtxUserIDKey)
+
+	resp, err := h.bundleService.ReplaceBundle(c.Request.Context(), existing, file, userID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.Header("Location", fmt.Sprintf("/api/v1/catalog/bundles/%s", resp.ID))
+	c.JSON(http.StatusOK, resp)
 }
 
 // DeleteBundle godoc
@@ -112,28 +176,65 @@ func (h *BundleHandler) UpdateBundle(c *gin.Context) {
 //	@Failure		404	{object}	ErrorResponse	"Bundle not found"
 //	@Router			/catalog/bundles/{id} [delete]
 func (h *BundleHandler) DeleteBundle(c *gin.Context) {
-	// TODO: read id path param via c.Param("id")
-	// TODO: call h.bundleService.GetByBundleID — return 404 if nil
-	// TODO: call h.bundleService.DeleteBundle(c.Request.Context(), existing)
-	// TODO: return 204 on success
-	c.Status(http.StatusNotImplemented)
+	bundleID := c.Param("id")
+
+	existing, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: fmt.Sprintf("bundle %q not found", bundleID)})
+
+		return
+	}
+
+	if err := h.bundleService.DeleteBundle(c.Request.Context(), existing); err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // ListBundles godoc
 //
 //	@Summary		List all bundles
-//	@Description	Returns all registered bundles ordered by created_at DESC.
+//	@Description	Returns a paginated list of all registered bundles ordered by created_at DESC.
 //	@Tags			Bundles
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Success		200	{object}	bundlesvc.BundleListResponse
-//	@Failure		401	{object}	ErrorResponse
-//	@Failure		500	{object}	ErrorResponse
+//	@Param			page		query		int	false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int	false	"Number of items per page (max: 100)"	default(20)
+//	@Success		200			{object}	bundlesvc.BundleListResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid pagination parameters"
+//	@Failure		401			{object}	ErrorResponse
+//	@Failure		500			{object}	ErrorResponse
 //	@Router			/catalog/bundles [get]
 func (h *BundleHandler) ListBundles(c *gin.Context) {
-	// TODO: call h.bundleService.ListBundles(c.Request.Context())
-	// TODO: return 200 with BundleListResponse
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	resp, err := h.bundleService.ListBundles(c.Request.Context(), bundlesvc.BundleListRequest{
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetBundle godoc
@@ -149,8 +250,31 @@ func (h *BundleHandler) ListBundles(c *gin.Context) {
 //	@Failure		404	{object}	ErrorResponse	"Bundle not found"
 //	@Router			/catalog/bundles/{id} [get]
 func (h *BundleHandler) GetBundle(c *gin.Context) {
-	// TODO: read id path param via c.Param("id")
-	// TODO: call h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
-	// TODO: return 404 if nil, else 200 with BundleResponse
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	bundleID := c.Param("id")
+
+	resp, err := h.bundleService.GetBundleByID(c.Request.Context(), bundleID)
+	if err != nil {
+		h.mapServiceError(c, err)
+
+		return
+	}
+
+	if resp == nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: fmt.Sprintf("bundle %q not found", bundleID)})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// mapServiceError translates a validators.ValidationError into the appropriate
+// HTTP status, and falls back to 500 for all other errors.
+func (h *BundleHandler) mapServiceError(c *gin.Context, err error) {
+	if valErr, ok := err.(*validators.ValidationError); ok {
+		c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+		return
+	}
+	c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 }

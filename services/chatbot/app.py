@@ -67,12 +67,21 @@ auth_cache_lock = asyncio.Lock()
 concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
+    """Initialize endpoint configurations for embedding, LLM, and reranker models.
+
+    Retrieves model details (endpoints, model names, and maximum token lengths)
+    and caches them in global variables.
+    """
     global emb_model_dict, llm_model_dict, reranker_model_dict
     emb_model_dict = get_embedding_endpoint()
     llm_model_dict = get_llm_endpoint()
     reranker_model_dict = get_reranker_endpoint()
 
 def initialize_vectorstore():
+    """Initialize the global vectorstore instance.
+
+    Retrieves the configured vector store from the database module.
+    """
     global vectorstore
     vectorstore = db.get_vector_store()
 
@@ -96,6 +105,11 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 
 @asynccontextmanager
 async def lifespan(app):
+    """Manage application lifespan events (startup and shutdown).
+
+    Sets up uvicorn logging configuration, creates a global connection pool
+    for the LLM session, and pre-initializes model configurations.
+    """
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
@@ -147,6 +161,11 @@ app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -155,13 +174,18 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 def swagger_root():
-    """Expose Swagger UI at the root path (/)"""
+    """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="AI-Services Chatbot API - Swagger UI",
     )
 
 def limit_concurrency(f):
+    """Decorator to enforce max batch size concurrency limits.
+
+    Acquires a slot from the bounded semaphore before running the function,
+    raising a SERVER_BUSY error if the semaphore is already fully locked.
+    """
     @wraps(f)
     async def wrapper(*args, **kwargs):
         if concurrency_limiter.locked():
@@ -295,6 +319,11 @@ def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     return PerfMetricsResponse(metrics=metrics)
 
 async def locked_stream(stream_g, perf_stat_dict):
+    """Asynchronously iterates through a stream generator and yields chunks.
+
+    Handles any exceptions raised during streaming and yields a formatted
+    error chunk response if a failure occurs mid-stream.
+    """
     try:
         async for chunk in iterate_in_threadpool(stream_g):
             yield chunk
@@ -450,6 +479,12 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
     }
 )
 async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
+    """Generate a chat completion response using Retrieval-Augmented Generation (RAG).
+
+    Performs query validation, language detection, document retrieval from the
+    vector store, reranking, prompt construction, and invokes the LLM endpoint.
+    Supports both standard and streaming responses.
+    """
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
 
@@ -677,6 +712,11 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     description="Check whether the vector store is initialized and populated."
 )
 async def db_status() -> DBStatusResponse:
+    """Check the status of the vector database.
+
+    Ensures the vector store is initialized and checks if any documents are
+    currently populated/ingested.
+    """
     try:
         # Ensure vectorstore is initialized on first request
         if vectorstore is None:
@@ -705,6 +745,11 @@ async def db_status() -> DBStatusResponse:
     description="Check if the service is running."
 )
 async def health() -> HealthResponse:
+    """Perform a basic health check.
+
+    Returns:
+        HealthResponse indicating the service is running and healthy.
+    """
     return HealthResponse(status="ok")
 
 if __name__ == "__main__":

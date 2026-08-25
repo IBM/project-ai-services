@@ -160,6 +160,10 @@ async def create_job(
     ),
     job_name: Optional[str] = Query(None, description="Optional human-readable name for the job"),
 ):
+    """Create a new background digitization or ingestion job for one or more files.
+
+    Validates files, generates unique job identifiers, and enqueues the tasks.
+    """
     try:
         # 1. Block new jobs while an import/export is running.
         if await db_ops.is_import_export_in_progress():

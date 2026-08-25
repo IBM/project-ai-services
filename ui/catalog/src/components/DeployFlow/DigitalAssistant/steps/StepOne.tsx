@@ -1,9 +1,16 @@
 import { useMemo, useEffect } from "react";
-import { TextInput, Dropdown, Grid, Column } from "@carbon/react";
+import {
+  TextInput,
+  Dropdown,
+  Grid,
+  Column,
+  InlineNotification,
+} from "@carbon/react";
 import styles from "../DigitalAssistantDeployFlow.module.scss";
 import type { StepProps } from "../types";
 import type { ComponentConfig } from "../../Shared/types";
-import { useMultiTypeProviderParams } from "../hooks/useProviderParams";
+import type { ProviderSchema } from "@/types/api.types";
+import { useDeployStore } from "@/store/deploy.store";
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -11,6 +18,7 @@ export const StepOne: React.FC<StepProps> = ({
   onChange,
   deployOptions,
   showNameError = false,
+  onSchemaError,
 }) => {
   const isNameValid = !!formData.name.trim();
 
@@ -18,64 +26,66 @@ export const StepOne: React.FC<StepProps> = ({
     { id: deployOptions.version, text: deployOptions.version },
   ];
 
-  // Collect provider IDs for all global component types for batch fetching
-  const providerIdsByType = useMemo(() => {
-    const result: Record<string, string[]> = {};
+  const providerParams = useDeployStore((state) => state.providerParams);
+  const providerParamsError = useDeployStore(
+    (state) => state.providerParamsError,
+  );
+
+  // Provider schemas from store, keyed by componentType → providerId.
+  const paramsByType = useMemo(() => {
+    const result: Record<string, Record<string, ProviderSchema>> = {};
     deployOptions.global_components.forEach((component) => {
-      result[component.type] = component.providers.map((p) => p.id);
+      result[component.type] = {};
+      component.providers.forEach((provider) => {
+        const cached = providerParams[`${component.type}:${provider.id}`];
+        if (cached) result[component.type][provider.id] = cached.data;
+      });
     });
     return result;
-  }, [deployOptions.global_components]);
+  }, [deployOptions.global_components, providerParams]);
 
-  // Fetch provider parameters for all component types in a single hook call,
-  // respecting Rules of Hooks (no hooks inside loops or callbacks)
-  const { paramsByType, errorsByType } =
-    useMultiTypeProviderParams(providerIdsByType);
-
-  const providerParamsByType = useMemo(() => {
-    const result: Record<
-      string,
-      {
-        paramsMap: Record<string, import("@/types/api.types").ProviderSchema>;
-        errors: Record<string, string>;
-      }
-    > = {};
-    Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
-      result[componentType] = {
-        paramsMap,
-        errors: errorsByType[componentType] || {},
-      };
-    });
-    return result;
-  }, [paramsByType, errorsByType]);
+  // Use the selected provider; fall back to the default so cold-open failures are still surfaced.
+  const failedComponentTypes = useMemo(() => {
+    return deployOptions.global_components
+      .filter((component) => {
+        const selectedProviderId =
+          formData.globalComponents[component.type]?.providerId ||
+          component.providers.find((p) => p.default)?.id ||
+          component.providers[0]?.id;
+        if (!selectedProviderId) return false;
+        return !!providerParamsError[`${component.type}:${selectedProviderId}`];
+      })
+      .map((c) => c.name);
+  }, [
+    deployOptions.global_components,
+    formData.globalComponents,
+    providerParamsError,
+  ]);
 
   // Extract model names from provider schemas for display
   const modelNames = useMemo(() => {
-    const newModelNames: Record<string, string> = {};
-
-    Object.entries(providerParamsByType).forEach(([_componentType, data]) => {
-      const paramsMap = data.paramsMap || {};
-
+    const result: Record<string, string> = {};
+    Object.entries(paramsByType).forEach(([_componentType, paramsMap]) => {
       Object.entries(paramsMap).forEach(([providerId, params]) => {
         const properties = params?.properties as Record<
           string,
           { oneOf?: Array<{ title?: string }> }
         >;
-
         const modelTitle = properties?.model?.oneOf?.[0]?.title;
-
-        if (modelTitle) {
-          newModelNames[providerId] = modelTitle;
-        }
+        if (modelTitle) result[providerId] = modelTitle;
       });
     });
+    return result;
+  }, [paramsByType]);
 
-    return newModelNames;
-  }, [providerParamsByType]);
+  // Notify parent when schema error state changes so it can gate the Next button.
+  useEffect(() => {
+    onSchemaError?.(failedComponentTypes.length > 0);
+  }, [failedComponentTypes, onSchemaError]);
 
   // Initialize default model parameters when provider params are loaded
   useEffect(() => {
-    if (Object.keys(providerParamsByType).length === 0) return;
+    if (Object.keys(paramsByType).length === 0) return;
 
     const updates: Record<string, ComponentConfig> = {};
     let hasUpdates = false;
@@ -84,7 +94,7 @@ export const StepOne: React.FC<StepProps> = ({
       ([componentType, config]) => {
         if (config.params?.model) return;
 
-        const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+        const paramsMap = paramsByType[componentType] || {};
         const cachedParams = paramsMap[config.providerId];
         const properties = cachedParams?.properties as Record<
           string,
@@ -94,10 +104,7 @@ export const StepOne: React.FC<StepProps> = ({
         if (properties?.model?.default) {
           updates[componentType] = {
             ...config,
-            params: {
-              ...config.params,
-              model: properties.model.default,
-            },
+            params: { ...config.params, model: properties.model.default },
           };
           hasUpdates = true;
         }
@@ -106,13 +113,10 @@ export const StepOne: React.FC<StepProps> = ({
 
     if (hasUpdates) {
       onChange({
-        globalComponents: {
-          ...formData.globalComponents,
-          ...updates,
-        },
+        globalComponents: { ...formData.globalComponents, ...updates },
       });
     }
-  }, [providerParamsByType, formData.globalComponents, onChange]);
+  }, [paramsByType, formData.globalComponents, onChange]);
 
   // Build component data with provider options, deduplicate by preferring default provider
   const globalComponentsData = useMemo(() => {
@@ -124,23 +128,17 @@ export const StepOne: React.FC<StepProps> = ({
 
       component.providers.forEach((provider) => {
         const displayName = modelNames[provider.id] || provider.name;
-
         const existing = providersByDisplayName.get(displayName);
         if (!existing) {
-          // First provider with this display name
           providersByDisplayName.set(displayName, provider);
         } else if (provider.default && !existing.default) {
-          // Replace with default provider if current one isn't default
           providersByDisplayName.set(displayName, provider);
         }
       });
 
       const providerOptions: Array<{ id: string; text: string }> = [];
       providersByDisplayName.forEach((provider, displayName) => {
-        providerOptions.push({
-          id: provider.id,
-          text: displayName,
-        });
+        providerOptions.push({ id: provider.id, text: displayName });
       });
 
       const selectedProviderId =
@@ -156,15 +154,13 @@ export const StepOne: React.FC<StepProps> = ({
   }, [deployOptions.global_components, formData.globalComponents, modelNames]);
 
   const handleProviderChange = (componentType: string, providerId: string) => {
-    // Extract default model from provider schema
-    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const paramsMap = paramsByType[componentType] || {};
     const cachedParams = paramsMap[providerId];
     const properties = cachedParams?.properties as Record<
       string,
       { default?: unknown }
     >;
     const modelParam: Record<string, unknown> = {};
-
     if (properties?.model?.default) {
       modelParam.model = properties.model.default;
     }
@@ -172,10 +168,7 @@ export const StepOne: React.FC<StepProps> = ({
     onChange({
       globalComponents: {
         ...formData.globalComponents,
-        [componentType]: {
-          providerId,
-          params: modelParam,
-        },
+        [componentType]: { providerId, params: modelParam },
       },
     });
   };
@@ -185,6 +178,16 @@ export const StepOne: React.FC<StepProps> = ({
       <div className={styles.stepHeader}>
         <h2 className={styles.stepTitle}>{title}</h2>
       </div>
+
+      {failedComponentTypes.length > 0 && (
+        <InlineNotification
+          kind="error"
+          title={`Failed to load configurations of ${failedComponentTypes.join(", ")}.`}
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
 
       <div className={styles.formSection}>
         <Grid narrow className={styles.formGrid}>

@@ -42,6 +42,10 @@ def ensure_directories() -> None:
 
 
 def initialize_models() -> None:
+    """Initialize endpoint configurations for the LLM model.
+
+    Retrieves model details and caches them in the global `llm_model_dict` variable.
+    """
     global llm_model_dict
     llm_model_dict = get_llm_endpoint()
 
@@ -72,6 +76,11 @@ def _initialize_database() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application lifespan events (startup and shutdown).
+
+    Sets up logging, connection pooling, model initializations, database tables,
+    cache directories, and initiates recovering zombie jobs.
+    """
     configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     initialize_models()
@@ -121,6 +130,11 @@ app = FastAPI(
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -130,6 +144,7 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 def swagger_root():
+    """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="AI-Services Extract Information API — Swagger UI",
@@ -138,6 +153,7 @@ def swagger_root():
 
 @app.get("/health", tags=["health"])
 def health():
+    """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
 
 
@@ -147,6 +163,10 @@ def health():
 
 @app.exception_handler(SchemaValidationError)
 async def schema_validation_error_handler(request: Request, exc: SchemaValidationError):
+    """Global exception handler for SchemaValidationError.
+
+    Formats schema validation errors into standard API JSON error responses.
+    """
     body: dict = {"error": {"code": exc.code, "message": exc.message, "status": exc.status}}
     if exc.details:
         body["error"]["details"] = exc.details
@@ -155,6 +175,10 @@ async def schema_validation_error_handler(request: Request, exc: SchemaValidatio
 
 @app.exception_handler(ExtractException)
 async def extract_exception_handler(request: Request, exc: ExtractException):
+    """Global exception handler for ExtractException.
+
+    Formats extraction-related errors into standard API JSON error responses.
+    """
     body: dict = {"error": {"code": exc.code, "message": exc.message, "status": exc.status_code}}
     if exc.details:
         body["error"]["details"] = exc.details

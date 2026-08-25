@@ -35,7 +35,7 @@ func NewParametersCmd() *cobra.Command {
 			}
 
 			// Create catalog provider
-			provider, err := catalog.NewCatalogProvider()
+			provider, err := catalog.NewCatalogProvider(nil)
 			if err != nil {
 				return fmt.Errorf("failed to create catalog provider: %w", err)
 			}

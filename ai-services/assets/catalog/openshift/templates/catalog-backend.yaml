@@ -128,6 +128,9 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+          volumeMounts:
+            - name: catalog-bundles
+              mountPath: /data/catalog-bundles
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"
@@ -135,3 +138,7 @@ spec:
             limits:
               memory: "{{ .Values.backend.resources.limits.memory }}"
               cpu: "{{ .Values.backend.resources.limits.cpu }}"
+      volumes:
+        - name: catalog-bundles
+          persistentVolumeClaim:
+            claimName: catalog-bundles
