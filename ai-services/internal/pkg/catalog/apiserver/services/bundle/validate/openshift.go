@@ -83,7 +83,7 @@ type openShiftPaths struct {
 	hasValues      bool
 	hasSchema      bool
 	hasTemplFile   bool
-	metadataBytes  []byte                 // raw content of openshift/metadata.yaml
+	metadataBytes  []byte                  // raw content of openshift/metadata.yaml
 	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
 }
 

@@ -12,8 +12,8 @@ import (
 // It extends the common required fields (name, version, resources) with
 // podman-specific options.
 type PodmanMetadataYAML struct {
-	Name    string           `yaml:"name"`
-	Version string           `yaml:"version"`
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
 	// PodTemplateExecs is optional. When present each inner slice lists the
 	// template filenames to execute in order for a single pod. An absent or
 	// empty value is valid — the runtime will fall back to executing all

@@ -119,4 +119,3 @@ func stripTopDir(path, topDir string) string {
 
 	return strings.TrimPrefix(path, prefix)
 }
-
