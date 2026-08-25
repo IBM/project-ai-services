@@ -9,7 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewDeleteCmd implements: ai-services catalog bundle delete <bundle_id> [--yes]
+// NewDeleteCmd implements: ai-services catalog bundle delete <bundle_id> [--yes].
 func NewDeleteCmd() *cobra.Command {
 	var skipConfirm bool
 
@@ -32,6 +32,7 @@ Note:
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,6 +44,7 @@ Note:
 				_, _ = fmt.Scanln(&answer)
 				if answer != "y" && answer != "Y" {
 					logger.Infoln("Aborted.")
+
 					return nil
 				}
 			}

@@ -7,7 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewCreateCmd implements: ai-services catalog bundle create --file <path>
+// NewCreateCmd implements: ai-services catalog bundle create --file <path>.
 func NewCreateCmd() *cobra.Command {
 	var filePath string
 
@@ -28,6 +28,7 @@ Note:
 		Example: `  ai-services catalog bundle create --file ./my-service-bundle.tar.gz`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

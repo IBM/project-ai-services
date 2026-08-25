@@ -7,7 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewValidateCmd implements: ai-services catalog bundle validate --file <path>
+// NewValidateCmd implements: ai-services catalog bundle validate --file <path>.
 func NewValidateCmd() *cobra.Command {
 	var filePath string
 
@@ -24,6 +24,7 @@ The command exits with a non-zero status if validation fails.`,
 		Example: `  ai-services catalog bundle validate --file ./my-service-bundle.tar.gz`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,6 +38,7 @@ The command exits with a non-zero status if validation fails.`,
 			result, err := c.ValidateBundle(filePath)
 			if err != nil {
 				logger.Errorf("✗ Bundle validation failed: %v\n", err)
+
 				return err
 			}
 

@@ -7,11 +7,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewInfoCmd implements: ai-services catalog bundle info <bundle_id>
+// NewInfoCmd implements: ai-services catalog bundle info <bundle_id>.
 func NewInfoCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "info <bundle_id>",
-		Short:   "Show details for a catalog bundle",
+		Use:   "info <bundle_id>",
+		Short: "Show details for a catalog bundle",
 		Long: `Display the full details of a catalog bundle.
 
 The bundle is identified by its UUID, shown in the output of 'bundle list'
@@ -21,6 +21,7 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 		Args:    cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

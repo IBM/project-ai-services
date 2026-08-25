@@ -33,7 +33,7 @@ type BundleResponse struct {
 
 // BundleListResponse is the paginated response returned by GET /api/v1/catalog/bundles.
 type BundleListResponse struct {
-	Bundles    []BundleResponse        `json:"bundles"`
+	Bundles    []BundleResponse         `json:"bundles"`
 	Pagination BundlePaginationMetadata `json:"pagination"`
 }
 

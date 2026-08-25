@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewListCmd implements: ai-services catalog bundle list
+// NewListCmd implements: ai-services catalog bundle list.
 func NewListCmd() *cobra.Command {
 	var (
 		page     int
@@ -19,8 +19,8 @@ func NewListCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "list",
-		Short:   "List all catalog bundles",
+		Use:   "list",
+		Short: "List all catalog bundles",
 		Long: `List all custom bundles registered with the catalog.
 
 Bundles are shown in a table ordered by registration time, most recent first.
@@ -32,6 +32,7 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 		Args:    cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,7 +51,8 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 	}
 
 	cmd.Flags().IntVar(&page, "page", 1, "Page number (1-indexed)")
-	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Number of items per page (1–100)")
+	const defaultPageSize = 20
+	cmd.Flags().IntVar(&pageSize, "page-size", defaultPageSize, "Number of items per page (1–100)")
 
 	return cmd
 }
@@ -62,6 +64,7 @@ func printBundleTable(resp *client.BundleListResponse) error {
 
 	if p.TotalItems == 0 {
 		logger.Infoln("No bundles registered.")
+
 		return nil
 	}
 

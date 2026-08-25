@@ -7,7 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// NewUpdateCmd implements: ai-services catalog bundle update <bundle_id> --file <path>
+// NewUpdateCmd implements: ai-services catalog bundle update <bundle_id> --file <path>.
 func NewUpdateCmd() *cobra.Command {
 	var filePath string
 
@@ -30,6 +30,7 @@ Note:
 		Args:    cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
