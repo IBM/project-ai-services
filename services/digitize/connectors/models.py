@@ -84,6 +84,21 @@ class ConnectorError(str, Enum):
     """
 
 # ---------------------------------------------------------------------------
+# Connector type enum
+# ---------------------------------------------------------------------------
+
+class ConnectorType(str, Enum):
+    """Allowed connector transport types.
+
+    Inherits from str so values can be passed directly to SQLAlchemy and
+    compared with raw DB strings without calling .value.
+    """
+
+    SSH = "ssh"
+    S3 = "s3"
+
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
@@ -118,6 +133,16 @@ class ConnectorCreateRequest(BaseModel):
             }
         }
     }
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        allowed = {t.value for t in ConnectorType}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid connector type {v!r}. Allowed values: {sorted(allowed)}"
+            )
+        return v
 
     @field_validator("id", mode="before")
     @classmethod
