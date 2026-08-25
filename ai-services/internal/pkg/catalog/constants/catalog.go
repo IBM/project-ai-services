@@ -25,6 +25,7 @@ const (
 	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
 	ConnectorTypeDatasource = "datasource"
 )
+
 // Datasource provider ID constants.
 // These values must match the connector IDs defined in the catalog assets
 // (assets/connectors/datasource/<id>/metadata.yaml).
