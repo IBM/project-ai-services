@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -47,7 +48,17 @@ type Options struct {
 	BaseDir string
 	// HTTPSPort is the host port Caddy binds for HTTPS traffic, e.g. "443".
 	// Set once at first join; ignored on subsequent runs if already deployed.
-	HTTPSPort string
+	HTTPSPort int
+
+	// DomainName is an optional custom domain suffix for self-signed certificates.
+	// If empty, Caddy uses wildcard DNS format: <service>.<ip>.nip.io.
+	DomainName string
+	// SSLCertPath is the path to a user-provided SSL certificate (PEM).
+	// Must be used together with SSLKeyPath.
+	SSLCertPath string
+	// SSLKeyPath is the path to a user-provided SSL private key (PEM).
+	// Must be used together with SSLCertPath.
+	SSLKeyPath string
 }
 
 // Setup writes prerequisite config files, checks whether the worker proxy
@@ -129,7 +140,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
 	}
 
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
-		"caddy.httpsPort": opts.HTTPSPort,
+		"caddy.httpsPort": strconv.Itoa(opts.HTTPSPort),
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)

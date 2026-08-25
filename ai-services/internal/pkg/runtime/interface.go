@@ -17,10 +17,10 @@ type Runtime interface {
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)
 	CreatePod(ctx context.Context, body io.Reader, opts map[string]string) ([]types.Pod, error)
-	DeletePod(id string, force *bool) error
-	StopPod(id string) error
-	StartPod(id string) error
-	InspectPod(nameOrId string) (*types.Pod, error)
+	DeletePod(nameOrID string, force *bool) error
+	StopPod(nameOrID string) error
+	StartPod(nameOrID string) error
+	InspectPod(nameOrID string) (*types.Pod, error)
 	PodExists(nameOrID string) (bool, error)
 	PodLogs(nameOrID string) error
 	GetPodResources(nameOrID string) (*types.PodResources, error)
@@ -38,7 +38,7 @@ type Runtime interface {
 
 	// Container operations
 	// ListContainers(filters map[string][]string) ([]types.Container, error)
-	InspectContainer(nameOrId string) (*types.Container, error)
+	InspectContainer(nameOrID string) (*types.Container, error)
 	ContainerExists(nameOrID string) (bool, error)
 	ContainerLogs(containerNameOrID string) error
 	ExecInContainerWithCmd(podName, containerName string, command []string) (string, error)

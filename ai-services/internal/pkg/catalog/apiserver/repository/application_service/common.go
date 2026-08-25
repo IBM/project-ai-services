@@ -1049,6 +1049,7 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 			Status:     types.Status(strings.ToLower(processedPod.Status)),
 			Healthy:    processedPod.Health == string(consts.Ready),
 			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+			Labels:     pod.Labels,
 			Containers: containers,
 		}
 

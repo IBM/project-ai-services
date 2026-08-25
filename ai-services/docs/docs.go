@@ -2452,6 +2452,12 @@ const docTemplate = `{
                 "healthy": {
                     "type": "boolean"
                 },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "pod_id": {
                     "type": "string"
                 },
