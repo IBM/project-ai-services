@@ -64,7 +64,7 @@ func serviceMetaYAML(id, version, name string) string {
 	if n == "" {
 		n = id
 	}
-	return "id: " + id + "\ntype: service\nversion: " + version + "\nname: " + n + "\ndescription: test\nstandalone: true\n"
+	return "id: " + id + "\ntype: service\nversion: " + version + "\nname: " + n + "\ndescription: test\nstandalone: true\nabout:\n  - section\n"
 }
 
 // componentMetaYAML returns a minimal valid component metadata.yaml body.
@@ -219,7 +219,7 @@ func TestPeekMetadata_ReturnedBytesCanBeReused(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestParseMetadataYAML_ServiceMinimal(t *testing.T) {
-	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.0.0\nname: n\ndescription: d\nstandalone: true\n"))
+	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.0.0\nname: n\ndescription: d\nstandalone: true\nabout:\n  - section\n"))
 	require.NoError(t, err)
 	sm := meta.(*bundlemetadata.ServiceMetadata)
 	assert.Equal(t, "svc", sm.ID)
@@ -228,7 +228,7 @@ func TestParseMetadataYAML_ServiceMinimal(t *testing.T) {
 }
 
 func TestParseMetadataYAML_ServiceWithName(t *testing.T) {
-	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.2.3\nname: My Svc\ndescription: d\nstandalone: true\n"))
+	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.2.3\nname: My Svc\ndescription: d\nstandalone: true\nabout:\n  - section\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "My Svc", meta.(*bundlemetadata.ServiceMetadata).DisplayName)
 }

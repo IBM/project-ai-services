@@ -36,28 +36,3 @@ func ParseAndValidateOpenShiftMetadata(data []byte) (version string, err error) 
 	return m.Version, nil
 }
 
-// ValidateOpenShiftChartVersion parses Chart.yaml and checks that its version
-// matches rootVersion.
-func ValidateOpenShiftChartVersion(chartData []byte, rootVersion string) error {
-	// Chart.yaml is a YAML file; we only need the version field.
-	var chart struct {
-		Version string `yaml:"version"`
-	}
-	if err := yaml.Unmarshal(chartData, &chart); err != nil {
-		return &validators.ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("openshift/Chart.yaml: failed to parse: %s", err),
-		}
-	}
-	if chart.Version != rootVersion {
-		return &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"version mismatch: root metadata.yaml has %q but openshift/Chart.yaml has %q",
-				rootVersion, chart.Version,
-			),
-		}
-	}
-
-	return nil
-}

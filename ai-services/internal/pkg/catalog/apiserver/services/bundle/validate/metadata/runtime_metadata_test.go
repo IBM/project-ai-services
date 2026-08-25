@@ -68,27 +68,6 @@ func TestParseAndValidateOpenShiftMetadata_InvalidYAML(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// ValidateOpenShiftChartVersion — version cross-check
-// -----------------------------------------------------------------------
-
-func TestValidateOpenShiftChartVersion_Match(t *testing.T) {
-	chart := []byte("apiVersion: v2\nname: svc\nversion: 1.0.0\ntype: application\n")
-	require.NoError(t, bundlemetadata.ValidateOpenShiftChartVersion(chart, "1.0.0"))
-}
-
-func TestValidateOpenShiftChartVersion_Mismatch(t *testing.T) {
-	chart := []byte("apiVersion: v2\nname: svc\nversion: 2.0.0\ntype: application\n")
-	err := bundlemetadata.ValidateOpenShiftChartVersion(chart, "1.0.0")
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "openshift/Chart.yaml")
-}
-
-func TestValidateOpenShiftChartVersion_InvalidYAML(t *testing.T) {
-	err := bundlemetadata.ValidateOpenShiftChartVersion([]byte(":\tinvalid"), "1.0.0")
-	assertValidationError(t, err, http.StatusBadRequest, "openshift/Chart.yaml")
-}
-
-// -----------------------------------------------------------------------
 // validateCommonRuntimeFields — field-level coverage via ValidatePodmanMetadata
 // (OpenShift uses the same helper; one set of field tests is sufficient)
 // -----------------------------------------------------------------------
@@ -143,41 +122,3 @@ func TestValidatePodmanMetadata_ResourcesBlockAbsent(t *testing.T) {
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
 }
 
-// -----------------------------------------------------------------------
-// validateCommonRuntimeFields — same field coverage via ParseAndValidateOpenShiftMetadata
-// -----------------------------------------------------------------------
-
-func TestParseAndValidateOpenShiftMetadata_MissingName(t *testing.T) {
-	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
-		[]byte("version: \"1.0.0\"\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: 0\n"),
-	)
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "'name' is required")
-}
-
-func TestParseAndValidateOpenShiftMetadata_MissingCPU(t *testing.T) {
-	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
-		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 0\n  memory: 1073741824\n  storage: 0\n"),
-	)
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
-}
-
-func TestParseAndValidateOpenShiftMetadata_MissingMemory(t *testing.T) {
-	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
-		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 1\n  memory: 0\n  storage: 0\n"),
-	)
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.memory' must be greater than 0")
-}
-
-func TestParseAndValidateOpenShiftMetadata_NegativeStorage(t *testing.T) {
-	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
-		[]byte("name: svc\nversion: \"1.0.0\"\nresources:\n  cpu: 1\n  memory: 1073741824\n  storage: -1\n"),
-	)
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.storage' must be 0 or greater")
-}
-
-func TestParseAndValidateOpenShiftMetadata_ResourcesBlockAbsent(t *testing.T) {
-	_, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(
-		[]byte("name: svc\nversion: \"1.0.0\"\n"),
-	)
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
-}

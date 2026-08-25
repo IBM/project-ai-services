@@ -171,27 +171,23 @@ func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (any, 
 }
 
 // parseMetadataYAML decodes raw YAML bytes, validates all required fields via
-// bundlemetadata.ValidateRootMetadata, and returns the appropriate concrete type.
+// bundlemetadata.ParseRootMetadata, and returns the appropriate concrete type.
 // Returns *bundlemetadata.ServiceMetadata or *bundlemetadata.ComponentMetadata.
 func parseMetadataYAML(data []byte) (any, error) {
-	m, err := bundlemetadata.UnmarshalMetadataYAML(data)
+	parsed, err := bundlemetadata.ParseRootMetadata(data)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := bundlemetadata.ValidateRootMetadata(m); err != nil {
-		return nil, err
-	}
-
-	switch m.Type {
-	case bundlemetadata.CatalogTypeService:
+	switch m := parsed.(type) {
+	case *bundlemetadata.ServiceMetadataYAML:
 		return &bundlemetadata.ServiceMetadata{
 			ID:          m.ID,
 			Type:        m.Type,
 			Ver:         m.Version,
 			DisplayName: m.Name,
 		}, nil
-	case bundlemetadata.CatalogTypeComponent:
+	case *bundlemetadata.ComponentMetadataYAML:
 		return &bundlemetadata.ComponentMetadata{
 			ID:            m.ID,
 			Type:          m.Type,
@@ -200,9 +196,9 @@ func parseMetadataYAML(data []byte) (any, error) {
 			DisplayName:   m.Name,
 		}, nil
 	default:
-		// ValidateRootMetadata already rejects unknown types before we reach here,
+		// ParseRootMetadata already rejects unknown types before we reach here,
 		// so this branch is only reachable if a new type is added without a matching case.
-		return nil, fmt.Errorf("parseMetadataYAML: unhandled catalog type %q — add a case branch", m.Type)
+		return nil, fmt.Errorf("parseMetadataYAML: unhandled metadata type %T — add a case branch", parsed)
 	}
 }
 

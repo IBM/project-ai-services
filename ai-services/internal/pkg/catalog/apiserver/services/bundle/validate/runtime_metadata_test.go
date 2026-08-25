@@ -56,7 +56,7 @@ func assertValidationError(t *testing.T, err error, code int, msgContains string
 
 // validRootMeta returns a minimal valid root metadata.yaml for a service bundle.
 func validRootMeta() string {
-	return "id: svc\ntype: service\nversion: 1.0.0\nname: My Svc\ndescription: d\nstandalone: true\n"
+	return "id: svc\ntype: service\nversion: 1.0.0\nname: My Svc\ndescription: d\nstandalone: true\nabout:\n  - section\n"
 }
 
 // validPodmanMeta returns a minimal valid podman/metadata.yaml.
