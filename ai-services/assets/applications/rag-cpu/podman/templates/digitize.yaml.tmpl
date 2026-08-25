@@ -125,6 +125,8 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
+        - name: DB_ENCRYPTION_KEY
+          value: "{{ .Values.digitize.dbEncryptionKey }}"
         {{- if .Values.instruct.apiKey }}
         - name: LLM_API_KEY
           value: "{{ .Values.instruct.apiKey }}"

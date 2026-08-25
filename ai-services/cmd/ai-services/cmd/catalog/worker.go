@@ -43,10 +43,9 @@ func newWorkerRegisterCmd() *cobra.Command {
 		Long: `Pre-registers a worker by name in the catalog and returns a single-use
 bootstrap token.
 
-Pass the token to the worker daemon at startup so it can authenticate with the
-catalog gRPC gateway:
+Pass the token to the worker node and run:
 
-  worker join --token <token> --gateway <catalog-host>:9090`,
+  ai-services worker join <catalog-host>:9090 --token <token>`,
 		Example: `  ai-services catalog worker register node-1`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

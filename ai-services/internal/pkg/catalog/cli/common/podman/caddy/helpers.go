@@ -12,35 +12,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
-
-// ComputeDomainConfig computes the domain configuration from SSL certificates and domain name.
-// Priority: certDomain > customDomain > hostIP.nip.io.
-func ComputeDomainConfig(sslCertPath, sslKeyPath, domainName string) (string, error) {
-	var domainSuffix string
-
-	// If SSL certificate is provided, extract domain from it
-	if sslCertPath != "" && sslKeyPath != "" {
-		extractedDomain, err := utils.ExtractDomainFromCertificate(sslCertPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract domain from certificate: %w", err)
-		}
-		domainSuffix = extractedDomain
-	} else if domainName != "" {
-		// Use provided domain name
-		domainSuffix = domainName
-	} else {
-		// Default to hostIP.nip.io when no configuration is provided
-		hostIP, err := utils.GetHostIP()
-		if err != nil {
-			return "", fmt.Errorf("failed to get host IP for domain suffix: %w", err)
-		}
-		domainSuffix = fmt.Sprintf("%s.nip.io", hostIP)
-	}
-
-	return domainSuffix, nil
-}
 
 // getCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
 func getCaddyAdminPort(runtime *podman.PodmanClient, podName string) (string, error) {

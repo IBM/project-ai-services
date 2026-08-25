@@ -18,6 +18,7 @@ spec:
         ai-services.io/service: {{ .Release.Name }}
         ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: digitize-ui
+        ai-services.io/component-type: ui
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false

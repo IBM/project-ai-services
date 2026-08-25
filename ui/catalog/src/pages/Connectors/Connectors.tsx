@@ -1,11 +1,12 @@
 import { PageHeader } from "@carbon/ibm-products";
+import DataSourceConnectorsTable from "@/components/DataSourceConnectorsTable";
 import styles from "./Connectors.module.scss";
 
-// Placeholder page for the Connectors section
 const Connectors = () => {
   return (
     <div className={styles.connectorsContainer}>
       <PageHeader title="Connectors" />
+      <DataSourceConnectorsTable />
     </div>
   );
 };
