@@ -64,19 +64,18 @@ func metaFields(meta any) (catalogType, catalogID, version, name string) {
 //
 //  1. Read the archive into memory and parse the root metadata.yaml — all required-field
 //     checks (name, description, standalone, component_type) happen here.
-//  2. Check for a catalog collision (skipped when catalog is nil).
-//  3. Run Podman and OpenShift validators concurrently; each skips gracefully when its
+//  2. Run Podman and OpenShift validators concurrently; each skips gracefully when its
 //     runtime directory is absent.
-//  4. Return a *ServiceValidationResult or *ComponentValidationResult.
+//  3. Return a *ServiceValidationResult or *ComponentValidationResult.
 //
-// No DB row is written and CatalogProvider is not reloaded.
+// No DB row is written and CatalogProvider is not reloaded. This does not check
+// whether the catalog_id already exists in the catalog — that check only makes sense
+// at create time and is performed separately by ProcessBundle (checkCatalogCollision).
+// Running it here too would make ReplaceBundle (which calls ValidateBundle at step 3)
+// reject every legitimate PUT, since the entry it is replacing always already exists.
 func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, error) {
 	archiveBytes, meta, topDir, err := peekMetadata(file)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := s.checkCatalogCollision(meta); err != nil {
 		return nil, err
 	}
 
@@ -201,6 +200,12 @@ func (s *bundleService) ProcessBundle(ctx context.Context, file io.Reader, userI
 				catalogID, existing.ID,
 			),
 		}
+	}
+
+	// Step 2a: catalog collision check — catches embedded/built-in catalog items
+	// that have no bundles-table row and therefore aren't caught by step 2 above.
+	if err := s.checkCatalogCollision(meta); err != nil {
+		return nil, err
 	}
 
 	// Step 3: full validation — same rules as POST /validate, no re-read needed.

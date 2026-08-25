@@ -1388,51 +1388,13 @@ func failsOnReload(err error) *mockCatalogProvider {
 	}
 }
 
-// -----------------------------------------------------------------------
-// checkCatalogCollision — ValidateBundle catalog-collision tests
-// -----------------------------------------------------------------------
-
-// TestValidateBundle_ServiceCollision_Returns422 verifies that when the catalog
-// already has a service registered under the archive's id, ValidateBundle
-// returns a 422 ValidationError instead of bypassing the check.
-func TestValidateBundle_ServiceCollision_Returns422(t *testing.T) {
+// TestValidateBundle_NoCatalogIDCheck verifies that ValidateBundle does not reject
+// an archive whose catalog_id already exists elsewhere — /validate is a pure
+// structural/semantic check and must not depend on catalog state. The collision
+// check only applies to ProcessBundle (POST).
+func TestValidateBundle_NoCatalogIDCheck(t *testing.T) {
 	catalog := &mockCatalogProvider{
-		serviceExists: func(id string) bool { return id == "my-service" },
-	}
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
-
-	archive := buildArchive(t, map[string]string{
-		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
-	}, true)
-
-	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog service")
-}
-
-// TestValidateBundle_ComponentCollision_Returns422 verifies that when the catalog
-// already has a component registered under the archive's type/id, ValidateBundle
-// returns a 422 ValidationError instead of bypassing the check.
-func TestValidateBundle_ComponentCollision_Returns422(t *testing.T) {
-	catalog := &mockCatalogProvider{
-		componentExists: func(componentType, id string) bool {
-			return componentType == "llm" && id == "my-provider"
-		},
-	}
-	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
-
-	archive := buildArchive(t, map[string]string{
-		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
-	}, true)
-
-	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
-	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog component")
-}
-
-// TestValidateBundle_NoCollision_Passes verifies that when the catalog does not
-// report a collision, ValidateBundle proceeds past checkCatalogCollision.
-func TestValidateBundle_NoCollision_Passes(t *testing.T) {
-	catalog := &mockCatalogProvider{
-		serviceExists: func(_ string) bool { return false },
+		serviceExists: func(_ string) bool { return true }, // would collide if checked
 	}
 	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
 
@@ -1443,6 +1405,83 @@ func TestValidateBundle_NoCollision_Passes(t *testing.T) {
 	result, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
 	require.NoError(t, err)
 	require.NotNil(t, result)
+}
+
+// TestProcessBundle_ServiceCollision_Returns422 verifies that POST /bundles rejects
+// an archive whose service id is already registered in the catalog (e.g. an embedded
+// item with no bundles-table row, so GetActiveByCatalogID alone would miss it).
+func TestProcessBundle_ServiceCollision_Returns422(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	catalog := &mockCatalogProvider{
+		serviceExists: func(id string) bool { return id == "my-service" },
+	}
+	svc := NewBundleService(repo, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
+	}, true)
+
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog service")
+}
+
+// TestProcessBundle_ComponentCollision_Returns422 verifies that POST /bundles rejects
+// an archive whose component (type, id) is already registered in the catalog.
+func TestProcessBundle_ComponentCollision_Returns422(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	catalog := &mockCatalogProvider{
+		componentExists: func(componentType, id string) bool {
+			return componentType == "llm" && id == "my-provider"
+		},
+	}
+	svc := NewBundleService(repo, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
+	}, true)
+
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog component")
+}
+
+// TestReplaceBundle_NoCatalogCollisionCheck verifies that PUT /bundles/{id} does NOT
+// reject a replace even though the catalog reports the target id as already existing
+// — which it always will, since ReplaceBundle's whole purpose is to update an entry
+// that's already registered.
+func TestReplaceBundle_NoCatalogCollisionCheck(t *testing.T) {
+	noSvcRepo, noCompRepo := noRunningInstances()
+	catalog := &mockCatalogProvider{
+		serviceExists: func(_ string) bool { return true }, // would always collide if checked
+	}
+	repo := &mockBundleRepo{
+		update: func(_ context.Context, _ uuid.UUID, _ models.BundleUpdate) error {
+			return nil
+		},
+	}
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
+	}, true)
+	record := existingServiceRecord()
+	record.ID = uuid.MustParse("550e8400-e29b-41d4-a716-446655440000").String()
+
+	_, err := svc.ReplaceBundle(context.Background(), record, bytes.NewReader(archive), "admin")
+	// Extraction fails because bundleStorageRoot doesn't exist in tests — but that
+	// proves collision checking did NOT short-circuit first with a 422.
+	require.Error(t, err)
+	var valErr *validators.ValidationError
+	if assert.False(t, assertIsValidationError(err, &valErr), "must not be a ValidationError (i.e. not a collision 422)") {
+		return
+	}
 }
 
 // TestReloadAfterProcess_CalledOnSuccess verifies that Reload is invoked after
