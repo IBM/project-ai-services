@@ -182,8 +182,10 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 //  4. For each linked service, call GET /v1/connectors/{id} on its Digitize pod to obtain
 //     sync_status and last_sync_at. Failures degrade gracefully to sync_status="unknown".
 func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error) {
-	// Step 1: fetch connector (no credentials — safe for API response).
-	connector, err := s.connectorRepo.GetByID(ctx, id, false)
+	// Step 1: fetch connector including metadata so non-sensitive fields can be returned.
+	// Sensitive fields are identified from the provider schema and stripped before the response
+	// is built; they are never forwarded to the caller.
+	connector, err := s.connectorRepo.GetByID(ctx, id, true)
 	if err != nil {
 		if err == dbrepo.ErrConnectorNotFound {
 			return nil, &ValidationError{
