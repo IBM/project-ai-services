@@ -6,9 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -18,8 +22,12 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 	logger.Infof("Target: %s\n", opts.Target)
 	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
-	// For OpenShift, use the name as-is (namespace convention)
-	applicationID := opts.Name
+	// Get application details from catalog API
+	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, opts.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get application details: %w", err)
+	}
+	logger.Infof("Application ID: %s\n", appDetails.ID)
 
 	// Get absolute path to backup file
 	absFilename, err := filepath.Abs(opts.BackupFile)
@@ -27,19 +35,34 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
+	// Get component ID for opensearch
+	templateID, err := cliUtils.GetComponentID(appDetails, "opensearch")
+	if err != nil {
+		return fmt.Errorf("failed to get opensearch component ID: %w", err)
+	}
+	logger.Infof("OpenSearch component ID: %s\n", templateID)
+
+	// Derive namespace using catalog convention: "ai-services-<first 8 chars of app UUID>"
+	appUUID, err := uuid.Parse(appDetails.ID)
+	if err != nil {
+		return fmt.Errorf("failed to parse application UUID: %w", err)
+	}
+	namespace := catalogUtils.AppNamespace(appUUID)
+	logger.Infof("Namespace: %s\n", namespace)
+
 	// Execute restore based on target
 	switch opts.Target {
 	case "opensearch":
-		return restore.RestoreOpenSearch(ctx, applicationID, absFilename)
+		return restore.RestoreOpenSearch(ctx, templateID, namespace, absFilename)
 	case "digitize":
-		return o.restoreDigitize(ctx, opts.Name, absFilename)
+		return o.restoreDigitize(ctx, appDetails, absFilename)
 	default:
 		return fmt.Errorf("unsupported target: %s", opts.Target)
 	}
 }
 
 // restoreDigitize restores digitize metadata using the Import API for OpenShift.
-func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, backupFile string) error {
+func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
 	logger.Infof("Restoring digitize metadata\n")
 	logger.Infof("Digitize Import (API-based Approach)\n")
 
@@ -48,8 +71,8 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, bac
 		return err
 	}
 
-	// Get digitize service API URL from OpenShift routes
-	digitizeURL, err := o.getDigitizeAPIURL(ctx, appName)
+	// Get digitize service API URL from catalog service endpoints
+	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
 	if err != nil {
 		return err
 	}
