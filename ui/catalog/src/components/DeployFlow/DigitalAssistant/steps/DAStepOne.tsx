@@ -1,11 +1,14 @@
 import { useMemo, useEffect } from "react";
 import type { StepProps } from "../types";
 import type { ComponentConfig } from "../../Shared/types";
+import type { LLMOption } from "@/types/api.types";
 import { useDeployStore } from "@/store/deploy.store";
 import {
   SharedStepOne,
   type StepOneComponentRow,
 } from "../../Shared/steps/SharedStepOne";
+
+const EMPTY: LLMOption[] = [];
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -19,7 +22,9 @@ export const StepOne: React.FC<StepProps> = ({
   const providerParamsError = useDeployStore(
     (state) => state.providerParamsError,
   );
-  const { getGlobalComponentModels } = useDeployStore();
+  const globalComponentModels = useDeployStore(
+    (state) => state.globalComponentModels,
+  );
 
   // Use the selected provider; fall back to the default so cold-open failures are still surfaced.
   const failedComponentTypes = useMemo(() => {
@@ -43,12 +48,12 @@ export const StepOne: React.FC<StepProps> = ({
   const modelNames = useMemo(() => {
     const result: Record<string, string> = {};
     deployOptions.global_components.forEach((component) => {
-      getGlobalComponentModels(component.type).forEach((m) => {
+      (globalComponentModels[component.type] ?? EMPTY).forEach((m) => {
         if (!result[m.providerId]) result[m.providerId] = m.text;
       });
     });
     return result;
-  }, [deployOptions.global_components, getGlobalComponentModels]);
+  }, [deployOptions.global_components, globalComponentModels]);
 
   // Set default model selection when model options arrive and nothing is selected yet.
   useEffect(() => {
@@ -59,7 +64,7 @@ export const StepOne: React.FC<StepProps> = ({
       const config = formData.globalComponents[component.type];
       if (!config || config.params?.model) return;
 
-      const models = getGlobalComponentModels(component.type);
+      const models = globalComponentModels[component.type] ?? EMPTY;
       if (models.length === 0) return;
 
       // Prefer the default provider's first model, fall back to first overall.
@@ -84,14 +89,14 @@ export const StepOne: React.FC<StepProps> = ({
   }, [
     deployOptions.global_components,
     formData.globalComponents,
-    getGlobalComponentModels,
+    globalComponentModels,
     onChange,
   ]);
 
   // Build component rows for SharedStepOne.
   const components = useMemo<StepOneComponentRow[]>(() => {
     return deployOptions.global_components.map((component) => {
-      const models = getGlobalComponentModels(component.type);
+      const models = globalComponentModels[component.type] ?? EMPTY;
       const selectedModel =
         (formData.globalComponents[component.type]?.params?.model as string) ||
         "";
@@ -123,13 +128,13 @@ export const StepOne: React.FC<StepProps> = ({
   }, [
     deployOptions.global_components,
     formData.globalComponents,
-    getGlobalComponentModels,
+    globalComponentModels,
     modelNames,
   ]);
 
   // Resolve provider from the selected model and update formData.
   const handleModelChange = (componentType: string, modelId: string) => {
-    const models = getGlobalComponentModels(componentType);
+    const models = globalComponentModels[componentType] ?? EMPTY;
     const selected = models.find((m) => m.id === modelId);
     if (!selected) return;
 
