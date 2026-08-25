@@ -21,20 +21,8 @@
       "type": "string",
       "title": "Bucket name",
       "description": "Name of the S3 bucket to use as the content source.",
+      "minLength": 1,
       "ui:section": "Location"
-    },
-    "access_key_id": {
-      "type": "string",
-      "title": "Access key ID",
-      "description": "S3-compatible access key identifier.",
-      "ui:section": "Authentication"
-    },
-    "secret_access_key": {
-      "type": "string",
-      "title": "Secret access key",
-      "description": "S3-compatible secret access key.",
-      "format": "password",
-      "ui:section": "Authentication"
     },
     "prefix": {
       "type": "string",
@@ -48,9 +36,24 @@
       "description": "Optional delimiter character used when listing objects (e.g. '/').",
       "ui:section": "Location"
     },
+    "access_key_id": {
+      "type": "string",
+      "title": "Access key ID",
+      "description": "S3-compatible access key identifier.",
+      "minLength": 1,
+      "ui:section": "Authentication"
+    },
+    "secret_access_key": {
+      "type": "string",
+      "title": "Secret access key",
+      "description": "S3-compatible secret access key.",
+      "format": "password",
+      "minLength": 1,
+      "ui:section": "Authentication"
+    },
     "allowed_extensions": {
       "type": "array",
-      "title": "File filters",
+      "title": "Include files by type",
       "description": "Restrict ingestion to files whose name ends with one of these extensions.",
       "ui:section": "File filters",
       "minItems": 1,

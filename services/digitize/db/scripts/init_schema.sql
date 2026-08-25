@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS connectors (
     attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_sync_at            TIMESTAMPTZ,
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
-    last_sync_error         TEXT,
     error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
     CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
@@ -82,7 +81,6 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
-    failed_files     INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
     CONSTRAINT pk_csl PRIMARY KEY (connector_id, seq),

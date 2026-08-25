@@ -8,6 +8,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
+// DatasourceServiceInterface defines the contract for datasource connector business logic.
+type DatasourceServiceInterface interface {
+	// CreateDatasource validates the request, tests the connection, encrypts credentials,
+	// and persists a new datasource connector record.
+	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
+}
+
 // ApplicationServiceInterface defines the contract for application business logic.
 type ApplicationServiceInterface interface {
 	// ListApplications retrieves a paginated list of applications with filters.

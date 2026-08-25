@@ -297,7 +297,7 @@ ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
 
 ### Overview — why failure tests are excluded by default
 
-The three failure test files exercise **intentional error paths** (wrong credentials, bad inputs, unreachable services). They are **not** part of the normal E2E suite run because:
+The four failure test files exercise **intentional error paths** (wrong credentials, bad inputs, unreachable services, active-resource protection). They are **not** part of the normal E2E suite run because:
 
 - They require specific environment conditions (e.g. a reachable catalog server to test wrong-password rejection).
 - They intentionally make commands fail, which would appear as unexpected failures in a normal run.
@@ -305,17 +305,17 @@ The three failure test files exercise **intentional error paths** (wrong credent
 
 Each failure file has a `BeforeEach` guard at the `Describe` level that calls `ginkgo.Skip` unless the `--run-failure-tests` flag is explicitly passed. This mirrors the `--app-name` guard used by Language Support Tests — **no flag, no execution, no accidents**.
 
-The labels (`failure-test`, `bootstrap-failure`, `catalog-failure`, `similarity-failure`, and sub-labels) are retained for **precision targeting** once the flag unlocks execution.
+The labels (`failure-test`, `bootstrap-failure`, `catalog-failure`, `similarity-failure`, `digitize-failure`, and sub-labels) are retained for **precision targeting** once the flag unlocks execution.
 
 ### How the two mechanisms interact
 
 ```
 Normal full suite run  (make test)
   └─ --run-failure-tests not passed
-     └─ BeforeEach fires ginkgo.Skip on every failure It() → all 15 skipped ✓
+     └─ BeforeEach fires ginkgo.Skip on every failure It() → all 20 skipped ✓
 
 Run ALL failure tests
-  └─ pass --run-failure-tests → guard passes → all 15 run ✓
+  └─ pass --run-failure-tests → guard passes → all 20 run ✓
 
 Run only one domain
   └─ pass --run-failure-tests + --label-filter="catalog-failure"
@@ -337,10 +337,15 @@ failure-test                           ← umbrella: selects ALL failure tests b
   ├─ catalog-failure                   ← domain: catalog_failure_test.go (5 tests)
   │    ├─ catalog-login                ← sub: missing flag, bad URL, whoami without login
   │    └─ catalog-configure            ← sub: unpaired SSL flags, invalid port
-  └─ similarity-failure                ← domain: similarity_failure_test.go (5 tests)
-       ├─ similarity-input             ← sub: empty query, invalid mode, top_k=0
-       ├─ similarity-connectivity      ← sub: unreachable similarity API
-       └─ similarity-readiness         ← sub: empty vector index (HTTP 503)
+  ├─ similarity-failure                ← domain: similarity_failure_test.go (5 tests)
+  │    ├─ similarity-input             ← sub: empty query, invalid mode, top_k=0
+  │    ├─ similarity-connectivity      ← sub: unreachable similarity API
+  │    └─ similarity-readiness         ← sub: empty vector index (HTTP 503)
+  └─ digitize-failure                  ← domain: digitize_failure_test.go (5 tests)
+       ├─ digitize-input               ← sub: invalid document status filter (TC-1)
+       ├─ digitize-deduplication       ← sub: re-submit already-ingested file (TC-2)
+       ├─ digitize-active-job          ← sub: delete job in accepted/in_progress state (TC-3, TC-4)
+       └─ digitize-active-doc          ← sub: delete document from in_progress job (TC-5)
 ```
 
 ---
@@ -371,17 +376,23 @@ ginkgo -r -tags "$TAGS" \
 
 ### Running ALL failure tests together
 
-Pass `--run-failure-tests` after `--` to unlock all three failure suites in a single pass.
+Pass `--run-failure-tests` after `--` to unlock all four failure suites in a single pass.
+
+> **Note:** The digitize failure tests require `--app-name=<your-rag-app>` since they target a live RAG application endpoint.  The digitize deduplication test (TC-2) requires a full ingestion round-trip (~15 min) — use at least 90 min timeout when running all suites together.
 
 ```bash
-# Using make
-make test TEST_ARGS="--timeout=10m" APP_RUNTIME=podman -- --run-failure-tests
+# Using make (recommended — build tags applied automatically)
+make test \
+  TEST_ARGS="--label-filter=failure-test --timeout=90m" \
+  APP_NAME=<your-rag-app> \
+  EXTRA_TEST_ARGS="--run-failure-tests"
 
 # Using ginkgo CLI
 export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
 ginkgo -r -tags "$TAGS" \
-  --timeout=10m \
-  ./tests/e2e -- --runtime=podman --run-failure-tests
+  --label-filter="failure-test" \
+  --timeout=90m \
+  ./tests/e2e -- --app-name=<your-rag-app> --runtime=podman --run-failure-tests
 ```
 
 ---
@@ -403,15 +414,20 @@ ginkgo -r -tags "$TAGS" --label-filter="catalog-failure" --timeout=3m \
 
 # Similarity failure tests only (5 tests)
 ginkgo -r -tags "$TAGS" --label-filter="similarity-failure" --timeout=3m \
-  ./tests/e2e -- --app-name=<deployed-app-name> --runtime=podman --run-failure-tests
+  ./tests/e2e -- --app-name=<your-rag-app> --runtime=podman --run-failure-tests
+
+# Digitize failure tests only (5 tests — requires a running RAG application)
+ginkgo -r -tags "$TAGS" --label-filter="digitize-failure" --timeout=25m \
+  ./tests/e2e -- --app-name=<your-rag-app> --run-failure-tests
 ```
 
 Or with `make test`:
 
 ```bash
-make test TEST_ARGS="--label-filter=bootstrap-failure  --timeout=5m" APP_RUNTIME=podman         -- --run-failure-tests
-make test TEST_ARGS="--label-filter=catalog-failure    --timeout=3m" APP_RUNTIME=podman         -- --run-failure-tests
-make test TEST_ARGS="--label-filter=similarity-failure --timeout=3m" APP_RUNTIME=podman APP_NAME=<app> -- --run-failure-tests
+make test TEST_ARGS="--label-filter=bootstrap-failure  --timeout=5m"  APP_RUNTIME=podman                    EXTRA_TEST_ARGS="--run-failure-tests"
+make test TEST_ARGS="--label-filter=catalog-failure    --timeout=3m"  APP_RUNTIME=podman                    EXTRA_TEST_ARGS="--run-failure-tests"
+make test TEST_ARGS="--label-filter=similarity-failure --timeout=3m"  APP_RUNTIME=podman APP_NAME=<app>     EXTRA_TEST_ARGS="--run-failure-tests"
+make test TEST_ARGS="--label-filter=digitize-failure   --timeout=25m"               APP_NAME=<your-rag-app> EXTRA_TEST_ARGS="--run-failure-tests"
 ```
 
 ---
@@ -458,6 +474,22 @@ ginkgo -r -tags "$TAGS" --label-filter="failure-test && similarity-connectivity"
 # Similarity — empty-index readiness failure (Test 5)
 ginkgo -r -tags "$TAGS" --label-filter="failure-test && similarity-readiness"    --timeout=2m \
   ./tests/e2e -- --app-name=<app> --runtime=podman --run-failure-tests
+
+# Digitize — input validation only, TC-1 (no job needed, ~30 s)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && digitize-input"          --timeout=2m \
+  ./tests/e2e -- --app-name=<your-rag-app> --run-failure-tests
+
+# Digitize — deduplication only, TC-2 (requires full ingestion round-trip, ~15 min)
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && digitize-deduplication"  --timeout=20m \
+  ./tests/e2e -- --app-name=<your-rag-app> --run-failure-tests
+
+# Digitize — active job protection only, TC-3 & TC-4
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && digitize-active-job"     --timeout=25m \
+  ./tests/e2e -- --app-name=<your-rag-app> --run-failure-tests
+
+# Digitize — active document protection only, TC-5
+ginkgo -r -tags "$TAGS" --label-filter="failure-test && digitize-active-doc"     --timeout=20m \
+  ./tests/e2e -- --app-name=<your-rag-app> --run-failure-tests
 ```
 
 ---
@@ -478,10 +510,11 @@ export CATALOG_SERVER_URL="..."                        # optional — auto-disco
 
 | Label | File | Tests |
 |---|---|---|
-| `failure-test` | all three failure files | All 15 failure tests — umbrella label |
+| `failure-test` | all four failure files | All 20 failure tests — umbrella label |
 | `bootstrap-failure` | `bootstrap_failure_test.go` | All 5 bootstrap failure tests |
 | `catalog-failure` | `catalog_failure_test.go` | All 5 catalog failure tests |
 | `similarity-failure` | `similarity_failure_test.go` | All 5 similarity failure tests |
+| `digitize-failure` | `digitize_failure_test.go` | All 5 digitize failure tests |
 | `failure-test && registry` | `bootstrap_failure_test.go` | Invalid registry credentials (Test 1) |
 | `failure-test && catalog` | `bootstrap_failure_test.go` | Wrong catalog password + unreachable server (Tests 2a, 2b) |
 | `failure-test && validation` | `bootstrap_failure_test.go` | `bootstrap validate` failures (Tests 3, 4) |
@@ -491,6 +524,10 @@ export CATALOG_SERVER_URL="..."                        # optional — auto-disco
 | `failure-test && similarity-input` | `similarity_failure_test.go` | Empty query, invalid mode, top_k=0 (Tests 1, 2, 3) |
 | `failure-test && similarity-connectivity` | `similarity_failure_test.go` | Unreachable similarity API (Test 4) |
 | `failure-test && similarity-readiness` | `similarity_failure_test.go` | Empty vector index HTTP 503 (Test 5) |
+| `failure-test && digitize-input` | `digitize_failure_test.go` | Invalid document status filter (TC-1) |
+| `failure-test && digitize-deduplication` | `digitize_failure_test.go` | Re-submit already-ingested file (TC-2) |
+| `failure-test && digitize-active-job` | `digitize_failure_test.go` | Delete job in accepted/in_progress state (TC-3, TC-4) |
+| `failure-test && digitize-active-doc` | `digitize_failure_test.go` | Delete document from in_progress job (TC-5) |
 
 ---
 
@@ -501,7 +538,7 @@ Follow the component-per-file convention:
 - Bootstrap failures → `bootstrap_failure_test.go`
 - Catalog failures → `catalog_failure_test.go`
 - Similarity failures → `similarity_failure_test.go`
-- Digitization failures → `digitization_failure_test.go` *(future)*
+- Digitize failures → `digitize_failure_test.go`
 - Ingestion failures → `ingestion_failure_test.go` *(future)*
 
 Each new failure `Describe` block **must** include the `BeforeEach` guard as its first statement:

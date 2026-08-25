@@ -6,6 +6,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -110,6 +111,10 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 	}
 
 	if _, err := g.registry.Register(ctx, workerName, req.GetRuntimeType(), req.GetMetadata()); err != nil {
+		if errors.Is(err, registry.ErrWorkerAlreadyActive) {
+			return nil, status.Errorf(codes.AlreadyExists, "worker %s is already active", workerName)
+		}
+
 		return nil, fmt.Errorf("failed to register worker: %w", err)
 	}
 

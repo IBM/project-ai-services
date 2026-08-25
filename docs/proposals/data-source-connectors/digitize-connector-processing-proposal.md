@@ -164,7 +164,7 @@ class ConnectorSyncLog(Base):
 
 ### 3.1 `POST /v1/connectors`
 
-Creates a connector, encrypts secrets at rest, persists configuration. Returns `201 Created` immediately. The first scheduled tick fires when the scheduler is registered (PR7).
+Creates a connector, encrypts secrets at rest, persists configuration. Returns `201 Created` immediately. The scheduler job is registered (with `fire_immediately=True`) before the DB insert so that a scheduler failure aborts the creation cleanly. A `_probe_connector_credentials` background task is also dispatched to test the supplied credentials — on failure the connector row's `error` field is set to the auth-failure sentinel.
 
 #### Request Parameters
 - Common: `connector_id` (UUID, optional — auto-generated if omitted), `connector_name` (string, unique), `type` (`"ssh"` | `"s3"`), `allowed_extensions` (`array[string]`), `connection_details` (object).
@@ -206,7 +206,7 @@ Creates a connector, encrypts secrets at rest, persists configuration. Returns `
 ```
 
 #### Responses
-- `201 Created`: Connector created. Scheduler registration happens in `lifespan()` (PR7 — not yet implemented).
+- `201 Created`: Connector created and scheduler job registered immediately (`fire_immediately=True`). Credential probe dispatched as a background task.
 - `409 Conflict`: `connector_id` or `connector_name` already exists.
 
 ---
@@ -215,9 +215,11 @@ Creates a connector, encrypts secrets at rest, persists configuration. Returns `
 
 Updates connector configuration in place.
 - Secrets are re-encrypted if provided.
-- `connection_details` is merged key-by-key using the PostgreSQL `||` JSONB operator (omitted fields remain unchanged).
+- `connection_details` is merged key-by-key (untouched encrypted keys are preserved via `merge_and_encrypt_partial`).
 - `type` and `sync_interval_seconds` cannot be modified.
 - Does not restart the scheduler — the next scheduled tick reads updated config directly from DB.
+- If `connection_details` is supplied, a `_probe_connector_credentials` background task is dispatched against the merged credentials. On success, any previous auth-failure error is cleared; on failure, the `error` field is set to the credential-error sentinel.
+- Returns `409 Conflict` if the connector is `DELETE_PENDING`.
 
 #### Responses
 - `200 OK`: Updated successfully.
@@ -285,20 +287,22 @@ Returns paginated execution history from `connector_sync_logs` (`limit` default 
 Returns a single sync log entry identified by its sequence number. Returns `404` if the connector or the specific `sync_seq` does not exist.
 
 #### `POST /v1/connectors/{connector_id}/syncs`
-Triggers an immediate manual sync tick.
-- Safe & idempotent: acquires DB lock via atomic `UPDATE connectors SET sync_status='syncing' WHERE id=:id AND sync_status!='syncing' RETURNING id`.
-- If lock acquired: dispatches `asyncio.create_task(run_tick(connector_id))`; polls `get_active_sync_seq()` via `_wait_for_sync_seq()` (10 attempts × 100ms) until the log row appears, then returns `202 Accepted` with `{"sync_seq": <n>}`.
-- If lock unavailable (already syncing): fetches current active `sync_seq` via `get_active_sync_seq()` and returns `202 Accepted` with it (no duplicate tick started).
+Triggers an immediate manual sync tick. Implemented via the shared `dispatch_sync(connector_id)` helper (also used by the scheduler).
+- Guards: returns `404` if connector not found; raises `SyncLocked` (→ `409`) if connector is `DELETE_PENDING` or if the active sync is already `CANCEL_PENDING`.
+- If lock acquired via `try_acquire_sync_lock`: calls `init_sync_log_and_update_connector` **synchronously in the caller** (no polling), dispatches `asyncio.create_task(run_tick(connector_id, sync_seq))`, and returns `202 Accepted` with `{"sync_seq": <n>}` immediately.
+- If lock unavailable (already syncing): reads `get_active_sync_seq()` and returns `202 Accepted` with the existing seq (idempotent — no duplicate tick started).
 
 ```text
-POST /v1/connectors/{connector_id}/syncs
+POST /v1/connectors/{connector_id}/syncs  →  dispatch_sync(connector_id)
   │
-  ├─ 1. Check existence → 404 if not found
-  ├─ 2. try_acquire_sync_lock(connector_id) (atomic UPDATE ... RETURNING)
-  │      ├─ Lock acquired → asyncio.create_task(run_tick(connector_id))
-  │      │    └─ _wait_for_sync_seq() polls until init_sync_log_and_update_connector row appears
-  │      └─ Lock unavailable (already syncing) → get_active_sync_seq()
-  └─ 3. Return 202 Accepted { "sync_seq": <seq> }
+  ├─ 1. get_active_connector() → 404 if not found
+  ├─ 2. connector.sync_status == DELETE_PENDING → SyncLocked (409)
+  ├─ 3. get_active_sync_seq() — if CANCEL_PENDING on active row → SyncLocked (409)
+  ├─ 4. try_acquire_sync_lock(connector_id)
+  │      ├─ Acquired → init_sync_log_and_update_connector() (sync, returns seq immediately)
+  │      │             asyncio.create_task(run_tick(connector_id, sync_seq))
+  │      └─ Not acquired (already syncing) → get_active_sync_seq()
+  └─ 5. Return 202 Accepted { "sync_seq": <seq> }
 ```
 
 #### `POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop`
@@ -330,7 +334,7 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 
 #### Document APIs (`/v1/documents`)
 - Connector-sourced documents are **excluded** from `GET /v1/documents`, `GET /v1/documents/{doc_id}`, and `DELETE /v1/documents/{doc_id}` (returns `404`).
-- **Implementation:** `is_connector_sourced_document(doc_id)` checks for presence in `connector_document_checksum`. `get_all_documents_paginated()` accepts `exclude_connector_sourced=True` which filters via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = documents.doc_id)`.
+- **Implementation (in place):** `is_connector_sourced_document(doc_id)` checks for presence in `connector_document_checksum`. `get_all_documents_paginated()` accepts `exclude_connector_sourced=True` which filters via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = documents.doc_id)`.
 
 #### Job APIs (`/v1/jobs`)
 - All jobs (user-submitted and connector-initiated) are visible in `GET /v1/jobs` and `GET /v1/jobs/{job_id}`.
@@ -583,7 +587,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
 
 ## 6. Sync Execution Engine
 
-**File:** `services/digitize/connectors/sync_tick.py`
+**File:** `services/digitize/connectors/sync_tick.py` ✅ **Implemented**
 
 ### 6.1 Status Enums
 
@@ -613,8 +617,7 @@ class SyncLogStatus(str, Enum):
 
 ![Sync Tick Flow](sync-worker-tick-flow.svg)
 
-- **Phase 0 (Lock):** Lock acquired externally before `run_tick` is called — either by `_run_tick_wrapped` in `scheduler.py` (PR7) or by `trigger_sync` in `connectors.py`. `run_tick` assumes the lock is already held when it is called.
-- **Phase 1 (Log):** `init_sync_log_and_update_connector(connector_id)` is called **inside** `run_tick`. Two DB calls: insert sync-log row (seq = `COALESCE(MAX(seq),0)+1`) + set connector `sync_status='syncing'`. Returns `sync_seq`.
+- **Phase 0 (Caller — Lock + Log):** `dispatch_sync()` (in `connectors.py`) acquires the lock and opens the sync-log row **before** `run_tick` is called. `init_sync_log_and_update_connector(connector_id)` is called synchronously in the caller; the returned `sync_seq` is passed directly into `run_tick(connector_id, sync_seq)`. This eliminates any need for polling inside the endpoint.
 - **Phase 1b (Interrupt Check):** `_check_interrupt_call(connector_id, sync_seq)` immediately before any remote I/O. If any interrupt detected, raises `asyncio.CancelledError`.
 - **Phase 2 (Scan & State):** Query `known_checksums` and `all_checksums`. Offload blocking calls (`connect`, `scan`) to thread pool via `asyncio.to_thread(...)`.
 - **Phase 3 (Classify):** `_classify()` separates `scanned_files` into `ingest_list` and cross-connector duplicates. Cross-connector duplicates execute `add_connector_checksum_entry` inline.
@@ -652,6 +655,8 @@ class SyncLogStatus(str, Enum):
 
 ### 6.3 Implementation Code
 
+> **Note on caller contract:** The sync lock and log-row creation are handled by `dispatch_sync()` in `connectors.py` **before** `run_tick` is invoked. `run_tick` receives `sync_seq` as a parameter and never calls `init_sync_log_and_update_connector` internally.
+
 ```python
 class InterruptType(str, Enum):
     SYNC_CANCEL = "sync_cancel"           # CANCEL_PENDING on connector_sync_logs row
@@ -669,28 +674,34 @@ def _check_interrupt_call(connector_id: str, sync_seq: int) -> Optional[Interrup
     return None
 
 
-async def run_tick(connector_id: str) -> None:
+async def run_tick(connector_id: str, sync_seq: int) -> None:
     """
-    Execute one full sync tick. Caller must have acquired the sync lock before calling.
+    Execute one full sync tick.
+
+    The caller (dispatch_sync) is responsible for:
+      1. Acquiring the sync lock via try_acquire_sync_lock()
+      2. Creating the sync-log row via init_sync_log_and_update_connector()
+         and passing the returned seq here as sync_seq.
     """
     config = get_active_connector(connector_id)
     if config is None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
         return
 
-    sync_seq: int = init_sync_log_and_update_connector(connector_id)
     scanner = build_scanner(config)
 
     try:
         interrupt = _check_interrupt_call(connector_id, sync_seq)
         if interrupt:
-            raise asyncio.CancelledError(f"Connector {connector_id!r} interrupted")
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         await asyncio.to_thread(scanner.connect)
-        scanned_files = await asyncio.to_thread(scanner.scan)
+        scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
 
-        known_checksums = set(list_connector_checksums(connector_id))
-        all_checksums = set(list_all_checksums())
+        known_checksums: set[str] = set(list_connector_checksums(connector_id))
+        all_checksums: set[str] = set(list_all_checksums())
 
         ingest_list, orphan_checksums = _classify(
             connector_id, scanned_files, known_checksums, all_checksums
@@ -709,11 +720,13 @@ async def run_tick(connector_id: str) -> None:
         _complete_tick(sync_seq, connector_id)
 
     except asyncio.CancelledError as ce:
+        logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
         interrupt = _check_interrupt_call(connector_id, sync_seq)
         await _handle_interrupt(sync_seq, connector_id, interrupt)
         raise
 
     except Exception as exc:
+        logger.error(f"Tick failed for connector {connector_id!r}: {exc}", exc_info=True)
         _fail_tick(sync_seq, connector_id, exc)
 
     finally:
@@ -732,7 +745,9 @@ async def _process_new_files(sync_seq, connector_id, connector_name, scanner, in
 
         interrupt = _check_interrupt_call(connector_id, sync_seq)
         if interrupt:
-            raise asyncio.CancelledError(...)
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         job_id = generate_uuid()
         batch_dir_name = f"{connector_id}-{sync_seq}-{batch_number}"
@@ -747,19 +762,25 @@ async def _process_new_files(sync_seq, connector_id, connector_name, scanner, in
                     scanner.download_to, remote_path, batch_dir / filename
                 )
                 if not scanner.verify_integrity(local_checksum, checksum):
-                    logger.warning(f"Integrity check failed for {remote_path!r}; skipping")
+                    logger.warning(
+                        f"Integrity check failed for {remote_path!r} in connector "
+                        f"{connector_id!r}; skipping file"
+                    )
                     continue
                 checksum_to_filename[checksum] = filename
 
             interrupt = _check_interrupt_call(connector_id, sync_seq)
             if interrupt:
-                raise asyncio.CancelledError(...)
+                raise asyncio.CancelledError(
+                    f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+                )
 
+            filenames = list(checksum_to_filename.values())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
             doc_id_dict = initialize_job_state(
                 job_id=job_id, operation=OperationType.INGESTION,
                 output_format=OutputFormat.JSON,
-                documents_info=list(checksum_to_filename.values()),
+                documents_info=filenames,
                 job_name=job_name,
             )
             for checksum, filename in checksum_to_filename.items():
@@ -771,16 +792,28 @@ async def _process_new_files(sync_seq, connector_id, connector_name, scanner, in
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            logger.warning(
+                f"Failed to ingest batch {batch_number} for connector {connector_id!r}: {exc}",
+                exc_info=True,
+            )
             batch_failed = True
         finally:
             cleanup_staging_directory(batch_dir_name, staging_base, ignore_errors=True)
 
     if batch_failed:
-        raise RuntimeError("One or more batches failed")
+        raise RuntimeError(
+            f"One or more batches failed to ingest for connector {connector_id!r}; "
+            "connector marked as out of sync"
+        )
 
 
 async def _handle_interrupt(sync_seq, connector_id, interrupt_type) -> None:
-    """Note: _handle_interrupt is async — it awaits _run_teardown for DELETE_CONNECTOR."""
+    """_handle_interrupt is async — it awaits _run_teardown for DELETE_CONNECTOR."""
+    if interrupt_type is None:
+        # Unexpected CancelledError — treat as sync cancel
+        _cancel_tick(sync_seq, connector_id)
+        return
+
     if interrupt_type == InterruptType.SYNC_CANCEL:
         _cancel_tick(sync_seq, connector_id)
         from digitize.api.v1.connectors import _sweep_staging_dir
@@ -791,99 +824,112 @@ async def _handle_interrupt(sync_seq, connector_id, interrupt_type) -> None:
         _cancel_tick(sync_seq, connector_id)
         from digitize.api.v1.connectors import _run_teardown
         await _run_teardown(connector_id)  # same function as Case B
-
-    else:  # None (unexpected CancelledError)
-        _cancel_tick(sync_seq, connector_id)
 ```
 
 ---
 
 ## 7. Scheduler & Task Coordination
 
-**File:** `services/digitize/connectors/scheduler.py` — ⚠️ **NOT YET IMPLEMENTED (PR7)**
+**Files:** `services/digitize/connectors/scheduler.py`, `services/digitize/utils/recovery.py`, `services/digitize/app.py` ✅ **Implemented**
 
 ### 7.1 Architecture & State Tracking
 
-`ConnectorScheduler` will use an APScheduler `AsyncScheduler` singleton backed by `AsyncSQLAlchemyDataStore` in Postgres.
+The scheduler uses an APScheduler v4 `AsyncScheduler` singleton backed by `SQLAlchemyDataStore` (schema `"scheduler"`) in the shared Postgres database.
 
 **No in-process registries.** Delete state is stored exclusively in the `connectors` table (`sync_status = 'delete pending'`). All cancellation and teardown decisions are driven by live DB reads.
 
+The scheduler registers `dispatch_sync` (from `connectors.py`) directly as the recurring job callable. `dispatch_sync` handles lock-acquisition and idempotency — there is no separate `_run_tick_wrapped` wrapper.
+
 ---
 
-### 7.2 Scheduler Implementation _(planned)_
+### 7.2 Scheduler Implementation
 
 ```python
-# Planned implementation in scheduler.py
+# connectors/scheduler.py
+
+_scheduler: AsyncScheduler | None = None  # assigned by _connector_scheduler_lifespan in app.py
+
 
 async def register_connector_job(
-    connector_id: str, interval_seconds: int, fire_immediately: bool = False
+    connector_id: str,
+    interval_seconds: int,
+    fire_immediately: bool = False,
 ) -> None:
-    kwargs = dict(
-        func=_run_tick_wrapped,
-        trigger=IntervalTrigger(seconds=interval_seconds),
+    """Schedule (or reschedule) a recurring sync job for connector_id.
+
+    fire_immediately=True fires the first tick at now() instead of waiting
+    one full interval.  Used when attaching a new connector.
+    """
+    from digitize.api.v1.connectors import dispatch_sync
+
+    now = datetime.now(timezone.utc)
+    start_time = now if fire_immediately else now + timedelta(seconds=interval_seconds)
+
+    sched = _get_scheduler()
+    await sched.add_schedule(
+        func_or_task_id=dispatch_sync,
+        trigger=IntervalTrigger(seconds=interval_seconds, start_time=start_time),
         args=[connector_id],
         id=connector_id,
-        max_instances=1,
-        replace_existing=True,
     )
-    if fire_immediately:
-        kwargs["next_run_time"] = datetime.now(timezone.utc)
-    await _get_scheduler().add_job(**kwargs)
 
 
-async def _run_tick_wrapped(connector_id: str) -> None:
-    """APScheduler entry point.
-    1. Skip if DELETE_PENDING.
-    2. try_acquire_sync_lock — skip if already syncing.
-    3. Call run_tick(connector_id).
-    """
-    status = get_connector_sync_status(connector_id)
-    if status == ConnectorStatus.DELETE_PENDING:
-        return
-    if not try_acquire_sync_lock(connector_id):
-        return
-    await run_tick(connector_id)
+async def remove_connector_job(connector_id: str) -> None:
+    """Remove the scheduled job for connector_id, if it exists. Silently ignores missing jobs."""
+    sched = _get_scheduler()
+    try:
+        await sched.remove_schedule(connector_id)
+    except Exception as exc:
+        logger.debug(f"Could not remove scheduler job for {connector_id!r}: {exc}")
 ```
 
 ---
 
-### 7.3 Crash Recovery for Connector Sync State _(planned)_
+### 7.3 Crash Recovery for Connector Sync State
 
-`recover_connector_sync_state()` in `services/digitize/utils/recovery.py` — **NOT YET IMPLEMENTED**.
+`recover_connector_sync_state()` in `services/digitize/utils/recovery.py` ✅ **Implemented**.
 
-Planned behavior on startup:
-1. Bulk `UPDATE connectors SET sync_status='out of sync' WHERE sync_status='syncing'` — unlocks connectors stuck in `'syncing'` from a mid-tick crash.
-2. For each affected connector: find the open `connector_sync_logs` row and close it to `status='failed'` with `error='Service restarted during sync tick'`.
+Behavior on startup:
+1. `reset_syncing_connectors()` — bulk `UPDATE connectors SET sync_status='out of sync' WHERE sync_status='syncing'`. Returns list of affected connector IDs.
+2. For each affected connector: `close_open_sync_log(connector_id, error)` — closes the open `connector_sync_logs` row (status = `'started'` or `'cancel pending'`) to `status='failed'` with `error='Service restarted during sync tick'`.
 
-Note: `recover_zombie_jobs()` for regular (non-connector) jobs **is** implemented in `recovery.py` and called from `lifespan()`.
+Returns number of connectors recovered.
+
+Note: `recover_zombie_jobs()` for regular (non-connector) jobs is also implemented in `recovery.py` and called from `lifespan()`.
 
 ---
 
-### 7.4 Lifespan Integration _(planned)_
+### 7.4 Lifespan Integration
 
-`app.py` currently implements `lifespan()` with DB connection, schema creation, and `recover_zombie_jobs()` only. Planned additions (PR7):
+`app.py` `lifespan()` starts the scheduler via `_connector_scheduler_lifespan()`:
 
 ```python
-# Planned additions to lifespan() in app.py
+# app.py — _connector_scheduler_lifespan()
 
+data_store = SQLAlchemyDataStore(db_engine, schema="scheduler")
 async with AsyncScheduler(data_store=data_store) as sched:
     scheduler_module._scheduler = sched
 
-    # Connector crash recovery
-    recover_connector_sync_state()
+    # Connector crash recovery — unlock connectors stuck in 'syncing'.
+    recovered = recover_connector_sync_state()
 
-    # Re-register existing connectors (fire_immediately=False — don't double-fire)
-    for connector in get_all_connectors():
-        await register_connector_job(
-            connector.id, connector.sync_interval_seconds, fire_immediately=False
+    # Re-register all existing connectors (fire_immediately=False — don't double-fire
+    # connectors that are already up-to-date after crash recovery).
+    connectors = list_connectors()
+    for connector in connectors:
+        await scheduler_module.register_connector_job(
+            connector.id,
+            connector.sync_interval_seconds,
+            fire_immediately=False,
         )
 
-    # Size thread pool based on connector count
-    pool_size = max(len(get_all_connectors()) + 4, 8)
-    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=pool_size))
-
+    await sched.start_in_background()
     yield
 ```
+
+`POST /v1/connectors` calls `register_connector_job(connector_id, sync_interval, fire_immediately=True)` before the DB insert (fail-fast order).
+
+`DELETE /v1/connectors/{id}` calls `remove_connector_job(connector_id)` after marking the connector `delete_pending`, before dispatching teardown, so no new tick fires after the connector is marked for deletion.
 
 ---
 
@@ -899,7 +945,7 @@ Scanners perform synchronous blocking I/O (`boto3` calls, Paramiko SFTP operatio
   - **`connectors.sync_status = 'delete pending'`** — set by `mark_connector_delete_pending` when DELETE arrives (unconditionally).
   - **`connector_sync_logs.status = 'cancel pending'`** — set by `mark_sync_cancel_pending` when stop-sync is requested.
 - `_check_interrupt_call(connector_id, sync_seq)` reads both sources on every call. Invoked at **four checkpoints**:
-  - In `run_tick` — immediately after `init_sync_log_and_update_connector` (Phase 1b).
+  - In `run_tick` — immediately before `scanner.connect` (Phase 1b).
   - In `_process_new_files` — before each batch starts (Checkpoint 2).
   - In `_process_new_files` — after each batch of downloads completes (Checkpoint 3).
   - In `_wait_for_job` — on every poll cycle (Checkpoint 4).
@@ -910,21 +956,18 @@ Scanners perform synchronous blocking I/O (`boto3` calls, Paramiko SFTP operatio
   - `_cancel_tick` + `await _run_teardown(connector_id)` for `DELETE_CONNECTOR` (same `_run_teardown` used for Case B).
 - No safety-net timeout. No waiting for the tick to exit before teardown begins.
 
-### 8.3 Thread Pool Sizing _(planned — PR7)_
-Each ticking connector holds at most **1 thread at a time**.
-$$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total configured connectors)}$$
 
 ---
 
 ## 9. Implementation Plan & PR Breakdown
 
-### Implemented PRs
+### Implemented PRs — All Complete ✅
 
 - **PR 1 — DB Schema + ORM Models + Settings ✅:** `connectors`, `connector_document_checksum`, `connector_sync_logs` tables & ORM models (`db/scripts/init_schema.sql`, `db/models.py`). `connector_sync_logs` uses composite PK `(connector_id, seq)`. `Connector` ORM has an `error` field for teardown errors (in model, not shown in SQL schema). `ConnectorStatus` and `SyncLogStatus` string enums in `connectors/models.py`. Scanner config models (`S3ConnectorConfig`, `SSHConnectorConfig`) in `connectors/scanners/config.py`.
 
-- **PR 2 — DB Operations Layer ✅:** `manager.py` & `utils/db.py` fully implemented. All checksum helpers (`insert_connector_checksum`, `delete_connector_checksum` returning `doc_id`, `count_checksum_owners`, `find_connector_doc_by_checksum`, `get_connector_checksums`, `get_all_connector_checksums`), sync-lock/signal helpers (`try_acquire_sync_lock`, `mark_sync_cancel_pending`, `mark_connector_delete_pending`), sync-log helpers (`init_sync_log_and_update_connector`, `finalize_sync_log_and_update_connector`, `update_sync_log`, `update_connector_total_files`, `set_connector_error`, `list_sync_logs`, `get_sync_log`, `get_sync_log_status`, `get_active_sync_seq`). All tested in `test_connector_db.py`.
+- **PR 2 — DB Operations Layer ✅:** `manager.py` & `utils/db.py` fully implemented. All checksum helpers (`insert_connector_checksum`, `delete_connector_checksum` returning `doc_id`, `count_checksum_owners`, `find_connector_doc_by_checksum`, `get_connector_checksums`, `get_all_connector_checksums`), sync-lock/signal helpers (`try_acquire_sync_lock`, `mark_sync_cancel_pending`, `mark_connector_delete_pending`), sync-log helpers (`init_sync_log_and_update_connector`, `finalize_sync_log_and_update_connector`, `update_sync_log`, `update_connector_total_files`, `set_connector_error`, `list_sync_logs`, `get_sync_log`, `get_sync_log_status`, `get_active_sync_seq`). Crash-recovery helpers `reset_syncing_connectors` and `close_open_sync_log` also implemented. All tested in `test_connector_db.py`.
 
-- **PR 3 — REST API Endpoints ✅:** Full CRUD in `connectors.py` (`POST`, `PUT`, `DELETE`, `GET`, `GET /{id}`, `GET /{id}/syncs`, `GET /{id}/syncs/{seq}`, `POST /{id}/syncs`, `POST /{id}/syncs/{seq}/stop`). Connector visibility filtering in `documents.py` (`is_connector_sourced_document`, `exclude_connector_sourced` in `get_all_documents_paginated`).
+- **PR 3 — REST API Endpoints ✅:** Full CRUD in `connectors.py` (`POST`, `PUT`, `DELETE`, `GET`, `GET /{id}`, `GET /{id}/syncs`, `GET /{id}/syncs/{seq}`, `POST /{id}/syncs`, `POST /{id}/syncs/{seq}/stop`). Shared `dispatch_sync()` helper used by both the HTTP handler and the APScheduler. Connector visibility filtering in `documents.py` (`is_connector_sourced_document`, `exclude_connector_sourced` in `get_all_documents_paginated`). Credential probe (`_probe_connector_credentials`) dispatched as a background task on `POST` and `PUT`.
 
 - **PR 4a — Scanner Abstraction ✅:** `BaseScanner` interface (`base_scanner.py`) & `scanner_factory.py` with `_REGISTRY` for `"s3"` and `"ssh"` types. Factory decrypts secrets before building the typed config.
 
@@ -932,20 +975,16 @@ $$\text{pool\_size} = \max(N + 4, 8) \quad \text{(where } N = \text{total config
 
 - **PR 5 — S3 Scanner ✅:** `S3Scanner` implementation with AWS/IBM COS provider auto-detection, cross-region alias resolution, `head_bucket` pre-flight check, `HashingWriter` inline MD5, multi-part ETag integrity bypass.
 
-- **PR 6 — Core Sync Engine ✅:** `sync_tick.py` fully implemented. `run_tick`, `_classify`, `_process_new_files` (batch download, integrity skip, `batch_failed` flag, 1-based `batch_number`, job named `Connector-{connector_name}-{sync_seq}-{batch_number}`), `_delete_orphans` (uses `asyncio.to_thread` for `_best_effort_delete_document`), `async _handle_interrupt` (awaits `_run_teardown` for DELETE path), `_cancel_tick`, `_fail_tick`, `_complete_tick`. `_check_interrupt_call(connector_id, sync_seq)` reads from both tables using `ConnectorStatus`/`SyncLogStatus`. Tests in `test_sync_tick.py`.
+- **PR 6 — Core Sync Engine ✅:** `sync_tick.py` fully implemented. `run_tick(connector_id, sync_seq)` — `sync_seq` is provided by the caller (`dispatch_sync`), not generated internally. `_classify`, `_process_new_files` (batch download, integrity skip, `batch_failed` flag, 1-based `batch_number`, job named `Connector-{connector_name}-{sync_seq}-{batch_number}`), `_delete_orphans` (uses `asyncio.to_thread` for `_best_effort_delete_document`), `async _handle_interrupt` (awaits `_run_teardown` for DELETE path), `_cancel_tick`, `_fail_tick`, `_complete_tick`. `_check_interrupt_call(connector_id, sync_seq)` reads from both tables using `ConnectorStatus`/`SyncLogStatus`. Tests in `test_sync_tick.py`.
+
+- **PR 7 — Scheduler + Lifespan + Crash Recovery ✅:**
+  - `connectors/scheduler.py` created: `register_connector_job`, `remove_connector_job`. APScheduler v4 `AsyncScheduler` + `SQLAlchemyDataStore` (schema `"scheduler"`) backed by the shared Postgres engine. `dispatch_sync` registered directly as the scheduler callable (no `_run_tick_wrapped` wrapper). `apscheduler[sqlalchemy]` added to `requirements.txt`.
+  - `recover_connector_sync_state()` added to `utils/recovery.py`: bulk-resets connectors stuck in `'syncing'` → `'out of sync'`; closes open `connector_sync_logs` rows to `'failed'`.
+  - `app.py` `lifespan()` updated via `_connector_scheduler_lifespan()` context manager: starts `AsyncScheduler`, calls `recover_connector_sync_state()`, re-registers all existing connector jobs (`fire_immediately=False`), sizes the default `ThreadPoolExecutor` to `max(N+4, 8)`, and calls `await sched.start_in_background()`.
+  - `POST /v1/connectors` calls `register_connector_job(connector_id, sync_interval, fire_immediately=True)` **before** the DB insert (fail-fast order).
+  - `DELETE /v1/connectors/{id}` calls `remove_connector_job(connector_id)` after marking `delete_pending` so no new tick fires after the connector is marked for deletion.
+  - Unit tests in `tests/test_connector_scheduler.py` cover `register_connector_job`, `remove_connector_job`, and `recover_connector_sync_state`.
 
 - **PR 8 — Cancel Sync Endpoint ✅:** `POST /syncs/{seq}/stop` implemented with `sync_status` pre-check + seq validation + `mark_sync_cancel_pending`. `SyncLogStatus.CANCEL_PENDING` and `InterruptType.SYNC_CANCEL` handle the cancel path. `finalize_sync_log_and_update_connector` maps `CANCELLED` → `OUT_OF_SYNC`.
 
 - **PR 9 — Non-Blocking DELETE ✅:** `DELETE /v1/connectors/{id}` uses `mark_connector_delete_pending` (unconditional) + checks `sync_status` to decide Case A vs B. Case B dispatches `asyncio.create_task(_run_teardown(...))`. Case A tick detects `DELETE_PENDING` via `_check_interrupt_call` → `await _run_teardown` in `_handle_interrupt`. Single `_run_teardown` function in `connectors.py` handles both paths.
-
----
-
-### Pending PRs
-
-- **PR 7 — Scheduler + Lifespan + Crash Recovery ✅:**
-  - `connectors/scheduler.py` created: `register_connector_job`, `remove_connector_job`, `_run_tick_wrapped` (APScheduler v4 `AsyncScheduler` + `SQLAlchemyDataStore` backed by the shared Postgres engine). `apscheduler[sqlalchemy]==4.0.0a6` added to `requirements.txt`.
-  - `recover_connector_sync_state()` added to `utils/recovery.py`: bulk-resets connectors stuck in `'syncing'` → `'out of sync'`; closes open `connector_sync_logs` rows to `'failed'`. DB helpers `reset_syncing_connectors` / `close_open_sync_log` added to `db/manager.py` and `utils/db.py`.
-  - `app.py` `lifespan()` updated: starts `AsyncScheduler` within an `async with` block, calls `recover_connector_sync_state()`, re-registers all existing connector jobs (`fire_immediately=False`), and sizes the default `ThreadPoolExecutor` to `max(N+4, 8)`.
-  - `POST /v1/connectors` now calls `register_connector_job(connector_id, sync_interval, fire_immediately=True)` after the DB insert. The stub comment is removed.
-  - `DELETE /v1/connectors/{id}` now calls `remove_connector_job(connector_id)` before dispatching teardown so no new tick fires after the connector is marked delete-pending.
-  - Unit tests in `tests/test_connector_scheduler.py` cover `_run_tick_wrapped`, `register_connector_job`, `remove_connector_job`, and `recover_connector_sync_state`.

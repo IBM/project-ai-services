@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/project-ai-services/ai-services/docs" // Import generated docs
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -17,7 +18,7 @@ import (
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, bundleService bundlesvc.BundleServiceInterface) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -35,9 +36,10 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), tokenMgr, blacklist)
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
-	registerCatalogRoutes(v1, handlers.NewCatalogHandler(), handlers.NewResourcesHandler(), auth)
+	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(), auth)
 	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), auth)
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
+	registerDatasourceRoutes(v1, handlers.NewDatasourceHandler(datasourceSvc), auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 
 	return router
@@ -110,5 +112,13 @@ func registerWorkerRoutes(v1 *gin.RouterGroup, h *handlers.WorkerHandler, authMw
 		g.POST("", h.CreateWorker)
 		g.GET("", h.ListWorkers)
 		g.DELETE("/:id", h.DeleteWorker)
+	}
+}
+
+func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("datasources")
+	g.Use(authMw)
+	{
+		g.POST("", h.CreateDatasource)
 	}
 }

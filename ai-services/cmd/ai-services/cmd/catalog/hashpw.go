@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"

@@ -449,7 +449,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
             with open(processed_text_json_path, "r") as f:
                 text_data = json.load(f)
                 document_language = detect_document_language(text_data)
-                logger.info(f"Detected document language: {document_language}")
+                logger.info(f"Detected document language: {document_language} for doc: {doc_path}")
         except Exception as e:
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
 
@@ -537,7 +537,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 future = converter_executor.submit(convert_document, path, out_path, file_name)
                 conversion_futures[future] = path
                 if doc_id is not None:
-                    logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
+                    logger.debug(f"Submitted for conversion: {Path(path).name}")
                     status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
                     status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
