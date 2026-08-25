@@ -93,11 +93,11 @@ func validateSSLCertificates(certPath, keyPath string) error {
 		return fmt.Errorf("certificate validation failed: %w", err)
 	}
 
-	if err := ValidateCertificateKeyPair(certPath, keyPath); err != nil {
+	if err := validateCertificateKeyPair(certPath, keyPath); err != nil {
 		return fmt.Errorf("certificate and key validation failed: %w", err)
 	}
 
-	if err := ValidateWildcardCertificate(certPath); err != nil {
+	if err := validateWildcardCertificate(certPath); err != nil {
 		return fmt.Errorf("wildcard certificate validation failed: %w", err)
 	}
 
@@ -166,7 +166,7 @@ func LoadCertificate(certPath string) (*x509.Certificate, error) {
 }
 
 // ValidateCertificateKeyPair verifies that a certificate and private key match.
-func ValidateCertificateKeyPair(certPath, keyPath string) error {
+func validateCertificateKeyPair(certPath, keyPath string) error {
 	// Load the certificate and key pair
 	_, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -177,7 +177,7 @@ func ValidateCertificateKeyPair(certPath, keyPath string) error {
 }
 
 // ValidateWildcardCertificate checks if a certificate contains a wildcard SAN entry.
-func ValidateWildcardCertificate(certPath string) error {
+func validateWildcardCertificate(certPath string) error {
 	cert, err := LoadCertificate(certPath)
 	if err != nil {
 		return err
