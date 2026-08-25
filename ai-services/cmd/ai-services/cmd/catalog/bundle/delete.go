@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // NewDeleteCmd implements: ai-services catalog bundle delete <bundle_id> [--yes].
@@ -39,10 +40,12 @@ Note:
 			bundleID := args[0]
 
 			if !skipConfirm {
-				fmt.Printf("Delete bundle %s? [y/N] ", bundleID)
-				var answer string
-				_, _ = fmt.Scanln(&answer)
-				if answer != "y" && answer != "Y" {
+				confirmed, err := utils.ConfirmAction(fmt.Sprintf("Delete bundle %s?", bundleID))
+				if err != nil {
+					return err
+				}
+
+				if !confirmed {
 					logger.Infoln("Aborted.")
 
 					return nil
