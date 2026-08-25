@@ -606,6 +606,42 @@ def get_all_document_ids() -> list[str]:
         raise
 
 
+def get_user_document_ids() -> list[str]:
+    """
+    Read IDs of user-submitted documents only (connector-sourced docs excluded).
+
+    Returns:
+        List of doc_id strings for documents not in connector_document_checksum
+    """
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot retrieve document IDs without database connection.")
+
+    try:
+        logger.debug("Reading user-submitted document IDs from database")
+        all_documents = []
+        offset = 0
+
+        while True:
+            documents, total = db_manager.get_all_documents(
+                limit=IMPORT_EXPORT_DEFAULT_LIMIT,
+                offset=offset,
+                exclude_connector_sourced=True,
+            )
+            if not documents:
+                break
+            all_documents.extend(documents)
+            offset += len(documents)
+            if offset >= total:
+                break
+
+        doc_ids = [doc.doc_id for doc in all_documents]
+        logger.info(f"Found {len(doc_ids)} user-submitted document IDs in database")
+        return doc_ids
+    except Exception as e:
+        logger.error(f"Failed to read user document IDs from database: {e}", exc_info=True)
+        raise
+
+
 IMPORT_EXPORT_DEFAULT_LIMIT = 10000
 IMPORT_EXPORT_BATCH_SIZE = 100
 

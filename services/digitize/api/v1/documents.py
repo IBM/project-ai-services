@@ -8,6 +8,7 @@ Connector visibility rules:
   - GET  /v1/documents        — user-submitted only (connector-sourced excluded)
   - GET  /v1/documents/{id}   — 404 for connector-sourced docs
   - DELETE /v1/documents/{id} — 404 for connector-sourced docs
+  - DELETE /v1/documents      — user-submitted only (connector-sourced skipped)
 """
 
 import json

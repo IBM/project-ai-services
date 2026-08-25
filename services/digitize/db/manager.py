@@ -669,77 +669,87 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
     @staticmethod
-    def delete_all_documents() -> Dict[str, Any]:
+    def delete_user_documents() -> Dict[str, Any]:
         """
-        Delete all documents from the database.
-        
+        Delete only user-submitted documents (those NOT in connector_document_checksum).
+
+        Connector-sourced documents and their checksum rows are left untouched.
+
         Returns:
-            Dictionary with deletion statistics:
+            Dictionary with:
             - deleted_count: Number of documents deleted
-            - success: Whether operation completed successfully
+            - doc_ids: List of deleted doc_id strings
+            - success: Whether the operation completed successfully
         """
         try:
             with get_db_session() as session:
-                # Wipe the checksum registry so previously-seen hashes are no longer
-                # blocked after a full reset.
-                session.execute(delete(DocumentChecksum))
-                stmt = delete(Document)
-                result = cast(CursorResult, session.execute(stmt))
+                # Collect user-submitted doc IDs first (excludes connector-sourced).
+                user_doc_ids_stmt = (
+                    select(Document.doc_id)
+                    .where(
+                        ~select(ConnectorDocumentChecksum.doc_id)
+                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
+                        .exists()
+                    )
+                )
+                doc_ids = list(session.scalars(user_doc_ids_stmt).all())
+
+                if not doc_ids:
+                    return {"deleted_count": 0, "doc_ids": [], "success": True}
+
+                # Remove checksum registry rows for these docs so hashes can be
+                # re-registered if the same file is ingested again.
+                session.execute(
+                    delete(DocumentChecksum).where(DocumentChecksum.doc_id.in_(doc_ids))
+                )
+
+                # Remove already_exists shadow docs that reference any of these docs.
+                session.execute(
+                    delete(Document).where(
+                        Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)
+                    )
+                )
+
+                result = cast(
+                    CursorResult,
+                    session.execute(delete(Document).where(Document.doc_id.in_(doc_ids))),
+                )
                 deleted_count = result.rowcount
-                return {
-                    "deleted_count": deleted_count,
-                    "success": True
-                }
+                logger.info(f"Deleted {deleted_count} user-submitted documents from database")
+                return {"deleted_count": deleted_count, "doc_ids": doc_ids, "success": True}
         except SQLAlchemyError as e:
-            logger.error(f"Database error deleting all documents: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
+            logger.error(f"Database error deleting user documents: {e}", exc_info=True)
+            return {"deleted_count": 0, "doc_ids": [], "success": False, "error": str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error deleting all documents: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
-    
+            logger.error(f"Unexpected error deleting user documents: {e}", exc_info=True)
+            return {"deleted_count": 0, "doc_ids": [], "success": False, "error": str(e)}
+
     @staticmethod
-    def delete_all_jobs() -> Dict[str, Any]:
+    def delete_user_jobs() -> Dict[str, Any]:
         """
-        Delete all jobs from the database.
-        
+        Delete only user-submitted jobs — those whose job_name does NOT start
+        with the connector-job prefix ``"Connector-"``.
+
         Returns:
-            Dictionary with deletion statistics:
+            Dictionary with:
             - deleted_count: Number of jobs deleted
-            - success: Whether operation completed successfully
+            - success: Whether the operation completed successfully
         """
         try:
             with get_db_session() as session:
-                stmt = delete(Job)
+                stmt = delete(Job).where(
+                    ~Job.job_name.like("Connector-%")
+                )
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
-                return {
-                    "deleted_count": deleted_count,
-                    "success": True
-                }
+                logger.info(f"Deleted {deleted_count} user-submitted jobs from database")
+                return {"deleted_count": deleted_count, "success": True}
         except SQLAlchemyError as e:
-            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
+            logger.error(f"Database error deleting user jobs: {e}", exc_info=True)
+            return {"deleted_count": 0, "success": False, "error": str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
-
-
+            logger.error(f"Unexpected error deleting user jobs: {e}", exc_info=True)
+            return {"deleted_count": 0, "success": False, "error": str(e)}
 
     # ========================================================================
     # Connector CRUD
