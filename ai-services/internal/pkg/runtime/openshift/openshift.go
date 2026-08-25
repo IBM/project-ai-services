@@ -232,7 +232,7 @@ func (kc *OpenshiftClient) CreatePod(_ context.Context, body io.Reader, opts map
 }
 
 // DeletePod deletes a pod by ID or name.
-func (kc *OpenshiftClient) DeletePod(id string, force *bool) error {
+func (kc *OpenshiftClient) DeletePod(nameOrID string, force *bool) error {
 	logger.Warningln("Not implemented")
 
 	return nil
@@ -269,14 +269,14 @@ func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
 }
 
 // StopPod stops a pod.
-func (kc *OpenshiftClient) StopPod(id string) error {
+func (kc *OpenshiftClient) StopPod(nameOrID string) error {
 	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
 
 // StartPod starts a pod.
-func (kc *OpenshiftClient) StartPod(id string) error {
+func (kc *OpenshiftClient) StartPod(nameOrID string) error {
 	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil

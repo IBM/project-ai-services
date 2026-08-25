@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -440,15 +441,29 @@ type ConnectorValidator struct {
 	provider *catalog.CatalogProvider
 }
 
+// datasourceNameRe restricts connector names to letters, digits, hyphens, and underscores.
+// This matches the character set allowed by most cloud resource naming conventions.
+var datasourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // NewConnectorValidator creates a new ConnectorValidator backed by the given catalog provider.
 func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidator {
 	return &ConnectorValidator{provider: provider}
 }
 
 // ValidateCreateDatasourceRequest validates the full CreateDatasourceRequest:
-//  1. Verifies the provider exists in the catalog under the "datasource" connector type.
-//  2. Validates params against the provider's JSON Schema (if one is present).
+//  1. Validates the name contains only allowed characters (letters, digits, hyphens, underscores).
+//  2. Verifies the provider exists in the catalog under the "datasource" connector type.
+//  3. Validates params against the provider's JSON Schema (if one is present).
 func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context, req apimodels.CreateDatasourceRequest) error {
+	// Name character validation — case-insensitive duplicate detection is handled at
+	// the DB query level via LOWER(name) = LOWER($1).
+	if !datasourceNameRe.MatchString(req.Name) {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: "Datasource name may only contain letters, digits, hyphens (-), and underscores (_)",
+		}
+	}
+
 	if !v.provider.ConnectorExists(catalogconstants.ConnectorTypeDatasource, req.ProviderID) {
 		return &ValidationError{
 			Code:    http.StatusNotFound,
@@ -466,14 +481,14 @@ func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context
 		return nil
 	}
 
-	if len(req.Metadata) == 0 {
+	if len(req.Params) == 0 {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Metadata is required for datasource provider %q", req.ProviderID),
+			Message: fmt.Sprintf("Params is required for datasource provider %q", req.ProviderID),
 		}
 	}
 
-	return ValidateParams(req.Metadata, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
+	return ValidateParams(req.Params, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
 }
 
 // Made with Bob

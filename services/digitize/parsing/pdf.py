@@ -28,6 +28,10 @@ logging.getLogger("pdfminer").setLevel(logging.ERROR)
 logger = get_logger("PDF")
 
 def get_pdf_page_count(file_path):
+    """Get the page count of a PDF file using pypdfium2.
+
+    Returns the page count as an integer, or 0 if an exception occurs.
+    """
     try:
         pdf = pdfium.PdfDocument(file_path)
         count = len(pdf)
@@ -70,6 +74,11 @@ def get_document_page_count(file_path: str) -> int:
         return 0
 
 def get_matching_header_lvl(toc, title, threshold=80):
+    """Retrieve the Markdown header prefix (e.g. '##') matching a TOC title.
+
+    Performs partial string ratio fuzzy matching against the Table of Contents keys
+    using the specified similarity threshold.
+    """
     title_l = title.lower()
     for toc_title in toc:
         score = fuzz.partial_ratio(title_l, toc_title.lower())
@@ -79,6 +88,11 @@ def get_matching_header_lvl(toc, title, threshold=80):
 
 
 def get_toc(file):
+    """Extract the Table of Contents (TOC) outlines from a PDF file.
+
+    Returns a dictionary mapping section/title names to their hierarchical outline levels,
+    or an empty dictionary if no outlines exist.
+    """
     toc = {}
     page_count = 0
     parser = None

@@ -6,7 +6,7 @@ import (
 )
 
 func TestListArchitectures(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestListArchitectures(t *testing.T) {
 }
 
 func TestLoadArchitecture(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestLoadArchitecture(t *testing.T) {
 }
 
 func TestListServices(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestListServices(t *testing.T) {
 }
 
 func TestLoadService(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLoadService(t *testing.T) {
 }
 
 func TestListComponents(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestListComponents(t *testing.T) {
 }
 
 func TestLoadComponent(t *testing.T) {
-	provider, err := NewCatalogProvider()
+	provider, err := NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("Failed to create catalog provider: %v", err)
 	}

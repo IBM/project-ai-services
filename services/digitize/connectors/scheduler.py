@@ -105,7 +105,7 @@ async def remove_connector_job(connector_id: str) -> None:
         logger.info(f"Removed scheduler job for connector {connector_id!r}")
     except Exception as exc:
         # LookupError or similar if the schedule doesn't exist — safe to ignore.
-        logger.debug(
+        logger.warning(
             f"Could not remove scheduler job for {connector_id!r} "
             f"(may not have been registered): {exc}"
         )

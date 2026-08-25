@@ -69,6 +69,7 @@ logger = get_logger("schema_router")
     tags=["schemas"],
 )
 async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
+    """Register and validate a new schema for data extraction."""
     # --- Conflict check (name uniqueness) ---
     if db_repo.schema_name_exists(body.name):
         raise SchemaValidationError(
@@ -180,6 +181,7 @@ async def list_schemas(
     offset: int = Query(default=0, ge=0, description="Records to skip"),
     name: Optional[str] = Query(default=None, description="Case-insensitive name substring filter"),
 ) -> SchemaListResponse:
+    """Retrieve a paginated list of registered extraction schemas with basic metadata."""
     rows, total = db_repo.list_schemas(name_filter=name, limit=limit, offset=offset)
     data = [
         SchemaListItem(
@@ -219,6 +221,7 @@ async def list_schemas(
     tags=["schemas"],
 )
 async def get_schema(schema_id: str) -> SchemaDetailResponse:
+    """Retrieve detailed information and definition for a specific schema by ID."""
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
         raise SchemaValidationError(
@@ -262,6 +265,7 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
     tags=["schemas"],
 )
 async def delete_schema(schema_id: str) -> Response:
+    """Delete a specific schema from the system."""
     # Check existence first for a clear 404.
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
@@ -332,6 +336,7 @@ async def bulk_delete_schemas(
         description="Must be 'true' to confirm destructive bulk deletion",
     ),
 ) -> Response:
+    """Bulk delete all schemas from the system once explicit confirmation is provided."""
     if confirm != "true":
         raise SchemaValidationError(
             "CONFIRMATION_REQUIRED",

@@ -1,5 +1,5 @@
 ui:
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.60
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.61
   resources:
     requests:
       memory: "512Mi"
@@ -9,7 +9,7 @@ ui:
       cpu: "500m"
 
 backend:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.257
+  image: icr.io/ai-services-cicd/ai-services:v0.0.274
   runtime: "openshift"
   adminPasswordHash: ""
   # @generate:password length=32, special=false

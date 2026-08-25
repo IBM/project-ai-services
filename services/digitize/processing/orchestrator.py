@@ -104,6 +104,11 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
 
 
 def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=LanguageCodes.ENGLISH):
+    """Flushes the current buffered chunk content into structured token-limited chunks.
+
+    Splits the chunk content into smaller token-limited chunks if necessary, and appends them
+    to the global chunks list with appropriate metadata.
+    """
     content = current_chunk["content"].strip()
     if not content:
         return
@@ -444,7 +449,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
             with open(processed_text_json_path, "r") as f:
                 text_data = json.load(f)
                 document_language = detect_document_language(text_data)
-                logger.info(f"Detected document language: {document_language}")
+                logger.info(f"Detected document language: {document_language} for doc: {doc_path}")
         except Exception as e:
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
 
@@ -460,7 +465,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
 
 
 def clean_intermediate_files(doc_id, out_path):
-    """Remove intermediate files but keep <doc_id>.json"""
+    """Remove intermediate files but keep <doc_id>.json."""
     for pattern in [f"{doc_id}{text_suffix}", f"{doc_id}{table_suffix}", f"{doc_id}{text_chunk_suffix}", f"{doc_id}{table_chunk_suffix}"]:
         file_path = Path(out_path) / pattern
         if file_path.exists():
@@ -532,7 +537,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 future = converter_executor.submit(convert_document, path, out_path, file_name)
                 conversion_futures[future] = path
                 if doc_id is not None:
-                    logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
+                    logger.debug(f"Submitted for conversion: {Path(path).name}")
                     status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
                     status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 

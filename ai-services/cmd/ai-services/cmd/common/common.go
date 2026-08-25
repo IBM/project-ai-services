@@ -1,3 +1,5 @@
+// Package common provides CLI helpers shared across all top-level commands
+// (catalog, worker, bootstrap, etc.).
 package common
 
 import (
@@ -13,8 +15,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// InitAndValidateRuntimeFlag validates the runtime flag value, initialises
+// vars.RuntimeFactory, and checks platform support. It must be called in
+// PreRunE before any code that reads vars.RuntimeFactory.
 func InitAndValidateRuntimeFlag(runtimeType string) error {
-	// Initialize runtime factory based on flag
 	rt := types.RuntimeType(runtimeType)
 	if !rt.Valid() {
 		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
@@ -23,7 +27,6 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
 	logger.Debugf("Using runtime: %s\n", rt)
 
-	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(rt); err != nil {
 		return err
 	}
@@ -31,8 +34,11 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 	return validateRuntimeType(rt)
 }
 
+// ConfigureRuntimeFlag registers the --runtime / -r flag on cmd and marks it
+// required. Use this in every command that accepts a runtime type.
 func ConfigureRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
-	cmd.Flags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	cmd.Flags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
+		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired(constants.RuntimeFlag)
 }
 

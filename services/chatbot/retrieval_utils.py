@@ -12,6 +12,18 @@ def format_table_html(table_html):
     return table_html
 
 def show_document_content(retrieved_documents, scores):
+    """Generate HTML markup to display retrieved documents alongside their similarity scores.
+
+    Handles different document types, including rendering image elements with base64 data
+    URLs, HTML tables, and standard text or JSON contents.
+
+    Args:
+        retrieved_documents (list): A list of dictionaries representing the retrieved document chunks.
+        scores (list): A list of float similarity scores corresponding to the retrieved documents.
+
+    Returns:
+        str: A string of HTML representing the formatted document contents.
+    """
     html_content = ""
     
     for idx, (doc, score) in enumerate(zip(retrieved_documents, scores)):

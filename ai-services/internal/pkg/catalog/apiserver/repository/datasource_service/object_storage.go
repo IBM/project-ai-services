@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,7 +19,30 @@ import (
 const (
 	awsEndpointSuffix = "amazonaws.com"
 	s3ConnectTimeout  = 10 * time.Second
+	s3DefaultRegion   = "us-east-1"
 )
+
+// regionFromEndpointRe extracts the SigV4 region segment from AWS S3 and IBM COS endpoint URLs.
+// It matches the same two hostname patterns as the digitize Python service (_REGION_FROM_URL_RE).
+//
+//	s3.<region>.amazonaws.com                              (AWS S3)
+//	s3.<region>.cloud-object-storage.appdomain.cloud      (IBM COS)
+var regionFromEndpointRe = regexp.MustCompile(
+	`(?i)s3[.\-](?P<region>[a-z0-9\-]+)\.(?:amazonaws\.com|cloud-object-storage\.appdomain\.cloud)`,
+)
+
+// cosCrossRegionAliases maps IBM COS cross-region endpoint aliases to the canonical SigV4
+// region that IBM COS accepts for signing. These three aliases are fixed IBM infrastructure
+// geography mappings (documented by IBM COS) — identical to the Python digitize service.
+//
+//	us → us-south  (Dallas  — primary US cross-region PoP)
+//	eu → eu-de     (Frankfurt — primary EU cross-region PoP)
+//	ap → jp-tok    (Tokyo   — primary AP cross-region PoP)
+var cosCrossRegionAliases = map[string]string{
+	"us": "us-south",
+	"eu": "eu-de",
+	"ap": "jp-tok",
+}
 
 // authErrorCodes are S3/STS codes that indicate invalid credentials.
 var authErrorCodes = map[string]bool{
@@ -53,13 +77,6 @@ func NewObjectStorageTester() ConnectionTester {
 	return &objectStorageTester{}
 }
 
-// SensitiveFields returns the credential fields that must be encrypted at rest.
-func (t *objectStorageTester) SensitiveFields() map[string]bool {
-	return map[string]bool{
-		"secret_access_key": true,
-	}
-}
-
 // TestConnection runs three sequential checks against an S3-compatible endpoint using a
 // single ListObjectsV2(MaxKeys=0) call — a zero-cost probe that transfers no object data.
 // The SDK response (or error) is classified into network / auth / access failure categories.
@@ -70,8 +87,6 @@ func (t *objectStorageTester) TestConnection(ctx context.Context, params map[str
 	secretKey, _ := params["secret_access_key"].(string)
 	prefix, _ := params["prefix"].(string)
 
-	isAWS := strings.Contains(endpointURL, awsEndpointSuffix)
-
 	cfg := aws.Config{
 		Region:      regionFromEndpoint(endpointURL),
 		Credentials: credentials.NewStaticCredentialsProvider(accessKeyID, secretKey, ""),
@@ -79,14 +94,15 @@ func (t *objectStorageTester) TestConnection(ctx context.Context, params map[str
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		if !isAWS {
-			// IBM COS, MinIO, and other S3-compatible stores: supply the custom
-			// endpoint and enable path-style addressing.
-			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+		if strings.Contains(endpointURL, awsEndpointSuffix) {
+			// AWS S3: SDK resolves the regional endpoint from cfg.Region automatically;
+			// virtual-hosted-style addressing is used by default — no BaseEndpoint needed.
+			return
 		}
-		// AWS S3: SDK resolves the regional endpoint from cfg.Region automatically;
-		// virtual-hosted-style addressing is used by default — no BaseEndpoint needed.
+		// IBM COS, MinIO, and other S3-compatible stores: supply the custom
+		// endpoint and enable path-style addressing.
+		o.BaseEndpoint = aws.String(endpointURL)
+		o.UsePathStyle = true
 	})
 
 	callCtx, cancel := context.WithTimeout(ctx, s3ConnectTimeout)
@@ -152,30 +168,25 @@ func classifyS3Error(err error, endpointURL, bucket string) error {
 	}
 }
 
-// regionFromEndpoint extracts the SigV4 region from the endpoint URL.
-// Falls back to "us-east-1" when the pattern is not recognised.
+// regionFromEndpoint extracts the SigV4 region from an S3-compatible endpoint URL using
+// the same regex-based approach as the digitize Python service (_REGION_FROM_URL_RE in config.py).
 //
-// Supported patterns:
-//
-//	s3.<region>.amazonaws.com                              (AWS S3)
-//	s3.<region>.cloud-object-storage.appdomain.cloud      (IBM COS direct-region)
-//	s3.us.cloud-object-storage.appdomain.cloud            (IBM COS cross-region alias → us-south)
+// It matches AWS S3 and IBM COS hostname patterns and resolves IBM COS cross-region aliases
+// to their canonical SigV4 region values. Falls back to s3DefaultRegion ("us-east-1") for
+// any URL that does not match a known pattern (e.g. MinIO, custom S3-compatible stores) —
+// this is the AWS SDK default and is correct for SigV4 signing against most S3-compatible stores.
 func regionFromEndpoint(endpointURL string) string {
-	cosAliases := map[string]string{"us": "us-south", "eu": "eu-de", "ap": "jp-tok"}
-	u := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(endpointURL, "https://"), "http://"))
-	parts := strings.Split(u, ".")
-	// ["s3", "<region>", "amazonaws", "com"]  or
-	// ["s3", "<region>", "cloud-object-storage", "appdomain", "cloud"]
-	if len(parts) >= 3 && parts[0] == "s3" {
-		region := parts[1]
-		if canonical, ok := cosAliases[region]; ok {
-			return canonical
-		}
-
-		return region
+	match := regionFromEndpointRe.FindStringSubmatch(endpointURL)
+	if match == nil {
+		return s3DefaultRegion
 	}
 
-	return "us-east-1"
+	region := strings.ToLower(match[regionFromEndpointRe.SubexpIndex("region")])
+	if canonical, ok := cosCrossRegionAliases[region]; ok {
+		return canonical
+	}
+
+	return region
 }
 
 // Made with Bob

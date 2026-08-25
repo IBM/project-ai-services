@@ -192,6 +192,11 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -220,6 +225,7 @@ def swagger_root():
     description="Check if the service is running and healthy.",
 )
 async def health_check():
+    """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
 
 

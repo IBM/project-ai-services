@@ -30,8 +30,6 @@ from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.scanners.s3_scanner import S3Scanner
 from digitize.connectors.scanners.ssh_scanner import SSHScanner
-from digitize.settings import settings
-
 logger = get_logger("scanner_factory")
 
 # ---------------------------------------------------------------------------
@@ -78,8 +76,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
         connection_details = connector_row.connection_details or {}
         allowed_extensions = connector_row.allowed_extensions or [".pdf", ".docx"]
 
-    key_path = settings.digitize.connector.encryption_key_path
-    connection_details = decrypt_secrets(connector_type, connection_details, key_path)
+    connection_details = decrypt_secrets(connector_type, connection_details)
 
     if connector_type not in _REGISTRY:
         supported = sorted(_REGISTRY.keys())

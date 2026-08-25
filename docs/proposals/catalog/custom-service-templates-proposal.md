@@ -459,7 +459,7 @@ Use `PUT` to replace an existing bundle identified by its internal record ID (`b
 
 Like `POST`, `PUT` performs validation directly from the uploaded archive before any state transition. The server validates archive structure, parses root and runtime metadata, checks `values.yaml` and schema/metadata consistency, parses template files, verifies service labels and annotations, reads `steps.md`, and scans relevant files line-by-line before proceeding with the replacement.
 
-**Running-instance guard.** After archive validation and before marking the row `processing`, the server queries the database to check whether any service or component is currently deployed using this catalog entry. For service bundles the check queries the `services` table by `catalog_id`. For component bundles the `catalog_id` (`<component_type>--<provider>`) is split to query the `components` table by `type` and `provider`. If any running instance is found the replacement is rejected with `409 Conflict` before any status transition occurs. This same check can be reused by `DELETE` in the future.
+**Running-instance guard.** After archive validation and before marking the row `processing`, the server queries the database to check whether any service or component is currently deployed using this catalog entry. For service bundles the check queries the `services` table by `catalog_id`. For component bundles the `catalog_id` (`<component_type>--<provider>`) is split to query the `components` table by `type` and `provider`. If any running instance is found the replacement is rejected with `409 Conflict` before any status transition occurs. The same guard is reused by `DELETE`.
 
 Returns `404` if no bundle with that `bundle_id` exists.
 
@@ -505,6 +505,8 @@ The `200` response returns the updated bundle record with `status: active`, `ver
 
 Permanently removes a bundle: marks the row `deleting`, deletes the on-disk directory (`<catalog_type>/<catalog_id>-<version>/`) from the bundle volume, triggers a `CatalogProvider.Reload()` so the item is no longer served, and then removes the DB row. Any application that was deployed using this bundle's `catalog_id` is **not** affected — existing deployed resources are independent of the catalog once launched.
 
+**Running-instance guard.** Before marking the row `deleting`, the server queries the database to check whether any service or component is currently deployed using this catalog entry. For service bundles the check queries the `services` table by `catalog_id`. For component bundles the `catalog_id` (`<component_type>--<provider>`) is split to query the `components` table by `type` and `provider`. If any running instance is found the deletion is rejected with `409 Conflict` before any status transition occurs. Stop or delete the running instances first, then retry. This reuses the same guard as `PUT`.
+
 ```
 DELETE /api/v1/catalog/bundles/:bundle_id
 Authorization: Bearer <admin-jwt>
@@ -524,12 +526,13 @@ curl -X DELETE https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2
 
 | Status | Meaning |
 |---|---|
-| `204 No Content` | Bundle marked `deleting`, on-disk directory removed, `CatalogProvider` reloaded, and DB row deleted. |
+| `204 No Content` | No running instances found, bundle marked `deleting`, on-disk directory removed, `CatalogProvider` reloaded, and DB row deleted. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
 | `404 Not Found` | No bundle with the given `bundle_id` exists. |
+| `409 Conflict` | One or more services or components are currently running that were deployed from this bundle's `catalog_id`. The deletion is rejected before any status transition. Stop or delete the running instances first, then retry. |
 
-> Deletion is **synchronous** — the row is marked `deleting`, then the directory removal, `CatalogProvider.Reload()`, and DB delete happen in-process before the `204` is returned. There is no async processing step and no polling needed. If any of those steps fails before the final DB delete, the row is marked `failed`.
+> Deletion is **synchronous** — the running-instance guard is checked first; if it passes, the row is marked `deleting`, then the directory removal, `CatalogProvider.Reload()`, and DB delete happen in-process before the `204` is returned. There is no async processing step and no polling needed. If any step fails after the status transition, the row is marked `failed`.
 
 ---
 
@@ -1050,12 +1053,21 @@ type BundleServiceInterface interface {
     // (status=active, version, name, size_bytes — single statement),
     // reloads catalog, deletes old on-disk directory when different, and returns 200.
     // On failure after the status transition: DB row is marked failed and error is returned.
-    ReplaceBundle(ctx context.Context, existing *BundleRecord, file io.Reader, userID string) (*BundleResponse, error)
+    ReplaceBundle(ctx context.Context, existing *BundleResponse, file io.Reader, userID string) (*BundleResponse, error)
 
-    GetByBundleID(ctx context.Context, bundleID string) (*BundleRecord, error)
+    // GetBundleByID returns the full BundleResponse for a specific bundle by its UUID string.
+    // Returns (nil, nil) when not found.
     GetBundleByID(ctx context.Context, bundleID string) (*BundleResponse, error)
-    DeleteBundle(ctx context.Context, existing *BundleRecord) error
-    ListBundles(ctx context.Context) (*BundleListResponse, error)
+
+    // DeleteBundle — synchronous DELETE.
+    // Checks for running instances (→ 409 if any), marks row deleting, removes the on-disk
+    // directory, reloads CatalogProvider, then deletes the DB row.
+    // Accepts *BundleResponse (same shape returned by GetBundleByID) — no intermediate
+    // BundleRecord construction in the handler.
+    // On failure after the status transition: DB row is marked failed and error is returned.
+    DeleteBundle(ctx context.Context, existing *BundleResponse) error
+
+    ListBundles(ctx context.Context, req BundleListRequest) (*BundleListResponse, error)
 }
 ```
 

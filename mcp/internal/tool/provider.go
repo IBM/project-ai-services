@@ -3,6 +3,7 @@ package tool
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,12 +27,14 @@ type Provider struct {
 	globalHeaders map[string]string
 	bodyName      string
 	inputSchema   *jsonschema.Schema
+	tlsSkipVerify bool
 }
 
 // NewProvider creates a new tool provider
 func NewProvider(operation types.OperationInfo, endpoint string,
 	auth authenticator.Authenticator,
-	globalQuery, globalHeaders map[string]string) (*Provider, error) {
+	globalQuery, globalHeaders map[string]string,
+	tlsSkipVerify bool) (*Provider, error) {
 
 	provider := &Provider{
 		operation:     operation,
@@ -40,6 +43,7 @@ func NewProvider(operation types.OperationInfo, endpoint string,
 		globalQuery:   globalQuery,
 		globalHeaders: globalHeaders,
 		bodyName:      getBodyName(operation),
+		tlsSkipVerify: tlsSkipVerify,
 	}
 
 	provider.inputSchema = provider.buildInputSchema()
@@ -314,6 +318,12 @@ func (p *Provider) Execute(ctx context.Context, params *mcp.CallToolParamsRaw) (
 
 	// Execute request
 	client := &http.Client{}
+	if p.tlsSkipVerify {
+		// #nosec G402 - verification is skipped only when the user passes --tls-skip-verify
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
