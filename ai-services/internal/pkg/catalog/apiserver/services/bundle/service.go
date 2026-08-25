@@ -47,15 +47,15 @@ func NewBundleService(repo repository.BundleRepository, svcRepo repository.Servi
 	}
 }
 
-// metaFields extracts the four identity strings from either a *bundlemetadata.ServiceMetadata
-// or *bundlemetadata.ComponentMetadata. It is called once after peekMetadata so that the
+// metaFields extracts the four identity strings from either a *bundlemetadata.ServiceMetadataYAML
+// or *bundlemetadata.ComponentMetadataYAML. It is called once after peekMetadata so that the
 // rest of the pipeline works with plain strings rather than type-switching repeatedly.
 func metaFields(meta any) (catalogType, catalogID, version, name string) {
 	switch m := meta.(type) {
-	case *bundlemetadata.ServiceMetadata:
-		return m.Type, m.ID, m.Ver, m.DisplayName
-	case *bundlemetadata.ComponentMetadata:
-		return m.Type, m.ComponentType + "--" + m.ID, m.Ver, m.DisplayName
+	case *bundlemetadata.ServiceMetadataYAML:
+		return m.Type, m.ID, m.Version, m.Name
+	case *bundlemetadata.ComponentMetadataYAML:
+		return m.Type, m.ComponentType + "--" + m.ID, m.Version, m.Name
 	}
 	panic("metaFields: unexpected metadata type") // unreachable — parseMetadataYAML rejects all other types
 }
@@ -118,14 +118,14 @@ func (s *bundleService) checkCatalogCollision(meta any) error {
 	}
 
 	switch m := meta.(type) {
-	case *bundlemetadata.ServiceMetadata:
+	case *bundlemetadata.ServiceMetadataYAML:
 		if s.catalog.ServiceExists(m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: service id %q conflicts with an existing catalog service; choose a unique id", m.ID),
 			}
 		}
-	case *bundlemetadata.ComponentMetadata:
+	case *bundlemetadata.ComponentMetadataYAML:
 		if s.catalog.ComponentExists(m.ComponentType, m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
@@ -137,30 +137,17 @@ func (s *bundleService) checkCatalogCollision(meta any) error {
 	return nil
 }
 
-// buildValidationResult constructs a *ServiceValidationResult or *ComponentValidationResult
-// from the parsed metadata.
+// buildValidationResult constructs a *BundleValidationResult from the parsed metadata.
 func buildValidationResult(meta any) (any, error) {
-	switch m := meta.(type) {
-	case *bundlemetadata.ServiceMetadata:
-		return &ServiceValidationResult{
-			Valid:       true,
-			CatalogType: m.Type,
-			CatalogID:   m.ID,
-			Version:     m.Ver,
-			Name:        m.DisplayName,
-		}, nil
-	case *bundlemetadata.ComponentMetadata:
-		return &ComponentValidationResult{
-			Valid:         true,
-			CatalogType:   m.Type,
-			ComponentType: m.ComponentType,
-			CatalogID:     m.ComponentType + "--" + m.ID,
-			Version:       m.Ver,
-			Name:          m.DisplayName,
-		}, nil
-	default:
-		return nil, fmt.Errorf("buildValidationResult: unexpected metadata type %T", meta)
-	}
+	catalogType, catalogID, version, name := metaFields(meta)
+
+	return &BundleValidationResult{
+		Valid:       true,
+		CatalogType: catalogType,
+		CatalogID:   catalogID,
+		Version:     version,
+		Name:        name,
+	}, nil
 }
 
 // ProcessBundle is the synchronous POST creation path.

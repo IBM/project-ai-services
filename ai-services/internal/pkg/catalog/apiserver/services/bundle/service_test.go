@@ -492,7 +492,7 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 	archiveBytes, _, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
-	meta := &bundlemetadata.ServiceMetadata{ID: "my-service", Type: bundlemetadata.CatalogTypeService, Ver: "2.0.0", DisplayName: "Updated Name"}
+	meta := &bundlemetadata.ServiceMetadataYAML{ID: "my-service", Type: bundlemetadata.CatalogTypeService, Version: "2.0.0", Name: "Updated Name"}
 
 	updateCalls := make([]models.BundleUpdate, 0, 2)
 	repo := &mockBundleRepo{
@@ -526,8 +526,8 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 
 	// Call the activate step directly: update to active.
 	statusActive := models.BundleStatusActive
-	metaName := meta.DisplayName
-	metaVersion := meta.Ver
+	metaName := meta.Name
+	metaVersion := meta.Version
 	activateErr := svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -608,9 +608,9 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	assert.DirExists(t, newFinalDir)
 
 	statusActive := models.BundleStatusActive
-	sm := meta.(*bundlemetadata.ServiceMetadata)
-	name := sm.DisplayName
-	version := sm.Ver
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	name := sm.Name
+	version := sm.Version
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -667,9 +667,9 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 	// Now simulate the DB update+refetch path.
 	sizeBytes := int64(512)
 	statusActive := models.BundleStatusActive
-	sm := meta.(*bundlemetadata.ServiceMetadata)
-	name := sm.DisplayName
-	version := sm.Ver
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	name := sm.Name
+	version := sm.Version
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -1402,9 +1402,70 @@ func TestValidateBundle_NoCatalogIDCheck(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
 	}, true)
 
-	result, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	raw, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
 	require.NoError(t, err)
-	require.NotNil(t, result)
+	require.NotNil(t, raw)
+	result, ok := raw.(*BundleValidationResult)
+	require.True(t, ok, "ValidateBundle must return *BundleValidationResult")
+	assert.True(t, result.Valid)
+	assert.Equal(t, "service", result.CatalogType)
+	assert.Equal(t, "my-service", result.CatalogID)
+	assert.Equal(t, "1.0.0", result.Version)
+}
+
+// TestValidateBundle_BadArchive verifies that a non-gzip payload results in an error.
+func TestValidateBundle_BadArchive(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader([]byte("not-gzip")))
+	require.Error(t, err)
+	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
+}
+
+// TestValidateBundle_MissingMetadataYAML verifies that an archive with no metadata.yaml
+// at the root returns a 400.
+func TestValidateBundle_MissingMetadataYAML(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"other.txt": "hello",
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	assertValidationError(t, err, http.StatusBadRequest, "metadata.yaml not found")
+}
+
+// TestValidateBundle_InvalidMetadataYAML verifies that a syntactically invalid
+// metadata.yaml results in a 400.
+func TestValidateBundle_InvalidMetadataYAML(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": "{\x00invalid yaml",
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.Error(t, err)
+}
+
+// TestValidateBundle_ComponentBundle verifies that a valid component archive returns
+// the correct catalog_type and catalog_id in the result.
+// Component catalog_id is encoded as "<component_type>--<id>" by metaFields.
+func TestValidateBundle_ComponentBundle(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
+	}, true)
+
+	raw, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	result, ok := raw.(*BundleValidationResult)
+	require.True(t, ok, "ValidateBundle must return *BundleValidationResult")
+	assert.True(t, result.Valid)
+	assert.Equal(t, "component", result.CatalogType)
+	assert.Equal(t, "llm--my-provider", result.CatalogID)
+	assert.Equal(t, "2.0.0", result.Version)
 }
 
 // TestProcessBundle_ServiceCollision_Returns422 verifies that POST /bundles rejects

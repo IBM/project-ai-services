@@ -87,7 +87,7 @@ func (h *BundleHandler) CreateBundle(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			file	formData	file	true	".tar.gz archive to validate"
-//	@Success		200		{object}	bundlesvc.ServiceValidationResult
+//	@Success		200		{object}	bundlesvc.BundleValidationResult
 //	@Failure		400		{object}	ErrorResponse
 //	@Failure		401		{object}	ErrorResponse
 //	@Failure		403		{object}	ErrorResponse

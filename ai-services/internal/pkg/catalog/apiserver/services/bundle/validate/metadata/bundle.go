@@ -19,24 +19,6 @@ const (
 	CatalogTypeComponent = "component"
 )
 
-// ServiceMetadata holds the parsed identity fields for a service bundle.
-type ServiceMetadata struct {
-	ID          string
-	Type        string
-	Ver         string
-	DisplayName string
-}
-
-// ComponentMetadata holds the parsed identity fields for a component bundle.
-// The DB catalog_id for a component is the composite "<ComponentType>--<ID>".
-type ComponentMetadata struct {
-	ID            string
-	Type          string
-	ComponentType string
-	Ver           string
-	DisplayName   string
-}
-
 // ServiceMetadataYAML is the decode target for a service bundle's root metadata.yaml.
 // It only exposes fields that are valid for type=service.
 type ServiceMetadataYAML struct {

@@ -61,7 +61,7 @@ func catalogTypeToDir(catalogType string) string {
 // parses all required fields, and returns:
 //   - the raw archive bytes (so callers can hand the same bytes to extractAndMeasure
 //     without re-reading the original io.Reader),
-//   - either a *bundlemetadata.ServiceMetadata or *bundlemetadata.ComponentMetadata, and
+//   - either a *bundlemetadata.ServiceMetadataYAML or *bundlemetadata.ComponentMetadataYAML, and
 //   - the top-level directory name inferred from the archive structure (empty for flat archives).
 //
 // Threading topDir out avoids a redundant extra scan by each runtime validator, which
@@ -172,34 +172,9 @@ func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (any, 
 
 // parseMetadataYAML decodes raw YAML bytes, validates all required fields via
 // bundlemetadata.ParseRootMetadata, and returns the appropriate concrete type.
-// Returns *bundlemetadata.ServiceMetadata or *bundlemetadata.ComponentMetadata.
+// Returns *bundlemetadata.ServiceMetadataYAML or *bundlemetadata.ComponentMetadataYAML.
 func parseMetadataYAML(data []byte) (any, error) {
-	parsed, err := bundlemetadata.ParseRootMetadata(data)
-	if err != nil {
-		return nil, err
-	}
-
-	switch m := parsed.(type) {
-	case *bundlemetadata.ServiceMetadataYAML:
-		return &bundlemetadata.ServiceMetadata{
-			ID:          m.ID,
-			Type:        m.Type,
-			Ver:         m.Version,
-			DisplayName: m.Name,
-		}, nil
-	case *bundlemetadata.ComponentMetadataYAML:
-		return &bundlemetadata.ComponentMetadata{
-			ID:            m.ID,
-			Type:          m.Type,
-			ComponentType: m.ComponentType,
-			Ver:           m.Version,
-			DisplayName:   m.Name,
-		}, nil
-	default:
-		// ParseRootMetadata already rejects unknown types before we reach here,
-		// so this branch is only reachable if a new type is added without a matching case.
-		return nil, fmt.Errorf("parseMetadataYAML: unhandled metadata type %T — add a case branch", parsed)
-	}
+	return bundlemetadata.ParseRootMetadata(data)
 }
 
 // extractAndMeasure extracts data (a gzip-compressed tar archive) into destDir,

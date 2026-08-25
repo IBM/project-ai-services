@@ -17,7 +17,7 @@ type BundleServiceInterface interface {
 	// archive (structure, metadata, values/schema consistency, templates, labels, annotations,
 	// steps.md, and relevant file contents) without permanent extraction.
 	// No DB row is written and no CatalogProvider reload is triggered.
-	// Returns *ServiceValidationResult or *ComponentValidationResult.
+	// Returns *BundleValidationResult.
 	ValidateBundle(ctx context.Context, file io.Reader) (any, error)
 
 	// ProcessBundle is the synchronous POST bundle creation path.
@@ -58,23 +58,13 @@ type BundleListRequest struct {
 // Validation result types (returned by ValidateBundle)
 // -----------------------------------------------------------------------
 
-// ServiceValidationResult is the JSON body for a successfully validated service bundle.
-type ServiceValidationResult struct {
+// BundleValidationResult is the JSON body for a successfully validated bundle archive.
+type BundleValidationResult struct {
 	Valid       bool   `json:"valid"`
 	CatalogType string `json:"catalog_type"`
 	CatalogID   string `json:"catalog_id"`
 	Version     string `json:"version"`
 	Name        string `json:"name,omitempty"`
-}
-
-// ComponentValidationResult is the JSON body for a successfully validated component bundle.
-type ComponentValidationResult struct {
-	Valid         bool   `json:"valid"`
-	CatalogType   string `json:"catalog_type"`
-	ComponentType string `json:"component_type"`
-	CatalogID     string `json:"catalog_id"`
-	Version       string `json:"version"`
-	Name          string `json:"name,omitempty"`
 }
 
 // -----------------------------------------------------------------------
