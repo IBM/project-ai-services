@@ -10,7 +10,7 @@ GET    /v1/translate/jobs/{job_id}/result/download — download translated file
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -285,7 +285,7 @@ async def get_job(job_id: str) -> JobDetailResponse:
         500: http_error_responses[500],
     },
 )
-async def get_job_result(job_id: str):
+async def get_job_result(job_id: str) -> Union[JobResultResponse, JSONResponse]:
     """Return the completed translation result for a job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:
@@ -348,7 +348,7 @@ async def get_job_result(job_id: str):
         500: http_error_responses[500],
     },
 )
-async def download_job_result(job_id: str):
+async def download_job_result(job_id: str) -> Union[PlainTextResponse, JSONResponse]:
     """Download the translated output file for a completed job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:

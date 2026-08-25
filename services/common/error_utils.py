@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     # Server errors (5xx)
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
     LLM_ERROR = "LLM_ERROR"
+    LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
     VECTOR_STORE_NOT_READY = "VECTOR_STORE_NOT_READY"
     INSUFFICIENT_STORAGE = "INSUFFICIENT_STORAGE"
 
@@ -241,6 +242,7 @@ class APIError:
         ErrorCode.SERVER_BUSY: (429, "Server is busy. Please try again later"),
         ErrorCode.INTERNAL_SERVER_ERROR: (500, "An unexpected error occurred"),
         ErrorCode.LLM_ERROR: (500, "Failed to generate response. Please try again later"),
+        ErrorCode.LLM_UNAVAILABLE: (503, "LLM service is unavailable. Please try again later"),
         ErrorCode.VECTOR_STORE_NOT_READY: (503, "Vector store not initialized"),
         ErrorCode.INSUFFICIENT_STORAGE: (507, "Insufficient storage space"),
     }

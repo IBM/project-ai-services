@@ -54,7 +54,7 @@ router = APIRouter()
         413: http_error_responses[413],   # CONTEXT_LIMIT_EXCEEDED
         429: http_error_responses[429],   # concurrency_limiter at capacity
         500: http_error_responses[500],
-        503: http_error_responses[503],   # vLLM unreachable
+        503: {"description": "Service Unavailable — vLLM is unreachable. Retry after a short delay."},
     },
 )
 async def sync_translate(body: SyncTranslateRequest) -> SyncTranslateResponse:
@@ -136,7 +136,7 @@ async def sync_translate(body: SyncTranslateRequest) -> SyncTranslateResponse:
     except httpx.RequestError as exc:
         logger.error(f"vLLM unreachable during sync translate: {exc}", exc_info=True)
         APIError.raise_error(
-            ErrorCode.VECTOR_STORE_NOT_READY,
+            ErrorCode.LLM_UNAVAILABLE,
             "Translation service is temporarily unavailable. Please try again later.",
         )
     except httpx.HTTPStatusError as exc:

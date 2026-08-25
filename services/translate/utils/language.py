@@ -37,6 +37,12 @@ def validate_languages(
     supported = settings.translate.supported_languages_list
     supported_display = ", ".join(s.capitalize() for s in sorted(supported))
 
+    # target must not be empty before normalisation collapses it to "auto"
+    if not target_language or not target_language.strip():
+        _raise_invalid_language(
+            f"target_language must not be empty. Supported: {supported_display}."
+        )
+
     norm_source = normalise_language(source_language)
     norm_target = normalise_language(target_language)
 
