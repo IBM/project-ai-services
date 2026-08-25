@@ -134,6 +134,25 @@ class ConnectorCreateRequest(BaseModel):
         }
     }
 
+    @field_validator("allowed_extensions")
+    @classmethod
+    def validate_allowed_extensions(cls, v: List[str]) -> List[str]:
+        bad_format = [e for e in v if not e.startswith(".")]
+        if bad_format:
+            raise ValueError(
+                f"Each extension must start with '.', got: {bad_format!r}. "
+                f"Use '.pdf' not 'pdf'."
+            )
+        normalised = [e.lower() for e in v]
+        supported = {".pdf", ".docx"}
+        unsupported = [e for e in normalised if e not in supported]
+        if unsupported:
+            raise ValueError(
+                f"Unsupported extension(s): {unsupported!r}. "
+                f"Supported extensions: {sorted(supported)}"
+            )
+        return normalised
+
     @field_validator("type", mode="before")
     @classmethod
     def validate_type(cls, v: str) -> str:
