@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/iancoleman/orderedmap"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -327,8 +328,10 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 }
 
 // GetConnectorProviderParams returns the JSON schema for a specific connector provider's configuration.
-// If the schema file is not present, returns an empty schema instead of failing.
-func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connectorType, providerID string) (map[string]any, error) {
+// The schema is decoded into an *orderedmap.OrderedMap so that property insertion order is preserved
+// when the result is marshalled back to JSON (e.g. for the API response).
+// If the schema file is not present, returns an empty ordered map instead of failing.
+func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connectorType, providerID string) (*orderedmap.OrderedMap, error) {
 	_, err := p.LoadConnector(connectorType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("connector provider not found: %w", err)
@@ -351,7 +354,7 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 		// Schema file is optional — return an empty schema rather than failing.
 		logger.WarningfCtx(ctx, "schema file not found at '%s': %v", schemaPath, err)
 
-		return map[string]any{}, nil
+		return orderedmap.New(), nil
 	}
 	defer func() {
 		if closeErr := schemaFile.Close(); closeErr != nil {
@@ -359,12 +362,14 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 		}
 	}()
 
-	var schema map[string]any
-	if err := json.NewDecoder(schemaFile).Decode(&schema); err != nil {
+	// orderedmap.OrderedMap unmarshals all nested objects recursively as *OrderedMap,
+	// preserving key order at every depth level.
+	om := orderedmap.New()
+	if err := json.NewDecoder(schemaFile).Decode(om); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
 
-	return schema, nil
+	return om, nil
 }
 
 // GetServiceParams returns the JSON schema for a specific service's configuration.
