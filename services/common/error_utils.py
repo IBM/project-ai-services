@@ -288,6 +288,50 @@ class APIError:
         )
 
 
+def extract_http_error_message(exc) -> str:
+    """Extract the human-readable message from a FastAPI HTTPException.
+
+    ``APIError.raise_error`` always stores the user-facing message at
+    ``exc.detail["error"]["message"]``.  This helper unwraps that path and
+    falls back to ``str(exc.detail)`` for any exception whose detail is not
+    structured (e.g. plain-string FastAPI validation errors).
+
+    Args:
+        exc: A ``fastapi.HTTPException`` instance.
+
+    Returns:
+        The extracted message string.
+    """
+    if isinstance(exc.detail, dict):
+        return exc.detail.get("error", {}).get("message", str(exc.detail))
+    return str(exc.detail)
+
+
+def build_http_error_detail(exc, operation_message: str) -> dict:
+    """Build a structured error detail dict for re-raising an HTTPException.
+
+    Combines a human-readable *operation_message* (describing what was being
+    attempted and why it failed) with the error code extracted from the
+    original exception so the HTTP status code, error code, and message are
+    all consistent and displayable to the end user.
+
+    Args:
+        exc: The original ``fastapi.HTTPException`` being handled.
+        operation_message: The fully-composed user-facing message, e.g.
+            ``"Failed to create connector 'x': Connector already exists"``.
+
+    Returns:
+        A ``{"error": {"code": ..., "message": ..., "status": ...}}`` dict
+        suitable for passing directly as ``HTTPException(detail=...)``.
+    """
+    code = (
+        exc.detail.get("error", {}).get("code", "INTERNAL_SERVER_ERROR")
+        if isinstance(exc.detail, dict)
+        else "INTERNAL_SERVER_ERROR"
+    )
+    return {"error": {"code": code, "message": operation_message, "status": exc.status_code}}
+
+
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Custom exception handler to format HTTPException responses consistently.

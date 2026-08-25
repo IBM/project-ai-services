@@ -223,7 +223,7 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 	}
 
 	// Compute domain configuration (cert domain extraction + domain suffix resolution)
-	domainSuffix, err := caddy.ComputeDomainConfig(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
 	if err != nil {
 		s.Fail("failed to calculate domain")
 

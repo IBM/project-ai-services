@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -19,6 +20,7 @@ import (
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -27,10 +29,6 @@ const (
 	// workerApp is the app name passed to the template provider.
 	// Resolves to assets/worker/<runtime>/templates/.
 	workerApp = "worker"
-
-	// workerProxyLabel is the label used to check whether the worker proxy
-	// pod is already running — more resilient than checking by name.
-	workerProxyLabel = "ai-services.io/component=worker-proxy"
 
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
@@ -47,7 +45,17 @@ type Options struct {
 	BaseDir string
 	// HTTPSPort is the host port Caddy binds for HTTPS traffic, e.g. "443".
 	// Set once at first join; ignored on subsequent runs if already deployed.
-	HTTPSPort string
+	HTTPSPort int
+
+	// DomainName is an optional custom domain suffix for self-signed certificates.
+	// If empty, Caddy uses wildcard DNS format: <service>.<ip>.nip.io.
+	DomainName string
+	// SSLCertPath is the path to a user-provided SSL certificate (PEM).
+	// Must be used together with SSLKeyPath.
+	SSLCertPath string
+	// SSLKeyPath is the path to a user-provided SSL private key (PEM).
+	// Must be used together with SSLCertPath.
+	SSLKeyPath string
 }
 
 // Setup writes prerequisite config files, checks whether the worker proxy
@@ -62,7 +70,7 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
 	pods, err := rt.ListPods(map[string][]string{
-		"label": {workerProxyLabel},
+		"label": {workerconstants.WorkerProxyLabel},
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: list pods: %w", err)
@@ -116,7 +124,7 @@ func writeCaddyfile(baseDir string) error {
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
 func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
-	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, workerApp)
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
@@ -129,7 +137,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
 	}
 
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
-		"caddy.httpsPort": opts.HTTPSPort,
+		"caddy.httpsPort": strconv.Itoa(opts.HTTPSPort),
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
