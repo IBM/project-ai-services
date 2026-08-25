@@ -49,7 +49,7 @@ async def _run_digitize(
         await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format, file_checksum_dict)
         logger.info(f"Digitization pipeline for job {job_id} finished")
     except Exception as exc:
-        logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
+        logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
@@ -79,7 +79,7 @@ async def _run_ingest(
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
         logger.info(f"Ingestion pipeline for job {job_id} finished")
     except Exception as exc:
-        logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
+        logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
@@ -196,6 +196,10 @@ async def create_job(
 
         quota_ok, queued_for_op = db_manager.check_quota_atomic(op_key, quota)
         if not quota_ok:
+            logger.warning(
+                "Queue quota exceeded for %s: %d/%d slots used — returning 429",
+                operation.value, queued_for_op, quota,
+            )
             APIError.raise_error(
                 ErrorCode.RATE_LIMIT_EXCEEDED,
                 f"The {operation.value} conversion queue is full "
@@ -284,42 +288,40 @@ async def create_job(
         filenames     = novel_filenames
         file_contents = novel_contents
 
-        # 7. Stage files and dispatch async task.
+        # 6. Stage files to disk.
+        await dg_util.stage_upload_files(
+            job_id,
+            filenames,
+            str(settings.digitize.staging_dir / job_id),
+            file_contents,
+        )
+
+        # 7 & 8. Create DB rows and enqueue conversion tasks.
+        # If either step fails the staged files must be removed — the pipeline
+        # will never run to clean them up because no asyncio task is created yet.
         try:
-            await dg_util.stage_upload_files(
-                job_id,
-                filenames,
-                str(settings.digitize.staging_dir / job_id),
-                file_contents,
-            )
             doc_id_dict = dg_util.initialize_job_state(
                 job_id, operation, output_format, filenames, job_name,
                 already_exists_files=already_exists_files,
             )
-            if operation == models.OperationType.INGESTION:
-                asyncio.create_task(_run_ingest(job_id, filenames, doc_id_dict, file_checksum_dict))
-            else:
-                asyncio.create_task(_run_digitize(job_id, doc_id_dict, output_format, file_checksum_dict))
-        except Exception as exc:
-            concurrency_manager.release(op_key)
-            logger.error(
-                f"Failed to dispatch task for job {job_id}, "
-                f"semaphore released: {exc}",
-                exc_info=True,
-            )
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to dispatch job '{job_id}': {exc}")
 
-        # 8. Insert conversion_tasks rows.
-        await dg_util.enqueue_conversion_tasks(
-            job_id=job_id,
-            op_key=op_key,
-            filenames=filenames,
-            doc_id_dict=doc_id_dict,
-            staging_dir=settings.digitize.staging_dir / job_id,
-            output_format=output_format,
-            quota=quota,
-            queued_for_op=queued_for_op,
-        )
+            await dg_util.enqueue_conversion_tasks(
+                job_id=job_id,
+                op_key=op_key,
+                filenames=filenames,
+                doc_id_dict=doc_id_dict,
+                staging_dir=settings.digitize.staging_dir / job_id,
+                output_format=output_format,
+                quota=quota,
+                queued_for_op=queued_for_op,
+            )
+        except Exception:
+            logger.error(
+                f"Job {job_id}: DB initialisation or enqueue failed — "
+                f"removing {len(filenames)} staged file(s)",
+            )
+            cleanup_staging_directory(job_id, settings.digitize.staging_dir)
+            raise
 
         # 9. Launch the pipeline as a fire-and-forget asyncio task.
         #    The pipeline polls conversion_tasks and drives post-conversion work.

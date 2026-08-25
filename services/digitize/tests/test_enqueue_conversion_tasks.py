@@ -4,12 +4,12 @@ Unit tests for enqueue_conversion_tasks — utils/jobs.py.
 Covers:
   - Correct slot allocation: first N tasks → 'queued', remainder → 'pending'
   - Page count used correctly to set is_large
-  - One create_conversion_task call per file
+  - All tasks are passed to create_conversion_tasks_batch in a single call
 """
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -18,76 +18,71 @@ import pytest
 _DB_MANAGER_PATH = "digitize.db.manager.db_manager"
 
 
+def _run_enqueue(tmp_path, filenames, *, page_count=10, queued_for_op=0,
+                 quota=10, op_key="ingestion", uuids=None):
+    """Helper: run enqueue_conversion_tasks, return the list passed to batch."""
+    from digitize.utils.jobs import enqueue_conversion_tasks
+    from digitize.models import OutputFormat
+
+    doc_id_dict = {fn: f"doc-{i}" for i, fn in enumerate(filenames)}
+    for fn in filenames:
+        (tmp_path / fn).write_bytes(b"%PDF-1.4")
+
+    batch_calls = []
+
+    uuid_side = uuids if uuids else [f"task-{i}" for i in range(len(filenames))]
+    with patch(_DB_MANAGER_PATH) as mock_mgr, \
+         patch("digitize.utils.jobs.get_document_page_count", return_value=page_count), \
+         patch("digitize.utils.jobs.generate_uuid", side_effect=uuid_side):
+
+        mock_mgr.create_conversion_tasks_batch.side_effect = \
+            lambda tasks: batch_calls.extend(tasks)
+
+        asyncio.run(enqueue_conversion_tasks(
+            job_id="j1",
+            op_key=op_key,
+            filenames=filenames,
+            doc_id_dict=doc_id_dict,
+            staging_dir=tmp_path,
+            output_format=OutputFormat.JSON,
+            quota=quota,
+            queued_for_op=queued_for_op,
+        ))
+
+    return batch_calls
+
+
 @pytest.mark.unit
 class TestEnqueueConversionTasks:
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _run(self, coro):
-        return asyncio.run(coro)
-
-    def _make_doc_id_dict(self, filenames):
-        return {fn: f"doc-{i}" for i, fn in enumerate(filenames)}
 
     # ------------------------------------------------------------------
     # Basic smoke test
     # ------------------------------------------------------------------
 
     def test_single_file_queued_when_slots_available(self, tmp_path):
+        tasks = _run_enqueue(tmp_path, ["file.pdf"], op_key="digitization")
+
+        assert len(tasks) == 1
+        assert tasks[0]["status"] == "queued"
+        assert tasks[0]["operation"] == "digitization"
+        assert tasks[0]["output_format"] == "json"
+
+    def test_single_batch_call_for_multiple_files(self, tmp_path):
+        """All rows must be delivered to create_conversion_tasks_batch in one call."""
         from digitize.utils.jobs import enqueue_conversion_tasks
         from digitize.models import OutputFormat
 
-        filenames = ["file.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        (tmp_path / "file.pdf").write_bytes(b"%PDF-1.4")
-
-        created_tasks = []
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count", return_value=10), \
-             patch("digitize.utils.jobs.generate_uuid", return_value="task-001"):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="digitization",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=5,
-                queued_for_op=0,
-            ))
-
-        assert len(created_tasks) == 1
-        assert created_tasks[0]["status"] == "queued"
-        assert created_tasks[0]["operation"] == "digitization"
-        assert created_tasks[0]["output_format"] == "json"
-
-    def test_excess_files_become_pending(self, tmp_path):
-        """
-        4 files submitted, 2 free slots → first 2 queued, last 2 pending.
-        """
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
-
-        filenames = [f"f{i}.pdf" for i in range(4)]
-        doc_id_dict = self._make_doc_id_dict(filenames)
+        filenames = [f"f{i}.pdf" for i in range(5)]
+        doc_id_dict = {fn: f"doc-{i}" for i, fn in enumerate(filenames)}
         for fn in filenames:
             (tmp_path / fn).write_bytes(b"%PDF-1.4")
-
-        created_tasks = []
 
         with patch(_DB_MANAGER_PATH) as mock_mgr, \
              patch("digitize.utils.jobs.get_document_page_count", return_value=5), \
              patch("digitize.utils.jobs.generate_uuid",
-                   side_effect=[f"task-{i}" for i in range(4)]):
+                   side_effect=[f"t{i}" for i in range(5)]):
 
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
+            asyncio.run(enqueue_conversion_tasks(
                 job_id="j1",
                 op_key="ingestion",
                 filenames=filenames,
@@ -95,175 +90,72 @@ class TestEnqueueConversionTasks:
                 staging_dir=tmp_path,
                 output_format=OutputFormat.JSON,
                 quota=10,
-                queued_for_op=8,  # only 2 free slots
+                queued_for_op=0,
             ))
 
-        assert len(created_tasks) == 4
-        statuses = [t["status"] for t in created_tasks]
-        assert statuses[:2] == ["queued", "queued"]
-        assert statuses[2:] == ["pending", "pending"]
+        # batch method called exactly once; single-file method never called
+        mock_mgr.create_conversion_tasks_batch.assert_called_once()
+        mock_mgr.create_conversion_task.assert_not_called()
+        # the single call received all 5 task dicts
+        passed = mock_mgr.create_conversion_tasks_batch.call_args[0][0]
+        assert len(passed) == 5
+
+    # ------------------------------------------------------------------
+    # Slot allocation
+    # ------------------------------------------------------------------
+
+    def test_excess_files_become_pending(self, tmp_path):
+        """4 files submitted, 2 free slots → first 2 queued, last 2 pending."""
+        tasks = _run_enqueue(
+            tmp_path,
+            [f"f{i}.pdf" for i in range(4)],
+            queued_for_op=8, quota=10,  # 2 free slots
+        )
+        assert len(tasks) == 4
+        assert [t["status"] for t in tasks] == ["queued", "queued", "pending", "pending"]
 
     def test_all_tasks_pending_when_no_slots_free(self, tmp_path):
-        """
-        queued_for_op == quota → 0 free slots → all tasks inserted as pending.
-        """
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
+        """queued_for_op == quota → 0 free slots → all tasks inserted as pending."""
+        tasks = _run_enqueue(
+            tmp_path,
+            ["a.pdf", "b.pdf"],
+            queued_for_op=5, quota=5,
+        )
+        assert all(t["status"] == "pending" for t in tasks)
 
-        filenames = ["a.pdf", "b.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        for fn in filenames:
-            (tmp_path / fn).write_bytes(b"%PDF-1.4")
-
-        created_tasks = []
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count", return_value=3), \
-             patch("digitize.utils.jobs.generate_uuid",
-                   side_effect=["t1", "t2"]):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="ingestion",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=5,
-                queued_for_op=5,  # quota full
-            ))
-
-        assert all(t["status"] == "pending" for t in created_tasks)
+    # ------------------------------------------------------------------
+    # is_large classification
+    # ------------------------------------------------------------------
 
     def test_large_file_sets_is_large_true(self, tmp_path):
         """Page count >= threshold → is_large=True."""
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
         from digitize.settings import settings
-
-        filenames = ["big.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        (tmp_path / "big.pdf").write_bytes(b"%PDF-1.4")
-
-        threshold = settings.digitize.heavy_doc_page_threshold  # default 500
-        created_tasks = []
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count",
-                   return_value=threshold), \
-             patch("digitize.utils.jobs.generate_uuid", return_value="t-large"):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="digitization",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=5,
-                queued_for_op=0,
-            ))
-
-        assert created_tasks[0]["is_large"] is True
+        threshold = settings.digitize.heavy_doc_page_threshold
+        tasks = _run_enqueue(tmp_path, ["big.pdf"], page_count=threshold,
+                             op_key="digitization")
+        assert tasks[0]["is_large"] is True
 
     def test_normal_file_sets_is_large_false(self, tmp_path):
         """Page count < threshold → is_large=False."""
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
         from digitize.settings import settings
-
-        filenames = ["small.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        (tmp_path / "small.pdf").write_bytes(b"%PDF-1.4")
-
         threshold = settings.digitize.heavy_doc_page_threshold
-        created_tasks = []
+        tasks = _run_enqueue(tmp_path, ["small.pdf"], page_count=threshold - 1,
+                             op_key="digitization")
+        assert tasks[0]["is_large"] is False
 
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count",
-                   return_value=threshold - 1), \
-             patch("digitize.utils.jobs.generate_uuid", return_value="t-small"):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="digitization",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=5,
-                queued_for_op=0,
-            ))
-
-        assert created_tasks[0]["is_large"] is False
+    # ------------------------------------------------------------------
+    # Field correctness
+    # ------------------------------------------------------------------
 
     def test_each_file_gets_unique_task_id(self, tmp_path):
         """A unique task_id must be generated for each file."""
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
-
-        filenames = ["f1.pdf", "f2.pdf", "f3.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        for fn in filenames:
-            (tmp_path / fn).write_bytes(b"%PDF-1.4")
-
-        created_tasks = []
         uuids = ["t-1", "t-2", "t-3"]
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count", return_value=5), \
-             patch("digitize.utils.jobs.generate_uuid", side_effect=uuids):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="ingestion",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=10,
-                queued_for_op=0,
-            ))
-
-        task_ids = [t["task_id"] for t in created_tasks]
-        assert task_ids == uuids
-        assert len(set(task_ids)) == 3  # all unique
+        tasks = _run_enqueue(tmp_path, ["f1.pdf", "f2.pdf", "f3.pdf"], uuids=uuids)
+        assert [t["task_id"] for t in tasks] == uuids
+        assert len({t["task_id"] for t in tasks}) == 3
 
     def test_cached_file_path_uses_staging_dir(self, tmp_path):
-        """cached_file must be the staging path, not just the filename."""
-        from digitize.utils.jobs import enqueue_conversion_tasks
-        from digitize.models import OutputFormat
-
-        filenames = ["doc.pdf"]
-        doc_id_dict = self._make_doc_id_dict(filenames)
-        (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4")
-
-        created_tasks = []
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr, \
-             patch("digitize.utils.jobs.get_document_page_count", return_value=0), \
-             patch("digitize.utils.jobs.generate_uuid", return_value="t1"):
-
-            mock_mgr.create_conversion_task.side_effect = lambda **kw: created_tasks.append(kw)
-
-            self._run(enqueue_conversion_tasks(
-                job_id="j1",
-                op_key="digitization",
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=tmp_path,
-                output_format=OutputFormat.JSON,
-                quota=5,
-                queued_for_op=0,
-            ))
-
-        expected_path = str(tmp_path / "doc.pdf")
-        assert created_tasks[0]["cached_file"] == expected_path
+        """cached_file must be the full staging path, not just the filename."""
+        tasks = _run_enqueue(tmp_path, ["doc.pdf"], page_count=0,
+                             op_key="digitization")
+        assert tasks[0]["cached_file"] == str(tmp_path / "doc.pdf")

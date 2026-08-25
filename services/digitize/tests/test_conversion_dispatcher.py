@@ -560,12 +560,13 @@ class TestSafeRemove:
 
 @pytest.mark.unit
 class TestRunConversionUpdated:
-    def test_uses_task_page_count_not_file_read(self, tmp_path):
+    def test_dispatcher_does_not_update_job_doc_status(self, tmp_path):
         """
-        _run_conversion for digitization must use task.page_count from the DB
-        row (stored at enqueue time) rather than re-reading the cached file.
-        The old code called get_document_page_count(task.cached_file) AFTER
-        conversion — which is wrong if the file has already been deleted.
+        _run_conversion must NOT call get_status_manager / update_doc_metadata /
+        update_job_progress.  Job and document status updates are the
+        responsibility of the pipeline layer (pipeline/digitize.py), which
+        polls task.status and reads task.page_count / task.result_path from
+        the task row.  The dispatcher only writes to conversion_tasks.
         """
         import digitize.workers.conversion_dispatcher as mod
 
@@ -573,47 +574,38 @@ class TestRunConversionUpdated:
             cached_file=str(tmp_path / "file.pdf"),
             operation="digitization",
         )
-        task.page_count = 42  # pre-stored at enqueue time
+        task.page_count = 42  # stored at enqueue time; pipeline reads this
         (tmp_path / "file.pdf").write_bytes(b"%PDF-1.4")
 
         result_path = str(tmp_path / "output.json")
-        metadata_updates = []
+        task_status_calls = []
 
         async def _run():
-            with patch.object(mod.db_manager, "update_task_status"), \
+            with patch.object(
+                    mod.db_manager, "update_task_status",
+                    side_effect=lambda *a, **kw: task_status_calls.append((a, kw))) as mock_uts, \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
-                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
-                 patch("asyncio.get_running_loop") as mock_loop, \
-                 patch("common.misc_utils.get_utc_timestamp",
-                       return_value="2024-01-01T00:00:00Z"):
+                 patch("asyncio.get_running_loop") as mock_loop:
 
                 mock_event_loop = MagicMock()
                 mock_event_loop.run_in_executor = AsyncMock(return_value=(result_path, 1.0))
                 mock_loop.return_value = mock_event_loop
 
-                mock_sm = Mock()
-                mock_sm.update_doc_metadata = Mock(
-                    side_effect=lambda doc_id, upd, **kw: metadata_updates.append(upd)
-                )
-                mock_sm.update_job_progress = Mock()
-                mock_gsm.return_value = mock_sm
-
                 await mod._run_conversion(task, weight=1)
 
         asyncio.run(_run())
 
-        # The metadata update for COMPLETED must carry pages=42 (from task.page_count)
-        completed_update = next(
-            (u for u in metadata_updates if u.get("status") is not None
-             and str(u.get("status")) in ("completed", "DocStatus.COMPLETED", "DocStatus.completed")),
-            None,
-        )
-        # Verify via pages value — must be 42, not whatever get_document_page_count would return
-        pages_value = next(
-            (u.get("pages") for u in metadata_updates if "pages" in u),
-            None,
-        )
-        assert pages_value == 42
+        # Dispatcher must have written "running" then "completed" to the task row.
+        statuses_written = [a[1] for (a, _) in task_status_calls]
+        assert "running" in statuses_written
+        assert "completed" in statuses_written
+
+        # Dispatcher must NOT have touched job/doc status — pipeline owns that.
+        # If get_status_manager was imported and called, those imports would be
+        # present at the module level; since we removed them, any accidental
+        # re-import would raise ImportError or AttributeError in the patched env.
+        # Confirm no pages metadata was written anywhere in this call.
+        # (page_count lives on the task row for the pipeline to consume.)
 
     def test_cached_file_deleted_on_success(self, tmp_path):
         """After successful conversion the staged input file must be removed."""

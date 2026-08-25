@@ -1515,7 +1515,7 @@ class DatabaseManager:
         status: str = "queued",
     ) -> Optional[ConversionTask]:
         """
-        Insert a new conversion_tasks row.
+        Insert a single conversion_tasks row.
 
         Args:
             task_id:       Unique task identifier.
@@ -1560,6 +1560,68 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def create_conversion_tasks_batch(tasks: list[dict]) -> None:
+        """
+        Insert multiple conversion_tasks rows in a single transaction.
+
+        All rows are inserted atomically — if any row fails the entire
+        batch is rolled back and no tasks are created.  Use this instead
+        of repeated ``create_conversion_task`` calls when enqueueing a
+        multi-file job to reduce DB round-trips to one.
+
+        Args:
+            tasks: Sequence of dicts, each with the same keys accepted by
+                   ``create_conversion_task`` (task_id, job_id, doc_id,
+                   operation, cached_file, output_format, page_count,
+                   is_large, status).
+
+        Raises:
+            SQLAlchemyError: propagated on failure so the caller can treat
+                the entire enqueue as failed (no partial inserts).
+        """
+        if not tasks:
+            return
+        now = datetime.now(timezone.utc)
+        with get_db_session() as session:
+            session.add_all([
+                ConversionTask(
+                    task_id=t["task_id"],
+                    job_id=t["job_id"],
+                    doc_id=t["doc_id"],
+                    operation=t["operation"],
+                    cached_file=t["cached_file"],
+                    output_format=t["output_format"],
+                    page_count=t["page_count"],
+                    is_large=t["is_large"],
+                    status=t["status"],
+                    queued_at=now,
+                )
+                for t in tasks
+            ])
+            session.flush()
+            logger.debug(
+                f"Batch-inserted {len(tasks)} conversion task(s) "
+                f"(job_id={tasks[0]['job_id']!r})"
+            )
+
+    @staticmethod
+    def _load_and_expunge_task(task: ConversionTask, session) -> None:
+        """
+        Eagerly load all columns of ``task`` then detach it from ``session``.
+
+        SQLAlchemy lazy-loads attributes after a session closes, which raises
+        ``DetachedInstanceError``.  Accessing every column as a tuple forces
+        the ORM to populate them while the session is still open; ``expunge``
+        then removes the object from the identity map so callers can use it
+        freely after the ``with get_db_session()`` block exits.
+        """
+        _ = (task.task_id, task.job_id, task.doc_id, task.operation,
+             task.cached_file, task.output_format, task.page_count,
+             task.is_large, task.status, task.result_path, task.error,
+             task.queued_at, task.started_at, task.completed_at)
+        session.expunge(task)
+
+    @staticmethod
     def get_conversion_task(task_id: str) -> Optional[ConversionTask]:
         """Return the ConversionTask with the given task_id, or None."""
         try:
@@ -1567,11 +1629,7 @@ class DatabaseManager:
                 stmt = select(ConversionTask).where(ConversionTask.task_id == task_id)
                 task = session.scalar(stmt)
                 if task:
-                    _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-                         task.cached_file, task.output_format, task.page_count,
-                         task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at)
-                    session.expunge(task)
+                    DatabaseManager._load_and_expunge_task(task, session)
                 return task
         except SQLAlchemyError as e:
             logger.error(f"DB error retrieving task {task_id}: {e}", exc_info=True)
@@ -1594,11 +1652,7 @@ class DatabaseManager:
                 )
                 task = session.scalar(stmt)
                 if task:
-                    _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-                         task.cached_file, task.output_format, task.page_count,
-                         task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at)
-                    session.expunge(task)
+                    DatabaseManager._load_and_expunge_task(task, session)
                 return task
         except SQLAlchemyError as e:
             logger.error(f"DB error retrieving task for job {job_id}: {e}", exc_info=True)
@@ -1616,11 +1670,7 @@ class DatabaseManager:
                 )
                 tasks = list(session.scalars(stmt).all())
                 for t in tasks:
-                    _ = (t.task_id, t.job_id, t.doc_id, t.operation,
-                         t.cached_file, t.output_format, t.page_count,
-                         t.is_large, t.status, t.result_path, t.error,
-                         t.queued_at, t.started_at, t.completed_at)
-                    session.expunge(t)
+                    DatabaseManager._load_and_expunge_task(t, session)
                 return tasks
         except SQLAlchemyError as e:
             logger.error(f"DB error retrieving tasks for job {job_id}: {e}", exc_info=True)
@@ -1638,11 +1688,7 @@ class DatabaseManager:
                 )
                 tasks = list(session.scalars(stmt).all())
                 for t in tasks:
-                    _ = (t.task_id, t.job_id, t.doc_id, t.operation,
-                         t.cached_file, t.output_format, t.page_count,
-                         t.is_large, t.status, t.result_path, t.error,
-                         t.queued_at, t.started_at, t.completed_at)
-                    session.expunge(t)
+                    DatabaseManager._load_and_expunge_task(t, session)
                 return tasks
         except SQLAlchemyError as e:
             logger.error(f"DB error retrieving tasks (status={status}): {e}", exc_info=True)
@@ -1807,11 +1853,7 @@ class DatabaseManager:
                 )
                 task = session.scalar(stmt)
                 if task:
-                    _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-                         task.cached_file, task.output_format, task.page_count,
-                         task.is_large, task.status, task.result_path, task.error,
-                         task.queued_at, task.started_at, task.completed_at)
-                    session.expunge(task)
+                    DatabaseManager._load_and_expunge_task(task, session)
                 return task
         except SQLAlchemyError as e:
             logger.error(f"DB error peeking head for {operation}: {e}", exc_info=True)
@@ -1859,11 +1901,7 @@ class DatabaseManager:
                     return None
                 # row[0] is the ORM object returned by RETURNING *
                 task = row[0]
-                _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-                     task.cached_file, task.output_format, task.page_count,
-                     task.is_large, task.status, task.result_path, task.error,
-                     task.queued_at, task.started_at, task.completed_at)
-                session.expunge(task)
+                DatabaseManager._load_and_expunge_task(task, session)
                 return task
         except SQLAlchemyError as e:
             logger.error(f"DB error claiming head for {operation}: {e}", exc_info=True)

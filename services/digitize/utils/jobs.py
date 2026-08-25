@@ -191,7 +191,16 @@ async def enqueue_conversion_tasks(
     queued_for_op: int,
 ) -> None:
     """
-    Insert conversion_tasks rows for every file in the job.
+    Insert conversion_tasks rows for every file in the job in a single
+    atomic DB transaction.
+
+    Page counts are still fetched sequentially (each is a file read that
+    must complete before ``is_large`` can be determined), but all INSERT
+    rows are batched into one ``session.add_all()`` call so the number of
+    DB round-trips is reduced from N (one per file) to 1.
+
+    The batch insert is atomic: if any row fails the entire set is rolled
+    back, leaving no partial state for the caller to reason about.
 
     Slots up to the free quota are inserted as ``queued``; the rest as
     ``pending`` (the dispatcher will promote them as capacity frees up).
@@ -209,6 +218,7 @@ async def enqueue_conversion_tasks(
     from digitize.db.manager import db_manager
 
     slots_free = max(0, quota - queued_for_op)
+    tasks = []
 
     for idx, filename in enumerate(filenames):
         task_id = generate_uuid()
@@ -217,21 +227,23 @@ async def enqueue_conversion_tasks(
         page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
         is_large = page_count >= settings.digitize.heavy_doc_page_threshold
         task_status = "queued" if idx < slots_free else "pending"
-        db_manager.create_conversion_task(
-            task_id=task_id,
-            job_id=job_id,
-            doc_id=doc_id,
-            operation=op_key,
-            cached_file=str(file_path),
-            output_format=output_format.value,
-            page_count=page_count,
-            is_large=is_large,
-            status=task_status,
-        )
+        tasks.append({
+            "task_id":       task_id,
+            "job_id":        job_id,
+            "doc_id":        doc_id,
+            "operation":     op_key,
+            "cached_file":   str(file_path),
+            "output_format": output_format.value,
+            "page_count":    page_count,
+            "is_large":      is_large,
+            "status":        task_status,
+        })
         logger.debug(
-            f"Enqueued task {task_id} for {filename} "
+            f"Prepared task {task_id} for {filename} "
             f"(op={op_key}, status={task_status}, large={is_large})"
         )
+
+    db_manager.create_conversion_tasks_batch(tasks)
 
 
 async def stage_upload_files(

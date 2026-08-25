@@ -142,7 +142,7 @@ def load_pdf_pages(pdf_path):
                 pdf_pages.append(page.extract_words(extra_attrs=["size", "fontname"]))
     except (PDFSyntaxError, FileNotFoundError, OSError) as e:
         logger.warning(f"Failed to load PDF pages from {pdf_path}: {e}", exc_info=True)
-
+        return []
     return pdf_pages
 
 def find_text_font_size(

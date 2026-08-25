@@ -71,6 +71,18 @@ class DigitizeConfig(BaseSettings):
         description="Dispatcher poll interval (seconds)",
     )
 
+    # Maximum wall-clock time (seconds) the digitize pipeline will wait for the
+    # dispatcher to start and then complete a single conversion task.  If the
+    # dispatcher stalls (e.g. worker crash, semaphore leak) the job is failed
+    # rather than hanging the pipeline thread indefinitely.
+    # Default: 3600 s (1 h) — accommodates large, multi-hundred-page PDFs while
+    # still guaranteeing eventual termination.
+    conversion_timeout_s: float = Field(
+        default=3600.0,
+        gt=0.0,
+        description="Max seconds to wait for a single conversion task to complete",
+    )
+
     # Chunking parameters
     chunk_max_tokens: int = Field(
         default=512,

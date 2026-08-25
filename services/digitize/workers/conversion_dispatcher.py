@@ -31,7 +31,6 @@ drain the last free slot and push the large task's wait indefinitely.
 """
 
 import asyncio
-import shutil
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -48,12 +47,10 @@ logger = get_logger("conversion_dispatcher")
 # Round-robin state — alternates each tick when a task was successfully claimed.
 _rr_turn: str = "ingestion"
 
-# One shared process pool for all conversions.
-# max_workers == semaphore capacity so a worker process is always immediately
-# available when the semaphore grants a slot — no internal queuing in the pool.
-_process_pool = ProcessPoolExecutor(
-    max_workers=conversion_semaphore.capacity  # default 4
-)
+# Process pool — created lazily inside dispatch_loop() so worker processes are
+# not spawned on module import (which would affect test collection, CLI tools,
+# and any code that transitively imports this module).
+_process_pool: ProcessPoolExecutor | None = None
 
 
 def _other(op: str) -> str:
@@ -93,10 +90,14 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
     Execute a single conversion task inside the shared process pool.
     Releases the semaphore unconditionally in the finally block.
     Deletes the staged input file on completion or failure (best-effort).
-    """
-    from digitize.utils.db import get_status_manager
-    from digitize.models import DocStatus, JobStatus
 
+    Responsibility boundary
+    -----------------------
+    This function owns only the conversion_tasks row — it writes task status
+    (queued → running → completed / failed) and result_path / error.
+    All job and document status updates (JobStatus, DocStatus) are the
+    responsibility of the pipeline layer that polls task.status.
+    """
     try:
         cached_path = Path(task.cached_file)
         if not cached_path.exists():
@@ -107,12 +108,8 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
             logger.warning(f"Task {task.task_id}: cached file missing — marked failed")
             return
 
-        # Mark task and associated job/doc as running / in_progress
+        # Mark task as running — pipeline layer picks this up via poll.
         db_manager.update_task_status(task.task_id, "running")
-        if task.job_id and task.doc_id:
-            status_mgr = get_status_manager(task.job_id)
-            status_mgr.update_doc_metadata(task.doc_id, {"status": DocStatus.IN_PROGRESS})
-            status_mgr.update_job_progress(task.doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
         # Convert in a child process — CPU-bound, no GIL release
         out_dir = settings.digitize.digitized_docs_dir
@@ -129,37 +126,10 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         db_manager.update_task_status(task.task_id, "completed", result_path=result_path)
         logger.info(f"Task {task.task_id} completed → {result_path}")
 
-        # For digitization: update job/doc to completed.
-        # page_count is read from the task row (stored at enqueue time) so we
-        # do not need to re-open the file after it may already be deleted.
-        if task.operation == "digitization" and task.job_id and task.doc_id:
-            from common.misc_utils import get_utc_timestamp
-            status_mgr = get_status_manager(task.job_id)
-            status_mgr.update_doc_metadata(task.doc_id, {
-                "status": DocStatus.COMPLETED,
-                "pages": task.page_count or 0,
-                "completed_at": get_utc_timestamp(),
-            })
-            status_mgr.update_job_progress(task.doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
-
-        # For ingestion: orchestrator polls task.status — no extra update needed here.
-
     except Exception as exc:
         logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
         db_manager.update_task_status(task.task_id, "failed", error=str(exc))
 
-        if task.job_id and task.doc_id:
-            from digitize.utils.db import get_status_manager
-            from digitize.models import DocStatus, JobStatus
-            status_mgr = get_status_manager(task.job_id)
-            status_mgr.update_doc_metadata(
-                task.doc_id, {"status": DocStatus.FAILED},
-                error=f"Conversion failed: {exc}",
-            )
-            status_mgr.update_job_progress(
-                task.doc_id, DocStatus.FAILED, JobStatus.FAILED,
-                error=f"Conversion failed: {exc}",
-            )
     finally:
         # Delete the staged input file — result_path is kept until user exports.
         _safe_remove(task.cached_file)
@@ -171,69 +141,86 @@ async def dispatch_loop() -> None:
     Long-running coroutine that polls the DB and dispatches conversion tasks.
 
     Started once in app.py's lifespan and cancelled on shutdown.
+    The process pool is created here (not at module import) so worker
+    processes are only spawned when the dispatcher actually starts.
     """
-    global _rr_turn
-    logger.info("Conversion dispatcher loop started")
+    global _rr_turn, _process_pool
 
-    while True:
-        try:
-            available = conversion_semaphore.available
-            if available > 0:
-                first, second = _rr_turn, _other(_rr_turn)
+    # Initialise the pool on first entry.  max_workers == semaphore capacity
+    # so a worker process is always immediately available when the semaphore
+    # grants a slot — no internal queuing in the pool.
+    _process_pool = ProcessPoolExecutor(
+        max_workers=conversion_semaphore.capacity  # default 4
+    )
+    logger.info(
+        f"Conversion dispatcher started "
+        f"(pool workers={conversion_semaphore.capacity})"
+    )
 
-                # Peek at both heads up-front so each queue's budget can account
-                # for the other queue's pending weight requirement.
-                first_head  = db_manager.peek_head(first)
-                second_head = db_manager.peek_head(second)
-                first_needed  = (2 if first_head.is_large  else 1) if first_head  else 0
-                second_needed = (2 if second_head.is_large else 1) if second_head else 0
+    try:
+        while True:
+            try:
+                available = conversion_semaphore.available
+                if available > 0:
+                    first, second = _rr_turn, _other(_rr_turn)
 
-                # Budget for first = capacity minus whatever the second queue's
-                # blocked head is waiting to accumulate.  This prevents first from
-                # consuming a slot that would strand a large task in second.
-                budget_for_first = max(0, available - second_needed)
-                first_task = _try_claim_if_fits(first, budget_for_first)
-                if first_task:
-                    weight = 2 if first_task.is_large else 1
-                    await conversion_semaphore.acquire(weight)
-                    asyncio.create_task(_run_conversion(first_task, weight))
-                    queued_counts = db_manager.get_queued_counts()
-                    logger.debug(
-                        f"Dispatched {first} task {first_task.task_id} "
-                        f"(file={Path(first_task.cached_file).name}, weight={weight}, "
-                        f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
-                        f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
-                    )
+                    # Peek at both heads up-front so each queue's budget can account
+                    # for the other queue's pending weight requirement.
+                    first_head  = db_manager.peek_head(first)
+                    second_head = db_manager.peek_head(second)
+                    first_needed  = (2 if first_head.is_large  else 1) if first_head  else 0
+                    second_needed = (2 if second_head.is_large else 1) if second_head else 0
 
-                # Budget for second = remaining capacity after reserving first_needed.
-                # This prevents second from consuming units that first is waiting to accumulate.
-                budget_for_second = max(0, available - first_needed)
-                second_task = _try_claim_if_fits(second, budget_for_second)
-                if second_task:
-                    weight = 2 if second_task.is_large else 1
-                    await conversion_semaphore.acquire(weight)
-                    asyncio.create_task(_run_conversion(second_task, weight))
-                    queued_counts = db_manager.get_queued_counts()
-                    logger.debug(
-                        f"Dispatched {second} task {second_task.task_id} "
-                        f"(file={Path(second_task.cached_file).name}, weight={weight}, "
-                        f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
-                        f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
-                    )
+                    # Budget for first = capacity minus whatever the second queue's
+                    # blocked head is waiting to accumulate.  This prevents first from
+                    # consuming a slot that would strand a large task in second.
+                    budget_for_first = max(0, available - second_needed)
+                    first_task = _try_claim_if_fits(first, budget_for_first)
+                    if first_task:
+                        weight = 2 if first_task.is_large else 1
+                        await conversion_semaphore.acquire(weight)
+                        asyncio.create_task(_run_conversion(first_task, weight))
+                        queued_counts = db_manager.get_queued_counts()
+                        logger.debug(
+                            f"Dispatched {first} task {first_task.task_id} "
+                            f"(file={Path(first_task.cached_file).name}, weight={weight}, "
+                            f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
+                            f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
+                        )
 
-                # Advance turn only when first was successfully claimed.
-                if first_task:
-                    _rr_turn = second
+                    # Budget for second = remaining capacity after reserving first_needed.
+                    # This prevents second from consuming units that first is waiting to accumulate.
+                    budget_for_second = max(0, available - first_needed)
+                    second_task = _try_claim_if_fits(second, budget_for_second)
+                    if second_task:
+                        weight = 2 if second_task.is_large else 1
+                        await conversion_semaphore.acquire(weight)
+                        asyncio.create_task(_run_conversion(second_task, weight))
+                        queued_counts = db_manager.get_queued_counts()
+                        logger.debug(
+                            f"Dispatched {second} task {second_task.task_id} "
+                            f"(file={Path(second_task.cached_file).name}, weight={weight}, "
+                            f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
+                            f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
+                        )
 
-            # After each tick, promote pending → queued to backfill quota headroom.
-            db_manager.promote_pending("ingestion", settings.digitize.ingestion_queue_quota)
-            db_manager.promote_pending("digitization", settings.digitize.digitization_queue_quota)
+                    # Advance turn only when first was successfully claimed.
+                    if first_task:
+                        _rr_turn = second
 
-        except asyncio.CancelledError:
-            logger.info("Conversion dispatcher loop cancelled — shutting down")
-            raise
-        except Exception as exc:
-            logger.error(f"Dispatcher loop error: {exc}", exc_info=True)
-            # Don't crash the loop on transient errors; sleep and retry.
+                # After each tick, promote pending → queued to backfill quota headroom.
+                db_manager.promote_pending("ingestion", settings.digitize.ingestion_queue_quota)
+                db_manager.promote_pending("digitization", settings.digitize.digitization_queue_quota)
 
-        await asyncio.sleep(settings.digitize.conversion_poll_interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(f"Dispatcher loop error: {exc}", exc_info=True)
+                # Don't crash the loop on transient errors; sleep and retry.
+
+            await asyncio.sleep(settings.digitize.conversion_poll_interval)
+
+    except asyncio.CancelledError:
+        logger.info("Conversion dispatcher loop cancelled — shutting down")
+        _process_pool.shutdown(wait=False)
+        raise
