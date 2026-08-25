@@ -47,7 +47,10 @@ information. All sensitive values are automatically redacted.`,
   ai-services must-gather --runtime podman --application rag
 
   # Write output to a custom directory
-  ai-services must-gather --runtime podman --output-dir /tmp/debug`,
+  ai-services must-gather --runtime podman --output-dir /tmp/debug
+
+  # Collect from an application namespace (openshift)
+  ai-services must-gather --runtime openshift --namespace ai-services-2b4410e6`,
 		Args:              cobra.NoArgs,
 		PersistentPreRunE: mustGatherPreRun,
 		RunE:              mustGatherRun,
@@ -63,6 +66,9 @@ information. All sensitive values are automatically redacted.`,
 	cmd.PersistentFlags().StringVarP(&applicationName, "application", "a", "",
 		"Limit collection to this application name (default: all applications)")
 
+	cmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "",
+		"Application namespace to collect from, e.g. ai-services-2b4410e6 (required when --runtime openshift)")
+
 	return cmd
 }
 
@@ -75,6 +81,10 @@ func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
 			"invalid runtime type: %s (must be 'podman' or 'openshift'). "+
 				"Please specify runtime using --runtime flag", runtimeType,
 		)
+	}
+
+	if rt == types.RuntimeTypeOpenShift && namespace == "" {
+		return fmt.Errorf("--namespace is required when using --runtime openshift.\n Provide the application namespace (e.g. ai-services-2b4410e6)")
 	}
 
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
@@ -112,6 +122,8 @@ func newGatherer(rt types.RuntimeType) (gatherer, error) {
 	switch rt {
 	case types.RuntimeTypePodman:
 		return newPodmanGatherer(), nil
+	case types.RuntimeTypeOpenShift:
+		return newOpenshiftGatherer(), nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime for must-gather: %s", rt)
 	}

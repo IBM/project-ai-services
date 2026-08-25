@@ -21,6 +21,7 @@ import (
 
 // Compile-time assertions that both gatherers satisfy the podCollector interface.
 var _ podCollector = (*podmanGatherer)(nil)
+var _ podCollector = (*openshiftGatherer)(nil)
 
 const (
 	dirPerm     = 0755
