@@ -1,4 +1,4 @@
-image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
 model: ""
 apiKey: ""
 maxModelLen: 32768

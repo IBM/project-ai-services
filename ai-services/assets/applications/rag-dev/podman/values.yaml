@@ -56,7 +56,7 @@ instruct:
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
   model:
     # @hidden
     name: ibm-granite/granite-3.3-8b-instruct
