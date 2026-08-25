@@ -30,7 +30,7 @@ spec:
             - "-c"
             - |
               echo "Waiting for embedding endpoint to become ready..."
-              until wget -q -O /dev/null http://embedding-predictor:8080/v1/models; do
+              until curl -sf http://embedding-predictor:8080/v1/models > /dev/null; do
                 echo "Embedding not ready, retrying in 10s..."
                 sleep 10
               done
