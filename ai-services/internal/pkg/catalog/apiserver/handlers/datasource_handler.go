@@ -88,7 +88,7 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 //	@Tags			Datasources
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Datasource connector ID (UUID)"
+//	@Param			id	path	string	true	"Datasource connector ID (UUID)"
 //	@Success		204	"Datasource deleted"
 //	@Failure		400	{object}	ErrorResponse	"Invalid connector ID format"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized"
