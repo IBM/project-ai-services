@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
-from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from digitize.connectors.models import (
     ConnectorCreateRequest,
     ConnectorDetailResponse,
@@ -48,18 +48,6 @@ router = APIRouter()
 logger = get_logger("connectors_router")
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_KEY_PATH = None  # resolved lazily via _get_key_path()
-
-
-def _get_key_path() -> str:
-    """Return the encryption key path from settings."""
-    return settings.digitize.connector.encryption_key_path
-
-
-# ---------------------------------------------------------------------------
 # POST /v1/connectors
 # ---------------------------------------------------------------------------
 
@@ -80,10 +68,14 @@ def _get_key_path() -> str:
     response_description="Connector created; worker start scheduled",
 )
 async def create_connector(body: ConnectorCreateRequest):
-    connector_id = body.connector_id or str(uuid.uuid4())
+    """Create a new connector and schedule its worker.
+
+    Validates connector settings, encrypts credentials, persists the new connector
+    configuration in the database, and schedules the background worker.
+    """
+    connector_id = body.id or str(uuid.uuid4())
     try:
-        key_path = _get_key_path()
-        encrypted_details = encrypt_secrets(body.type, body.connection_details, key_path)
+        encrypted_details = encrypt_secrets(body.type, body.connection_details)
 
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
@@ -96,13 +88,17 @@ async def create_connector(body: ConnectorCreateRequest):
             )
         except Exception as sched_exc:
             logger.error(
-                f"Scheduler registration failed for {connector_id!r}: {sched_exc}"
+                f"Scheduler registration failed for {connector_id!r}: {sched_exc}",
+                exc_info=True,
             )
-            raise
+            raise RuntimeError(
+                f"Failed to register scheduler job for connector {connector_id!r} "
+                f"during connector creation: {sched_exc}"
+            ) from sched_exc
 
         db_ops.insert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connector_type=body.type,
             connection_details=encrypted_details,
             allowed_extensions=body.allowed_extensions,
@@ -110,31 +106,40 @@ async def create_connector(body: ConnectorCreateRequest):
         )
 
         logger.info(
-            f"Connector {connector_id!r} ({body.connector_name!r}) attached "
+            f"Connector {connector_id!r} ({body.name!r}) attached "
             f"(type={body.type}, interval={sync_interval}s)"
         )
 
         return Response(
-            content=f'{{"connector_id": "{connector_id}"}}',
+            content=f'{{"id": "{connector_id}"}}',
             status_code=201,
             media_type="application/json",
         )
 
     except IntegrityError:
         # id or name already exists
+        logger.error(f"Connector {connector_id!r} or name {body.name!r} already exists")
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector {connector_id!r} or name {body.connector_name!r} already exists",
+            f"Connector {connector_id!r} or name {body.name!r} already exists",
         )
     except RuntimeError as exc:
         # encryption key not found
         logger.error(f"Encryption key error: {exc}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException:
-        raise
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to create connector {connector_id!r} (name={body.name!r}): encryption error — {exc}",
+        )
+    except HTTPException as exc:
+        message = f"Failed to create connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error creating connector: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error creating connector {connector_id!r} (name={body.name!r}): {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -159,9 +164,14 @@ async def create_connector(body: ConnectorCreateRequest):
     response_description="Connector updated; running worker picks up changes on next tick",
 )
 async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
+    """Update an existing connector's configurations.
+
+    Encrypts updated secrets if provided and applies modifications. Running workers
+    will pick up the updated settings on their next execution interval.
+    """
     try:
         # Nothing to update — treat as success
-        if body.connector_name is None and body.allowed_extensions is None and body.connection_details is None:
+        if body.name is None and body.allowed_extensions is None and body.connection_details is None:
             return Response(status_code=200)
 
         existing = db_ops.get_active_connector(connector_id)
@@ -176,8 +186,6 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
             )
 
-        key_path = _get_key_path()
-
         # If connection_details is being updated, we need to merge with existing
         # encrypted details so untouched keys stay encrypted and intact.
         merged_details: Optional[dict] = None
@@ -186,37 +194,51 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 existing.type,
                 existing.connection_details,
                 body.connection_details,
-                key_path,
             )
 
         db_ops.upsert_connector(
             connector_id=connector_id,
-            name=body.connector_name,
+            name=body.name,
             connection_details=merged_details,
             allowed_extensions=body.allowed_extensions,
         )
 
+        if merged_details is not None:
+            # Connection details changed — trigger a sync immediately so run_tick
+            # validates the new credentials and updates the connector/sync-log status.
+            asyncio.create_task(dispatch_sync(connector_id))
+
         logger.info(f"Connector {connector_id!r} updated")
         return Response(status_code=200)
 
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        logger.warning(f"Connector {connector_id!r} not found: {exc}")
         APIError.raise_error(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Connector {connector_id!r} not found",
         )
     except IntegrityError:
+        logger.error(f"Connector name {body.name!r} is already in use")
         APIError.raise_error(
             ErrorCode.RESOURCE_LOCKED,
-            f"Connector name {body.connector_name!r} is already in use",
+            f"Connector name {body.name!r} is already in use",
         )
     except RuntimeError as exc:
         logger.error(f"Encryption key error: {exc}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
-    except HTTPException:
-        raise
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to update connector {connector_id!r}: encryption error — {exc}",
+        )
+    except HTTPException as exc:
+        message = f"Failed to update connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error updating connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error updating connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +261,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     response_description="No content — teardown proceeds in the background",
 )
 async def delete_connector(connector_id: str):
-    """
-    Fast, non-blocking DELETE:
+    """Fast, non-blocking DELETE.
 
     Case A — sync_status == 'syncing':
         Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
@@ -267,11 +288,16 @@ async def delete_connector(connector_id: str):
 
         return Response(status_code=204)
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to delete connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error deleting connector {connector_id!r}: {exc}",
+        )
 
 
 async def _run_teardown(connector_id: str) -> None:
@@ -289,41 +315,40 @@ async def _run_teardown(connector_id: str) -> None:
       5. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
-    deletion_failed = False
+    deletion_errors: list[str] = []
     try:
         # Step 1: Remove the scheduled job so no new ticks fire after this point.
         try:
             import digitize.connectors.scheduler as _sched
             await _sched.remove_connector_job(connector_id)
         except Exception as sched_exc:
-            deletion_failed = True
+            deletion_errors.append(f"Failed to remove scheduler job: {sched_exc}")
             logger.warning(
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
 
         # Steps 2+3: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-        for checksum in owned_checksums:
-            try:
-                remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
-                if remaining == 0 and doc_id:
-                    if not _best_effort_delete_document(doc_id):
-                        deletion_failed = True
-            except Exception as exc:
-                deletion_failed = True
-                logger.error(
-                    f"Error removing checksum {checksum!r} for connector "
-                    f"{connector_id!r}: {exc}",
-                    exc_info=True,
-                )
+        checksum_removal_failures, doc_deletion_failures = _remove_checksums(
+            connector_id, owned_checksums
+        )
+        if checksum_removal_failures:
+            deletion_errors.append(
+                f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
+            )
+        if doc_deletion_failures:
+            deletion_errors.append(
+                f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+            )
 
         # Step 4: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
-            deletion_failed = True
+            deletion_errors.append("staging directory sweep failed")
 
-        if deletion_failed:
-            db_ops.set_connector_error(connector_id, "Teardown failed — skipping connector row deletion")
-            logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures")
+        if deletion_errors:
+            error_msg = f"Failed to delete connector, error: {'; '.join(deletion_errors)}"
+            db_ops.set_connector_error(connector_id, error_msg)
+            logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
         # Step 5: delete the connector row (cascades to connector_sync_logs)
@@ -340,7 +365,43 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
-        db_ops.set_connector_error(connector_id, "Documents deletion failed")
+        db_ops.set_connector_error(connector_id, f"Unexpected error during teardown: {exc}")
+
+
+def _remove_checksums(
+    connector_id: str,
+    checksums: list[str] | set[str],
+) -> tuple[list[str], list[str]]:
+    """
+    Remove checksum ownership rows for *connector_id* and delete any document
+    that loses its last owner.
+
+    Iterates all *checksums*, accumulating failures rather than stopping on the
+    first error so that as many checksums as possible are cleaned up in one pass.
+
+    Returns
+    -------
+    checksum_removal_failures:
+        Checksums for which ``remove_connector_checksum_entry`` raised.
+    doc_deletion_failures:
+        Checksums whose associated document could not be deleted (best-effort).
+    """
+    checksum_removal_failures: list[str] = []
+    doc_deletion_failures: list[str] = []
+    for checksum in checksums:
+        try:
+            remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
+            if remaining == 0 and doc_id:
+                if not _best_effort_delete_document(doc_id):
+                    doc_deletion_failures.append(checksum)
+        except Exception as exc:
+            checksum_removal_failures.append(checksum)
+            logger.error(
+                f"Error removing checksum {checksum!r} for connector "
+                f"{connector_id!r}: {exc}",
+                exc_info=True,
+            )
+    return checksum_removal_failures, doc_deletion_failures
 
 
 def _best_effort_delete_document(doc_id: str) -> bool:
@@ -419,27 +480,35 @@ def _sweep_staging_dir(
     response_description="List of connectors",
 )
 async def list_connectors():
+    """Retrieve a list of all active connectors with their current sync state.
+
+    Strips out any sensitive/secret connection details from the response.
+    """
     try:
         connectors = db_ops.list_connectors()
         return [
             ConnectorListItem(
-                connector_id=c.id,
-                connector_name=c.name,
+                id=c.id,
+                name=c.name,
                 type=c.type,
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
                 sync_status=c.sync_status,
-                last_sync_error=c.last_sync_error,
                 error=c.error,
                 total_files=c.total_files,
             )
             for c in connectors
         ]
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to list connectors: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error listing connectors: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error listing connectors: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +530,10 @@ async def list_connectors():
     response_description="Connector detail",
 )
 async def get_connector(connector_id: str):
+    """Retrieve detailed information for a single connector by its ID.
+
+    Strips out any sensitive/secret connection details from the response.
+    """
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -470,24 +543,28 @@ async def get_connector(connector_id: str):
             )
 
         return ConnectorDetailResponse(
-            connector_id=connector.id,
-            connector_name=connector.name,
+            id=connector.id,
+            name=connector.name,
             type=connector.type,
             allowed_extensions=list(connector.allowed_extensions or []),
             sync_interval_seconds=connector.sync_interval_seconds,
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
             sync_status=connector.sync_status,
-            last_sync_error=connector.last_sync_error,
             error=connector.error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
         )
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to get connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error fetching connector {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +672,11 @@ async def dispatch_sync(connector_id: str) -> int:
     response_description="Sync dispatched (or already in progress)",
 )
 async def trigger_sync(connector_id: str):
+    """Manually dispatch a synchronization task for a specified connector.
+
+    If a synchronization task is already in progress, returns details for the
+    currently active run.
+    """
     try:
         sync_seq = await dispatch_sync(connector_id)
         return SyncTriggerResponse(sync_seq=sync_seq)
@@ -602,11 +684,16 @@ async def trigger_sync(connector_id: str):
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
     except SyncLocked as exc:
         APIError.raise_error(ErrorCode.RESOURCE_LOCKED, str(exc))
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to trigger sync for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error triggering sync for connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -634,6 +721,10 @@ async def trigger_sync(connector_id: str):
     response_description="Stop signal sent",
 )
 async def cancel_sync(connector_id: str, sync_seq: int):
+    """Request cancellation/stopping of a currently running sync task.
+
+    Sends a cancellation signal to the connector worker.
+    """
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -664,11 +755,16 @@ async def cancel_sync(connector_id: str, sync_seq: int):
         logger.info(f"Cancel-sync signal sent for connector {connector_id!r} (seq={sync_seq})")
         return Response(status_code=204)
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to cancel sync for connector {connector_id!r} (seq={sync_seq}): {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error cancelling sync for {connector_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error cancelling sync for connector {connector_id!r} (seq={sync_seq}): {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +787,7 @@ async def get_sync_history(
     limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)"),
     offset: int = Query(0, ge=0, description="Zero-based offset"),
 ):
+    """Retrieve a paginated history of sync runs for a specific connector."""
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -717,14 +814,19 @@ async def get_sync_history(
 
         return SyncLogResponse(total=total, limit=limit, offset=offset, items=items)
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to get sync history for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(
             f"Unexpected error fetching sync log for {connector_id}: {exc}",
             exc_info=True,
         )
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching sync history for connector {connector_id!r}: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -743,6 +845,7 @@ async def get_sync_history(
     response_description="Sync log entry",
 )
 async def get_sync(connector_id: str, sync_seq: int):
+    """Retrieve details of a single sync run by its sequence number."""
     try:
         connector = db_ops.get_active_connector(connector_id)
         if connector is None:
@@ -769,13 +872,18 @@ async def get_sync(connector_id: str, sync_seq: int):
             error=log.error or "",
         )
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to get sync {sync_seq} for connector {connector_id!r}: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(
             f"Unexpected error fetching sync {sync_seq} for {connector_id}: {exc}",
             exc_info=True,
         )
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching sync {sync_seq} for connector {connector_id!r}: {exc}",
+        )
 
 # Made with Bob

@@ -438,7 +438,7 @@ func checkApplicationExists(appClient *catalogClient.ApplicationClient, appName 
 // buildCatalogPayload builds the catalog API payload for the given template.
 func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, error) {
 	// Initialize catalog provider
-	provider, err := catalog.NewCatalogProvider()
+	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
@@ -539,7 +539,7 @@ func printNextSteps(app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	catalogProvider, err := catalog.NewCatalogProvider()
+	catalogProvider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog provider: %w", err)
 	}

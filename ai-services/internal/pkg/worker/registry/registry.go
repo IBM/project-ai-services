@@ -18,6 +18,10 @@ import (
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
+// ErrWorkerAlreadyActive is returned by Register when the named worker already
+// has an active in-memory entry (i.e. a live CommandStream is open).
+var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
+
 const (
 	// commandChannelSize is the buffer size for the per-worker command channel.
 	// Each concurrent deployment to the same worker writes one command to this
@@ -35,7 +39,8 @@ type WorkerEntry struct {
 	// It is zero-value until the first successful DB upsert.
 	DBID uuid.UUID
 
-	WorkerName string
+	WorkerName  string
+	RuntimeType string
 
 	// CommandCh is written by RemoteRuntime to send commands to this worker.
 	// The gateway goroutine reads from it and writes to the gRPC stream.
@@ -94,30 +99,27 @@ func New(repo repository.WorkerRepository) *Registry {
 // and ensures an in-memory entry with a live CommandCh exists.
 // workerName must come from the validated token — callers must not trust the name
 // the worker declares in its RegisterRequest.
-// runtimeType must be one of the supported values ("podman", "openshift");
-// an unsupported or empty value is rejected with an error.
 func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
-	rt, err := runtimeTypeFromString(runtimeType)
-	if err != nil {
-		return nil, err
+	r.mu.Lock()
+	if _, exists := r.workers[workerName]; exists {
+		r.mu.Unlock()
+
+		return nil, fmt.Errorf("%w: %s", ErrWorkerAlreadyActive, workerName)
 	}
 
-	r.mu.Lock()
-	entry, exists := r.workers[workerName]
-	if !exists {
-		entry = &WorkerEntry{
-			WorkerName: workerName,
-			CommandCh:  make(chan *workerpb.Command, commandChannelSize),
-			results:    make(map[string]chan *workerpb.CommandResult),
-		}
-		r.workers[workerName] = entry
+	entry := &WorkerEntry{
+		WorkerName:  workerName,
+		RuntimeType: runtimeType,
+		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
+		results:     make(map[string]chan *workerpb.CommandResult),
 	}
+	r.workers[workerName] = entry
 	r.mu.Unlock()
 
 	if r.repo != nil {
 		w := &models.Worker{
 			Name:        workerName,
-			RuntimeType: rt,
+			RuntimeType: models.WorkerRuntimeType(runtimeType),
 			Status:      models.WorkerStatusReady,
 			Metadata:    metadataToAny(metadata),
 		}
@@ -207,7 +209,9 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 	now := time.Now()
 
 	for _, w := range workers {
-		if w.Status == models.WorkerStatusDisconnected {
+		// Pending workers have never connected — they have no heartbeat yet
+		// and must not be swept to Disconnected.
+		if w.Status == models.WorkerStatusPending || w.Status == models.WorkerStatusDisconnected {
 			continue
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > timeout {
@@ -288,6 +292,32 @@ func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.C
 	return entry.waitForResult(commandID), nil
 }
 
+// WorkerCommandChannel returns the command channel for the named worker.
+// It satisfies the runtime/remote.WorkerRegistry interface.
+func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Command, bool) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerName]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+
+	return entry.CommandCh, true
+}
+
+// WorkerRuntimeType returns the runtime type string for the named worker.
+// It satisfies the runtime/remote.WorkerRegistry interface.
+func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerName]
+	r.mu.RUnlock()
+	if !ok {
+		return "", false
+	}
+
+	return entry.RuntimeType, true
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -303,21 +333,6 @@ func metadataToAny(m map[string]string) map[string]any {
 	}
 
 	return out
-}
-
-// runtimeTypeFromString maps a runtime type string declared by the worker to the
-// corresponding DB model constant. Returns an error for unsupported or empty values.
-// Supported values: "podman", "openshift".
-func runtimeTypeFromString(s string) (models.WorkerRuntimeType, error) {
-	switch s {
-	case string(models.WorkerRuntimeTypePodman):
-		return models.WorkerRuntimeTypePodman, nil
-	case string(models.WorkerRuntimeTypeOpenShift):
-		return models.WorkerRuntimeTypeOpenShift, nil
-	default:
-		return "", fmt.Errorf("unsupported runtime_type %q: must be %q or %q",
-			s, models.WorkerRuntimeTypePodman, models.WorkerRuntimeTypeOpenShift)
-	}
 }
 
 // ValidateToken checks a bootstrap token, marks it used, and returns the worker name it was

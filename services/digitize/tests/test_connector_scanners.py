@@ -456,13 +456,13 @@ class TestBuildScanner:
 
     def test_s3_type_returns_s3_scanner(self):
         row = self._make_connector_dict("s3")
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert isinstance(scanner, S3Scanner)
 
     def test_s3_scanner_config_populated(self):
         row = self._make_connector_dict("s3")
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert scanner._cfg.bucket_name == "my-bucket"
         assert scanner._cfg.allowed_extensions == [".pdf", ".docx"]
@@ -477,14 +477,14 @@ class TestBuildScanner:
             },
             allowed_extensions=[".pdf"],
         )
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert isinstance(scanner, S3Scanner)
         assert scanner._cfg.bucket_name == "ns-bucket"
 
     def test_unknown_type_raises_value_error(self):
         row = {"type": "ftp", "connection_details": {}, "allowed_extensions": []}
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             with pytest.raises(ValueError, match="ftp"):
                 build_scanner(row)
 
@@ -1052,13 +1052,13 @@ class TestBuildScannerSSH:
     def test_ssh_type_returns_ssh_scanner(self):
         from digitize.connectors.scanners.ssh_scanner import SSHScanner
         row = self._make_ssh_connector_dict()
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert isinstance(scanner, SSHScanner)
 
     def test_ssh_scanner_config_populated(self):
         row = self._make_ssh_connector_dict()
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert scanner._cfg.host == "sftp.example.com"
         assert scanner._cfg.username == "user"
@@ -1075,7 +1075,7 @@ class TestBuildScannerSSH:
             },
             allowed_extensions=[".pdf"],
         )
-        with patch(_PATCH_DECRYPT, side_effect=lambda t, d, k: d):
+        with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert isinstance(scanner, SSHScanner)
         assert scanner._cfg.host == "sftp.host"

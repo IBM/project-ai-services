@@ -10,33 +10,29 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
 const (
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
-
-	// ProviderObjectStorage is the provider ID for S3-compatible object storage connectors.
-	ProviderObjectStorage = "object_storage"
-	// ProviderFileSystem is the provider ID for SSH/SFTP file system connectors.
-	ProviderFileSystem = "file_system"
 )
 
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
 // DatasourceService is the single implementation of the create-datasource flow.
-// It is provider-agnostic: provider-specific behaviour (connection testing and
-// sensitive-field identification) is delegated to a ConnectionTester looked up
-// from the testers registry.
+// It is provider-agnostic: provider-specific behaviour (connection testing) is
+// delegated to a ConnectionTester looked up from the testers registry.
+// Sensitive-field identification is derived at runtime from each provider's
+// schema.json, keyed on format: "password".
 type DatasourceService struct {
-	connectorRepo    dbrepo.ConnectorRepository
-	catalogProvider  *catalog.CatalogProvider
-	validator        *validators.ConnectorValidator
-	encryptionKey    string
+	connectorRepo   dbrepo.ConnectorRepository
+	validator       *validators.ConnectorValidator
+	catalogProvider *catalog.CatalogProvider
+	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
 }
@@ -47,18 +43,18 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	catalogProvider *catalog.CatalogProvider,
 	validator *validators.ConnectorValidator,
+	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
-		catalogProvider: catalogProvider,
 		validator:       validator,
+		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
-			ProviderObjectStorage: NewObjectStorageTester(),
-			ProviderFileSystem:    NewFileSystemTester(),
+			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
+			catalogconstants.DatasourceProviderFileSystem:    NewFileSystemTester(),
 		},
 	}
 }
@@ -66,9 +62,9 @@ func NewDatasourceService(
 // CreateDatasource is the single create flow shared by all providers:
 //
 //  1. Validate the request body (provider existence + JSON-schema param validation).
-//  2. Duplicate-name guard.
+//  2. Duplicate-name guard (case-insensitive — handled by LOWER() in the DB query).
 //  3. Test the connection — the outcome sets the initial connector status.
-//  4. Encrypt sensitive credential fields.
+//  4. Encrypt sensitive credential fields derived from the provider's schema.json.
 //  5. Persist the connector record.
 func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error) {
 	// Phase 1: validate request (provider existence + param schema).
@@ -76,7 +72,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, err
 	}
 
-	// Phase 2: duplicate-name guard.
+	// Phase 2: duplicate-name guard (case-insensitive — handled by LOWER() in the DB query).
 	existing, err := s.connectorRepo.GetByName(ctx, req.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check for existing connector: %w", err)
@@ -98,7 +94,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		}
 	}
 
-	testErr := tester.TestConnection(ctx, req.Metadata)
+	testErr := tester.TestConnection(ctx, req.Params)
 	if testErr != nil {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
@@ -106,8 +102,13 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		}
 	}
 
-	// Phase 4: encrypt sensitive credential fields before persistence.
-	encryptedParams, err := encryptSensitiveFields(req.Metadata, tester.SensitiveFields(), s.encryptionKey)
+	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
+	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -217,7 +218,10 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 		if sensitiveKeys[k] {
 			plaintext, ok := v.(string)
 			if !ok {
-				return nil, fmt.Errorf("sensitive field %q must be a string", k)
+				return nil, &ValidationError{
+					Code:    http.StatusBadRequest,
+					Message: fmt.Sprintf("sensitive field %q must be a string value", k),
+				}
 			}
 
 			ciphertext, err := catalogutils.Encrypt(plaintext, encryptionKey)

@@ -675,6 +675,11 @@ def check_extraction_budget(
 # ---------------------------------------------------------------------------
 
 def fmt_dt(dt) -> Optional[str]:
+    """Format a datetime object into an ISO 8601 string representation with UTC 'Z' offset.
+
+    Returns:
+        Optional[str]: ISO formatted string or None if input datetime is None.
+    """
     if dt is None:
         return None
     if dt.tzinfo is None:

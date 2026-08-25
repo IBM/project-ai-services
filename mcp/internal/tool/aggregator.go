@@ -22,7 +22,7 @@ type Aggregator struct {
 
 // NewAggregator creates a new tool aggregator
 func NewAggregator(intf *openapi.Interface, endpoint string, auth authenticator.Authenticator,
-	globalQuery, globalHeaders map[string]string) (*Aggregator, error) {
+	globalQuery, globalHeaders map[string]string, tlsSkipVerify bool) (*Aggregator, error) {
 
 	aggregator := &Aggregator{
 		intf:          intf,
@@ -36,7 +36,7 @@ func NewAggregator(intf *openapi.Interface, endpoint string, auth authenticator.
 	// Create providers for each operation
 	for _, operation := range intf.Operations {
 		provider, err := NewProvider(operation, endpoint,
-			auth, globalQuery, aggregator.globalHeaders)
+			auth, globalQuery, aggregator.globalHeaders, tlsSkipVerify)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider for operation %s: %w", operation.OperationID, err)
 		}

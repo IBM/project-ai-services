@@ -2,6 +2,7 @@ from common.emb_utils import get_embedder
 
 
 def retrieve_documents(query, emb_model, emb_endpoint, max_tokens, vectorstore, top_k, mode="hybrid", language='en'):
+    """Retrieve documents from the vector store using embedding-based search."""
     embedding = get_embedder(emb_model, emb_endpoint, max_tokens)
     results = vectorstore.search(query, embedding=embedding, top_k=top_k, mode=mode, language=language)
 

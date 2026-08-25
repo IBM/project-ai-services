@@ -43,24 +43,27 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest:
     properties:
-      metadata:
-        additionalProperties: {}
-        description: |-
-          Metadata holds the provider-specific configuration. Sensitive fields (format: "password"
-          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
-        type: object
       name:
-        description: Name is the unique human-readable label for this connector.
+        description: |-
+          Name is the unique human-readable label for this connector.
+          Must be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are
+          allowed. Duplicate-name detection is case-insensitive ("My-DB" and "my-db" conflict).
         maxLength: 100
         minLength: 3
         type: string
+      params:
+        additionalProperties: {}
+        description: |-
+          Params holds the provider-specific configuration. Sensitive fields (format: "password"
+          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
+        type: object
       provider_id:
         description: ProviderID identifies the provider implementation (e.g. "object_storage",
           "file_system").
         type: string
     required:
-    - metadata
     - name
+    - params
     - provider_id
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:
@@ -141,46 +144,6 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker:
-    properties:
-      id:
-        type: string
-      last_heartbeat:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      registered_at:
-        type: string
-      runtime_type:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType'
-      status:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus'
-      updated_at:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType:
-    enum:
-    - unknown
-    - podman
-    - openshift
-    type: string
-    x-enum-varnames:
-    - WorkerRuntimeTypeUnknown
-    - WorkerRuntimeTypePodman
-    - WorkerRuntimeTypeOpenShift
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus:
-    enum:
-    - pending
-    - ready
-    - disconnected
-    type: string
-    x-enum-varnames:
-    - WorkerStatusPending
-    - WorkerStatusReady
-    - WorkerStatusDisconnected
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       catalog_id:
@@ -465,6 +428,10 @@ definitions:
         type: string
       healthy:
         type: boolean
+      labels:
+        additionalProperties:
+          type: string
+        type: object
       pod_id:
         type: string
       pod_name:
@@ -595,6 +562,26 @@ definitions:
     - Exited
     - Removing
     - Dead
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker:
+    properties:
+      id:
+        type: string
+      last_heartbeat:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      registered_at:
+        type: string
+      runtime_type:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
     properties:
       available:
@@ -1802,7 +1789,7 @@ paths:
           description: List of workers
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker'
             type: array
         "500":
           description: Internal error
@@ -1819,7 +1806,7 @@ paths:
       - application/json
       description: |-
         Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.
-        The operator passes this token when starting the worker daemon (`worker start --token <token>`).
+        The operator passes this token when starting the worker daemon (`worker join --token <token>`).
       parameters:
       - description: Worker registration request
         in: body

@@ -57,12 +57,12 @@ func TestCanonicalizeName(t *testing.T) {
 
 func TestNewInterface(t *testing.T) {
 	// Load test documents
-	minimalDoc, err := LoadDescription("testdata/minimal.yaml")
+	minimalDoc, err := LoadDescription("testdata/minimal.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load minimal spec: %v", err)
 	}
 
-	complexDoc, err := LoadDescription("testdata/complex.yaml")
+	complexDoc, err := LoadDescription("testdata/complex.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load complex spec: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestNewInterface(t *testing.T) {
 
 
 func TestCollectTags(t *testing.T) {
-	doc, err := LoadDescription("testdata/complex.yaml")
+	doc, err := LoadDescription("testdata/complex.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load spec: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestCollectTags(t *testing.T) {
 }
 
 func TestCollectOperations(t *testing.T) {
-	doc, err := LoadDescription("testdata/complex.yaml")
+	doc, err := LoadDescription("testdata/complex.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load spec: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestInterfaceNameGeneration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.title, func(t *testing.T) {
 			// Create a minimal doc with specific title
-			doc, _ := LoadDescription("testdata/minimal.yaml")
+			doc, _ := LoadDescription("testdata/minimal.yaml", false)
 			doc.Info.Title = tt.title
 
 			intf := NewInterface(doc)
@@ -275,7 +275,7 @@ func TestInterfaceNameGeneration(t *testing.T) {
 }
 
 func TestRequestBodyContentTypePreference(t *testing.T) {
-	doc, err := LoadDescription("testdata/complex.yaml")
+	doc, err := LoadDescription("testdata/complex.yaml", false)
 	if err != nil {
 		t.Fatalf("Failed to load spec: %v", err)
 	}

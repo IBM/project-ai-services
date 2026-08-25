@@ -19,6 +19,15 @@ logger = get_logger("processing.language")
 
 
 def count_tokens(text, emb_endpoint):
+    """Count the number of tokens in the given text using the specified embedding endpoint.
+
+    Args:
+        text (str): Input text to tokenize and count.
+        emb_endpoint (str): The URL of the embedding/tokenizer API endpoint.
+
+    Returns:
+        int: Total token count of the text.
+    """
     token_len = len(tokenize_with_llm(text, emb_endpoint))
     return token_len
 

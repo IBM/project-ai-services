@@ -188,8 +188,8 @@ func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[
 	return toPodsList(kubeReport), nil
 }
 
-func (pc *PodmanClient) DeletePod(id string, force *bool) error {
-	_, err := pods.Remove(pc.Context, id, &pods.RemoveOptions{Force: force})
+func (pc *PodmanClient) DeletePod(nameOrID string, force *bool) error {
+	_, err := pods.Remove(pc.Context, nameOrID, &pods.RemoveOptions{Force: force})
 	if err != nil {
 		return fmt.Errorf("failed to delete the pod: %w", err)
 	}
@@ -210,8 +210,8 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*types.Container, err
 	return toInspectContainer(stats), nil
 }
 
-func (pc *PodmanClient) StopPod(id string) error {
-	inspectReport, err := pc.InspectPod(id)
+func (pc *PodmanClient) StopPod(nameOrID string) error {
+	inspectReport, err := pc.InspectPod(nameOrID)
 	if err != nil {
 		return fmt.Errorf("failed to inspect pod: %w", err)
 	}
@@ -225,7 +225,7 @@ func (pc *PodmanClient) StopPod(id string) error {
 			}
 		}
 	}
-	_, err = pods.Stop(pc.Context, id, &pods.StopOptions{})
+	_, err = pods.Stop(pc.Context, nameOrID, &pods.StopOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to stop the pod: %w", err)
 	}
@@ -233,8 +233,8 @@ func (pc *PodmanClient) StopPod(id string) error {
 	return nil
 }
 
-func (pc *PodmanClient) StartPod(id string) error {
-	_, err := pods.Start(pc.Context, id, &pods.StartOptions{})
+func (pc *PodmanClient) StartPod(nameOrID string) error {
+	_, err := pods.Start(pc.Context, nameOrID, &pods.StartOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start the pod: %w", err)
 	}

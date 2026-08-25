@@ -23,6 +23,7 @@ deploy them, and handle service metadata`,
 	catalogCMD.AddCommand(NewWhoamiCmd())
 	catalogCMD.AddCommand(NewMigrateCmd())
 	catalogCMD.AddCommand(NewInfoCmd())
+	catalogCMD.AddCommand(NewWorkerCmd())
 
 	return catalogCMD
 }
