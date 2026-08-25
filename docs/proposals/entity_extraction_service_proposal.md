@@ -1377,15 +1377,13 @@ curl -X POST http://localhost:9500/v1/extract/jobs \
         "code": "INVALID_FILE_CONTENT",
         "message": "One or more files failed content validation.",
         "status": 415,
-        "details": {
-            "invalid_files": [
+        "details": [
                 {
                     "index": 1,
                     "filename": "invoice_002.txt",
                     "reason": "File contains null bytes and appears to be binary."
                 }
             ]
-        }
     }
 }
 ```
