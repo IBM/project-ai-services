@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -78,6 +79,61 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// ConnectDatasourceToApplication godoc
+//
+//	@Summary		Connect datasource to application
+//	@Description	Links a datasource connector to each eligible (Digitize) service in a running application. Returns 422 when no eligible running service with an API endpoint is found, or 502 when the downstream Digitize service cannot be reached.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path		string								true	"Application ID (UUID)"
+//	@Param			datasource_id	path		string								true	"Datasource connector ID (UUID)"
+//	@Success		200				{object}	models.ConnectDatasourceResponse	"Datasource connected"
+//	@Failure		400				{object}	ErrorResponse						"Invalid path parameter"
+//	@Failure		401				{object}	ErrorResponse						"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse						"Application or datasource not found"
+//	@Failure		422				{object}	ErrorResponse						"No eligible running service found"
+//	@Failure		502				{object}	ErrorResponse						"Downstream Digitize service error"
+//	@Failure		500				{object}	ErrorResponse						"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [put]
+func (h *DatasourceHandler) ConnectDatasourceToApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.ConnectDatasourceToApplication(c.Request.Context(), applicationID, datasourceID)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to connect datasource to application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to connect datasource to application",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // Made with Bob

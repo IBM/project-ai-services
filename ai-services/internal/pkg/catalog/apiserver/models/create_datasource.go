@@ -15,9 +15,25 @@ type CreateDatasourceRequest struct {
 	CreatedBy string `json:"-"`
 }
 
+// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
+type ConnectDatasourceRequest struct {
+	ConnectorID      string         `json:"connector_id"`
+	ConnectorName    string         `json:"connector_name"`
+	Type             string         `json:"type"`
+	AllowedExtensions []string      `json:"allowed_extensions,omitempty"`
+	ConnectionDetails map[string]any `json:"connection_details"`
+}
+
 // CreateDatasourceResponse is the response body returned after a successful datasource creation.
 type CreateDatasourceResponse struct {
 	ID string `json:"id"`
+}
+
+// ConnectDatasourceResponse is the response body returned after a successful datasource connection.
+type ConnectDatasourceResponse struct {
+	ApplicationID string `json:"application_id"`
+	DatasourceID  string `json:"datasource_id"`
+	ConnectorID   string `json:"connector_id"`
 }
 
 // Made with Bob
