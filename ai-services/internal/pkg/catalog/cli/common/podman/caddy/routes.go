@@ -74,7 +74,7 @@ func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman
 	// Build route domains map by querying Caddy
 	routeDomains := make(map[string]string)
 	for _, info := range routeInfos {
-		processRouteInfo(info, proxyManager, routeDomains)
+		processRouteInfo(ctx, info, proxyManager, routeDomains)
 	}
 
 	// Get Caddy HTTPS port
@@ -134,7 +134,7 @@ func parseRouteEntry(routeEntry, podName string) string {
 
 // processRouteInfo processes route information and populates the routeDomains map.
 // Queries Caddy for each route and adds it to the map with a standardized variable name.
-func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
+func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
 	// Parse routes annotation to extract subdomains
 	// Format: "port:subdomain:type, port:subdomain:type, ..."
 	// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
@@ -145,7 +145,7 @@ func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, r
 		}
 
 		// Query Caddy for this route (route ID is the subdomain)
-		actualRoute, err := proxyManager.GetRouteByID(subdomain)
+		actualRoute, err := proxyManager.GetRouteByID(ctx, subdomain)
 		if err != nil {
 			// Log warning but continue - route might not exist yet
 			logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
