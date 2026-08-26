@@ -91,8 +91,8 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		return err
 	}
 
-	// Delete database data and secrets
-	if err := cleanupDatabaseResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
+	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
+	if err := cleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
 	}
 
@@ -112,10 +112,10 @@ func deleteSecrets(ctx context.Context, rt *podman.PodmanClient, secrets []strin
 	return nil
 }
 
-// cleanupDatabaseResources handles database volume and secret cleanup.
-func cleanupDatabaseResources(ctx context.Context, rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
+// cleanupSkippedResources deletes secrets and volumes that are preserved when --skip-cleanup is set.
+func cleanupSkippedResources(ctx context.Context, rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
 	if skipCleanup {
-		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
+		logger.Infoln("Skipping cleanup of preserved resources (--skip-cleanup flag set)")
 
 		return nil
 	}
