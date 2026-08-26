@@ -175,14 +175,9 @@ func TestRegistry_RegisterAddsEntry(t *testing.T) {
 func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
 	reg := New(nil)
 
-	// runtimeType is stored as-is; callers are responsible for validation.
-	// Registering with an arbitrary type must succeed without error.
-	entry, err := reg.Register(context.Background(), "worker-1", "docker", nil)
-	if err != nil {
-		t.Fatalf("Register with unknown runtime_type: unexpected error: %v", err)
-	}
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
+	_, err := reg.Register(context.Background(), "worker-1", "docker", nil)
+	if err == nil {
+		t.Fatal("expected error for unsupported runtime_type")
 	}
 }
 
