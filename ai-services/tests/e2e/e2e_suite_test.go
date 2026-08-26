@@ -240,6 +240,12 @@ func catalogLoginWithDiscovery(loginCtx context.Context, fatal bool) {
 const (
 	invalidJobID = "invalid-job-id-123"
 	invalidDocID = "invalid-doc-id-123"
+
+	// unreachableSummarizeURL points to a host that will never accept TCP
+	// connections, used in the connectivity failure test to exercise
+	// transport-level error handling.  The .invalid TLD is guaranteed by
+	// RFC 2606 to never resolve in DNS.
+	unreachableSummarizeURL = "http://summarize.invalid.ais-failure-test.example.com:9999"
 )
 
 // jobStartDelay lets the service begin processing before asserting in-progress state.
@@ -2621,6 +2627,82 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnsupportedMediaType))
 			gomega.Expect(errResp.Error.Code).To(gomega.Equal(415))
 			logger.Infof("[TEST] ✓ binary TXT rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		// ── TC-2: Invalid level via JSON body ─────────────────────────────────
+		//
+		// Rationale: The existing test "returns 400 for invalid level parameter
+		// via multipart form" only covers the multipart/form-data code path.
+		// The JSON body path through app.py → summ_utils.validate_summary_level()
+		// is a separate dispatch branch and must be tested independently.
+		//
+		// Expected: HTTP 400, errResp.Error.Code == 400.
+		ginkgo.It("returns 400 for invalid level value via JSON body", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			errResp, statusCode, err := summarization.SummarizeTextExpectingError(
+				ctx, syncSummarizeBaseURL,
+				"IBM Power Systems are designed for enterprise AI workloads.",
+				"ultra-brief",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errResp).NotTo(gomega.BeNil())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(errResp.Error.Code).To(gomega.Equal(400))
+			logger.Infof("[TEST] ✓ invalid level via JSON body rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
+		})
+
+		// ── TC-3: Both level and length supplied ──────────────────────────────
+		//
+		// Rationale: "level" (abstraction-based) and "length" (legacy word-count)
+		// are mutually exclusive.  Providing both in the same JSON body is
+		// ambiguous and must be rejected before any LLM call is made.
+		// This code path (app.py: if summary_level is not None and
+		// summary_length is not None) has no existing test coverage.
+		//
+		// Expected: HTTP 400, response body contains "error".
+		ginkgo.It("returns 400 when both level and length are supplied in JSON body", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody, statusCode, err := summarization.SummarizeRawBody(
+				ctx, syncSummarizeBaseURL,
+				bytes.NewBufferString(`{"text":"IBM Power Systems are designed for enterprise AI workloads.","level":"brief","length":10}`),
+				"application/json",
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest))
+			gomega.Expect(string(rawBody)).To(gomega.ContainSubstring("error"))
+			logger.Infof("[TEST] ✓ level+length conflict rejected (status=%d)", statusCode)
+		})
+
+		// ── TC-5: Connectivity failure — unreachable summarize API ────────────
+		//
+		// Rationale: When the summarization service is completely absent (not
+		// deployed, wrong namespace, network partition) callers must receive an
+		// immediate transport-level error — not a hang or silent empty result.
+		// The context timeout (30 s) is shorter than the HTTP client default,
+		// guaranteeing DNS / TCP failure causes a rapid error rather than a hang.
+		// This is the only test that guards against a dead-endpoint condition.
+		//
+		// Expected: err is non-nil (transport-level failure).
+		ginkgo.It("returns a transport error when the summarize API is unreachable", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			logger.Infof("[TEST] Attempting request to unreachable summarize URL: %s", unreachableSummarizeURL)
+
+			_, _, transportErr := summarization.SummarizeRawBody(
+				ctx, unreachableSummarizeURL,
+				bytes.NewBufferString(`{"text":"what is IBM Power?"}`),
+				"application/json",
+			)
+			gomega.Expect(transportErr).To(
+				gomega.HaveOccurred(),
+				"Expected a transport error for an unreachable summarize API, but got nil",
+			)
+			logger.Infof("[TEST] ✓ transport error correctly received for unreachable URL: %v", transportErr)
 		})
 
 		// ── Concurrency ───────────────────────────────────────────────────────
