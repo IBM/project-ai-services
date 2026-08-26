@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // BundleValidator is implemented by each runtime-specific validator.
@@ -85,7 +86,7 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 		}
 
 		name := filepath.ToSlash(hdr.Name)
-		if shouldSkipEntry(hdr, name) {
+		if shouldSkipEntry(hdr) || utils.IsOSMetadataFile(name) {
 			continue
 		}
 
@@ -110,14 +111,9 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 }
 
 // shouldSkipEntry reports whether a tar entry should be ignored.
-// It skips non-regular/non-directory entries and macOS AppleDouble
-// resource-fork files (._<name>) that archive tools may embed alongside real files.
-func shouldSkipEntry(hdr *tar.Header, name string) bool {
-	if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
-		return true
-	}
-
-	return strings.HasPrefix(filepath.Base(name), "._")
+// It skips non-regular/non-directory entries.
+func shouldSkipEntry(hdr *tar.Header) bool {
+	return hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir
 }
 
 // readEntryContent reads and returns the content of a regular tar entry.
