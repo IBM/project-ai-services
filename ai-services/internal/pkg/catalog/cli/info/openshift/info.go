@@ -27,7 +27,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 		"label": {fmt.Sprintf("%s=%s", aiconst.ApplicationAnnotationKey, constants.CatalogAppName)},
 	}
 
-	pods, err := runtime.ListPods(listFilters)
+	pods, err := runtime.ListPods(ctx, listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -51,7 +51,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 	// Step 3: Read and print the info.md file
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
-	if err := helpers.PrintInfo(tp, runtime, constants.CatalogAppName, catalogTemplate); err != nil {
+	if err := helpers.PrintInfo(ctx, tp, runtime, constants.CatalogAppName, catalogTemplate); err != nil {
 		// not failing overall info command if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 	}

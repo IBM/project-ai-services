@@ -112,7 +112,7 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 
 	for _, svc := range services {
 		// List service pods
-		pods, err := s.rt.ListPods(map[string][]string{
+		pods, err := s.rt.ListPods(ctx, map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
 		})
 		if err != nil {
@@ -174,7 +174,7 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 func (s *PodmanDeletion) deletePods(ctx context.Context, pods []runtimeTypes.Pod, forceDelete bool) []string {
 	var podErrors []string
 	for _, pod := range pods {
-		if err := s.rt.DeletePod(pod.ID, &forceDelete); err != nil {
+		if err := s.rt.DeletePod(ctx, pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
@@ -198,7 +198,7 @@ func (s *PodmanDeletion) deleteOrphanedComponents(ctx context.Context, component
 
 	for _, componentID := range componentIDs {
 		// List component pods
-		pods, err := s.rt.ListPods(map[string][]string{
+		pods, err := s.rt.ListPods(ctx, map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
 		})
 		if err != nil {
@@ -280,7 +280,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 
 	// Delete each unique volume using the runtime client
 	for volumeName := range volumesToDelete {
-		if err := s.rt.DeleteVolume(volumeName); err != nil {
+		if err := s.rt.DeleteVolume(ctx, volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
@@ -334,7 +334,7 @@ func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runti
 
 	// Delete each unique secret
 	for secretName := range secretsToDelete {
-		if err := s.rt.DeleteSecret(secretName); err != nil {
+		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)

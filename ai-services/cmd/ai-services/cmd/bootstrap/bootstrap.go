@@ -79,11 +79,11 @@ func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
 			return fmt.Errorf("failed to create bootstrap instance: %w", err)
 		}
 
-		if configureErr := bootstrapInstance.Configure(); configureErr != nil {
+		if configureErr := bootstrapInstance.Configure(cmd.Context()); configureErr != nil {
 			return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
 		}
 
-		if err := factory.Validate(skip); err != nil {
+		if err := factory.Validate(cmd.Context(), skip); err != nil {
 			logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
 
 			return fmt.Errorf("failed to run bootstrap validate: %w", err)

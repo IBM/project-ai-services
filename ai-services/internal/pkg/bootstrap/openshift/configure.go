@@ -28,7 +28,7 @@ const (
 	machineConfigFolder       = "01-machine-config"
 )
 
-func (o *OpenshiftBootstrap) Configure() error {
+func (o *OpenshiftBootstrap) Configure(ctx context.Context) error {
 	logger.Infoln("Configuring OpenShift cluster")
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
@@ -37,9 +37,9 @@ func (o *OpenshiftBootstrap) Configure() error {
 
 	// 1. Apply machine-config
 	s := spinner.New("Applying the configurations")
-	s.Start(client.Ctx)
+	s.Start(ctx)
 
-	if err := applyYamlsFromFolder(client, machineConfigFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, machineConfigFolder); err != nil {
 		s.Fail("failed to apply the configurations")
 
 		return fmt.Errorf("error occurred while applying the configurations: %w", err)
@@ -47,21 +47,21 @@ func (o *OpenshiftBootstrap) Configure() error {
 	s.Stop("Configurations applied successfully")
 
 	// 2. Apply operators (namespaces, operatorgroups, subscriptions)
-	if err := applyYamlsFromFolder(client, operatorFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, operatorFolder); err != nil {
 		return fmt.Errorf("error occurred while applying operator configurations: %w", err)
 	}
 
 	// 3. Apply operands (CRs) - Does SpyreClusterPolicy configure + applying operand yamls
 	s = spinner.New("Applying operand configurations")
-	s.Start(client.Ctx)
+	s.Start(ctx)
 
-	if err := configureSCP(client, s); err != nil {
+	if err := configureSCP(ctx, client, s); err != nil {
 		s.Fail("failed to configure spyre cluster policy")
 
 		return fmt.Errorf("error occurred while configuring spyre cluster policy: %w", err)
 	}
 
-	if err := applyYamlsFromFolder(client, operandFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, operandFolder); err != nil {
 		s.Fail("failed to apply operand configurations")
 
 		return fmt.Errorf("error occurred while applying operand configurations: %w", err)
@@ -69,7 +69,7 @@ func (o *OpenshiftBootstrap) Configure() error {
 	s.Stop("Operand configurations applied successfully")
 
 	// 4. Wait for all CRs to be ready
-	if err := waitForAllCRs(client); err != nil {
+	if err := waitForAllCRs(ctx, client); err != nil {
 		return err
 	}
 
@@ -78,12 +78,12 @@ func (o *OpenshiftBootstrap) Configure() error {
 	return nil
 }
 
-func waitForAllCRs(client *openshift.OpenshiftClient) error {
+func waitForAllCRs(ctx context.Context, client *openshift.OpenshiftClient) error {
 	// Wait for SpyreClusterPolicy
 	s := spinner.New("Waiting for SpyreClusterPolicy to be ready")
-	s.Start(client.Ctx)
+	s.Start(ctx)
 
-	err := waitForSpyreClusterPolicy(client)
+	err := waitForSpyreClusterPolicy(ctx, client)
 	if err != nil {
 		s.Fail("SpyreClusterPolicy not ready")
 
@@ -93,9 +93,9 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 
 	// Wait for DSCInitialization
 	s = spinner.New("Waiting for DSCInitialization to be ready")
-	s.Start(client.Ctx)
+	s.Start(ctx)
 
-	err = waitForRHODSResource(client, "DSCInitialization")
+	err = waitForRHODSResource(ctx, client, "DSCInitialization")
 	if err != nil {
 		s.Fail("DSCInitialization not ready")
 
@@ -105,9 +105,9 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 
 	// Wait for DataScienceCluster
 	s = spinner.New("Waiting for DataScienceCluster to be ready")
-	s.Start(client.Ctx)
+	s.Start(ctx)
 
-	err = waitForRHODSResource(client, "DataScienceCluster")
+	err = waitForRHODSResource(ctx, client, "DataScienceCluster")
 	if err != nil {
 		s.Fail("DataScienceCluster not ready")
 
@@ -118,7 +118,7 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 	return nil
 }
 
-func applyYamlsFromFolder(client *openshift.OpenshiftClient, folder string) error {
+func applyYamlsFromFolder(ctx context.Context, client *openshift.OpenshiftClient, folder string) error {
 	tp := templates.NewEmbedTemplateProvider(&assets.BootstrapFS)
 
 	yamls, err := tp.LoadYamls(folder)
@@ -127,7 +127,7 @@ func applyYamlsFromFolder(client *openshift.OpenshiftClient, folder string) erro
 	}
 
 	for _, yaml := range yamls {
-		if err := applyYaml(client, yaml); err != nil {
+		if err := applyYaml(ctx, client, yaml); err != nil {
 			return fmt.Errorf("failed to apply YAML from %s: %w", folder, err)
 		}
 	}
@@ -135,9 +135,9 @@ func applyYamlsFromFolder(client *openshift.OpenshiftClient, folder string) erro
 	return nil
 }
 
-func configureSCP(client *openshift.OpenshiftClient, s *spinner.Spinner) error {
+func configureSCP(ctx context.Context, client *openshift.OpenshiftClient, s *spinner.Spinner) error {
 	// fetch spec from spyre operator alm-example
-	spec, err := fetchSCPSpec(client)
+	spec, err := fetchSCPSpec(ctx, client)
 	if err != nil {
 		return fmt.Errorf("error occurred while fetching spyre cluster policy spec: %w", err)
 	}
@@ -148,14 +148,14 @@ func configureSCP(client *openshift.OpenshiftClient, s *spinner.Spinner) error {
 	}
 
 	// frame and apply the scp yaml
-	if err = frameAndApply(client, spec, s); err != nil {
+	if err = frameAndApply(ctx, client, spec, s); err != nil {
 		return fmt.Errorf("error occurred while applying patch to spyre cluster policy: %w", err)
 	}
 
 	return nil
 }
 
-func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
+func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[string]any, error) {
 	// Find Spyre operator config
 	var spyreOp constants.OperatorConfig
 	for _, op := range constants.RequiredOperators {
@@ -166,7 +166,7 @@ func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
 		}
 	}
 
-	csv, err := fetchOperatorByPackage(client, spyreOp.Name, spyreOp.Namespace)
+	csv, err := fetchOperatorByPackage(ctx, client, spyreOp.Name, spyreOp.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching spyre operator: %w", err)
 	}
@@ -227,10 +227,9 @@ func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 	return nil
 }
 
-func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *spinner.Spinner) error {
+func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec map[string]any, s *spinner.Spinner) error {
 	scp := &unstructured.Unstructured{}
 	c := client.Client
-	ctx := client.Ctx
 	scp.SetName("spyreclusterpolicy")
 	scp.Object = map[string]any{
 		"apiVersion": "spyre.ibm.com/v1alpha1",
@@ -256,7 +255,7 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 	return err
 }
 
-func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
+func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftClient) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "spyre.ibm.com",
@@ -264,8 +263,8 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 		Kind:    "SpyreClusterPolicy",
 	})
 
-	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
+	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
+		if err := client.Client.Get(pollCtx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
@@ -302,15 +301,15 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 	})
 }
 
-func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error {
-	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
+func waitForRHODSResource(ctx context.Context, client *openshift.OpenshiftClient, kind string) error {
+	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
 		// Get the existing resource from the cluster
 		gvk := schema.GroupVersionKind{
 			Group:   strings.ToLower(kind) + ".opendatahub.io",
 			Version: constants.VersionV2,
 			Kind:    kind,
 		}
-		resource, exists, err := utils.GetExistingCustomResource(client, gvk)
+		resource, exists, err := utils.GetExistingCustomResource(pollCtx, client, gvk)
 		if err != nil {
 			// Handle rate limiting and other transient errors as retryable
 			if utils.IsTransientK8sError(err) {

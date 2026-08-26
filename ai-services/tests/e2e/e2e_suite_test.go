@@ -124,6 +124,82 @@ func expectErrResp(err error, errorResp any) {
 	gomega.Expect(errorResp).NotTo(gomega.BeNil())
 }
 
+// deleteDigitizeDocsFromJob deletes every document returned by a completed job
+// status. Used for intra-loop cleanup where the same file would otherwise
+// trigger 409 RESOURCE_LOCKED on the next CreateJob call.
+func deleteDigitizeDocsFromJob(baseURL string, docs []digitization.DocumentStatus) {
+	for _, doc := range docs {
+		cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_ = digitization.DeleteDocument(cleanCtx, baseURL, doc.ID)
+		cleanCancel()
+	}
+}
+
+// waitForSummarizeURL polls application info until the summarize-api URL is
+// present, or the ctx deadline fires (which calls ginkgo.Fail). Returns the URL.
+func waitForSummarizeURL(logPrefix string, timeout time.Duration) string {
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), timeout)
+	defer pollCancel()
+
+	const pollInterval = 15 * time.Second
+	var (
+		infoOutput string
+		resultURL  string
+	)
+	for {
+		var infoErr error
+		infoOutput, infoErr = cli.ApplicationInfo(pollCtx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Warningf("[%s] application info error while polling for summarize URL: %v", logPrefix, infoErr)
+		} else {
+			resultURL = cli.ExtractCatalogSummarizeURL(infoOutput)
+			if resultURL != "" {
+				break
+			}
+		}
+		if pollCtx.Err() != nil {
+			ginkgo.Fail(fmt.Sprintf(
+				"[%s] Timed out waiting for summarize-api URL in 'application info' for app %q.\nLast output:\n%s",
+				logPrefix, appName, infoOutput))
+		}
+		logger.Infof("[%s] summarize-api URL not yet present — retrying in %s", logPrefix, pollInterval)
+		select {
+		case <-pollCtx.Done():
+			ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for summarize-api URL for app %q", logPrefix, appName))
+		case <-time.After(pollInterval):
+		}
+	}
+	return resultURL
+}
+
+// waitForSummarizeHealthy polls /health on the given summarize URL until the
+// service reports healthy, or the ctx deadline fires (which calls ginkgo.Fail).
+func waitForSummarizeHealthy(logPrefix, baseURL string, timeout time.Duration) {
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), timeout)
+	defer healthCancel()
+
+	const pollInterval = 15 * time.Second
+	logger.Infof("[%s] Waiting for summarize-api to be healthy at %s/health", logPrefix, baseURL)
+	for {
+		if err := summarization.HealthCheck(healthCtx, baseURL); err == nil {
+			logger.Infof("[%s] summarize-api is healthy", logPrefix)
+			return
+		} else {
+			if healthCtx.Err() != nil {
+				ginkgo.Fail(fmt.Sprintf(
+					"[%s] Timed out waiting for summarize-api to become healthy at %s — last error: %v",
+					logPrefix, baseURL, err))
+			}
+			logger.Infof("[%s] summarize-api not yet healthy (%v) — retrying in %s", logPrefix, err, pollInterval)
+			select {
+			case <-healthCtx.Done():
+				ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for summarize-api to become healthy at %s", logPrefix, baseURL))
+			case <-time.After(pollInterval):
+			}
+		}
+	}
+}
+
 // catalogLoginWithDiscovery logs in to the catalog, auto-discovering the server URL; fatal=true fails the suite on error.
 func catalogLoginWithDiscovery(loginCtx context.Context, fatal bool) {
 	_, loginUsername, loginPassword := bootstrap.GetCatalogCreds()
@@ -194,8 +270,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	logger.Infof("[SETUP] Test binary directory: %s", tempBinDir)
 
 	ginkgo.By("Setting template name")
-	templateName = "rag"
-
 	if providedTemplate != "" {
 		templateName = providedTemplate
 		logger.Infof("[SETUP] Using provided template: %s", templateName)
@@ -945,6 +1019,23 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			if err := rag.CleanupLLMAsJudge(runID); err != nil {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
+			// Delete documents ingested by BeforeAll so the Digitization Tests
+			// context starts with a clean slate. Without this, CreateJob returns
+			// 409 RESOURCE_LOCKED for test_doc.pdf which was already processed
+			// during golden dataset ingestion, causing the entire ordered
+			// Digitization context to abort.
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cleanCancel()
+			infoOut, infoErr := cli.ApplicationInfo(cleanCtx, cfg, appName, appRuntime)
+			if infoErr == nil {
+				if digitizeURL := cli.ExtractDigitizeURL(infoOut); digitizeURL != "" {
+					if err := digitization.DeleteAllDocuments(cleanCtx, digitizeURL); err != nil {
+						logger.Warningf("[RAG][WARN] post-golden document cleanup failed (non-fatal): %v", err)
+					} else {
+						logger.Infof("[RAG] post-golden document cleanup completed")
+					}
+				}
+			}
 		})
 
 		ginkgo.It("validates RAG answers against golden dataset",
@@ -1093,6 +1184,18 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			createdJobIDs = nil
 			createdDocIDs = nil
+			// Wipe all remaining documents so the next spec starts with a clean
+			// slate. Some specs (e.g. ingestion workflow) process test_doc.pdf
+			// but never track the resulting document ID in createdDocIDs, which
+			// causes the following spec to receive 409 RESOURCE_LOCKED when it
+			// tries to re-process the same file.
+			if digitizeBaseURL != "" {
+				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cleanCancel()
+				if err := digitization.DeleteAllDocuments(cleanCtx, digitizeBaseURL); err != nil {
+					logger.Warningf("[DIGITIZE] AfterEach: DeleteAllDocuments failed (non-fatal): %v", err)
+				}
+			}
 		})
 
 		ginkgo.It("should pass health check", func() {
@@ -1245,6 +1348,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
 
+				// Delete the document produced by this iteration before the next
+				// format is attempted. The server rejects re-processing the same
+				// file with 409 RESOURCE_LOCKED when a document for it already
+				// exists, so each iteration must clean up after itself.
+				deleteDigitizeDocsFromJob(digitizeBaseURL, finalStatus.Documents)
+
 				logger.Infof("[TEST] %s format job completed", format)
 			}
 		})
@@ -1359,8 +1468,20 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						ownDocIDs = append(ownDocIDs, doc.ID)
 					}
 				}
+
+				// The server rejects re-processing the same file (test_doc.pdf) with
+				// 409 RESOURCE_LOCKED when a document already exists. Delete docs
+				// produced by this iteration before the next iteration calls CreateJob.
+				// We keep their IDs in ownDocIDs so the verification below (which
+				// checks found==false) still holds — already-deleted docs are absent
+				// from the list, satisfying the same invariant as DeleteAllDocuments.
+				if i < 1 {
+					deleteDigitizeDocsFromJob(digitizeBaseURL, finalStatus.Documents)
+				}
 			}
 
+			// Delete any remaining documents (from the last iteration) and verify
+			// all docs this spec created are gone.
 			err := digitization.DeleteAllDocuments(ctx, digitizeBaseURL)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1855,65 +1976,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			catalogLoginWithDiscovery(loginCtx, true)
 			loginCancel()
 
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-
-			// Poll for summarize-api URL (WaitForApplicationInfoURLs checks for RAG-specific URLs not in summarize template).
-			const summarizePollInterval = 15 * time.Second
-			var infoOutput string
-			for {
-				var infoErr error
-				infoOutput, infoErr = cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
-				if infoErr != nil {
-					logger.Warningf("[SUMMARIZE] application info error while polling for summarize URL: %v", infoErr)
-				} else {
-					summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOutput)
-					if summarizeBaseURL != "" {
-						break
-					}
-				}
-				if ctx.Err() != nil {
-					ginkgo.Fail(fmt.Sprintf(
-						"Timed out waiting for summarize-api URL in 'application info' output for app %q.\n"+
-							"Ensure the summarize template was deployed and the catalog is running.\n"+
-							"Last output:\n%s", appName, infoOutput))
-				}
-				logger.Infof("[SUMMARIZE] summarize-api URL not yet present — retrying in %s", summarizePollInterval)
-				select {
-				case <-ctx.Done():
-					ginkgo.Fail(fmt.Sprintf(
-						"Timed out waiting for summarize-api URL in 'application info' output for app %q.\n"+
-							"Last output:\n%s", appName, infoOutput))
-				case <-time.After(summarizePollInterval):
-				}
-			}
-
+			summarizeBaseURL = waitForSummarizeURL("SUMMARIZE", 10*time.Minute)
 			logger.Infof("[SUMMARIZE] Summarize Base URL: %s", summarizeBaseURL)
-
-			// Poll /health until service is ready (LLM model may still be loading).
-			logger.Infof("[SUMMARIZE] Waiting for summarize-api to be healthy at %s/health", summarizeBaseURL)
-			healthCtx, healthCancel := context.WithTimeout(context.Background(), 15*time.Minute)
-			defer healthCancel()
-			const healthPollInterval = 15 * time.Second
-			for {
-				healthErr := summarization.HealthCheck(healthCtx, summarizeBaseURL)
-				if healthErr == nil {
-					logger.Infof("[SUMMARIZE] summarize-api is healthy")
-					break
-				}
-				if healthCtx.Err() != nil {
-					ginkgo.Fail(fmt.Sprintf(
-						"Timed out waiting for summarize-api to become healthy at %s — last error: %v",
-						summarizeBaseURL, healthErr))
-				}
-				logger.Infof("[SUMMARIZE] summarize-api not yet healthy (%v) — retrying in %s", healthErr, healthPollInterval)
-				select {
-				case <-healthCtx.Done():
-					ginkgo.Fail(fmt.Sprintf(
-						"Timed out waiting for summarize-api to become healthy at %s", summarizeBaseURL))
-				case <-time.After(healthPollInterval):
-				}
-			}
+			waitForSummarizeHealthy("SUMMARIZE", summarizeBaseURL, 15*time.Minute)
 		})
 
 		ginkgo.AfterEach(func() {
@@ -2146,57 +2211,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			catalogLoginWithDiscovery(loginCtx, true)
 			loginCancel()
 
-			pollCtx, pollCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer pollCancel()
-
-			const summarizePollInterval = 15 * time.Second
-			var infoOutput string
-			for {
-				var infoErr error
-				infoOutput, infoErr = cli.ApplicationInfo(pollCtx, cfg, appName, appRuntime)
-				if infoErr != nil {
-					logger.Warningf("[SUMMARIZE-SYNC] application info error while polling for summarize URL: %v", infoErr)
-				} else {
-					syncSummarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOutput)
-					if syncSummarizeBaseURL != "" {
-						break
-					}
-				}
-				if pollCtx.Err() != nil {
-					ginkgo.Fail(fmt.Sprintf(
-						"Timed out waiting for summarize-api URL in 'application info' for app %q.\nLast output:\n%s",
-						appName, infoOutput))
-				}
-				logger.Infof("[SUMMARIZE-SYNC] summarize-api URL not yet present — retrying in %s", summarizePollInterval)
-				select {
-				case <-pollCtx.Done():
-					ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api URL for app %q", appName))
-				case <-time.After(summarizePollInterval):
-				}
-			}
-
+			syncSummarizeBaseURL = waitForSummarizeURL("SUMMARIZE-SYNC", 10*time.Minute)
 			logger.Infof("[SUMMARIZE-SYNC] Summarize Base URL: %s", syncSummarizeBaseURL)
-
-			// Wait for /health before running any tests.
-			healthCtx, healthCancel := context.WithTimeout(context.Background(), 15*time.Minute)
-			defer healthCancel()
-			const healthPollInterval = 15 * time.Second
-			for {
-				if err := summarization.HealthCheck(healthCtx, syncSummarizeBaseURL); err == nil {
-					logger.Infof("[SUMMARIZE-SYNC] summarize-api is healthy")
-					break
-				} else {
-					if healthCtx.Err() != nil {
-						ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api to become healthy at %s", syncSummarizeBaseURL))
-					}
-					logger.Infof("[SUMMARIZE-SYNC] summarize-api not yet healthy (%v) — retrying in %s", err, healthPollInterval)
-					select {
-					case <-healthCtx.Done():
-						ginkgo.Fail(fmt.Sprintf("Timed out waiting for summarize-api to become healthy at %s", syncSummarizeBaseURL))
-					case <-time.After(healthPollInterval):
-					}
-				}
-			}
+			waitForSummarizeHealthy("SUMMARIZE-SYNC", syncSummarizeBaseURL, 15*time.Minute)
 		})
 
 		// ── JSON body — happy path ────────────────────────────────────────────
@@ -2905,8 +2922,19 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			pdfPath := digitization.GetTestPDFPath()
 			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(digitization.IngestTestDocumentViaDigitizeAPI(ctx, digitizeBaseURL, "e2e-backup-restore-ingestion")).To(gomega.Succeed())
+			// Clear any stale documents from a previous failed run before starting.
+			// Without this, CreateJob returns 409 RESOURCE_LOCKED for test_doc.pdf
+			// when it was already processed in a prior run.
+			ginkgo.By("clearing any stale documents from previous test runs")
+			if err := digitization.DeleteAllDocuments(ctx, digitizeBaseURL); err != nil {
+				logger.Warningf("[BACKUP-RESTORE] pre-test document cleanup failed (non-fatal): %v", err)
+			}
 
+			// Run digitization FIRST so test_doc.pdf is written to the digitize DB.
+			// Ingestion runs second to populate OpenSearch for RAG queries.
+			// This order avoids a 409 RESOURCE_LOCKED: the file is not yet known to
+			// the system when digitization runs, so there is no conflict.
+			ginkgo.By("creating a digitization job to populate the digitize database")
 			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-backup-restore-digitization")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2923,6 +2951,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			digitizeDocName = doc.Name
 			digitizeDocStatus = doc.Status
+
+			// Ingest test_doc.pdf AFTER digitization so OpenSearch is populated for
+			// the RAG queries below. Digitization has already recorded the file, so
+			// ingestion re-processes it without conflict (different operation type).
+			ginkgo.By("ingesting test document to populate OpenSearch for RAG queries")
+			gomega.Expect(digitization.IngestTestDocumentViaDigitizeAPI(ctx, digitizeBaseURL, "e2e-backup-restore-ingestion")).To(gomega.Succeed())
 
 			ragPrompts := []struct {
 				question string
@@ -3025,6 +3059,253 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 
 	})
+
+	ginkgo.Context("OpenShift Application Backup And Restore",
+		ginkgo.Ordered,
+		ginkgo.Label("openshift-backup-restore", "app-backup-restore"),
+		func() {
+			// ------------------------------------------------------------------ //
+			// State shared across the It block.
+			// ------------------------------------------------------------------ //
+			var (
+				osDigitizeDocID         string
+				osDigitizeDocName       string
+				osDigitizeDocStatus     string
+				osDigitizeJobID         string
+				osDigitizeJobStatus     string
+				osPreBackupPowerVCResp  string
+				osPreBackupSpyreGPUResp string
+				osOpensearchBackupFile  string
+				osDigitizeBackupFile    string
+			)
+
+			// ------------------------------------------------------------------ //
+			// TC-BR-OCP-1: mirror of the podman flow for OpenShift.
+			//
+			// Flow:
+			//   1. Ingest doc + create digitization job on the existing app
+			//   2. Capture pre-backup RAG responses
+			//   3. Back up opensearch + digitize
+			//   4. Delete the existing app
+			//   5. Create a fresh app (sibling name when --app-name provided,
+			//      same name when the suite owns the lifecycle)
+			//   6. Re-login to catalog
+			//   7. Restore opensearch + digitize into the new app
+			//   8. Verify jobs, documents, and RAG responses match pre-backup
+			// ------------------------------------------------------------------ //
+			ginkgo.It("backs up and restores application data on OpenShift",
+				ginkgo.SpecTimeout(90*time.Minute),
+				func(specCtx context.Context) {
+					// Guard: OpenShift only.
+					if appRuntime != "openshift" {
+						ginkgo.Skip(fmt.Sprintf(
+							"[OPENSHIFT-BR] Skipping — runtime is %q, not \"openshift\"", appRuntime,
+						))
+					}
+					// Guard: require a running app.
+					if providedAppName == "" {
+						ginkgo.Skip(
+							"[OPENSHIFT-BR] Skipping — --app-name not provided; " +
+								"pass --app-name=<app> to target a running application",
+						)
+					}
+
+					catalogLoginWithDiscovery(specCtx, true)
+
+					// ── Step 1: Resolve URLs from the running app ─────────────────
+					ginkgo.By("resolving URLs from the running application")
+					infoOutput, err := cli.WaitForApplicationInfoURLs(specCtx, cfg, appName, appRuntime, 8*time.Minute, 15*time.Second)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					// On OpenShift the route hostnames are "backend-<app>..." and
+					// "digitize-api-<app>...". Use the OpenShift-aware extractors so
+					// we don't accidentally pick the wrong service URL.
+					osRAGBaseURL := cli.ExtractOpenShiftBackendURL(infoOutput)
+					gomega.Expect(osRAGBaseURL).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] could not extract RAG backend URL from application info")
+
+					osDigitizeURL := cli.ExtractDigitizeURL(infoOutput)
+					gomega.Expect(osDigitizeURL).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] could not extract digitize URL from application info")
+
+					logger.Infof("[OPENSHIFT-BR] RAG URL: %s  Digitize URL: %s", osRAGBaseURL, osDigitizeURL)
+
+					// ── Step 2: Clear any stale documents from previous runs ───────
+					ginkgo.By("clearing any stale documents from previous test runs")
+					if err := digitization.DeleteAllDocuments(specCtx, osDigitizeURL); err != nil {
+						logger.Warningf("[OPENSHIFT-BR] pre-test document cleanup failed (non-fatal): %v", err)
+					}
+
+					// ── Step 3: Run digitization FIRST to populate the digitize DB ─
+					// Ingestion runs after so OpenSearch is populated for RAG queries.
+					// This order avoids a 409 RESOURCE_LOCKED: the file is not yet
+					// known to the system when digitization runs, so there is no conflict.
+					ginkgo.By("creating a digitization job to populate the digitize database")
+					osPDFPath := digitization.GetTestPDFPath()
+					gomega.Expect(osPDFPath).NotTo(gomega.BeEmpty())
+
+					jobResp, err := digitization.CreateJob(specCtx, osDigitizeURL, osPDFPath, "digitization", "json", "e2e-os-br-digitize")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					finalStatus, err := digitization.WaitForJobCompletion(specCtx, osDigitizeURL, jobResp.JobID, 10*time.Minute)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+					gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+
+					osDigitizeJobID = finalStatus.JobID
+					osDigitizeJobStatus = finalStatus.Status
+					osDigitizeDocID = finalStatus.Documents[0].ID
+
+					osDoc, docErr := digitization.GetDocument(specCtx, osDigitizeURL, osDigitizeDocID)
+					gomega.Expect(docErr).NotTo(gomega.HaveOccurred())
+					osDigitizeDocName = osDoc.Name
+					osDigitizeDocStatus = osDoc.Status
+					logger.Infof("[OPENSHIFT-BR] Seeded digitize job=%s doc=%s", osDigitizeJobID, osDigitizeDocName)
+
+					// ── Step 4: Ingest test document to populate OpenSearch ────────
+					// Runs after digitization so test_doc.pdf is already in the digitize
+					// DB. Ingestion re-processes the file (different operation type) and
+					// indexes it into OpenSearch without receiving a 409.
+					ginkgo.By("ingesting test document to populate OpenSearch for RAG queries")
+					gomega.Expect(
+						digitization.IngestTestDocumentViaDigitizeAPI(specCtx, osDigitizeURL, "e2e-os-br-ingest"),
+					).To(gomega.Succeed())
+					logger.Infof("[OPENSHIFT-BR] Ingestion completed — OpenSearch populated")
+
+					// ── Step 5: Capture pre-backup RAG responses ──────────────────
+					ginkgo.By("capturing pre-backup RAG responses for known prompts")
+					osRAGPrompts := []struct {
+						question string
+						response *string
+					}{
+						{question: "What is PowerVC?", response: &osPreBackupPowerVCResp},
+						{question: "How is a spyre card different from a GPU?", response: &osPreBackupSpyreGPUResp},
+					}
+					for _, p := range osRAGPrompts {
+						logger.Infof("[OPENSHIFT-BR] Pre-backup RAG prompt: %s", p.question)
+						resp, askErr := rag.AskRAG(specCtx, osRAGBaseURL, p.question)
+						gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+						gomega.Expect(strings.TrimSpace(resp)).NotTo(gomega.BeEmpty())
+						*p.response = resp
+						logger.Infof("[OPENSHIFT-BR] Pre-backup response for %q: %s", p.question, resp)
+					}
+
+					// ── Step 6: Back up opensearch and digitize ───────────────────
+					ginkgo.By("backing up opensearch and digitize data")
+					osOpensearchBackupFile = filepath.Join(tempDir, "os-opensearch-backup-"+runID+".tar.gz")
+					osDigitizeBackupFile = filepath.Join(tempDir, "os-digitize-backup-"+runID+".tar.gz")
+
+					_, err = cli.ApplicationBackup(specCtx, cfg, appName, "opensearch", osOpensearchBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] opensearch backup failed")
+					logger.Infof("[OPENSHIFT-BR] OpenSearch backup written to %s", osOpensearchBackupFile)
+
+					_, err = cli.ApplicationBackup(specCtx, cfg, appName, "digitize", osDigitizeBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] digitize backup failed")
+					logger.Infof("[OPENSHIFT-BR] Digitize backup written to %s", osDigitizeBackupFile)
+
+					// ── Step 7: Delete the existing app ───────────────────────────
+					ginkgo.By("deleting the existing application")
+					deleteOutput, deleteErr := cli.DeleteApp(specCtx, cfg, appName, appRuntime)
+					gomega.Expect(deleteErr).NotTo(gomega.HaveOccurred())
+					gomega.Expect(deleteOutput).NotTo(gomega.BeEmpty())
+					logger.Infof("[OPENSHIFT-BR] Application %s deleted", appName)
+
+					// ── Step 8: Create a fresh app to restore into (legacy create) ─
+					// Use the sibling name when --app-name was provided so OpenShift
+					// namespace cleanup lag does not block immediate reuse of the name.
+					// The app is created via the plain 'application create' command
+					// (no URL-probing) — mirroring the legacy CLI flow.
+					ginkgo.By("creating a fresh application via legacy create to restore into")
+					osRestoreAppName := appName
+					if providedAppName != "" {
+						osRestoreAppName = appName + "-restore-" + runID
+					}
+
+					createOutput, createErr := cli.CreateApp(
+						specCtx,
+						cfg,
+						osRestoreAppName,
+						templateName,
+						createParams,
+						cli.CreateOptions{
+							SkipModelDownload: false,
+							ImagePullPolicy:   "IfNotPresent",
+						},
+						appRuntime,
+					)
+					gomega.Expect(createErr).NotTo(gomega.HaveOccurred())
+					gomega.Expect(createOutput).NotTo(gomega.BeEmpty())
+					logger.Infof("[OPENSHIFT-BR] Fresh application %s created", osRestoreAppName)
+
+					// ── Step 9: Re-login then restore ─────────────────────────────
+					ginkgo.By("re-logging into catalog and restoring opensearch and digitize")
+					catalogLoginWithDiscovery(specCtx, true)
+
+					_, err = cli.ApplicationRestore(specCtx, cfg, osRestoreAppName, "opensearch", osOpensearchBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] opensearch restore failed")
+					logger.Infof("[OPENSHIFT-BR] OpenSearch restore completed")
+
+					_, err = cli.ApplicationRestore(specCtx, cfg, osRestoreAppName, "digitize", osDigitizeBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] digitize restore failed")
+					logger.Infof("[OPENSHIFT-BR] Digitize restore completed")
+
+					// ── Step 10: Resolve URLs from the restored app ────────────────
+					ginkgo.By("waiting for application info URLs on the restored app")
+					restoredInfoOutput, infoErr := cli.WaitForApplicationInfoURLs(specCtx, cfg, osRestoreAppName, appRuntime, 8*time.Minute, 15*time.Second)
+					gomega.Expect(infoErr).NotTo(gomega.HaveOccurred())
+
+					restoredDigitizeURL := cli.ExtractDigitizeURL(restoredInfoOutput)
+					gomega.Expect(restoredDigitizeURL).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] could not extract digitize URL from restored app info")
+
+					restoredRAGBaseURL := cli.ExtractOpenShiftBackendURL(restoredInfoOutput)
+					gomega.Expect(restoredRAGBaseURL).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] could not extract RAG backend URL from restored app info")
+
+					// ── Step 11: Verify digitize jobs were restored ────────────────
+					ginkgo.By("verifying digitize jobs were restored")
+					restoredJobs, err := digitization.ListJobs(specCtx, restoredDigitizeURL, false, 20, 0, osDigitizeJobStatus, "digitization")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(restoredJobs.Data).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] no digitize jobs found after restore")
+
+					jobFound := false
+					for _, job := range restoredJobs.Data {
+						if job.JobID == osDigitizeJobID {
+							jobFound = true
+							gomega.Expect(job.Status).To(gomega.Equal(osDigitizeJobStatus))
+							break
+						}
+					}
+					gomega.Expect(jobFound).To(gomega.BeTrue(),
+						"[OPENSHIFT-BR] restored digitize job %s not found", osDigitizeJobID)
+					logger.Infof("[OPENSHIFT-BR] Digitize job %s found after restore", osDigitizeJobID)
+
+					// ── Step 12: Verify digitize documents were restored ───────────
+					ginkgo.By("verifying digitize documents were restored")
+					restoredDocs, err := digitization.ListDocuments(specCtx, restoredDigitizeURL, 20, 0, "", osDigitizeDocName)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(restoredDocs.Data).NotTo(gomega.BeEmpty(),
+						"[OPENSHIFT-BR] no digitize documents found after restore")
+					gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(osDigitizeDocName))
+					gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(osDigitizeDocStatus))
+					logger.Infof("[OPENSHIFT-BR] Digitize document %s restored successfully", osDigitizeDocName)
+
+					// ── Step 13: Verify RAG responses match pre-backup ────────────
+					ginkgo.By("verifying RAG responses match pre-backup responses")
+					for _, p := range osRAGPrompts {
+						logger.Infof("[OPENSHIFT-BR] Post-restore RAG prompt: %s", p.question)
+						restoredResp, askErr := rag.AskRAG(specCtx, restoredRAGBaseURL, p.question)
+						gomega.Expect(askErr).NotTo(gomega.HaveOccurred())
+						gomega.Expect(strings.TrimSpace(restoredResp)).NotTo(gomega.BeEmpty())
+						logger.Infof("[OPENSHIFT-BR] Post-restore response for %q: %s", p.question, restoredResp)
+						gomega.Expect(restoredResp).To(gomega.Equal(*p.response),
+							"[OPENSHIFT-BR] RAG response for %q changed after restore", p.question)
+					}
+
+					logger.Infof("[OPENSHIFT-BR] ✓ Backup and restore completed successfully (app=%s)", osRestoreAppName)
+				})
+		})
 
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {

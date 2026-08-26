@@ -25,11 +25,11 @@ func PullImageFromRegistry(ctx context.Context, runtime runtime.Runtime, images 
 }
 
 // FetchImagesNotFound returns list of images which are not present locally.
-func FetchImagesNotFound(runtime runtime.Runtime, reqImages []string) ([]string, error) {
+func FetchImagesNotFound(ctx context.Context, runtime runtime.Runtime, reqImages []string) ([]string, error) {
 	notfoundImages := make([]string, 0, len(reqImages))
 
 	// Verify the images existing locally
-	lImages, err := runtime.ListImages()
+	lImages, err := runtime.ListImages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list local images: %w", err)
 	}

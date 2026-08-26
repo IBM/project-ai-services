@@ -49,7 +49,7 @@ func (h *ResourcesHandler) GetResources(c *gin.Context) {
 	}
 
 	// Get system info from runtime
-	sysInfo, err := runtimeClient.GetSystemInfo()
+	sysInfo, err := runtimeClient.GetSystemInfo(c.Request.Context())
 	if err != nil {
 		logger.ErrorfCtx(c.Request.Context(), "Could not get system info: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{

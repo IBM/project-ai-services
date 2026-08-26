@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     # Server errors (5xx)
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
     LLM_ERROR = "LLM_ERROR"
+    LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
     VECTOR_STORE_NOT_READY = "VECTOR_STORE_NOT_READY"
     INSUFFICIENT_STORAGE = "INSUFFICIENT_STORAGE"
 
@@ -241,6 +242,7 @@ class APIError:
         ErrorCode.SERVER_BUSY: (429, "Server is busy. Please try again later"),
         ErrorCode.INTERNAL_SERVER_ERROR: (500, "An unexpected error occurred"),
         ErrorCode.LLM_ERROR: (500, "Failed to generate response. Please try again later"),
+        ErrorCode.LLM_UNAVAILABLE: (503, "LLM service is unavailable. Please try again later"),
         ErrorCode.VECTOR_STORE_NOT_READY: (503, "Vector store not initialized"),
         ErrorCode.INSUFFICIENT_STORAGE: (507, "Insufficient storage space"),
     }
@@ -286,6 +288,50 @@ class APIError:
                 }
             }
         )
+
+
+def extract_http_error_message(exc) -> str:
+    """Extract the human-readable message from a FastAPI HTTPException.
+
+    ``APIError.raise_error`` always stores the user-facing message at
+    ``exc.detail["error"]["message"]``.  This helper unwraps that path and
+    falls back to ``str(exc.detail)`` for any exception whose detail is not
+    structured (e.g. plain-string FastAPI validation errors).
+
+    Args:
+        exc: A ``fastapi.HTTPException`` instance.
+
+    Returns:
+        The extracted message string.
+    """
+    if isinstance(exc.detail, dict):
+        return exc.detail.get("error", {}).get("message", str(exc.detail))
+    return str(exc.detail)
+
+
+def build_http_error_detail(exc, operation_message: str) -> dict:
+    """Build a structured error detail dict for re-raising an HTTPException.
+
+    Combines a human-readable *operation_message* (describing what was being
+    attempted and why it failed) with the error code extracted from the
+    original exception so the HTTP status code, error code, and message are
+    all consistent and displayable to the end user.
+
+    Args:
+        exc: The original ``fastapi.HTTPException`` being handled.
+        operation_message: The fully-composed user-facing message, e.g.
+            ``"Failed to create connector 'x': Connector already exists"``.
+
+    Returns:
+        A ``{"error": {"code": ..., "message": ..., "status": ...}}`` dict
+        suitable for passing directly as ``HTTPException(detail=...)``.
+    """
+    code = (
+        exc.detail.get("error", {}).get("code", "INTERNAL_SERVER_ERROR")
+        if isinstance(exc.detail, dict)
+        else "INTERNAL_SERVER_ERROR"
+    )
+    return {"error": {"code": code, "message": operation_message, "status": exc.status_code}}
 
 
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:

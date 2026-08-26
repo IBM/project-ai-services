@@ -39,6 +39,10 @@ type ServiceDependencyRepository interface {
 	GetDependenciesByServiceID(ctx context.Context, serviceID uuid.UUID) ([]models.ServiceDependency, error)
 	// GetServicesByDependency retrieves all services that depend on a specific entity (service or component).
 	GetServicesByDependency(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]uuid.UUID, error)
+	// GetServiceCountByDependency returns the number of services that depend on each ID in
+	// dependencyIDs with the given dependencyType, in a single query.
+	// IDs with zero dependents are absent from the returned map.
+	GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error)
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
 	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
@@ -152,6 +156,45 @@ func (r *serviceDependencyRepo) GetServicesByDependency(ctx context.Context, dep
 	}
 
 	return serviceIDs, nil
+}
+
+// GetServiceCountByDependency returns, for each connector ID in dependencyIDs, the count of
+// services that reference it with the given dependencyType. A single GROUP BY query is issued
+// regardless of how many IDs are supplied. IDs with zero dependents are absent from the map.
+// Returns an empty (non-nil) map when dependencyIDs is empty.
+func (r *serviceDependencyRepo) GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(dependencyIDs))
+	if len(dependencyIDs) == 0 {
+		return counts, nil
+	}
+
+	query := `
+		SELECT dependency_id, COUNT(*) AS service_count
+		FROM service_dependencies
+		WHERE dependency_id = ANY($1) AND dependency_type = $2
+		GROUP BY dependency_id
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyIDs, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count services by dependency: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var depID uuid.UUID
+		var count int
+		if err := rows.Scan(&depID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan service count: %w", err)
+		}
+		counts[depID] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating service counts: %w", err)
+	}
+
+	return counts, nil
 }
 
 // RemoveAllDependenciesForService removes all dependencies for a specific service.

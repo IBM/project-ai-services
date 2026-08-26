@@ -17,6 +17,9 @@ type DatasourceServiceInterface interface {
 	// connected services enriched with live sync state from each service's Digitize pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.
 	GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error)
+	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
+	// Sensitive credential fields are never included in any returned item.
+	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

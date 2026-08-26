@@ -472,8 +472,10 @@ def is_connector_sourced_document(doc_id: str) -> bool:
     connector-sourced and must not be exposed via user-facing document APIs).
     """
     try:
+        from digitize.db.connection import get_db_session
+        from digitize.db.models import ConnectorDocumentChecksum
+        from sqlalchemy import select, exists
         with get_db_session() as session:
-            from sqlalchemy import exists
 
             stmt = select(
                 exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
@@ -1384,9 +1386,9 @@ def finalize_sync_log_and_update_connector(
     Finalize a sync run across two tables:
       - connector_sync_log: UPDATEs the matching row with status, finished_at,
         and optional file counts / error message.
-      - connector: UPDATEs last_sync_at to now, and sync_status to the terminal
-        state — CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can
-        retry; any other status (e.g. COMPLETED) is written through verbatim.
+      - connector: UPDATEs last_sync_at to now, sync_status to the terminal
+        state, and error — CANCELLED/FAILED both map to OUT_OF_SYNC so the
+        scheduler can retry; COMPLETED clears error to NULL.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1403,7 +1405,10 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    db_manager.update_connector_after_sync(connector_id, status=status, last_sync_at=now)
+    connector_error = f"Error from last sync: {error}" if error else error
+    db_manager.update_connector_after_sync(
+        connector_id, status=status, last_sync_at=now, error=connector_error
+    )
     return True
 
 
@@ -1412,8 +1417,11 @@ def update_connector_total_files(connector_id: str, total_files: int) -> None:
     db_manager.update_connector(connector_id=connector_id, total_files=total_files)
 
 
-def set_connector_error(connector_id: str, error: str) -> None:
-    """Persist an error message on the connector row (best-effort; logs on failure)."""
+def set_connector_error(connector_id: str, error: Optional[str]) -> None:
+    """Persist or clear an error message on the connector row (best-effort; logs on failure).
+
+    Pass ``None`` to clear a previously set error.
+    """
     try:
         db_manager.update_connector(connector_id=connector_id, error=error)
     except Exception as exc:
@@ -1484,7 +1492,7 @@ def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
 def reset_syncing_connectors(error: str = "Service restarted during sync tick") -> List[str]:
     """
     Bulk-set sync_status='out of sync' for every connector currently stuck in
-    'syncing', and stamp ``last_sync_error`` / ``error`` with *error*.
+    'syncing', and stamp ``error`` with *error*.
     Returns the list of affected connector IDs.
     """
     return db_manager.reset_syncing_connectors(error=error)

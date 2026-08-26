@@ -104,12 +104,13 @@ const (
 
 // Pod represents the details of a pod.
 type Pod struct {
-	PodID      string         `json:"pod_id"`
-	PodName    string         `json:"pod_name"`
-	Status     Status         `json:"status"`
-	Created    string         `json:"created"`
-	Healthy    bool           `json:"healthy"`
-	Containers []PodContainer `json:"containers"`
+	PodID      string            `json:"pod_id"`
+	PodName    string            `json:"pod_name"`
+	Status     Status            `json:"status"`
+	Created    string            `json:"created"`
+	Healthy    bool              `json:"healthy"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Containers []PodContainer    `json:"containers"`
 }
 
 // PodContainer represents a container in a pod.

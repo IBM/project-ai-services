@@ -2,6 +2,7 @@ package caddy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,39 +13,11 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-// ComputeDomainConfig computes the domain configuration from SSL certificates and domain name.
-// Priority: certDomain > customDomain > hostIP.nip.io.
-func ComputeDomainConfig(sslCertPath, sslKeyPath, domainName string) (string, error) {
-	var domainSuffix string
-
-	// If SSL certificate is provided, extract domain from it
-	if sslCertPath != "" && sslKeyPath != "" {
-		extractedDomain, err := utils.ExtractDomainFromCertificate(sslCertPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract domain from certificate: %w", err)
-		}
-		domainSuffix = extractedDomain
-	} else if domainName != "" {
-		// Use provided domain name
-		domainSuffix = domainName
-	} else {
-		// Default to hostIP.nip.io when no configuration is provided
-		hostIP, err := utils.GetHostIP()
-		if err != nil {
-			return "", fmt.Errorf("failed to get host IP for domain suffix: %w", err)
-		}
-		domainSuffix = fmt.Sprintf("%s.nip.io", hostIP)
-	}
-
-	return domainSuffix, nil
-}
-
 // getCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func getCaddyAdminPort(runtime *podman.PodmanClient, podName string) (string, error) {
-	pod, err := runtime.InspectPod(podName)
+func getCaddyAdminPort(ctx context.Context, runtime *podman.PodmanClient, podName string) (string, error) {
+	pod, err := runtime.InspectPod(ctx, podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
@@ -63,9 +36,9 @@ func getCaddyAdminPort(runtime *podman.PodmanClient, podName string) (string, er
 }
 
 // getHTTPSPort retrieves the HTTPS port from the Caddy pod.
-func getHTTPSPort(runtime *podman.PodmanClient, caddyPodName string) (string, error) {
+func getHTTPSPort(ctx context.Context, runtime *podman.PodmanClient, caddyPodName string) (string, error) {
 	// Get pod details
-	pod, err := runtime.InspectPod(caddyPodName)
+	pod, err := runtime.InspectPod(ctx, caddyPodName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
