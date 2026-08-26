@@ -8,11 +8,13 @@ import (
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"helm.sh/helm/v4/pkg/chart/common"
 	chartcommonutil "helm.sh/helm/v4/pkg/chart/common/util"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 	"helm.sh/helm/v4/pkg/engine"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // OpenShift runtime directory constant.
@@ -65,6 +67,10 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 		return err
 	}
 
+	if err := validateValuesSchema(found.schemaBytes, "openshift/values.schema.json"); err != nil {
+		return err
+	}
+
 	// Parse openshift/metadata.yaml and retrieve its version for the three-way check below.
 	metaVersion, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(found.metadataBytes)
 	if err != nil {
@@ -90,6 +96,7 @@ type openShiftPaths struct {
 	hasSchema      bool
 	hasTemplFile   bool
 	metadataBytes  []byte                  // raw content of openshift/metadata.yaml
+	schemaBytes    []byte                  // raw content of openshift/values.schema.json
 	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
 }
 
@@ -131,6 +138,7 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 		found.hasValues = true
 	case sub == "values.schema.json":
 		found.hasSchema = true
+		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml"):
 		found.hasTemplFile = true
 	}
@@ -236,10 +244,48 @@ func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion, metaVersi
 		}
 	}
 
-	if _, err := engine.Render(chrt, renderVals); err != nil {
+	rendered, err := engine.Render(chrt, renderVals)
+	if err != nil {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf("openshift Helm templates failed to render: %s", err),
+		}
+	}
+
+	return checkOpenShiftTemplateLabels(rendered)
+}
+
+// checkOpenShiftTemplateLabels walks every rendered template YAML and verifies
+// that each resource carries the constants.ApplicationTemplateKey label with a
+// non-empty value. Because Helm renders {{ .Chart.Name }} to the real chart
+// name, the value is always non-empty for well-formed bundles.
+func checkOpenShiftTemplateLabels(rendered map[string]string) error {
+	for file, content := range rendered {
+		// Skip NOTES.txt and any non-YAML output Helm may emit.
+		if !strings.HasSuffix(file, ".yaml") {
+			continue
+		}
+
+		var doc map[string]any
+		if err := k8syaml.Unmarshal([]byte(content), &doc); err != nil {
+			// Helm already validated the render; an unmarshal failure here is
+			// unexpected but not fatal for label checking — skip the file.
+			continue
+		}
+
+		meta, _ := doc["metadata"].(map[string]any)
+		labels, _ := meta["labels"].(map[string]any)
+		if v, _ := labels[constants.ApplicationTemplateKey].(string); strings.TrimSpace(v) == "" {
+			// Use only the base filename in the error to avoid the
+			// "chartname/templates/" prefix that Helm prepends.
+			base := file[strings.LastIndex(file, "/")+1:]
+			return &validators.ValidationError{
+				Code: http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf(
+					"openshift/templates/%s: missing required label %q",
+					base, constants.ApplicationTemplateKey,
+				),
+			}
 		}
 	}
 

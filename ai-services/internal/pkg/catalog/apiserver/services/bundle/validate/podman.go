@@ -2,12 +2,16 @@ package validate
 
 import (
 	"archive/tar"
+	"bytes"
 	"fmt"
 	"net/http"
 	"strings"
+	"text/template"
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // Podman runtime directory constant.
@@ -50,18 +54,28 @@ func (v *PodmanBundleValidator) Validate(archiveBytes []byte, topDir, rootVersio
 		return err
 	}
 
+	if err := validateValuesSchema(found.schemaBytes, "podman/values.schema.json"); err != nil {
+		return err
+	}
+
+	if err := validatePodmanTemplates(found.templFiles); err != nil {
+		return err
+	}
+
 	return bundlemetadata.ValidatePodmanMetadata(found.metadataBytes, rootVersion)
 }
 
 // podmanPaths tracks the presence of files required by the Podman layout and
-// carries the raw bytes of podman/metadata.yaml for semantic validation.
+// carries the raw bytes of files needed for semantic validation.
 type podmanPaths struct {
 	runtimeDirSeen bool // set on the first entry under podman/
 	hasMetadata    bool
 	hasValues      bool
 	hasSchema      bool
 	hasTemplFile   bool
-	metadataBytes  []byte // raw content of podman/metadata.yaml
+	metadataBytes  []byte            // raw content of podman/metadata.yaml
+	schemaBytes    []byte            // raw content of podman/values.schema.json
+	templFiles     map[string][]byte // name → raw content of each templates/*.yaml.tmpl
 }
 
 // collectPodmanPaths walks the archive once, records which required Podman paths
@@ -99,8 +113,13 @@ func (found *podmanPaths) recordEntry(sub string, hdr *tar.Header, content []byt
 		found.hasValues = true
 	case sub == "values.schema.json":
 		found.hasSchema = true
+		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml.tmpl"):
 		found.hasTemplFile = true
+		if found.templFiles == nil {
+			found.templFiles = make(map[string][]byte)
+		}
+		found.templFiles[sub] = content
 	}
 }
 
@@ -139,6 +158,98 @@ func collectMissingPodmanFiles(found *podmanPaths) []string {
 
 	return missing
 }
+
+
+// validatePodmanTemplates parses each *.yaml.tmpl with text/template (the same
+// package the runtime uses) to surface syntax errors, then renders each template
+// with nil data (missingkey=zero so all .Field references expand to "") and
+// checks the required fields of every ai-services Podman pod spec.
+func validatePodmanTemplates(templFiles map[string][]byte) error {
+	for path, content := range templFiles {
+		// 1. Parse the Go template — catches syntax errors.
+		tmpl, err := template.New(path).Option("missingkey=zero").Parse(string(content))
+		if err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: template syntax error: %s", path, err),
+			}
+		}
+
+		// 2. Execute with nil data; all .Field references expand to "".
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, nil); err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: template execution error: %s", path, err),
+			}
+		}
+
+		// 3. Unmarshal rendered YAML into a generic map and check required keys.
+		var doc map[string]any
+		if err := k8syaml.Unmarshal(buf.Bytes(), &doc); err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: rendered output is not valid YAML: %s", path, err),
+			}
+		}
+
+		if err := checkPodmanTemplateSpec(doc, path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkPodmanTemplateSpec verifies that the rendered template document has the
+// required fields every ai-services Podman pod spec must declare.
+//
+// Required top-level fields:
+//   - apiVersion  (non-blank string)
+//   - kind        (non-blank string)
+//
+// Required metadata fields:
+//   - metadata.name                                        (non-blank string)
+//   - metadata.labels[constants.ApplicationTemplateKey]   (key must be present;
+//     the value is a runtime expression so it is not checked here)
+func checkPodmanTemplateSpec(doc map[string]any, path string) error {
+	missing := make([]string, 0, 4)
+
+	if v, _ := doc["apiVersion"].(string); strings.TrimSpace(v) == "" {
+		missing = append(missing, "apiVersion")
+	}
+	if v, _ := doc["kind"].(string); strings.TrimSpace(v) == "" {
+		missing = append(missing, "kind")
+	}
+
+	templateLabelEntry := fmt.Sprintf("metadata.labels[%q]", constants.ApplicationTemplateKey)
+	meta, _ := doc["metadata"].(map[string]any)
+	if meta == nil {
+		missing = append(missing, "metadata.name")
+		missing = append(missing, templateLabelEntry)
+	} else {
+		if v, _ := meta["name"].(string); strings.TrimSpace(v) == "" {
+			missing = append(missing, "metadata.name")
+		}
+		labels, _ := meta["labels"].(map[string]any)
+		if _, ok := labels[constants.ApplicationTemplateKey]; !ok {
+			missing = append(missing, templateLabelEntry)
+		}
+	}
+
+	if len(missing) > 0 {
+		return &validators.ValidationError{
+			Code: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf(
+				"podman/%s: missing required Kubernetes spec field(s): %s",
+				path, strings.Join(missing, ", "),
+			),
+		}
+	}
+
+	return nil
+}
+
 
 // Ensure PodmanBundleValidator implements BundleValidator at compile time.
 var _ BundleValidator = (*PodmanBundleValidator)(nil)
