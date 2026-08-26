@@ -1310,14 +1310,14 @@ The existing endpoint is extended to accept multiple files. Single-file submissi
 
 | Parameter | Type | Required | Description                                                                                                |
 |:---|:---|:---|:-----------------------------------------------------------------------------------------------------------|
-| `files` | file[] | Yes | One or more `.txt` or `.md` files. Max `MAX_BATCH_SIZE` files. There should be no duplicate in file names. |
+| `files` | file[] | Yes | One or more `.txt` or `.md` files. Max `MAX_FILES_PER_JOB` files. There should be no duplicate in file names. |
 | `schema_id` | string | Yes | ID of a registered schema. Applied to all files in the batch.                                              |
 | `job_name` | string | No | Optional human-readable label for the batch.                                                               |
 
 **Validation rules (request thread):**
 
 1. At least one file is present (else `400`).
-2. File count ≤ `MAX_BATCH_SIZE` (else `400` with count and limit).
+2. File count ≤ `MAX_FILES_PER_JOB` (else `400` with count and limit).
 3. Each file passes `validate_text_upload` — extension check (`.txt`/`.md`), UTF-8 decode, null byte scan, control character ratio, PDF magic byte rejection. On failure, `415` identifying the failing filename and index.
 4. Validate that all files are unique, reject with 400 if any duplicate is present.
 5. `schema_id` exists (else `404`).
@@ -1328,7 +1328,7 @@ All file validations run before any job is created. If any file fails, the entir
 **Processing flow (request thread):**
 
 1. Validate all files and parameters.
-2. Acquire `job_limiter` slot (non-blocking; `429` on failure).
+2. Acquire `extract_limiter` slot (non-blocking; `429` on failure).
 3. Generate `job_id` (UUID).
 4. Stage all files to `/var/cache/extract/staging/{job_id}/`.
 5. Insert one row into `extract_jobs` with `status='accepted'`, `file_count=N`, `is_batch=true`.
@@ -1363,7 +1363,7 @@ curl -X POST http://localhost:9500/v1/extract/jobs \
 | 202 Accepted | Batch job created.                                                             |
 | 400 Bad Request | No files, too many files, or missing `schema_id`.                              |
 | 404 Not Found | Unknown `schema_id`.                                                           |
-| 413 Payload Too Large | Total upload size exceeds `MAX_BATCH_SIZE`.                                    |
+| 413 Payload Too Large | Total no of files exceeds `MAX_FILES_PER_JOB`.                                 |
 | 400 Bad Request | Duplicate files or missing parameters                                          | 
 | 415 Unsupported Media Type | One or more files failed content validation. Error identifies failing file(s). |
 | 429 Too Many Requests | Job concurrency at capacity.                                                   |
@@ -1409,7 +1409,7 @@ A failure at any stage marks that document as `failed` with the corresponding er
 **Worker pseudocode:**
 
 ```
-acquire job_limiter slot
+acquire extract_limiter slot
 update job → status='in_progress'
 
 for each document in batch (sequential):
@@ -1460,15 +1460,15 @@ release job_limiter slot
 
 **Concurrency model:**
 
-The `job_limiter` (configurable) is currently set at 2 , and `parallel_file_limiter` is capped to 8 (configurable), meaning we can have 2 jobs at a time processing 8 parallel files max at a time, reserving half the model's batch capacity for sync requests. Each job can have upto MAX_BATCH_SIZE files but only 8 files will be processed at a given time.
+The `extract_limiter` (configurable) is currently set at 8 , and `parallel_file_limiter` is capped to 4 (configurable), meaning we can have 8 requests (job or sync) at a time processing 4 parallel files max at a time from each job. Each job can have upto MAX_FILES_PER_JOB files but only 4 files will be processed at a given time.
 Each active batch job holds one `job_limiter` slot for its entire lifetime. Within the batch, each file briefly acquires one `concurrency_limiter` slot for its vLLM call(s), then releases it before moving to the next file.
 `job_limiter`*`parallel_file_limiter` = 0.5 * MODEL_BATCH_SIZE
 
-| Semaphore | Held by | Duration | Purpose |
-|:---|:---|:---|:---|
-| `job_limiter` | Batch job | Entire job lifetime | Caps concurrent batch jobs; ensures sync path stays responsive |
-| `parallel_file_limiter` | Per-file extraction | Duration of the complete file processing | Caps total number of files being processed parallely|
-| `concurrency_limiter` | Per-file extraction | Duration of vLLM call(s) only | Caps total concurrent vLLM connections across sync + async |
+| Semaphore               | Held by                                   | Duration                                 | Purpose                                                              |
+|:------------------------|:------------------------------------------|:-----------------------------------------|:---------------------------------------------------------------------|
+| `extract_limiter`       | Any incoming extract request (sync/async) | Entire request lifetime                  | Caps concurrent requests across sync + async                         |
+| `parallel_file_limiter` | Per-file extraction                       | Duration of the complete file processing | Caps total number of files being processed parallely in a single job |
+| `concurrency_limiter`   | Per-file extraction                       | Duration of vLLM call(s) only            | Caps total concurrent vLLM connections across sync + async           |
 
 
 ---
@@ -1494,28 +1494,24 @@ Extended to include batch progress counters and per-document summary.
             "doc_id": "a1b2c3d4-...",
             "filename": "invoice_001.txt",
             "status": "completed",
-            "result_url": "/v1/extract/jobs/b6d1f0aa-.../results/a1b2c3d4-...",
             "error": ""
         },
         {
             "doc_id": "e5f6g7h8-...",
             "filename": "invoice_002.txt",
             "status": "failed",
-            "result_url": "",
             "error": "Input does not fit in the model context window."
         },
         {
             "doc_id": "i9j0k1l2-...",
             "filename": "invoice_003.txt",
             "status": "in_progress",
-            "result_url": "",
             "error": ""
         },
         {
             "doc_id": "m3n4o5p6-...",
             "filename": "invoice_004.txt",
             "status": "pending",
-            "result_url": "",
             "error": ""
         }
     ],
@@ -1543,22 +1539,19 @@ Extended to include batch progress counters and per-document summary.
             "doc_id": "a1b2c3d4-...",
             "filename": "invoice_001.txt",
             "status": "completed",
-            "result_url": "/v1/extract/jobs/b6d1f0aa-.../results/a1b2c3d4-...",
-            "result_download_url": "/v1/extract/jobs/b6d1f0aa-.../results/a1b2c3d4-.../download"
+            "error": ""
         },
         {
             "doc_id": "e5f6g7h8-...",
             "filename": "invoice_002.txt",
             "status": "failed",
-            "error_code": "REQUIRED_FIELDS_ABSENT",
             "error": "Required fields absent after retry: invoice_number, vendor_name"
         },
         {
             "doc_id": "i9j0k1l2-...",
             "filename": "invoice_003.txt",
             "status": "completed",
-            "result_url": "/v1/extract/jobs/b6d1f0aa-.../results/i9j0k1l2-...",
-            "result_download_url": "/v1/extract/jobs/b6d1f0aa-.../results/i9j0k1l2--.../download"
+            "error": ""
         }
     ],
     "submitted_at": "2026-07-07T10:15:00Z",
@@ -1571,7 +1564,7 @@ Extended to include batch progress counters and per-document summary.
 
 ### A2.4 GET /v1/extract/jobs/{job_id}/results/{doc_id} — Per-Document Result
 
-Each document's result is retrieved individually via the `result_url` provided in the job details response. The response format is identical to the existing single-file result (Section 5.10 of the base proposal).
+The response format is identical to the existing single-file result (Section 5.10 of the base proposal).
 
 | Status | Description |
 |:---|:---|
@@ -1632,7 +1625,7 @@ Returns the result JSON as a downloadable file in .json format.
 
 ### A2.6 Existing Single-File Result Endpoint
 
-`GET /v1/extract/jobs/{job_id}/result` will now be invalid endpoint.
+`GET /v1/extract/jobs/{job_id}/result` will now be invalid.
 
 ### A2.7 DELETE /v1/extract/jobs/{job_id}
 
@@ -1653,7 +1646,6 @@ Two new columns on the existing `extract_jobs` table:
 | Column | Type | Description |
 |:---|:---|:---|
 | `file_count` | INTEGER NOT NULL DEFAULT 1 | Number of files in the job. |
-| `is_batch` | BOOLEAN NOT NULL DEFAULT FALSE | Distinguishes batch jobs from single-file jobs. |
 
 The `status` check constraint is updated to include the new terminal state:
 
@@ -1818,10 +1810,10 @@ Results are stored per-job (`results/{job_id}/`) rather than flat, avoiding file
 
 ## A5. Configuration
 
-| Variable | Description | Default |
-|:---|:---|:--------|
-| `MAX_BATCH_SIZE` | Maximum number of files per batch submission | `20`    |
-| `MAX_CONCURRENT_JOBS` | Async job semaphore | `2`      |
+| Variable | Description | Default                       |
+|:---|:---|:------------------------------|
+| `MAX_FILES_PER_JOB` | Maximum number of files per batch submission | `64` or 2*vLLM MAX_BATCH_SIZE |
+
 
 ---
 
@@ -1843,7 +1835,7 @@ The base proposal's boot-time zombie scan (Section 12) is extended for batch job
 |:---|:---|:---|
 | Single file submission (backward compat) | 1 `.txt` file | 202; `is_batch=false`, `file_count=1`; existing result endpoint works |
 | Batch submission | 3 `.txt` files | 202; `is_batch=true`, `file_count=3` |
-| Exceed MAX_BATCH_SIZE | 25 files (limit 20) | 400 with count and limit in error |
+| Exceed MAX_FILES_PER_JOB | 25 files (limit 20) | 400 with count and limit in error |
 | One invalid file in batch | 2 valid `.txt` + 1 binary `.txt` | 415 identifying failing file index and name; no job created |
 | No files | `schema_id` only | 400 |
 | Mixed extensions | 2 `.txt` + 1 `.md` | 202; all processed |
