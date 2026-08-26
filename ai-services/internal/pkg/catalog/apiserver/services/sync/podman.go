@@ -91,14 +91,11 @@ func validateResourceExistenceChecks(ctx context.Context, expectedSecretNames, e
 
 	var errorMessages []string
 
-	secretExistsFn := func(nameOrID string) (bool, error) { return rt.SecretExists(ctx, nameOrID) }
-	volumeExistsFn := func(nameOrID string) (bool, error) { return rt.VolumeExists(ctx, nameOrID) }
-
-	if msg := validateResourceExistence(ctx, expectedSecretNames, "secret", secretExistsFn); msg != "" {
+	if msg := validateResourceExistence(ctx, expectedSecretNames, "secret", rt.SecretExists); msg != "" {
 		errorMessages = append(errorMessages, msg)
 	}
 
-	if msg := validateResourceExistence(ctx, expectedVolumeNames, "volume", volumeExistsFn); msg != "" {
+	if msg := validateResourceExistence(ctx, expectedVolumeNames, "volume", rt.VolumeExists); msg != "" {
 		errorMessages = append(errorMessages, msg)
 	}
 
@@ -106,11 +103,11 @@ func validateResourceExistenceChecks(ctx context.Context, expectedSecretNames, e
 }
 
 // validateResourceExistence is a generic helper to validate resource existence via the provided lookup func.
-func validateResourceExistence(ctx context.Context, resourceNames []string, resourceType string, existsFunc func(string) (bool, error)) string {
+func validateResourceExistence(ctx context.Context, resourceNames []string, resourceType string, existsFunc func(context.Context, string) (bool, error)) string {
 	var missing []string
 
 	for _, name := range resourceNames {
-		exists, err := existsFunc(name)
+		exists, err := existsFunc(ctx, name)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to check %s existence for %s: %v", resourceType, name, err)
 
