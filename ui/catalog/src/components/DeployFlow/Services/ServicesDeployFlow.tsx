@@ -71,7 +71,7 @@ export const ServicesDeployFlow = ({
   onSubmit,
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
-  const [hasSchemaError, setHasSchemaError] = useState(false);
+  const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
   const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId ?? null,
@@ -87,6 +87,7 @@ export const ServicesDeployFlow = ({
   const { deployOptions, llmModels, isLoading, error, llmError } =
     useServiceDeployOptions(
       shouldFetchDeployOptions ? state.selectedServiceId : null,
+      open,
     );
 
   // Get component models loading and error state from store
@@ -257,7 +258,7 @@ export const ServicesDeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitializedFormData.current = null;
-    setHasSchemaError(false);
+    setHasStep2SchemaError(false);
     onClose();
   };
 
@@ -272,12 +273,11 @@ export const ServicesDeployFlow = ({
 
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
-    (state.currentStep === STEP_ONE &&
-      (isLoading || isStep1ComponentsLoading)) ||
+    !!shellError ||
     (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
     (isLastStep && state.isEditing) ||
     (isLastStep && !areAllRequiredFieldsFilled) ||
-    (isLastStep && (hasSchemaError || hasLlmError));
+    (isLastStep && (hasStep2SchemaError || hasLlmError));
 
   const steps = [
     { ...STEPS[0], complete: !!state.selectedServiceId },
@@ -320,7 +320,6 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
-          onComponentError={setHasSchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -335,7 +334,7 @@ export const ServicesDeployFlow = ({
           llmModelsWithProviders={llmModels}
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
-          onComponentError={setHasSchemaError}
+          onComponentError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>

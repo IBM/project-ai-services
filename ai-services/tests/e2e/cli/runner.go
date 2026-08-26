@@ -433,15 +433,30 @@ func ExtractCatalogDigitizeURL(infoOutput string) string {
 }
 
 // ExtractDigitizeURL returns the digitize-backend URL from 'application info' output.
+// For podman (catalog path) it matches by "digitize-backend" hostname substring.
+// For OpenShift it matches by "digitize-api" hostname substring (the actual route name).
+// Falls back to the legacy URL substitution only when neither match is found.
 func ExtractDigitizeURL(infoOutput string) string {
+	// Podman catalog path: URL contains "digitize-backend".
 	if u := ExtractCatalogDigitizeURL(infoOutput); u != "" {
 		return u
 	}
+	// OpenShift path: route hostname contains "digitize-api".
+	if u := extractURLBySubstring(infoOutput, "digitize-api"); u != "" {
+		return u
+	}
+	// Legacy fallback: substitute "ui" → "digitize-api" in the first URL found.
 	if urls := ExtractURLsFromOutput(infoOutput); len(urls) > 0 {
 		return strings.Replace(urls[0], "ui", "digitize-api", 1)
 	}
 
 	return ""
+}
+
+// ExtractOpenShiftBackendURL extracts the RAG backend URL from OpenShift route output.
+// On OpenShift the backend route hostname starts with "backend-".
+func ExtractOpenShiftBackendURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, "backend-")
 }
 
 // ExtractSimilarityAPIURL extracts the similarity-api URL from 'application info' output.
@@ -481,8 +496,39 @@ func ExtractCatalogSummarizeURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcSummarizeAPI)
 }
 
+// getOpenShiftRouteURLs fetches OpenShift routes for the given application namespace
+// via 'oc get routes' and returns the HTTPS URLs found in the output.
+// This is the fallback for OpenShift when 'application info' does not embed URLs.
+func getOpenShiftRouteURLs(appName string) []string {
+	out, err := common.RunCommand("oc", "get", "routes", "-n", appName,
+		"-o", `jsonpath={range .items[*]}{.spec.host}{"\n"}{end}`)
+	if err != nil {
+		// Fall back to plain text output if jsonpath fails.
+		out, err = common.RunCommand("oc", "get", "routes", "-n", appName)
+		if err != nil {
+			logger.Warningf("[WAIT] oc get routes -n %s failed: %v", appName, err)
+
+			return nil
+		}
+
+		return ExtractURLsFromOutput(out)
+	}
+
+	var urls []string
+	for _, host := range strings.Split(strings.TrimSpace(out), "\n") {
+		host = strings.TrimSpace(host)
+		if host != "" {
+			urls = append(urls, "https://"+host)
+		}
+	}
+
+	return urls
+}
+
 // WaitForApplicationInfoURLs polls 'application info' until service URLs are present.
-// For podman requires both chat-bot-backend and similarity-api; for openshift any URL suffices.
+// For podman requires both chat-bot-backend and similarity-api; for openshift any URL
+// suffices — when 'application info' produces no URLs (legacy output format) it falls
+// back to 'oc get routes' to resolve them directly from the cluster.
 func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName, appRuntime string, maxWait, pollInterval time.Duration) (string, error) {
 	deadline := time.Now().Add(maxWait)
 	attempt := 0
@@ -499,6 +545,7 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 		}
 
 		if appRuntime == "podman" {
+			// Podman catalog path: require both chat-bot-backend and similarity-api URLs.
 			backendURL, _ := extractCatalogRAGURLs(infoOutput)
 			similarityURL := ExtractSimilarityAPIURL(infoOutput)
 			if backendURL != "" && similarityURL != "" {
@@ -508,8 +555,20 @@ func WaitForApplicationInfoURLs(ctx context.Context, cfg *config.Config, appName
 				return infoOutput, nil
 			}
 		} else {
+			// OpenShift path: any URL in 'application info' output suffices.
 			if len(ExtractURLsFromOutput(infoOutput)) > 0 {
 				return infoOutput, nil
+			}
+
+			// Legacy OpenShift: 'application info' does not embed URLs — fall back to
+			// 'oc get routes' and synthesise a fake info output containing the URLs so
+			// callers (GetBaseURL, ExtractDigitizeURL, etc.) can parse them normally.
+			ocURLs := getOpenShiftRouteURLs(appName)
+			if len(ocURLs) > 0 {
+				logger.Infof("[WAIT] OpenShift routes resolved via 'oc get routes' after %d attempt(s): %v",
+					attempt, ocURLs)
+
+				return strings.Join(ocURLs, "\n"), nil
 			}
 		}
 
@@ -1277,10 +1336,19 @@ func CatalogConfigureResetCert(ctx context.Context, cfg *config.Config, certPath
 }
 
 // CatalogConfigureResetAuth runs 'catalog configure --reset-podman-auth'.
+// The command presents an interactive huh.NewConfirm() prompt; a PTY with "y\n"
+// is required to auto-confirm it — plain exec.Cmd with no PTY would hang until
+// the context deadline kills the process.
 func CatalogConfigureResetAuth(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	return runCLI(ctx, cfg, "catalog configure --reset-podman-auth",
-		"catalog", "configure", "--reset-podman-auth", "--runtime", appRuntime,
-	)
+	args := []string{"catalog", "configure", "--reset-podman-auth", "--runtime", appRuntime}
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
+
+	output, err := runWithPTY(ctx, cfg.AIServiceBin, args, "y\n")
+	if err != nil {
+		return output, fmt.Errorf("catalog configure --reset-podman-auth failed: %w\n%s", err, output)
+	}
+
+	return output, nil
 }
 
 // CatalogConfigureWithArgs runs 'catalog configure' with arbitrary extra args for negative / flag-combo tests.

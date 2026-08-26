@@ -8,10 +8,14 @@ import {
 import { COMPONENT_TYPES } from "@/constants";
 
 /**
- * Custom hook to fetch and cache service deploy options, LLM models, and component models
- * Uses Zustand store to cache data per service and avoid redundant API calls
+ * Custom hook to fetch and cache service deploy options, LLM models, and component models.
+ * Uses Zustand store to cache data per service and avoid redundant API calls.
+ * On reopen, retries only errored models
  */
-export const useServiceDeployOptions = (serviceId: string | null) => {
+export const useServiceDeployOptions = (
+  serviceId: string | null,
+  open: boolean,
+) => {
   const {
     getServiceDeployOptions,
     setServiceDeployOptions,
@@ -24,7 +28,7 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
     setProviderSchema,
   } = useServiceDeployStore();
 
-  const hasFetched = useRef<Record<string, boolean>>({});
+  const hasFetchedOptions = useRef<Record<string, boolean>>({});
 
   // Get cached data for this service
   const deployOptions = serviceId ? getServiceDeployOptions(serviceId) : null;
@@ -56,16 +60,20 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
   const shouldBeLoading =
     serviceId && !deployOptions && !deployOptionsError && !deployOptionsLoading;
 
+  // Fetch deploy options (and all component models) when not yet cached.
+  // On reopen, retries only errored models without re-fetching deploy options.
   useEffect(() => {
-    if (!serviceId) return;
+    if (!open || !serviceId) return;
 
-    // Only fetch if we don't have cached data and we haven't already started fetching
+    const storeState = useServiceDeployStore.getState();
+
+    // --- Path A: deploy options not cached yet — full fetch ---
     if (
       !deployOptions &&
-      !hasFetched.current[serviceId] &&
+      !hasFetchedOptions.current[serviceId] &&
       !deployOptionsLoading
     ) {
-      hasFetched.current[serviceId] = true;
+      hasFetchedOptions.current[serviceId] = true;
       setServiceDeployOptionsLoading(serviceId, true);
       setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, true);
       setServiceDeployOptionsError(serviceId, null);
@@ -162,11 +170,59 @@ export const useServiceDeployOptions = (serviceId: string | null) => {
           setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, errorMessage);
         })
         .finally(() => {
-          setServiceDeployOptionsLoading(serviceId, false);
-          hasFetched.current[serviceId] = false;
+          hasFetchedOptions.current[serviceId] = false;
+        });
+
+      return;
+    }
+
+    // --- Path B: deploy options cached — retry only errored models on reopen ---
+    if (!deployOptions) return;
+
+    const llmError = storeState.componentModelsError[`${serviceId}:llm`];
+    if (llmError) {
+      setComponentModelsError(serviceId, "llm", null);
+      setComponentModelsLoading(serviceId, "llm", true);
+      fetchLLMOptionsWithModels(serviceId, setProviderSchema, deployOptions)
+        .then((llmData) => setComponentModels(serviceId, "llm", llmData))
+        .catch((err) => {
+          setComponentModelsError(
+            serviceId,
+            "llm",
+            err instanceof Error ? err.message : "Failed to load LLM models",
+          );
         });
     }
+
+    const step1Components =
+      deployOptions.components?.filter(
+        (c) => !["llm", "reranker"].includes(c.type) && c.providers.length > 0,
+      ) ?? [];
+    step1Components.forEach((component) => {
+      const err =
+        storeState.componentModelsError[`${serviceId}:${component.type}`];
+      if (!err) return;
+      setComponentModelsError(serviceId, component.type, null);
+      setComponentModelsLoading(serviceId, component.type, true);
+      fetchComponentModelsWithSchemas(
+        serviceId,
+        component.type,
+        setProviderSchema,
+        deployOptions,
+      )
+        .then((models) => setComponentModels(serviceId, component.type, models))
+        .catch((retryErr) => {
+          setComponentModelsError(
+            serviceId,
+            component.type,
+            retryErr instanceof Error
+              ? retryErr.message
+              : `Failed to load ${component.type} models`,
+          );
+        });
+    });
   }, [
+    open,
     serviceId,
     deployOptions,
     deployOptionsLoading,
