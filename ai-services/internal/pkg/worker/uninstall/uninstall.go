@@ -37,7 +37,7 @@ func Uninstall(ctx context.Context, opts Options) error {
 		return fmt.Errorf("worker uninstall: init runtime: %w", err)
 	}
 
-	pods, err := rt.ListPods(map[string][]string{
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {workerconstants.WorkerProxyLabel},
 	})
 	if err != nil {
@@ -76,7 +76,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 
 	var baseDir string
 
-	config, err := getWorkerCaddyPodConfig(rt, pods[0].ID)
+	config, err := getWorkerCaddyPodConfig(ctx, rt, pods[0].ID)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()
@@ -98,8 +98,8 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 // getWorkerCaddyPodConfig retrieves worker Caddy pod configuration by inspecting
 // the running pod and its containers. It extracts the AI_SERVICES_BASE_DIR
 // environment variable injected by caddy.yaml.tmpl at deploy time.
-func getWorkerCaddyPodConfig(rt runtime.Runtime, podID string) (*WorkerCaddyConfig, error) {
-	pInfo, err := rt.InspectPod(podID)
+func getWorkerCaddyPodConfig(ctx context.Context, rt runtime.Runtime, podID string) (*WorkerCaddyConfig, error) {
+	pInfo, err := rt.InspectPod(ctx, podID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect pod %s: %w", podID, err)
 	}
@@ -107,7 +107,7 @@ func getWorkerCaddyPodConfig(rt runtime.Runtime, podID string) (*WorkerCaddyConf
 	config := &WorkerCaddyConfig{}
 
 	for _, container := range pInfo.Containers {
-		cInfo, err := rt.InspectContainer(container.ID)
+		cInfo, err := rt.InspectContainer(ctx, container.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}
@@ -157,7 +157,7 @@ func deletePods(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error
 	for _, p := range pods {
 		logger.InfofCtx(ctx, "Deleting pod: %s\n", p.Name)
 
-		if err := rt.DeletePod(p.ID, utils.BoolPtr(true)); err != nil {
+		if err := rt.DeletePod(ctx, p.ID, utils.BoolPtr(true)); err != nil {
 			errs = append(errs, fmt.Sprintf("pod %s: %v", p.Name, err))
 
 			continue

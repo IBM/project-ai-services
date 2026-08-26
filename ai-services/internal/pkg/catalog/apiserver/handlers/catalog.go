@@ -281,7 +281,7 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 	connectorType := c.Param("connector_type")
 	providerID := c.Param("provider_id")
 
-	schema, err := h.provider.GetConnectorProviderParams(c.Request.Context(), connectorType, providerID)
+	raw, err := h.provider.GetConnectorProviderParams(c.Request.Context(), connectorType, providerID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", connectorType, providerID, err),
@@ -290,7 +290,8 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, schema)
+	// Write the raw JSON bytes directly so the property order defined in schema.json is preserved.
+	c.Data(http.StatusOK, "application/json; charset=utf-8", raw)
 }
 
 // GetServiceParams godoc

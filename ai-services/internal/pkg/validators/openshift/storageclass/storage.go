@@ -29,9 +29,7 @@ func (r *StorageClassRule) Description() string {
 }
 
 // Verify checks if a default StorageClass exists.
-func (r *StorageClassRule) Verify() error {
-	ctx := context.Background()
-
+func (r *StorageClassRule) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)

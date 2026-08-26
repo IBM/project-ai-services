@@ -1,7 +1,6 @@
 package application
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,7 +84,7 @@ Note:
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
-		ctx := context.Background()
+		ctx := cmd.Context()
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		logger.Infof("Runtime: %s\n", rt)

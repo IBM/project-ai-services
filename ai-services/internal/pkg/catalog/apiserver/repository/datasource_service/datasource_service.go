@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -29,6 +32,7 @@ type ValidationError = validators.ValidationError
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
+	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
 	encryptionKey   string
@@ -42,12 +46,14 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
+		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
@@ -61,7 +67,7 @@ func NewDatasourceService(
 // CreateDatasource is the single create flow shared by all providers:
 //
 //  1. Validate the request body (provider existence + JSON-schema param validation).
-//  2. Duplicate-name guard (case-insensitive).
+//  2. Duplicate-name guard (case-insensitive — handled by LOWER() in the DB query).
 //  3. Test the connection — the outcome sets the initial connector status.
 //  4. Encrypt sensitive credential fields derived from the provider's schema.json.
 //  5. Persist the connector record.
@@ -102,9 +108,14 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
-	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
 	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
@@ -127,6 +138,89 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	return &apimodels.CreateDatasourceResponse{ID: connector.ID.String()}, nil
+}
+
+// ListDatasources returns a paginated list of datasource connectors, optionally filtered
+// by status and provider. Pagination mirrors the application and bundle list patterns:
+// uses repository.ConnectorFilters with Limit/Offset derived from Page/PageSize.
+func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error) {
+	filters := &dbrepo.ConnectorFilters{
+		Type:     catalogconstants.ConnectorTypeDatasource,
+		Status:   dbmodels.ConnectorStatus(req.Status),
+		Provider: req.Provider,
+		Limit:    req.PageSize,
+		Offset:   (req.Page - 1) * req.PageSize,
+	}
+
+	totalCount, err := s.connectorRepo.GetCount(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count datasources: %w", err)
+	}
+
+	connectors, err := s.connectorRepo.List(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list datasources: %w", err)
+	}
+
+	// Collect connector IDs so connected-service counts can be fetched in one query.
+	connectorIDs := make([]uuid.UUID, len(connectors))
+	for i := range connectors {
+		connectorIDs[i] = connectors[i].ID
+	}
+
+	serviceCounts, err := s.svcDepRepo.GetServiceCountByDependency(ctx, connectorIDs, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count connected services: %w", err)
+	}
+
+	data := make([]apimodels.DatasourceResponse, 0, len(connectors))
+	for i := range connectors {
+		data = append(data, *s.connectorToResponse(&connectors[i], serviceCounts[connectors[i].ID]))
+	}
+
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
+	}
+
+	return &apimodels.DatasourceListResponse{
+		Data: data,
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			TotalItems: totalCount,
+			TotalPages: totalPages,
+			HasNext:    req.Page < totalPages,
+			HasPrev:    req.Page > 1,
+		},
+	}, nil
+}
+
+// connectorToResponse converts a DB Connector model to a DatasourceResponse API model.
+// The provider name is resolved from the catalog; if unavailable (e.g. provider removed from
+// catalog), the name falls back to the stored provider ID so the response is never incomplete.
+// connectedServices is passed in directly from the List query's COUNT projection; callers
+// that do not have this value (GetByID) pass 0.
+func (s *DatasourceService) connectorToResponse(c *dbmodels.Connector, connectedServices int) *apimodels.DatasourceResponse {
+	providerName := c.Provider
+	if catalogConnector, err := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, c.Provider); err == nil {
+		providerName = catalogConnector.Name
+	}
+
+	return &apimodels.DatasourceResponse{
+		ID:   c.ID.String(),
+		Name: c.Name,
+		Type: c.Type,
+		Provider: apimodels.DatasourceProviderInfo{
+			ID:   c.Provider,
+			Name: providerName,
+		},
+		Status:            string(c.Status),
+		Message:           c.Message,
+		ConnectedServices: connectedServices,
+		CreatedAt:         c.CreatedAt.Format(catalogconstants.RFC3339WithTimezone),
+		UpdatedAt:         c.UpdatedAt.Format(catalogconstants.RFC3339WithTimezone),
+	}
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in

@@ -1,6 +1,7 @@
 package rhn
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -23,7 +24,7 @@ func (r *RHNRule) Description() string {
 	return "Validates that the system is registered with Red Hat Network (RHN)."
 }
 
-func (r *RHNRule) Verify() error {
+func (r *RHNRule) Verify(_ context.Context) error {
 	logger.Debugln("Validating RHN registration...")
 	cmd := exec.Command("dnf", "repolist")
 	output, err := cmd.CombinedOutput()

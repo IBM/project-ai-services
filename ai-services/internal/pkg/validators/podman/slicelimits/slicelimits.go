@@ -1,6 +1,7 @@
 package slicelimits
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,7 +27,7 @@ func (r *SliceLimitsRule) Description() string {
 	return "Validates that systemd user slice limits are configured for rootless podman."
 }
 
-func (r *SliceLimitsRule) Verify() error {
+func (r *SliceLimitsRule) Verify(_ context.Context) error {
 	logger.Debugln("Validating systemd user slice limits")
 
 	sudoUser := os.Getenv("SUDO_USER")

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,8 +10,8 @@ import (
 )
 
 // GetCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func GetCaddyAdminPort(rt runtime.Runtime, podName string) (string, error) {
-	pod, err := rt.InspectPod(podName)
+func GetCaddyAdminPort(ctx context.Context, rt runtime.Runtime, podName string) (string, error) {
+	pod, err := rt.InspectPod(ctx, podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
