@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     -- link back to the digitize job that owns this task
     job_id          VARCHAR(255)    REFERENCES jobs(job_id) ON DELETE SET NULL,
     doc_id          VARCHAR(255),                           -- informational; no FK
+    connector_id    VARCHAR(255),                           -- NULL for user jobs; connector UUID for connector jobs
     operation       VARCHAR(50)     NOT NULL,
     -- input
     cached_file     TEXT            NOT NULL,               -- absolute path at enqueue time
@@ -135,6 +136,10 @@ CREATE INDEX IF NOT EXISTS idx_ct_status_op_queued
 -- Supports get_conversion_task_by_job_id — avoids full-table scans on poll
 CREATE INDEX IF NOT EXISTS idx_ct_job_id
     ON conversion_tasks (job_id);
+
+-- Supports dispatcher connector round-robin pick (turn 2: queued tasks per connector)
+CREATE INDEX IF NOT EXISTS idx_ct_connector_queued
+    ON conversion_tasks (connector_id, status, queued_at);
 
 -- Create indexes with IF NOT EXISTS
 CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);

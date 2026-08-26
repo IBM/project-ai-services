@@ -41,7 +41,6 @@ from pydantic import ValidationError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
 from digitize.connectors.scanners.scanner_factory import build_scanner
-from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
 from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
@@ -60,7 +59,12 @@ from digitize.utils.db import (
     update_sync_log,
 )
 from digitize.db.models import JobSource
-from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
+from digitize.utils.jobs import (
+    enqueue_conversion_tasks,
+    generate_uuid,
+    get_job_document_stats,
+    initialize_job_state,
+)
 
 logger = get_logger("sync_tick")
 
@@ -407,7 +411,19 @@ async def _process_new_files(
                 if filename in filename_to_checksum
             }
 
-            await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
+            # Enqueue all files into conversion_tasks as 'queued' (connector path —
+            # no pending phase, no quota). The dispatcher's C-ING turn picks them up.
+            await enqueue_conversion_tasks(
+                job_id=job_id,
+                op_key=OperationType.INGESTION,
+                filenames=filenames,
+                doc_id_dict=doc_id_dict,
+                staging_dir=batch_dir,
+                output_format=OutputFormat.JSON,
+                quota=0,          # unused for connector tasks
+                queued_for_op=0,  # unused for connector tasks
+                connector_id=connector_id,
+            )
 
             await _wait_for_job(job_id, connector_id, sync_seq)
 

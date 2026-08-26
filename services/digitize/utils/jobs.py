@@ -204,6 +204,7 @@ async def enqueue_conversion_tasks(
     output_format: OutputFormat,
     quota: int,
     queued_for_op: int,
+    connector_id: Optional[str] = None,
 ) -> None:
     """
     Insert conversion_tasks rows for every file in the job in a single
@@ -217,8 +218,13 @@ async def enqueue_conversion_tasks(
     The batch insert is atomic: if any row fails the entire set is rolled
     back, leaving no partial state for the caller to reason about.
 
-    Slots up to the free quota are inserted as ``queued``; the rest as
-    ``pending`` (the dispatcher will promote them as capacity frees up).
+    For user jobs (connector_id=None): slots up to the free quota are
+    inserted as ``queued``; the rest as ``pending`` (promoted by the
+    dispatcher as capacity frees up).
+
+    For connector jobs (connector_id set): all tasks are inserted directly
+    as ``queued`` — connector tasks have no pending phase. The _BATCH_SIZE
+    cap in sync_tick controls how many tasks are enqueued per batch.
 
     Args:
         job_id:        Job identifier.
@@ -227,8 +233,9 @@ async def enqueue_conversion_tasks(
         doc_id_dict:   Mapping of filename → document ID.
         staging_dir:   Path to the job's staging directory.
         output_format: Requested output format.
-        quota:         Per-operation queue quota from settings.
-        queued_for_op: Number of tasks already queued for this operation.
+        quota:         Per-operation queue quota from settings (user jobs only).
+        queued_for_op: Number of tasks already queued for this operation (user jobs only).
+        connector_id:  Owning connector UUID; None for user-submitted jobs.
     """
     from digitize.db.manager import db_manager
 
@@ -241,11 +248,18 @@ async def enqueue_conversion_tasks(
         file_path = staging_dir / filename
         page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
         is_large = page_count >= settings.digitize.heavy_doc_page_threshold
-        task_status = ConversionTaskStatus.QUEUED if idx < slots_free else ConversionTaskStatus.PENDING
+        # Connector tasks are always queued directly — no pending phase.
+        # User tasks respect the quota: slots_free queued, remainder pending.
+        task_status = (
+            ConversionTaskStatus.QUEUED
+            if (connector_id is not None or idx < slots_free)
+            else ConversionTaskStatus.PENDING
+        )
         tasks.append({
             "task_id":       task_id,
             "job_id":        job_id,
             "doc_id":        doc_id,
+            "connector_id":  connector_id,
             "operation":     op_key,
             "cached_file":   str(file_path),
             "output_format": output_format.value,
@@ -255,7 +269,7 @@ async def enqueue_conversion_tasks(
         })
         logger.debug(
             f"Prepared task {task_id} for {filename} "
-            f"(op={op_key}, status={task_status}, large={is_large})"
+            f"(op={op_key}, status={task_status}, large={is_large}, connector={connector_id})"
         )
 
     db_manager.create_conversion_tasks_batch(tasks)
