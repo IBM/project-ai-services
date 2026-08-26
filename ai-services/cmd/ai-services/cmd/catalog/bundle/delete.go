@@ -48,7 +48,7 @@ Note:
 				}
 			}
 
-			c, err := client.NewBundleClient()
+			c, err := client.NewBundleClient(ctx)
 			if err != nil {
 				return err
 			}

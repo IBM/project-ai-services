@@ -39,7 +39,7 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			c, err := client.NewBundleClient()
+			c, err := client.NewBundleClient(ctx)
 			if err != nil {
 				return err
 			}

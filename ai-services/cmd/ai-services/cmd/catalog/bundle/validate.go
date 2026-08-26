@@ -25,7 +25,7 @@ The command exits with a non-zero status if validation fails.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			c, err := client.NewBundleClient()
+			c, err := client.NewBundleClient(ctx)
 			if err != nil {
 				return err
 			}

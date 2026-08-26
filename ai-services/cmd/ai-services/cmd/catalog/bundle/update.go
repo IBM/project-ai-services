@@ -32,7 +32,7 @@ Note:
 			ctx := cmd.Context()
 			bundleID := args[0]
 
-			c, err := client.NewBundleClient()
+			c, err := client.NewBundleClient(ctx)
 			if err != nil {
 				return err
 			}

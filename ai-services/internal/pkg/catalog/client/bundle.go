@@ -65,8 +65,8 @@ type BundleClient struct {
 }
 
 // NewBundleClient creates a new BundleClient using stored credentials.
-func NewBundleClient() (*BundleClient, error) {
-	c, err := New()
+func NewBundleClient(ctx context.Context) (*BundleClient, error) {
+	c, err := New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize client: %w", err)
 	}
