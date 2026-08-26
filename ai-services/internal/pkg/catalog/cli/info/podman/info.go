@@ -77,7 +77,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 // This orchestrates: deployContext gets pod name and route info from templates,
 // caddy.Context queries Caddy for route domains and HTTPS port.
-func GetCatalogRouteInfo(ctx context.Context, rt *rt.PodmanClient) (map[string]string, string, error) { //nolint:revive
+func GetCatalogRouteInfo(ctx context.Context, runtime *rt.PodmanClient) (map[string]string, string, error) {
 	// Create deployment context to access templates
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
@@ -100,7 +100,7 @@ func GetCatalogRouteInfo(ctx context.Context, rt *rt.PodmanClient) (map[string]s
 	caddyCtx := caddy.NewContext(caddyPodName, "")
 
 	// Use caddy package to get route info
-	return caddy.GetCatalogRouteInfo(ctx, caddyCtx, rt, routeInfos)
+	return caddy.GetCatalogRouteInfo(ctx, caddyCtx, runtime, routeInfos)
 }
 
 // Made with Bob
