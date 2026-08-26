@@ -8,7 +8,6 @@ import (
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"helm.sh/helm/v4/pkg/chart/common"
 	chartcommonutil "helm.sh/helm/v4/pkg/chart/common/util"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
@@ -88,15 +87,16 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 // carries the raw bytes of openshift/metadata.yaml for semantic validation, and
 // accumulates the []*archive.BufferedFile slice used by Helm loading — all
 // collected in a single archive scan.
+// hasSchema is derived from schemaBytes; hasTemplFile cannot be derived from
+// bufferedFiles (which holds all files) so it is kept as an explicit flag.
 type openShiftPaths struct {
 	runtimeDirSeen bool // set on the first entry under openshift/
 	hasMetadata    bool
 	hasChart       bool
 	hasValues      bool
-	hasSchema      bool
 	hasTemplFile   bool
 	metadataBytes  []byte                  // raw content of openshift/metadata.yaml
-	schemaBytes    []byte                  // raw content of openshift/values.schema.json
+	schemaBytes    []byte                  // raw content of openshift/values.schema.json; non-nil means present
 	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
 }
 
@@ -137,7 +137,6 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 	case sub == "values.yaml":
 		found.hasValues = true
 	case sub == "values.schema.json":
-		found.hasSchema = true
 		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml"):
 		found.hasTemplFile = true
@@ -175,7 +174,7 @@ func collectMissingOpenShiftFiles(found *openShiftPaths) []string {
 	if !found.hasValues {
 		missing = append(missing, "openshift/values.yaml")
 	}
-	if !found.hasSchema {
+	if found.schemaBytes == nil {
 		missing = append(missing, "openshift/values.schema.json")
 	}
 	if !found.hasTemplFile {
@@ -255,10 +254,10 @@ func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion, metaVersi
 	return checkOpenShiftTemplateLabels(rendered)
 }
 
-// checkOpenShiftTemplateLabels walks every rendered template YAML and verifies
-// that each resource carries the constants.ApplicationTemplateKey label with a
-// non-empty value. Because Helm renders {{ .Chart.Name }} to the real chart
-// name, the value is always non-empty for well-formed bundles.
+// checkOpenShiftTemplateLabels walks every rendered template YAML and delegates
+// the required-field checks to the shared checkTemplateSpec helper.
+// requireLabelValue is true because Helm renders {{ .Chart.Name }} to a real
+// non-empty string, so an empty value here means the label is genuinely absent.
 func checkOpenShiftTemplateLabels(rendered map[string]string) error {
 	for file, content := range rendered {
 		// Skip NOTES.txt and any non-YAML output Helm may emit.
@@ -269,24 +268,14 @@ func checkOpenShiftTemplateLabels(rendered map[string]string) error {
 		var doc map[string]any
 		if err := k8syaml.Unmarshal([]byte(content), &doc); err != nil {
 			// Helm already validated the render; an unmarshal failure here is
-			// unexpected but not fatal for label checking — skip the file.
+			// unexpected but not fatal for spec checking — skip the file.
 			continue
 		}
 
-		meta, _ := doc["metadata"].(map[string]any)
-		labels, _ := meta["labels"].(map[string]any)
-		if v, _ := labels[constants.ApplicationTemplateKey].(string); strings.TrimSpace(v) == "" {
-			// Use only the base filename in the error to avoid the
-			// "chartname/templates/" prefix that Helm prepends.
-			base := file[strings.LastIndex(file, "/")+1:]
-
-			return &validators.ValidationError{
-				Code: http.StatusUnprocessableEntity,
-				Message: fmt.Sprintf(
-					"openshift/templates/%s: missing required label %q",
-					base, constants.ApplicationTemplateKey,
-				),
-			}
+		// Use only the base filename to avoid the "chartname/templates/" prefix.
+		base := file[strings.LastIndex(file, "/")+1:]
+		if err := checkTemplateSpec(doc, openShiftRuntime+"/templates", base, true); err != nil {
+			return err
 		}
 	}
 

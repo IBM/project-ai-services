@@ -10,7 +10,6 @@ import (
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -67,15 +66,15 @@ func (v *PodmanBundleValidator) Validate(archiveBytes []byte, topDir, rootVersio
 
 // podmanPaths tracks the presence of files required by the Podman layout and
 // carries the raw bytes of files needed for semantic validation.
+// hasSchema and hasTemplFile are derived from schemaBytes and templFiles respectively,
+// so they are not stored separately.
 type podmanPaths struct {
 	runtimeDirSeen bool // set on the first entry under podman/
 	hasMetadata    bool
 	hasValues      bool
-	hasSchema      bool
-	hasTemplFile   bool
 	metadataBytes  []byte            // raw content of podman/metadata.yaml
-	schemaBytes    []byte            // raw content of podman/values.schema.json
-	templFiles     map[string][]byte // name → raw content of each templates/*.yaml.tmpl
+	schemaBytes    []byte            // raw content of podman/values.schema.json; non-nil means present
+	templFiles     map[string][]byte // name → raw content of each templates/*.yaml.tmpl; non-empty means present
 }
 
 // collectPodmanPaths walks the archive once, records which required Podman paths
@@ -112,10 +111,8 @@ func (found *podmanPaths) recordEntry(sub string, hdr *tar.Header, content []byt
 	case sub == "values.yaml":
 		found.hasValues = true
 	case sub == "values.schema.json":
-		found.hasSchema = true
 		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml.tmpl"):
-		found.hasTemplFile = true
 		if found.templFiles == nil {
 			found.templFiles = make(map[string][]byte)
 		}
@@ -149,10 +146,10 @@ func collectMissingPodmanFiles(found *podmanPaths) []string {
 	if !found.hasValues {
 		missing = append(missing, "podman/values.yaml")
 	}
-	if !found.hasSchema {
+	if found.schemaBytes == nil {
 		missing = append(missing, "podman/values.schema.json")
 	}
-	if !found.hasTemplFile {
+	if len(found.templFiles) == 0 {
 		missing = append(missing, "podman/templates/*.yaml.tmpl (at least one)")
 	}
 
@@ -192,57 +189,8 @@ func validatePodmanTemplates(templFiles map[string][]byte) error {
 			}
 		}
 
-		if err := checkPodmanTemplateSpec(doc, path); err != nil {
+		if err := checkTemplateSpec(doc, podmanRuntime, path, false); err != nil {
 			return err
-		}
-	}
-
-	return nil
-}
-
-// checkPodmanTemplateSpec verifies that the rendered template document has the
-// required fields every ai-services Podman pod spec must declare.
-//
-// Required top-level fields:
-//   - apiVersion  (non-blank string)
-//   - kind        (non-blank string)
-//
-// Required metadata fields:
-//   - metadata.name                                        (non-blank string)
-//   - metadata.labels[constants.ApplicationTemplateKey]   (key must be present;
-//     the value is a runtime expression so it is not checked here)
-func checkPodmanTemplateSpec(doc map[string]any, path string) error {
-	var missing []string
-
-	if v, _ := doc["apiVersion"].(string); strings.TrimSpace(v) == "" {
-		missing = append(missing, "apiVersion")
-	}
-	if v, _ := doc["kind"].(string); strings.TrimSpace(v) == "" {
-		missing = append(missing, "kind")
-	}
-
-	templateLabelEntry := fmt.Sprintf("metadata.labels[%q]", constants.ApplicationTemplateKey)
-	meta, _ := doc["metadata"].(map[string]any)
-	if meta == nil {
-		missing = append(missing, "metadata.name")
-		missing = append(missing, templateLabelEntry)
-	} else {
-		if v, _ := meta["name"].(string); strings.TrimSpace(v) == "" {
-			missing = append(missing, "metadata.name")
-		}
-		labels, _ := meta["labels"].(map[string]any)
-		if _, ok := labels[constants.ApplicationTemplateKey]; !ok {
-			missing = append(missing, templateLabelEntry)
-		}
-	}
-
-	if len(missing) > 0 {
-		return &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"podman/%s: missing required Kubernetes spec field(s): %s",
-				path, strings.Join(missing, ", "),
-			),
 		}
 	}
 
