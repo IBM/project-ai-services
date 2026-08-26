@@ -398,6 +398,27 @@ export type DeploymentPayload =
 
 export type ConnectorStatus = "Connected" | "Offline";
 
+export type WorkerStatus = "pending" | "ready" | "disconnected";
+export type WorkerRuntimeType = "unknown" | "podman" | "openshift";
+
+export interface WorkerApiResponse {
+  id: string;
+  name: string;
+  status: WorkerStatus;
+  runtime_type: WorkerRuntimeType;
+  last_heartbeat: string;
+  registered_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkerListResponse {
+  data: WorkerApiResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface ConnectorProvider {
   id: string;
   name: string;

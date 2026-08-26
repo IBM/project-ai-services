@@ -52,6 +52,10 @@ const Navbar = (props: NavbarProps) => {
             Connectors
           </SideNavMenuItem>
 
+          <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
+            Worker Resources
+          </SideNavMenuItem>
+
           <SideNavDivider />
 
           <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>
