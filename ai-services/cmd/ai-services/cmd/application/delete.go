@@ -202,8 +202,12 @@ func waitForApplicationDeletion(ctx context.Context, appClient *catalogClient.Ap
 			// Application still exists, continue polling
 		}
 
-		// Wait before next poll
-		time.Sleep(pollInterval)
+		// Wait before next poll, but honour context cancellation
+		select {
+		case <-time.After(pollInterval):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	return fmt.Errorf("timeout waiting for application deletion after %v", maxAttempts*pollInterval)
