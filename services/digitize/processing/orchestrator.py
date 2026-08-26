@@ -449,15 +449,15 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
         except Exception as e:
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
 
-        table_count, process_time = process_table(
+        table_count, process_time, table_failures = process_table(
             converted_doc, doc_path, processed_table_json_path, gen_model, gen_endpoint, document_language
         )
         timings["process_tables"] = process_time
 
-        return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language
+        return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language, table_failures
     except Exception as e:
         logger.error(f"Error processing converted document: {doc_path}. Details: {e}", exc_info=True)
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
 
 
 def clean_intermediate_files(doc_id, out_path):
@@ -624,7 +624,7 @@ def process_documents(
                 path = process_futures.pop(fut)
                 doc_id = doc_id_dict.get(Path(path).name)
                 try:
-                    txt_json, tab_json, pgs, tabs, timings, doc_lang = fut.result()
+                    txt_json, tab_json, pgs, tabs, timings, doc_lang, table_failures = fut.result()
 
                     if not txt_json or not tab_json:
                         if doc_id is not None:
@@ -654,12 +654,42 @@ def process_documents(
                             f"Processing Done: updating doc & job metadata "
                             f"for document: {doc_id}"
                         )
+                        
+                        # Check if table summarization failures occurred
+                        if table_failures:
+                            # Mark document as FAILED if any table summarization failed
+                            error_msg = f"Table summarization failed for {len(table_failures)} table(s)"
+                            logger.error(f"Document {doc_id}: {error_msg}")
+                            
+                            metadata_update = {
+                                "status": DocStatus.FAILED,
+                                "pages": pgs,
+                                "tables": tabs,
+                                "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
+                                "table_summarization_failures": {
+                                    "count": len(table_failures),
+                                    "details": table_failures
+                                }
+                            }
+                            
+                            status_mgr.update_doc_metadata(doc_id, metadata_update, error=error_msg)
+                            status_mgr.update_job_progress(
+                                doc_id=doc_id,
+                                doc_status=DocStatus.FAILED,
+                                job_status=JobStatus.IN_PROGRESS,
+                                error=error_msg
+                            )
+                            converted_pdf_stats.pop(path, {})
+                            continue
+                        
+                        # No failures - mark as PROCESSED
                         status_mgr.update_doc_metadata(doc_id, {
                             "status": DocStatus.PROCESSED,
                             "pages": pgs,
                             "tables": tabs,
                             "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
                         })
+                        
                         status_mgr.update_job_progress(
                             doc_id, DocStatus.PROCESSED, JobStatus.IN_PROGRESS
                         )

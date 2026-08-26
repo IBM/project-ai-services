@@ -1,6 +1,7 @@
 import logging
 import os
 import requests
+import threading
 import time
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,13 +56,17 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024, cancel_event=None):
     """Combined function to summarize and classify a table in a single LLM call.
 
     Returns tuple: (summary, decision).
+    Raises on failure so that the retry decorator and the caller can handle it.
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    if cancel_event is not None and cancel_event.is_set():
+        return "No summary.", False
 
     payload = {
         "model": gen_model,
@@ -115,32 +120,46 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
 
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
-        return "No summary.", False
+        raise
 
 def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
     """Combined function to summarize and classify tables using a single prompt.
 
-    Returns tuple: (summaries, decisions).
+    Returns tuple: (summaries, decisions, failures).
+    failures is a dict mapping table index to error message for failed tables.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
+    if not all_prompts:
+        return [], [], {}
+
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
+
+    cancel_event = threading.Event()
+    summaries: list[str] = []
+    decisions: list[bool] = []
+    failures: dict[int, str] = {}
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens, cancel_event): idx
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
                                    desc=f"Summarizing and classifying tables of '{doc_path}'"):
             idx = futures[future]
-            results[idx] = future.result()
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                error_msg = f"Failed to process table {idx}: {str(e)}"
+                logger.error(error_msg)
+                results[idx] = ("No summary.", False)
+                failures[idx] = error_msg
+                cancel_event.set()
+                break
 
     # Separate summaries and decisions with proper None handling
-    summaries: list[str] = []
-    decisions: list[bool] = []
-
-    for result in results:
+    for idx, result in enumerate(results):
         if result is not None:
             summary, decision = result
             summaries.append(summary)
@@ -149,8 +168,9 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             # Default values for failed futures
             summaries.append("No summary.")
             decisions.append(False)
+            failures[idx] = "Unknown error: result is None"
 
-    return summaries, decisions
+    return summaries, decisions, failures
 
 def get_vllm_headers(api_key: str | None = None):
     """Get headers for vLLM API calls, including auth if provided.

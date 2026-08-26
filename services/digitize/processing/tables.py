@@ -274,7 +274,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     if not converted_doc.tables:
         logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
-        return table_count, process_time
+        return table_count, process_time, {}
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
@@ -346,11 +346,17 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     )
 
     # Summarize and classify tables - use markdown directly
-    table_summaries, decisions = summarize_and_classify_tables(
+    table_summaries, decisions, failures = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,
         max_tokens=selected_max_tokens,
     )
+
+    # Log failures for visibility
+    if failures:
+        logger.warning(f"Table summarization failures for '{doc_path}': {len(failures)} table(s) failed")
+        for idx, error in failures.items():
+            logger.error(f"Table {idx} failed: {error}")
 
     filtered_table_dicts = {
         idx: {
@@ -367,4 +373,4 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
     process_time = time.time() - t0
 
-    return table_count, process_time
+    return table_count, process_time, failures
