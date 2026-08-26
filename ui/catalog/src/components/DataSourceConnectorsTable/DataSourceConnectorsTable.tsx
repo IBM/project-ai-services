@@ -1,4 +1,5 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useEffect } from "react";
+
 import {
   DataTable,
   Table,
@@ -41,7 +42,10 @@ import {
   fetchDataSourceConnectors,
   fetchAllDataSourceConnectors,
   transformConnectorToRow,
+  fetchConnectorTypes,
+  fetchConnectorParams,
 } from "@/api/connectors.api";
+import { useConnectorsStore } from "@/store/connectors.store";
 import styles from "./DataSourceConnectorsTable.module.scss";
 
 interface RenderCellProps {
@@ -92,6 +96,18 @@ const DataSourceConnectorsTable = ({
 }: DataSourceConnectorsTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
+  // Connector catalog prefetch — read store actions once, stable references
+  const {
+    isConnectorTypesStale,
+    setConnectorTypes,
+    setConnectorTypesLoading,
+    setConnectorTypesError,
+    isParamsStale,
+    setParams,
+    setParamsLoading,
+    setParamsError,
+  } = useConnectorsStore();
+
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
   pageRef.current = state.page;
@@ -132,6 +148,33 @@ const DataSourceConnectorsTable = ({
     },
     [],
   );
+
+  // Background prefetch — fires once after the connector list loads successfully.
+  useEffect(() => {
+    // Wait until the table has data (list loaded)
+    if (state.rowsData.length === 0) return;
+    // Skip if cache is still fresh
+    if (!isConnectorTypesStale()) return;
+
+    setConnectorTypesLoading(true);
+
+    fetchConnectorTypes()
+      .then((types) => {
+        setConnectorTypes(types);
+
+        // Prefetch params for each provider in parallel — skip any still fresh
+        types.forEach((type) => {
+          if (!isParamsStale(type.id)) return;
+          setParamsLoading(type.id, true);
+          fetchConnectorParams(type.id)
+            .then((schema) => setParams(type.id, schema))
+            .catch(() => setParamsError(type.id, "Failed to load params"));
+        });
+      })
+      .catch(() => setConnectorTypesError("Failed to load connector types"));
+    // Only re-run when rowsData goes from empty → populated (first successful load)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.rowsData.length]);
 
   // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
   useAutoRefresh({

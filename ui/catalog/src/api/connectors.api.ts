@@ -1,4 +1,10 @@
+import { api } from "@/api/axios";
+import { CONNECTORS_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
+  ConnectorParamsSchema,
+  ConnectorType,
+  CreateDatasourceRequest,
+  CreateDatasourceResponse,
   DataSourceConnectorApiResponse,
   DataSourceConnectorsListResponse,
 } from "@/types/api.types";
@@ -45,4 +51,45 @@ export async function fetchAllDataSourceConnectors(): Promise<
   const { default: mockData } =
     await import("@/pages/Connectors/datasource-connectors-mock-data.json");
   return mockData.data as DataSourceConnectorApiResponse[];
+}
+
+// ---------------------------------------------------------------------------
+// Fetch all datasource connector types
+// ---------------------------------------------------------------------------
+
+export async function fetchConnectorTypes(): Promise<ConnectorType[]> {
+  const res = await api.get<ConnectorType[]>(
+    CONNECTORS_ENDPOINTS.GET_CONNECTOR_TYPES,
+    {
+      params: { connector_type: "datasource" },
+    },
+  );
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch the JSON-Schema params for a specific connector provider
+// ---------------------------------------------------------------------------
+
+export async function fetchConnectorParams(
+  connectorId: string,
+): Promise<ConnectorParamsSchema> {
+  const res = await api.get<ConnectorParamsSchema>(
+    CONNECTORS_ENDPOINTS.GET_CONNECTOR_PARAMS(connectorId),
+  );
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Create a new datasource connector
+// ---------------------------------------------------------------------------
+
+export async function createDataSourceConnector(
+  payload: CreateDatasourceRequest,
+): Promise<CreateDatasourceResponse> {
+  const res = await api.post<CreateDatasourceResponse>(
+    CONNECTORS_ENDPOINTS.CREATE_DATASOURCE,
+    payload,
+  );
+  return res.data;
 }

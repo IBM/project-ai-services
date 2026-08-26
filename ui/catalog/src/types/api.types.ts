@@ -422,3 +422,51 @@ export interface DataSourceConnectorsListResponse {
   page: number;
   page_size: number;
 }
+
+/** Shape returned by GET /api/v1/connectors?connector_type=datasource */
+export interface ConnectorType {
+  type: string;
+  id: string;
+  name: string;
+  description: string;
+  connector_type: string;
+  connector_name: string;
+}
+
+/** A single property inside the JSON-Schema params response */
+export interface ParamProperty {
+  type?: string;
+  title?: string;
+  description?: string;
+  format?: string;
+  /** Present on array-type fields — defines allowed enum values */
+  items?: {
+    type?: string;
+    enum?: string[];
+  };
+  minItems?: number;
+  uniqueItems?: boolean;
+  /** Carbon UI extension — the section heading this field belongs to */
+  "ui:section"?: string;
+}
+
+/** Full response from GET /api/v1/connectors/datasource/providers/:id/params */
+export interface ConnectorParamsSchema {
+  $schema?: string;
+  type: string;
+  additionalProperties?: boolean;
+  properties: Record<string, ParamProperty>;
+  required?: string[];
+}
+
+/** POST /datasources — request body */
+export interface CreateDatasourceRequest {
+  name: string;
+  provider_id: string;
+  params: Record<string, string | string[]>;
+}
+
+/** POST /datasources — response body */
+export interface CreateDatasourceResponse {
+  id: string;
+}
