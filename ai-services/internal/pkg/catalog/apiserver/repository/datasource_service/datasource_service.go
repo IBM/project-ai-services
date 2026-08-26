@@ -170,7 +170,7 @@ func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) 
 	// guard above, rely on the database foreign key constraint and translate it to 409.
 	if err := s.connectorRepo.Delete(ctx, id); err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		if errors.As(err, &pgErr) && pgErr.Code == "23001" {
 			return &ValidationError{
 				Code:    http.StatusConflict,
 				Message: "datasource is connected to one or more applications and cannot be deleted",
