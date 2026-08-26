@@ -182,6 +182,9 @@ func waitForApplicationDeletion(ctx context.Context, appClient *catalogClient.Ap
 		maxAttempts  = 12
 	)
 
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
+
 	for range maxAttempts {
 		// Check if application still exists via API
 		app, err := appClient.GetApplication(ctx, appID)
@@ -204,9 +207,10 @@ func waitForApplicationDeletion(ctx context.Context, appClient *catalogClient.Ap
 
 		// Wait before next poll, but honour context cancellation
 		select {
-		case <-time.After(pollInterval):
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-timer.C:
+			timer.Reset(pollInterval)
 		}
 	}
 
