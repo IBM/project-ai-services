@@ -33,8 +33,6 @@ logger = get_logger("jobs_router")
 async def _run_digitize(
     job_id: str,
     doc_id_dict: dict,
-    output_format: models.OutputFormat,
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ) -> None:
     """
     Poll the conversion_tasks row for this digitization job until the
@@ -42,11 +40,10 @@ async def _run_digitize(
 
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
-    job_staging_path = settings.digitize.staging_dir / job_id
     try:
         logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
         from digitize.pipeline.digitize import digitize
-        await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format, file_checksum_dict)
+        await asyncio.to_thread(digitize, job_id, doc_id_dict)
         logger.info(f"Digitization pipeline for job {job_id} finished")
     except Exception as exc:
         logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
@@ -326,7 +323,7 @@ async def create_job(
         # 9. Launch the pipeline as a fire-and-forget asyncio task.
         #    The pipeline polls conversion_tasks and drives post-conversion work.
         if operation == models.OperationType.DIGITIZATION:
-            asyncio.create_task(_run_digitize(job_id, doc_id_dict, output_format, file_checksum_dict))
+            asyncio.create_task(_run_digitize(job_id, doc_id_dict))
         else:
             asyncio.create_task(_run_ingest(job_id, doc_id_dict, file_checksum_dict))
 

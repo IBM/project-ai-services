@@ -19,15 +19,22 @@ than is currently available, the dispatcher skips that operation *and*
 reserves those units — it does NOT hand them to the other operation.
 This prevents indefinite starvation of large files.
 
-The reservation is applied symmetrically:
+The reservation only applies when the other queue's head is itself a
+large task (needed > 1).  A normal task (needed=1) can always fit into
+whatever slots remain, so no pre-reservation is needed for it.
 
-  budget_for_first  = available - second_needed
-  budget_for_second = available - first_needed
+  second_reservation = second_needed if second_needed > 1 else 0
+  budget_for_first   = available - second_reservation
 
-This means: if the second queue's head is a blocked large task, the
-first queue is also prevented from consuming the slot(s) that the large
-task is waiting to accumulate.  Without this, the first queue could
-drain the last free slot and push the large task's wait indefinitely.
+  first_reservation  = first_needed if first_needed > 1 else 0
+  budget_for_second  = available_after_first - first_reservation
+
+Example: first=ING-large(2), second=DIG-normal(1), available=2
+  Old (wrong): budget_for_first = max(0, 2-1) = 1  large ING blocked despite having room
+  New (fixed): budget_for_first = max(0, 2-0) = 2  large ING dispatched correctly
+
+Example: first=ING-normal(1), second=DIG-large(2), available=2
+  budget_for_first = max(0, 2-2) = 0  ING normal held back, both slots preserved for DIG large
 """
 
 import asyncio
@@ -171,10 +178,12 @@ async def dispatch_loop() -> None:
                     first_needed  = (2 if first_head.is_large  else 1) if first_head  else 0
                     second_needed = (2 if second_head.is_large else 1) if second_head else 0
 
-                    # Budget for first = capacity minus whatever the second queue's
-                    # blocked head is waiting to accumulate.  This prevents first from
-                    # consuming a slot that would strand a large task in second.
-                    budget_for_first = max(0, available - second_needed)
+                    # Only reserve capacity for second's head when it is a large task
+                    # (needed > 1).  A normal task (needed=1) can always fit into
+                    # whatever remains after first runs — pre-reserving for it would
+                    # wrongly block a large first task that has exactly enough room now.
+                    second_reservation = second_needed if second_needed > 1 else 0
+                    budget_for_first = max(0, available - second_reservation)
                     first_task = _try_claim_if_fits(first, budget_for_first)
                     if first_task:
                         weight = 2 if first_task.is_large else 1
@@ -188,9 +197,17 @@ async def dispatch_loop() -> None:
                             f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
                         )
 
-                    # Budget for second = remaining capacity after reserving first_needed.
-                    # This prevents second from consuming units that first is waiting to accumulate.
-                    budget_for_second = max(0, available - first_needed)
+                    # Re-read available after first may have acquired slots.
+                    # Using the stale pre-acquire value would give second too generous
+                    # a budget on the tick where first finally dispatches (e.g. large
+                    # ING acquires weight=2, available drops from 2→0, but stale
+                    # available=2 would yield budget_for_second=0 by coincidence only
+                    # when first_needed==available; for other values it over-grants).
+                    available_after_first = conversion_semaphore.available
+
+                    # Same rule for second: only reserve if first's head is large.
+                    first_reservation = first_needed if first_needed > 1 else 0
+                    budget_for_second = max(0, available_after_first - first_reservation)
                     second_task = _try_claim_if_fits(second, budget_for_second)
                     if second_task:
                         weight = 2 if second_task.is_large else 1

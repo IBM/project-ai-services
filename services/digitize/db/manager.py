@@ -1915,12 +1915,32 @@ class DatabaseManager:
         This keeps the 'queued' count ≤ quota while draining the pending backlog
         in first-submitted-first-promoted order.
 
+        All three statements (count queued, select candidates, update status) run
+        inside a single transaction under the same session-level advisory lock used
+        by ``check_quota_atomic``.  This prevents two concurrent callers — e.g. the
+        dispatcher's promote tick and a concurrent admission check — from both
+        reading a stale queued_count and over-promoting beyond the quota.
+
+        The lock key is identical to ``check_quota_atomic`` (``hash(operation) &
+        0x7FFFFFFF``) so that admission and promotion on the same operation type are
+        mutually serialised even across different connections.
+
         Returns:
             Number of tasks promoted.
         """
+        from sqlalchemy import text
+
+        # Same key as check_quota_atomic — serialises admission and promotion
+        # for the same operation type across all connections.
+        lock_key = hash(operation) & 0x7FFFFFFF
+
         try:
             with get_db_session() as session:
-                # Count currently queued tasks for this operation
+                # Hold the advisory lock for the entire count → select → update
+                # sequence so no concurrent caller can interleave.
+                session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+
+                # Count currently queued tasks for this operation.
                 queued_count = session.scalar(
                     select(func.count()).where(
                         ConversionTask.status == "queued",
@@ -1932,7 +1952,7 @@ class DatabaseManager:
                 if headroom == 0:
                     return 0
 
-                # Fetch the oldest pending tasks that fit under the quota
+                # Fetch the oldest pending tasks that fit under the quota.
                 candidates = session.execute(
                     select(ConversionTask.task_id, ConversionTask.cached_file)
                     .where(

@@ -491,8 +491,7 @@ def process_documents(
     in-process pipeline immediately rather than waiting for all conversions to
     finish first.
 
-    The ``ProcessPoolExecutor`` for conversion and the light/heavy ``_run_batch``
-    split are both removed — the dispatcher owns CPU parallelism; this function
+    The dispatcher owns all conversion and CPU parallelism; this function
     owns the in-process post-conversion pipeline.
 
     Args:
@@ -516,11 +515,14 @@ def process_documents(
     task_id_to_path: dict = {t.task_id: str(p) for t, p in zip(tasks, input_paths)}
 
     pending_task_ids: set = set(task_id_to_path)
+    # Per-task deadline: each task gets conversion_timeout_s from first observation.
+    # Tracked separately so one slow/stalled task doesn't block others from being polled.
+    task_deadlines: dict = {}
     process_futures: dict = {}
     chunk_futures: dict = {}
     indexing_futures: dict = {}
 
-    # Per-file stats accumulated across stages, matching the original _run_batch shape:
+    # Per-file stats accumulated across stages:
     #   { file_path: { page_count, table_count,
     #                  timings: { digitizing, processing, chunking },
     #                  chunk_count } }
@@ -535,13 +537,36 @@ def process_documents(
         while pending_task_ids or process_futures or chunk_futures or indexing_futures:
 
             # --- A. React to completed/failed conversion tasks ---
+            timeout_s = settings.digitize.conversion_timeout_s
             for task_id in list(pending_task_ids):
                 task = db_manager.get_conversion_task(task_id)
                 if task is None:
                     pending_task_ids.discard(task_id)
+                    task_deadlines.pop(task_id, None)
                     continue
                 if task.status not in ("completed", "failed"):
+                    # Start the deadline clock the first time we see this task.
+                    if task_id not in task_deadlines:
+                        task_deadlines[task_id] = time.monotonic() + timeout_s
+                    if time.monotonic() >= task_deadlines[task_id]:
+                        path = task_id_to_path[task_id]
+                        doc_id = doc_id_dict.get(Path(path).name)
+                        error = (
+                            f"Conversion task {task_id} did not complete within "
+                            f"{timeout_s:.0f}s — dispatcher may be stalled"
+                        )
+                        logger.error(error)
+                        if doc_id is not None:
+                            status_mgr.update_doc_metadata(
+                                doc_id, {"status": DocStatus.FAILED}, error=error,
+                            )
+                            status_mgr.update_job_progress(
+                                doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS
+                            )
+                        pending_task_ids.discard(task_id)
+                        task_deadlines.pop(task_id, None)
                     continue
+                task_deadlines.pop(task_id, None)
                 path = task_id_to_path[task_id]
                 doc_id = doc_id_dict.get(Path(path).name)
                 pending_task_ids.discard(task_id)

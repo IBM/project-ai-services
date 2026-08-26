@@ -9,7 +9,6 @@ conversion_tasks row.  This function is the sole owner of job and
 document status transitions for digitization jobs.
 """
 import time
-from pathlib import Path
 
 from common.misc_utils import get_logger, get_utc_timestamp
 from digitize.db.manager import db_manager
@@ -20,12 +19,43 @@ from digitize.utils.db import get_status_manager
 logger = get_logger("digitize")
 
 
+def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
+    """
+    Poll the conversion_tasks row until its status is in ``terminal_statuses``
+    or the deadline expires.
+
+    Returns the task object (possibly in a terminal state) or ``None`` if the
+    row disappeared.  Raises ``_DeadlineExceeded`` when the deadline is hit so
+    the caller can apply a consistent failure path.
+
+    Args:
+        job_id:           Job identifier used to look up the task row.
+        terminal_statuses: Set of status strings that end polling.
+        deadline:         ``time.monotonic()`` value after which to give up.
+        timeout_s:        Original timeout in seconds, used only in the error message.
+        phase_label:      Human-readable label for the phase ("start" / "complete").
+    """
+    task = db_manager.get_conversion_task_by_job_id(job_id)
+    while task is not None and task.status not in terminal_statuses:
+        if time.monotonic() >= deadline:
+            raise _DeadlineExceeded(
+                f"Conversion task for job {job_id} did not {phase_label} within "
+                f"{timeout_s:.0f}s — dispatcher may be stalled"
+            )
+        time.sleep(settings.digitize.conversion_poll_interval)
+        task = db_manager.get_conversion_task_by_job_id(job_id)
+        if task is None:
+            logger.warning(f"Task for job {job_id} disappeared during polling")
+    return task
+
+
+class _DeadlineExceeded(Exception):
+    """Raised by ``_poll_until`` when the conversion deadline is exceeded."""
+
+
 def digitize(
-    directory_path: Path,
     job_id: str,
     doc_id_dict: dict,
-    output_format,
-    file_checksum_dict: dict | None = None,  # filename -> checksum pre-computed at upload
 ):
     """
     Poll the conversion_tasks row until the dispatcher marks it terminal
@@ -41,75 +71,44 @@ def digitize(
     semaphore leak, worker crash), the job is failed with a timeout message.
 
     Args:
-        directory_path:     Staging directory (kept for call-site compatibility).
-        job_id:             Job identifier.
-        doc_id_dict:        Mapping from filename to document ID.
-        output_format:      Output format (unused — task row already carries it).
-        file_checksum_dict: Pre-computed checksums keyed by filename (unused here;
-                            kept for API symmetry with the ingestion pipeline).
+        job_id:      Job identifier.
+        doc_id_dict: Mapping from filename to document ID.
     """
     status_mgr = get_status_manager(job_id)
     doc_id = next(iter(doc_id_dict.values()), "")
 
-    task = db_manager.get_conversion_task_by_job_id(job_id)
-    if task is None:
-        error = f"No conversion task found for job {job_id}"
+    def _fail(error: str) -> None:
         logger.error(error)
         if doc_id:
             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error)
-        status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=error)
+        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=error)
+
+    task = db_manager.get_conversion_task_by_job_id(job_id)
+    if task is None:
+        _fail(f"No conversion task found for job {job_id}")
         return
 
     timeout_s = settings.digitize.conversion_timeout_s
     deadline = time.monotonic() + timeout_s
 
-    # Poll until the dispatcher advances the task past queued state.
-    while task.status not in ("running", "completed", "failed"):
-        if time.monotonic() >= deadline:
-            error = (
-                f"Conversion task for job {job_id} did not start within "
-                f"{timeout_s:.0f}s — dispatcher may be stalled"
-            )
-            logger.error(error)
-            if doc_id:
-                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error)
-            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=error)
-            return
-        time.sleep(settings.digitize.conversion_poll_interval)
-        task = db_manager.get_conversion_task_by_job_id(job_id)
-        if task is None:
-            logger.warning(f"Task for job {job_id} disappeared during polling")
-            break
+    try:
+        # Phase 1: wait until the dispatcher picks up the task (queued → running).
+        task = _poll_until(job_id, {"running", "completed", "failed"}, deadline, timeout_s, "start")
 
-    # Mark job/doc IN_PROGRESS as soon as the dispatcher starts running the task.
-    if task is not None and task.status == "running" and doc_id:
-        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
-        status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
+        # Mark IN_PROGRESS as soon as the dispatcher starts running.
+        if task is not None and task.status == "running" and doc_id:
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
+            status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
-    # Continue polling until terminal.
-    while task is not None and task.status not in ("completed", "failed"):
-        if time.monotonic() >= deadline:
-            error = (
-                f"Conversion task for job {job_id} did not complete within "
-                f"{timeout_s:.0f}s — dispatcher may be stalled"
-            )
-            logger.error(error)
-            if doc_id:
-                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error)
-            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=error)
-            return
-        time.sleep(settings.digitize.conversion_poll_interval)
-        task = db_manager.get_conversion_task_by_job_id(job_id)
-        if task is None:
-            logger.warning(f"Task for job {job_id} disappeared during polling")
-            break
+        # Phase 2: wait until the dispatcher reaches a terminal state.
+        task = _poll_until(job_id, {"completed", "failed"}, deadline, timeout_s, "complete")
+
+    except _DeadlineExceeded as exc:
+        _fail(str(exc))
+        return
 
     if task is None or task.status == "failed":
-        error = (task.error or "Conversion failed") if task else "Task row missing"
-        logger.error(f"Digitization task for job {job_id} failed: {error}")
-        if doc_id:
-            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error)
-        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=error)
+        _fail((task.error or "Conversion failed") if task else "Task row missing")
         return
 
     # task.status == "completed"
