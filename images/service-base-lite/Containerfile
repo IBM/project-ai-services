@@ -6,13 +6,14 @@ RUN microdnf install -y python3.12-devel && \
     rm -f /tmp/epel-release.rpm && \
     microdnf clean all && \
     curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 - && \
+    pip install --upgrade pip setuptools wheel msgpack && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
 COPY requirements.txt .
 
 RUN python -m venv /var/venv && source /var/venv/bin/activate && \
-    pip install --upgrade pip setuptools wheel && \
+    pip install --upgrade pip setuptools wheel msgpack && \
     pip install -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
