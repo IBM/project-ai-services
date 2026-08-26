@@ -41,12 +41,12 @@ _NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 CONNECTOR_ID = "c7f3a2d1-0000-0000-0000-000000000001"
 CONNECTOR_NAME = "prod-sftp-reports"
-CONNECTOR_TYPE = "ssh"
+CONNECTOR_TYPE = "file_system"
 
 SSH_PAYLOAD = {
     "id": CONNECTOR_ID,
     "name": CONNECTOR_NAME,
-    "type": "ssh",
+    "type": "file_system",
     "allowed_extensions": [".pdf", ".docx"],
     "connection_details": {
         "host": "sftp.example.com",
@@ -59,7 +59,7 @@ SSH_PAYLOAD = {
 S3_PAYLOAD = {
     "id": "a1b2c3d4-0000-0000-0000-000000000002",
     "name": "prod-s3-rag-docs",
-    "type": "s3",
+    "type": "object_storage",
     "allowed_extensions": [".pdf"],
     "connection_details": {
         "endpoint_url": "https://s3.us-east-1.amazonaws.com",

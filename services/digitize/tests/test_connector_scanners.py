@@ -442,7 +442,7 @@ _PATCH_DECRYPT = "digitize.connectors.scanners.scanner_factory.decrypt_secrets"
 
 
 class TestBuildScanner:
-    def _make_connector_dict(self, connector_type: str = "s3") -> dict:
+    def _make_connector_dict(self, connector_type: str = "object_storage") -> dict:
         return {
             "type": connector_type,
             "connection_details": {
@@ -455,13 +455,13 @@ class TestBuildScanner:
         }
 
     def test_s3_type_returns_s3_scanner(self):
-        row = self._make_connector_dict("s3")
+        row = self._make_connector_dict("object_storage")
         with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert isinstance(scanner, S3Scanner)
 
     def test_s3_scanner_config_populated(self):
-        row = self._make_connector_dict("s3")
+        row = self._make_connector_dict("object_storage")
         with patch(_PATCH_DECRYPT, side_effect=lambda t, d: d):
             scanner = build_scanner(row)
         assert scanner._cfg.bucket_name == "my-bucket"
@@ -469,7 +469,7 @@ class TestBuildScanner:
 
     def test_accepts_orm_like_object(self):
         row = SimpleNamespace(
-            type="s3",
+            type="object_storage",
             connection_details={
                 "bucket_name": "ns-bucket",
                 "access_key_id": "AK",
@@ -1040,7 +1040,7 @@ class TestSFTPLoadPrivateKey:
 class TestBuildScannerSSH:
     def _make_ssh_connector_dict(self) -> dict:
         return {
-            "type": "ssh",
+            "type": "file_system",
             "connection_details": {
                 "host": "sftp.example.com",
                 "username": "user",
@@ -1067,7 +1067,7 @@ class TestBuildScannerSSH:
     def test_ssh_accepts_orm_like_object(self):
         from digitize.connectors.scanners.ssh_scanner import SSHScanner
         row = SimpleNamespace(
-            type="ssh",
+            type="file_system",
             connection_details={
                 "host": "sftp.host",
                 "username": "admin",

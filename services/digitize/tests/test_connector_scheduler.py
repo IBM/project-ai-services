@@ -211,7 +211,15 @@ class TestLifespanRecoveryDeletePending:
 
     @pytest.mark.asyncio
     async def test_lifespan_recovery_delete_pending(self):
+        import sys
+        import types
         import asyncio
+        # Ensure the submodule exists in sys.modules so patch() can resolve the
+        # attribute without importing the real package (which requires sniffio).
+        if "apscheduler.datastores.sqlalchemy" not in sys.modules:
+            _stub = types.ModuleType("apscheduler.datastores.sqlalchemy")
+            _stub.SQLAlchemyDataStore = None  # placeholder so patch() finds the attribute
+            sys.modules["apscheduler.datastores.sqlalchemy"] = _stub
         from unittest.mock import MagicMock, AsyncMock, patch
         from digitize.app import _connector_scheduler_lifespan
         from digitize.connectors.models import ConnectorStatus
