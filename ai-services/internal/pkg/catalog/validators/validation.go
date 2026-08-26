@@ -13,6 +13,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -476,7 +477,7 @@ func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context
 		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	schema, err := catalog.ConnectorSchemaToMap(rawSchema)
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
 		return fmt.Errorf("failed to decode param schema for provider %q: %w", req.ProviderID, err)
 	}

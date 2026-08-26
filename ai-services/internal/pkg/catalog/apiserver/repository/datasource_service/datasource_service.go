@@ -12,6 +12,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -107,7 +108,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	schema, err := catalog.ConnectorSchemaToMap(rawSchema)
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}

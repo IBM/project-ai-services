@@ -368,17 +368,6 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 	return raw, nil
 }
 
-// ConnectorSchemaToMap unmarshals a raw connector schema into a map[string]any for
-// internal callers that need to inspect individual properties (validation, encryption).
-func ConnectorSchemaToMap(raw json.RawMessage) (map[string]any, error) {
-	var schema map[string]any
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return nil, fmt.Errorf("failed to decode connector schema: %w", err)
-	}
-
-	return schema, nil
-}
-
 // GetServiceParams returns the JSON schema for a specific service's configuration.
 // If the schema file is not present, returns an empty schema instead of failing.
 func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
