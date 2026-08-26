@@ -24,24 +24,6 @@
       "minLength": 1,
       "ui:section": "Location"
     },
-<<<<<<< HEAD
-    "access_key_id": {
-      "type": "string",
-      "title": "Access key ID",
-      "description": "S3-compatible access key identifier.",
-      "minLength": 1,
-      "ui:section": "Authentication"
-    },
-    "secret_access_key": {
-      "type": "string",
-      "title": "Secret access key",
-      "description": "S3-compatible secret access key.",
-      "format": "password",
-      "minLength": 1,
-      "ui:section": "Authentication"
-    },
-=======
->>>>>>> 234d358f7a2da5abba79c2a050de9e228590339f
     "prefix": {
       "type": "string",
       "title": "Prefix (optional)",
