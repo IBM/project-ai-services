@@ -39,7 +39,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from common.misc_utils import cleanup_staging_directory, get_logger
+from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
@@ -326,6 +326,16 @@ async def _process_new_files(
                         f"Integrity check failed for {remote_path!r} in connector "
                         f"{connector_id!r}; skipping file"
                     )
+                    continue
+                try:
+                    file_bytes = (batch_dir / filename).read_bytes()
+                    validate_document_file(filename, file_bytes)
+                except ValueError as val_exc:
+                    logger.warning(
+                        f"Invalid file {remote_path!r} in connector "
+                        f"{connector_id!r}; skipping file: {val_exc}"
+                    )
+                    (batch_dir / filename).unlink(missing_ok=True)
                     continue
                 filename_to_checksum[filename] = checksum
 

@@ -243,6 +243,9 @@ class TestProcessNewFiles:
         stack.enter_context(
             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
         )
+        # validate_document_file reads staged bytes from disk; bypass it in unit tests
+        # since the scanner is a MagicMock and no real files are written to disk.
+        stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
         return stack
 
     def test_happy_path_completes_without_error(self):
@@ -376,6 +379,7 @@ class TestProcessNewFiles:
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
+            stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
             with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
                 with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
                     asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
@@ -927,6 +931,7 @@ class TestProcessNewFilesExtra:
         stack.enter_context(
             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
         )
+        stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
         return stack
 
     def test_empty_ingest_list_is_noop(self):
@@ -994,6 +999,7 @@ class TestProcessNewFilesExtra:
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
+            stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
             stack.enter_context(
                 patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_interrupt)
             )
