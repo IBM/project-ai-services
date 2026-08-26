@@ -159,7 +159,6 @@ func collectMissingPodmanFiles(found *podmanPaths) []string {
 	return missing
 }
 
-
 // validatePodmanTemplates parses each *.yaml.tmpl with text/template (the same
 // package the runtime uses) to surface syntax errors, then renders each template
 // with nil data (missingkey=zero so all .Field references expand to "") and
@@ -213,7 +212,7 @@ func validatePodmanTemplates(templFiles map[string][]byte) error {
 //   - metadata.labels[constants.ApplicationTemplateKey]   (key must be present;
 //     the value is a runtime expression so it is not checked here)
 func checkPodmanTemplateSpec(doc map[string]any, path string) error {
-	missing := make([]string, 0, 4)
+	var missing []string
 
 	if v, _ := doc["apiVersion"].(string); strings.TrimSpace(v) == "" {
 		missing = append(missing, "apiVersion")
@@ -249,7 +248,6 @@ func checkPodmanTemplateSpec(doc map[string]any, path string) error {
 
 	return nil
 }
-
 
 // Ensure PodmanBundleValidator implements BundleValidator at compile time.
 var _ BundleValidator = (*PodmanBundleValidator)(nil)

@@ -279,6 +279,7 @@ func checkOpenShiftTemplateLabels(rendered map[string]string) error {
 			// Use only the base filename in the error to avoid the
 			// "chartname/templates/" prefix that Helm prepends.
 			base := file[strings.LastIndex(file, "/")+1:]
+
 			return &validators.ValidationError{
 				Code: http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf(
