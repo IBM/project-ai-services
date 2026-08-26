@@ -23,6 +23,16 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
+        - name: digitize-db-wait
+          image: "{{ .Values.postgres.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              until pg_isready -h digitize-db -p 5432; do
+                echo "Waiting for digitize-db to be ready..."
+                sleep 5
+              done
         - name: digitize-db-init
           image: "{{ .Values.digitize.image }}"
           command:

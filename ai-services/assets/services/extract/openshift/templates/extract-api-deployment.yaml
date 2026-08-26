@@ -23,6 +23,16 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
+        - name: extract-db-wait
+          image: "{{ .Values.postgres.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              until pg_isready -h extract-db -p 5432; do
+                echo "Waiting for extract-db to be ready..."
+                sleep 5
+              done
         - name: extract-db-init
           image: "{{ .Values.extract.image }}"
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]

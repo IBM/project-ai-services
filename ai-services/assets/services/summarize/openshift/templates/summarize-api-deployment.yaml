@@ -23,6 +23,16 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
+        - name: summarize-db-wait
+          image: "{{ .Values.postgres.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              until pg_isready -h summarize-db -p 5432; do
+                echo "Waiting for summarize-db to be ready..."
+                sleep 5
+              done
         - name: summarize-db-init
           image: "{{ .Values.summarize.image }}"
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]

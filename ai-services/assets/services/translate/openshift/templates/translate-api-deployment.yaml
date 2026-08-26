@@ -23,6 +23,16 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
+        - name: translate-db-wait
+          image: "{{ .Values.postgres.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              until pg_isready -h translate-db -p 5432; do
+                echo "Waiting for translate-db to be ready..."
+                sleep 5
+              done
         - name: translate-db-init
           image: "{{ .Values.translate.image }}"
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
