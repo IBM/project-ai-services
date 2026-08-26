@@ -2,10 +2,12 @@ package datasourceservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -149,8 +151,9 @@ func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) 
 		return fmt.Errorf("failed to fetch connector: %w", err)
 	}
 
-	// Phase 2: conflict guard — reject deletion if any service_dependencies rows reference
-	// this connector (i.e. it is still connected to at least one application).
+	// Phase 2: best-effort conflict guard — reject deletion if any service_dependencies rows reference
+	// this connector (i.e. it is still connected to at least one application). The database
+	// remains the source of truth via the foreign key constraint enforced at delete time.
 	linkedServices, err := s.svcDepRepo.GetServicesByDependency(ctx, id, dbmodels.DependencyTypeConnector)
 	if err != nil {
 		return fmt.Errorf("failed to check connector dependencies: %w", err)
@@ -163,8 +166,17 @@ func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) 
 		}
 	}
 
-	// Phase 3: delete the connector record.
+	// Phase 3: delete the connector record. If another request links the connector after the
+	// guard above, rely on the database foreign key constraint and translate it to 409.
 	if err := s.connectorRepo.Delete(ctx, id); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return &ValidationError{
+				Code:    http.StatusConflict,
+				Message: "datasource is connected to one or more applications and cannot be deleted",
+			}
+		}
+
 		return fmt.Errorf("failed to delete connector: %w", err)
 	}
 
