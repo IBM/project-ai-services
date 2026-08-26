@@ -37,6 +37,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from pydantic import ValidationError
+
 from common.misc_utils import cleanup_staging_directory, get_logger
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.pipeline.ingest import ingest
@@ -143,7 +145,7 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             logger.error(
                 f"Connector {connector_id!r} failed to connect — treating as credential error: {conn_exc}"
             )
-            _fail_tick(sync_seq, connector_id, conn_exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG)
+            _fail_tick(sync_seq, connector_id, conn_exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG.value)
             return
 
         scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
@@ -180,7 +182,10 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         logger.error(
             f"Tick failed for connector {connector_id!r}: {exc}", exc_info=True
         )
-        _fail_tick(sync_seq, connector_id, exc)
+        if isinstance(exc, ValidationError):
+            _fail_tick(sync_seq, connector_id, exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG.value)
+        else:
+            _fail_tick(sync_seq, connector_id, exc)
 
     finally:
         if scanner is not None:
