@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -108,10 +109,21 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 		return
 	}
 
+	status := c.Query("status")
+	if status != "" &&
+		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusConnected &&
+		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusOffline {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("status must be '%s' or '%s'", dbmodels.ConnectorStatusConnected, dbmodels.ConnectorStatusOffline),
+		})
+
+		return
+	}
+
 	req := models.ListDatasourcesRequest{
 		Page:     page,
 		PageSize: pageSize,
-		Status:   c.Query("status"),
+		Status:   status,
 		Provider: c.Query("provider"),
 	}
 

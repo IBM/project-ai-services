@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -161,13 +162,20 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		return nil, fmt.Errorf("failed to list datasources: %w", err)
 	}
 
+	// Collect connector IDs so connected-service counts can be fetched in one query.
+	connectorIDs := make([]uuid.UUID, len(connectors))
+	for i := range connectors {
+		connectorIDs[i] = connectors[i].ID
+	}
+
+	serviceCounts, err := s.svcDepRepo.GetServiceCountByDependency(ctx, connectorIDs, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count connected services: %w", err)
+	}
+
 	data := make([]apimodels.DatasourceResponse, 0, len(connectors))
 	for i := range connectors {
-		serviceIDs, err := s.svcDepRepo.GetServicesByDependency(ctx, connectors[i].ID, dbmodels.DependencyTypeConnector)
-		if err != nil {
-			return nil, fmt.Errorf("failed to count connected services for connector %s: %w", connectors[i].ID, err)
-		}
-		data = append(data, *s.connectorToResponse(&connectors[i], len(serviceIDs)))
+		data = append(data, *s.connectorToResponse(&connectors[i], serviceCounts[connectors[i].ID]))
 	}
 
 	totalPages := 0
