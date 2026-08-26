@@ -30,6 +30,7 @@ type ValidationError = validators.ValidationError
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
+	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
 	encryptionKey   string
@@ -43,12 +44,14 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
+		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
@@ -135,6 +138,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 // uses repository.ConnectorFilters with Limit/Offset derived from Page/PageSize.
 func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error) {
 	filters := &dbrepo.ConnectorFilters{
+		Type:     catalogconstants.ConnectorTypeDatasource,
 		Status:   dbmodels.ConnectorStatus(req.Status),
 		Provider: req.Provider,
 		Limit:    req.PageSize,
@@ -153,7 +157,11 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 
 	data := make([]apimodels.DatasourceResponse, 0, len(connectors))
 	for i := range connectors {
-		data = append(data, *s.connectorToResponse(&connectors[i], 0))
+		serviceIDs, err := s.svcDepRepo.GetServicesByDependency(ctx, connectors[i].ID, dbmodels.DependencyTypeConnector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count connected services for connector %s: %w", connectors[i].ID, err)
+		}
+		data = append(data, *s.connectorToResponse(&connectors[i], len(serviceIDs)))
 	}
 
 	totalPages := 0

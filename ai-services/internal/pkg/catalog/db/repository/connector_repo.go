@@ -19,6 +19,7 @@ var ErrConnectorNotFound = errors.New("connector not found")
 
 // ConnectorFilters defines optional filters and pagination parameters for List queries.
 type ConnectorFilters struct {
+	Type     string                 // Required: filter by connector type (e.g. "datasource")
 	Status   models.ConnectorStatus // Optional: filter by connector status
 	Provider string                 // Optional: filter by provider identifier (e.g. "object_storage", "file_system")
 	Limit    int                    // Optional: maximum number of records to return
@@ -229,6 +230,10 @@ func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 	whereClauses := []string{}
 
 	if filters != nil {
+		if filters.Type != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("type = $%d", len(args)+1))
+			args = append(args, filters.Type)
+		}
 		if filters.Status != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", len(args)+1))
 			args = append(args, filters.Status)
