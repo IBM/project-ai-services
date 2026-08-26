@@ -44,13 +44,13 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	if !opts.SkipCleanup {
 		logger.DebuglnCtx(ctx, "Delete catalog PVCs...")
 
-		if err := rt.DeletePVCs(fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
+		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
 			s.Fail("failed to delete catalog pvc")
 
 			return fmt.Errorf("failed to delete PVCs: %w", err)
 		}
 
-		if err := rt.DeleteNamespace(namespace); err != nil {
+		if err := rt.DeleteNamespace(ctx, namespace); err != nil {
 			s.Fail("failed to delete catalog namespace")
 
 			return fmt.Errorf("failed to delete '%s' namespace: %w", namespace, err)

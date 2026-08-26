@@ -1,6 +1,7 @@
 package spyre
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -24,7 +25,7 @@ func (r *SpyreRule) Description() string {
 }
 
 // Verify performs comprehensive Spyre validation.
-func (r *SpyreRule) Verify() error {
+func (r *SpyreRule) Verify(_ context.Context) error {
 	logger.Debugln("Running comprehensive Spyre validation...")
 
 	// Check if Spyre cards are present

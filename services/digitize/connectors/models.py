@@ -67,33 +67,50 @@ class SyncLogStatus(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Error message constants
+# ---------------------------------------------------------------------------
+
+class ConnectorError(str, Enum):
+    """String enum of well-known error messages stored on the Connector row.
+
+    Inherits from str so values can be compared directly against DB strings.
+    """
+
+    CREDENTIAL_ERROR_MSG = "Authentication failed: unable to connect with the provided credentials"
+    """Written by run_tick when scanner.connect() raises a ConnectionError.
+
+    Cleared automatically when a subsequent sync tick connects successfully
+    (finalize_sync_log_and_update_connector with COMPLETED status sets error=None).
+    """
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
 class ConnectorCreateRequest(BaseModel):
     """Body accepted by POST /v1/connectors."""
 
-    connector_id: Optional[str] = Field(
+    id: Optional[str] = Field(
         None,
         description=(
             "Stable catalog UUID for this connector. "
             "If omitted, a UUID v4 is generated automatically."
         ),
     )
-    connector_name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
+    name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
     type: str = Field(..., description="Connector transport type: 'ssh' or 's3'")
     allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
 
-    @field_validator("connector_id", mode="before")
+    @field_validator("id", mode="before")
     @classmethod
-    def validate_connector_id(cls, v: Optional[str]) -> Optional[str]:
+    def validate_id(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
         try:
             uuid.UUID(str(v))
         except ValueError:
-            raise ValueError(f"connector_id must be a valid UUID, got {v!r}")
+            raise ValueError(f"id must be a valid UUID, got {v!r}")
         return str(v)
 
 
@@ -105,7 +122,7 @@ class ConnectorUpdateRequest(BaseModel):
     type and sync_interval_seconds cannot be changed via this endpoint.
     """
 
-    connector_name: Optional[str] = Field(None, description="New human-readable name (must be unique)")
+    name: Optional[str] = Field(None, description="New human-readable name (must be unique)")
     allowed_extensions: Optional[List[str]] = Field(None, description="Replacement allowed-extensions list")
     connection_details: Optional[Dict[str, Any]] = Field(
         None,
@@ -120,13 +137,12 @@ class ConnectorUpdateRequest(BaseModel):
 class ConnectorListItem(BaseModel):
     """One connector in GET /v1/connectors list."""
 
-    connector_id: str
-    connector_name: str
+    id: str
+    name: str
     type: str
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    last_sync_error: Optional[str]
     error: Optional[str]
     total_files: int
 
@@ -134,15 +150,14 @@ class ConnectorListItem(BaseModel):
 class ConnectorDetailResponse(BaseModel):
     """Single connector returned by GET /v1/connectors/{connector_id}."""
 
-    connector_id: str
-    connector_name: str
+    id: str
+    name: str
     type: str
     allowed_extensions: List[str]
     sync_interval_seconds: int
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    last_sync_error: Optional[str]
     error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int

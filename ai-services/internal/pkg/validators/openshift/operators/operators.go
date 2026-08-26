@@ -1,6 +1,7 @@
 package operators
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -27,7 +28,7 @@ func (r *OperatorRule) Description() string {
 	return "Validates that all operators are installed or not"
 }
 
-func (r *OperatorRule) Verify() error {
+func (r *OperatorRule) Verify(ctx context.Context) error {
 	var failed []string
 
 	client, err := openshift.NewOpenshiftClient()
@@ -37,7 +38,7 @@ func (r *OperatorRule) Verify() error {
 
 	// Prefetch all subscriptions across all namespaces
 	allSubscriptions := &operatorsv1alpha1.SubscriptionList{}
-	if err := client.Client.List(client.Ctx, allSubscriptions); err != nil {
+	if err := client.Client.List(ctx, allSubscriptions); err != nil {
 		return fmt.Errorf("failed to list subscriptions: %w", err)
 	}
 
@@ -46,7 +47,7 @@ func (r *OperatorRule) Verify() error {
 		if opPackage == "" {
 			opPackage = op.Name
 		}
-		if err := validateOperatorByPackage(client, opPackage, op.Namespace, allSubscriptions); err != nil {
+		if err := validateOperatorByPackage(ctx, client, opPackage, op.Namespace, allSubscriptions); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", op.Label, err.Error()))
 		} else {
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", op.Label))
@@ -72,7 +73,7 @@ func (r *OperatorRule) Hint() string {
 	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure --runtime openshift` to install required operators"
 }
 
-func validateOperatorByPackage(c *openshift.OpenshiftClient, packageName, opNamespace string, allSubscriptions *operatorsv1alpha1.SubscriptionList) error {
+func validateOperatorByPackage(ctx context.Context, c *openshift.OpenshiftClient, packageName, opNamespace string, allSubscriptions *operatorsv1alpha1.SubscriptionList) error {
 	// Find subscription with matching package name in the specified namespace
 	var sub *operatorsv1alpha1.Subscription
 	for i := range allSubscriptions.Items {
@@ -94,7 +95,7 @@ func validateOperatorByPackage(c *openshift.OpenshiftClient, packageName, opName
 
 	// Get CSV
 	csv := &operatorsv1alpha1.ClusterServiceVersion{}
-	if err := c.Client.Get(c.Ctx, k8sClient.ObjectKey{
+	if err := c.Client.Get(ctx, k8sClient.ObjectKey{
 		Name:      sub.Status.InstalledCSV,
 		Namespace: opNamespace,
 	}, csv); err != nil {

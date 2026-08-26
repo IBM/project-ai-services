@@ -43,21 +43,22 @@ func newWorkerRegisterCmd() *cobra.Command {
 		Long: `Pre-registers a worker by name in the catalog and returns a single-use
 bootstrap token.
 
-Pass the token to the worker daemon at startup so it can authenticate with the
-catalog gRPC gateway:
+Pass the token to the worker node and run:
 
-  worker join --token <token> --gateway <catalog-host>:9090`,
+  ai-services worker join <catalog-host>:9090 --token <token>`,
 		Example: `  ai-services catalog worker register node-1`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			resp, err := c.CreateWorker(args[0])
+			resp, err := c.CreateWorker(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -86,12 +87,14 @@ func newWorkerListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			workers, err := c.ListWorkers()
+			workers, err := c.ListWorkers(ctx)
 			if err != nil {
 				return err
 			}
@@ -117,12 +120,14 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			if err := c.DeleteWorkerByName(args[0]); err != nil {
+			if err := c.DeleteWorkerByName(ctx, args[0]); err != nil {
 				return err
 			}
 

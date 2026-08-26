@@ -115,7 +115,7 @@ func init() {
 // listCatalogTemplates lists architectures, services, and components from the catalog.
 func listCatalogTemplates(cmd *cobra.Command) error {
 	// Create catalog provider
-	provider, err := catalog.NewCatalogProvider()
+	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog provider: %w", err)
 	}

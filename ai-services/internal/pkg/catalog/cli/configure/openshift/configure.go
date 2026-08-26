@@ -45,7 +45,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	}
 
 	// Step 4: Collect and hash password (if secret doesn't exist)
-	passwordHash, err := catalogutils.CollectAndHashPassword(runtime)
+	passwordHash, err := catalogutils.CollectAndHashPassword(ctx, runtime)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	// Step 5: Prepare values with argument parameters
 	// Pass runtime so generateArgParams can skip re-generating the DB password
 	// when catalog-db-secret already exists (avoids mismatch with existing PVC data).
-	values, err := prepareValues(tp, runtime, passwordHash)
+	values, err := prepareValues(ctx, tp, runtime, passwordHash)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	logger.Infoln("-------")
 
 	// Step 7: Print next steps with route URLs
-	if err := helpers.PrintNextSteps(tp, runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate); err != nil {
+	if err := helpers.PrintNextSteps(ctx, tp, runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate); err != nil {
 		logger.Infof("failed to display next steps: %v\n", err)
 
 		return nil //nolint:nilerr // intentionally swallow error for non-critical step
@@ -104,9 +104,9 @@ func loadChart(ctx context.Context, tp templates.Template) (chart.Charter, error
 	return chart, nil
 }
 
-func prepareValues(tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]any, error) {
+func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]any, error) {
 	// Generate argument parameters
-	argParams, err := generateArgParams(rt, passwordHash)
+	argParams, err := generateArgParams(ctx, rt, passwordHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -120,11 +120,11 @@ func prepareValues(tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, 
 	return values, nil
 }
 
-func generateArgParams(rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]string, error) {
+func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]string, error) {
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 
-	dbSecretExists, err := rt.SecretExists(catalogconstants.CatalogDBSecretName)
+	dbSecretExists, err := rt.SecretExists(ctx, catalogconstants.CatalogDBSecretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check db secret existence: %w", err)
 	}

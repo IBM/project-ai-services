@@ -729,12 +729,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
 
-	catalogProvider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
-	}
-
-	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, s.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect application resources: %w", err)
 	}
@@ -768,7 +763,7 @@ func (s *ApplicationServiceBase) processServiceResources(
 	totals *resourceTotals,
 	countedComponents map[uuid.UUID]bool,
 ) error {
-	if err := s.addServiceResources(service, catalogProvider, runtimeClient, totals); err != nil {
+	if err := s.addServiceResources(ctx, service, catalogProvider, runtimeClient, totals); err != nil {
 		return fmt.Errorf("failed to get service allocated resources: %w", err)
 	}
 
@@ -787,6 +782,7 @@ func addAllocatedResources(runtimeMetadata *clitemplates.AppMetadata, totals *re
 }
 
 func (s *ApplicationServiceBase) addServiceResources(
+	ctx context.Context,
 	service models.Service,
 	catalogProvider *catalog.CatalogProvider,
 	runtimeClient runtime.Runtime,
@@ -799,7 +795,7 @@ func (s *ApplicationServiceBase) addServiceResources(
 
 	addAllocatedResources(runtimeMetadata, totals)
 
-	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
+	if err := addUsedResourcesByTemplateID(ctx, service.ID.String(), runtimeClient, totals); err != nil {
 		return fmt.Errorf("failed to get service used resources: %w", err)
 	}
 
@@ -853,25 +849,25 @@ func (s *ApplicationServiceBase) processComponentResources(
 
 	addAllocatedResources(runtimeMetadata, totals)
 
-	if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+	if err := addUsedResourcesByTemplateID(ctx, component.ID.String(), runtimeClient, totals); err != nil {
 		return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
 	}
 
 	return nil
 }
 
-func addUsedResourcesByTemplateID(templateID string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+func addUsedResourcesByTemplateID(ctx context.Context, templateID string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
 	filters := map[string][]string{
 		"label": {fmt.Sprintf("%s=%s", consts.ApplicationTemplateKey, templateID)},
 	}
 
-	pods, err := runtimeClient.ListPods(filters)
+	pods, err := runtimeClient.ListPods(ctx, filters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods for template %s: %w", templateID, err)
 	}
 
 	for _, pod := range pods {
-		if err := collectPodResources(pod.Name, runtimeClient, totals); err != nil {
+		if err := collectPodResources(ctx, pod.Name, runtimeClient, totals); err != nil {
 			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
 		}
 	}
@@ -879,8 +875,8 @@ func addUsedResourcesByTemplateID(templateID string, runtimeClient runtime.Runti
 	return nil
 }
 
-func collectPodResources(podName string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
-	resources, err := runtimeClient.GetPodResources(podName)
+func collectPodResources(ctx context.Context, podName string, runtimeClient runtime.Runtime, totals *resourceTotals) error {
+	resources, err := runtimeClient.GetPodResources(ctx, podName)
 	if err != nil {
 		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
 	}
@@ -963,7 +959,7 @@ func (s *ApplicationServiceBase) collectServicePods(
 	servicePods := make([]types.Pod, 0, len(services))
 
 	for _, service := range services {
-		pod, err := loadApplicationPods(rt, service.ID.String())
+		pod, err := loadApplicationPods(ctx, rt, service.ID.String())
 		if err != nil {
 			return nil, fmt.Errorf("failed to load service pod for service %s: %w", service.ID, err)
 		}
@@ -999,7 +995,7 @@ func (s *ApplicationServiceBase) collectComponentPods(
 				continue
 			}
 
-			componentPod, err := loadApplicationPods(rt, componentID)
+			componentPod, err := loadApplicationPods(ctx, rt, componentID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load component pod %s: %w", componentID, err)
 			}
@@ -1018,8 +1014,8 @@ func (s *ApplicationServiceBase) collectComponentPods(
 	return componentPods, nil
 }
 
-func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) {
-	filteredPod, err := common.FetchFilteredPods(rt, appID)
+func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) ([]types.Pod, error) {
+	filteredPod, err := common.FetchFilteredPods(ctx, rt, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -1030,7 +1026,7 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 	appPodList := make([]types.Pod, 0, len(filteredPod))
 
 	for _, pod := range filteredPod {
-		processedPod, err := common.ProcessPod(rt, pod)
+		processedPod, err := common.ProcessPod(ctx, rt, pod)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process pod: %w", err)
 		}
@@ -1054,6 +1050,7 @@ func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) 
 			Status:     types.Status(strings.ToLower(processedPod.Status)),
 			Healthy:    processedPod.Health == string(consts.Ready),
 			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+			Labels:     pod.Labels,
 			Containers: containers,
 		}
 

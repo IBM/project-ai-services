@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -54,11 +55,12 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
 			return validateLoginFlags(runtimeType, serverURL, username, miqToken, passwordStdin)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			if miqToken != "" {
-				return runLoginWithMIQToken(serverURL, miqToken, insecure)
+				return runLoginWithMIQToken(ctx, serverURL, miqToken, insecure)
 			}
 
-			return runLogin(serverURL, username, passwordStdin, insecure)
+			return runLogin(ctx, serverURL, username, passwordStdin, insecure)
 		},
 	}
 
@@ -76,14 +78,14 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
 }
 
 // runLoginWithMIQToken executes Flow B: exchange a ManageIQ token for a Catalog API JWT.
-func runLoginWithMIQToken(serverURL, miqToken string, insecure bool) error {
+func runLoginWithMIQToken(ctx context.Context, serverURL, miqToken string, insecure bool) error {
 	if insecure {
 		logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
 	}
 
 	logger.Infof("Logging in to %s using ManageIQ token...\n", serverURL)
 
-	if _, err := client.NewWithMIQToken(serverURL, miqToken, insecure); err != nil {
+	if _, err := client.NewWithMIQToken(ctx, serverURL, miqToken, insecure); err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
 
@@ -93,7 +95,7 @@ func runLoginWithMIQToken(serverURL, miqToken string, insecure bool) error {
 }
 
 // runLogin executes Flow A: authenticate with username and password.
-func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
+func runLogin(ctx context.Context, serverURL, username string, passwordStdin, insecure bool) error {
 	password, err := promptPassword(passwordStdin)
 	if err != nil {
 		return err
@@ -106,7 +108,7 @@ func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
 
 	logger.Infof("Logging in to %s as %q...\n", serverURL, username)
 
-	if _, err := client.NewWithLogin(serverURL, username, password, insecure); err != nil {
+	if _, err := client.NewWithLogin(ctx, serverURL, username, password, insecure); err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
 

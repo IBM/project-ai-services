@@ -16,19 +16,19 @@ type Application interface {
 	Delete(ctx context.Context, opts types.DeleteOptions) error
 
 	// Start starts a stopped application.
-	Start(opts types.StartOptions) error
+	Start(ctx context.Context, opts types.StartOptions) error
 
 	// Stop stops a running application.
-	Stop(opts types.StopOptions) error
+	Stop(ctx context.Context, opts types.StopOptions) error
 
 	// List returns information about running applications.
-	List(opts types.ListOptions) ([]types.ApplicationInfo, error)
+	List(ctx context.Context, opts types.ListOptions) ([]types.ApplicationInfo, error)
 
 	// Info displays detailed information about an application.
-	Info(opts types.InfoOptions) error
+	Info(ctx context.Context, opts types.InfoOptions) error
 
 	// Logs displays logs from an application pod.
-	Logs(opts types.LogsOptions) error
+	Logs(ctx context.Context, opts types.LogsOptions) error
 
 	// Restore restores application data from a backup file.
 	Restore(ctx context.Context, opts types.RestoreOptions) error

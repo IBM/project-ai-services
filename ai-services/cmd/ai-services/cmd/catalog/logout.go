@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -30,6 +30,8 @@ the locally stored credentials.`,
 			// Once precheck passes, silence usage for any *later* internal errors.
 			cmd.SilenceUsage = true
 
+			ctx := cmd.Context()
+
 			// Load credentials to check if the user is logged in.
 			creds, err := config.Load()
 			if err != nil {
@@ -41,7 +43,7 @@ the locally stored credentials.`,
 			// Build a client from the stored credentials and call the server logout endpoint.
 			// We use New() which also refreshes the token; if refresh fails we still
 			// want to clean up local credentials, so we handle both paths.
-			c, err := client.New()
+			c, err := client.New(ctx)
 			if err != nil {
 				// Token may already be expired – still remove local credentials.
 				logger.Warningf("could not reach server (%v). Removing local credentials anyway.\n", err)
@@ -49,7 +51,7 @@ the locally stored credentials.`,
 				return config.Delete()
 			}
 
-			if err := c.Logout(); err != nil {
+			if err := c.Logout(ctx); err != nil {
 				return fmt.Errorf("logout failed: %w", err)
 			}
 

@@ -25,9 +25,7 @@ func (r *KubeconfigRule) Description() string {
 }
 
 // Verify checks if the kubeconfig can access the OpenShift cluster.
-func (r *KubeconfigRule) Verify() error {
-	ctx := context.Background()
-
+func (r *KubeconfigRule) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)

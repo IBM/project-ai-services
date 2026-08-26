@@ -75,14 +75,10 @@ func NewSyncService(
 	componentRepo dbrepo.ComponentRepository,
 	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	syncInterval time.Duration,
+	catalogProvider *catalogpkg.CatalogProvider,
 ) (*SyncService, error) {
 	if syncInterval == 0 {
 		syncInterval = DefaultSyncInterval
-	}
-
-	catalogProvider, err := catalogpkg.NewCatalogProvider()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider for sync service: %w", err)
 	}
 
 	runtimeSync, err := newRuntimeSync(vars.RuntimeFactory.GetRuntimeType(), catalogProvider)
@@ -196,7 +192,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 
 	// Fail early if the namespace does not exist
 	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
-		if _, err := rt.GetNamespace(); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
+		if _, err := rt.GetNamespace(ctx); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
 			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
 		}
 	}
@@ -332,7 +328,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 // Returns: error message (if any) and error.
 func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, service models.Service) (string, error) {
 	// Fetch all pods using service ID as template label
-	pods, err := s.runtimeSync.FetchPodStatuses(rt, service.ID.String())
+	pods, err := s.runtimeSync.FetchPodStatuses(ctx, rt, service.ID.String())
 	if err != nil {
 		return s.handleServicePodFetchError(ctx, service, err)
 	}
@@ -418,7 +414,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	componentID := component.ID
 
 	// Fetch all pods using component ID as template label
-	pods, err := s.runtimeSync.FetchPodStatuses(rt, componentID.String())
+	pods, err := s.runtimeSync.FetchPodStatuses(ctx, rt, componentID.String())
 	if err != nil {
 		return s.handleComponentPodFetchError(ctx, component, componentID, err)
 	}

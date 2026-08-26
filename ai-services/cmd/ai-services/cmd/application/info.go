@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"text/template"
@@ -14,6 +15,7 @@ import (
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -45,11 +47,11 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// When legacyInfo is true and runtime is podman, use the older/stable code path
-		// For openshift runtime, always use the older/stable code path regardless of legacy flag
-		if legacyInfo && rt == types.RuntimeTypePodman {
+		// When legacyInfo is true, use the older/stable code path
+		if legacyInfo {
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)
@@ -61,27 +63,11 @@ Arguments:
 				Name: applicationName,
 			}
 
-			return app.Info(opts)
+			return app.Info(ctx, opts)
 		}
 
 		// Default: use new implementation using catalog
-		// For openshift runtime, always use the older/stable code path
-		if rt == types.RuntimeTypePodman {
-			return renderApplicationInfo(applicationName)
-		}
-
-		// OpenShift runtime uses the older implementation
-		factory := application.NewFactory(rt)
-		app, err := factory.Create(applicationName)
-		if err != nil {
-			return fmt.Errorf("failed to create application instance: %w", err)
-		}
-
-		opts := appTypes.InfoOptions{
-			Name: applicationName,
-		}
-
-		return app.Info(opts)
+		return renderApplicationInfo(ctx, applicationName, rt)
 	},
 }
 
@@ -89,13 +75,13 @@ func init() {
 	infoCmd.Flags().BoolVar(&legacyInfo, "legacy", false, "Use legacy application info implementation")
 }
 
-func renderApplicationInfo(appName string) error {
-	appClient, err := catalogClient.NewApplicationClient()
+func renderApplicationInfo(ctx context.Context, appName string, rt types.RuntimeType) error {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	app, err := cliUtils.GetAppByName(appClient, appName)
+	app, err := cliUtils.GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			logger.Warningf("Application: '%s' does not exist", appName)
@@ -106,12 +92,12 @@ func renderApplicationInfo(appName string) error {
 		return err
 	}
 
-	application, err := appClient.GetApplication(app.ID)
+	application, err := appClient.GetApplication(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	appPS, err := appClient.GetApplicationPS(app.ID)
+	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application pods: %w", err)
 	}
@@ -120,11 +106,11 @@ func renderApplicationInfo(appName string) error {
 	logger.Infoln("Application Template: " + application.CatalogID)
 	logger.Infoln("Application Version: " + application.Version)
 
-	return printServicesInfo(application.Services, appPS)
+	return printServicesInfo(application.Services, appPS, rt)
 }
 
-func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse) error {
-	catalogProvider, err := catalog.NewCatalogProvider()
+func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse, rt types.RuntimeType) error {
+	catalogProvider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return fmt.Errorf("failed to create catalog provider: %w", err)
 	}
@@ -137,9 +123,9 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 		params := map[string]string{}
 		params["SERVICE_NAME"] = service.Type
 
-		uiStatus, apiSatatus := getContainerStatus(appPS.Services, service.CatalogID)
+		uiStatus, apiStatus := getContainerStatus(appPS.Services, service.CatalogID, rt)
 		params["UI_STATUS"] = uiStatus
-		params["API_STATUS"] = apiSatatus
+		params["API_STATUS"] = apiStatus
 
 		for _, endpoint := range service.Endpoints {
 			urlType, urlTypeOk := endpoint["type"].(string)
@@ -154,7 +140,7 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 			return fmt.Errorf("failed to load service md files: %w", err)
 		}
 
-		err = printInfo(tmpls, params, service.CatalogID)
+		err = printInfo(tmpls, params)
 		if err != nil {
 			return fmt.Errorf("failed to load application info: %w", err)
 		}
@@ -163,9 +149,19 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 	return nil
 }
 
-func getContainerStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
-	uiStatus, apiStatus := "", ""
+func getContainerStatus(services []catalogTypes.Pod, catalogID string, rt types.RuntimeType) (string, string) {
+	switch rt {
+	case types.RuntimeTypePodman:
+		return printPodmanContainerStatus(services, catalogID)
+	case types.RuntimeTypeOpenShift:
+		return printOpenshiftPodStatus(services, catalogID)
+	default:
+		return "", ""
+	}
+}
 
+func printPodmanContainerStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
+	uiStatus, apiStatus := "", ""
 	for _, servicePod := range services {
 		if strings.HasPrefix(servicePod.PodName, catalogID) {
 			for _, podContainer := range servicePod.Containers {
@@ -191,7 +187,37 @@ func getContainerStatus(services []catalogTypes.Pod, catalogID string) (string, 
 	return uiStatus, apiStatus
 }
 
-func printInfo(tmpls map[string]*template.Template, params map[string]string, appTemplate string) error {
+/*
+1. For each service fetch all labels
+2. See if that service has ai-services.io/component-type label
+3. If yes, check if value is api or ui
+4. Update status accordingly.
+*/
+func printOpenshiftPodStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
+	uiStatus, apiStatus := "", ""
+
+	for _, service := range services {
+		if !strings.HasPrefix(service.PodName, catalogID) {
+			continue
+		}
+
+		component := service.Labels[constants.ComponentLabelKey]
+		switch component {
+		case "ui":
+			if service.Healthy {
+				uiStatus = "running"
+			}
+		case "api":
+			if service.Healthy {
+				apiStatus = "running"
+			}
+		}
+	}
+
+	return uiStatus, apiStatus
+}
+
+func printInfo(tmpls map[string]*template.Template, params map[string]string) error {
 	tmpl, ok := tmpls["info.md"]
 	if !ok {
 		logger.Warningf("failed to find info.md template")
