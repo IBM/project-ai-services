@@ -189,7 +189,7 @@ func validatePodmanTemplates(templFiles map[string][]byte) error {
 			}
 		}
 
-		if err := checkTemplateSpec(doc, podmanRuntime, path, false); err != nil {
+		if err := checkTemplateSpec(doc, podmanRuntime, path); err != nil {
 			return err
 		}
 	}

@@ -85,24 +85,15 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 		}
 
 		name := filepath.ToSlash(hdr.Name)
-
-		// Skip non-regular files and macOS AppleDouble resource-fork entries
-		// (._<name>) that archive tools may embed alongside real files.
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
-			continue
-		}
-		if strings.HasPrefix(filepath.Base(name), "._") {
+		if shouldSkipEntry(hdr, name) {
 			continue
 		}
 
-		var content []byte
-		if hdr.Typeflag == tar.TypeReg {
-			content, err = io.ReadAll(tr)
-			if err != nil {
-				return &validators.ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("error reading archive entry %q: %s", hdr.Name, err),
-				}
+		content, err := readEntryContent(tr, hdr)
+		if err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("error reading archive entry %q: %s", hdr.Name, err),
 			}
 		}
 
@@ -116,6 +107,31 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 	}
 
 	return nil
+}
+
+// shouldSkipEntry reports whether a tar entry should be ignored.
+// It skips non-regular/non-directory entries and macOS AppleDouble
+// resource-fork files (._<name>) that archive tools may embed alongside real files.
+func shouldSkipEntry(hdr *tar.Header, name string) bool {
+	if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
+		return true
+	}
+
+	return strings.HasPrefix(filepath.Base(name), "._")
+}
+
+// readEntryContent reads and returns the content of a regular tar entry.
+// Directory entries return nil content.
+func readEntryContent(tr *tar.Reader, hdr *tar.Header) ([]byte, error) {
+	if hdr.Typeflag != tar.TypeReg {
+		return nil, nil
+	}
+	content, err := io.ReadAll(tr)
+	if err != nil {
+		return nil, err
+	}
+
+	return content, nil
 }
 
 // stripTopDir removes the optional single top-level directory prefix from path.

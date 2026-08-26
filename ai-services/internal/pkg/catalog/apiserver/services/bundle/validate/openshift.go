@@ -272,9 +272,11 @@ func checkOpenShiftTemplateLabels(rendered map[string]string) error {
 			continue
 		}
 
+		path := openShiftRuntime + "/templates"
+
 		// Use only the base filename to avoid the "chartname/templates/" prefix.
 		base := file[strings.LastIndex(file, "/")+1:]
-		if err := checkTemplateSpec(doc, openShiftRuntime+"/templates", base, true); err != nil {
+		if err := checkTemplateSpec(doc, path, base); err != nil {
 			return err
 		}
 	}

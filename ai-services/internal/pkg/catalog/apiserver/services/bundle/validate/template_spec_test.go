@@ -38,14 +38,10 @@ func validDoc(labelValue string) map[string]any {
 // Happy paths
 // -----------------------------------------------------------------------
 
-func TestCheckTemplateSpec_ValidPodman(t *testing.T) {
-	// Podman: requireLabelValue=false, label key present with empty value (runtime expression).
-	require.NoError(t, checkTemplateSpec(validDoc(""), "podman", "svc.yaml.tmpl", false))
-}
-
-func TestCheckTemplateSpec_ValidOpenShift(t *testing.T) {
-	// OpenShift: requireLabelValue=true, label has a real non-empty value.
-	require.NoError(t, checkTemplateSpec(validDoc("my-chart"), "openshift/templates", "svc.yaml", true))
+func TestCheckTemplateSpec_Valid(t *testing.T) {
+	// templateID is deploy-time injected — empty value is valid for both runtimes.
+	require.NoError(t, checkTemplateSpec(validDoc(""), "podman", "svc.yaml.tmpl"))
+	require.NoError(t, checkTemplateSpec(validDoc(""), "openshift/templates", "svc.yaml"))
 }
 
 // -----------------------------------------------------------------------
@@ -55,14 +51,14 @@ func TestCheckTemplateSpec_ValidOpenShift(t *testing.T) {
 func TestCheckTemplateSpec_MissingAPIVersion(t *testing.T) {
 	doc := validDoc("v")
 	delete(doc, "apiVersion")
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, "apiVersion")
 }
 
 func TestCheckTemplateSpec_MissingKind(t *testing.T) {
 	doc := validDoc("v")
 	delete(doc, "kind")
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, "kind")
 }
 
@@ -73,23 +69,22 @@ func TestCheckTemplateSpec_MissingKind(t *testing.T) {
 func TestCheckTemplateSpec_MissingMetadataName(t *testing.T) {
 	doc := validDoc("v")
 	doc["metadata"].(map[string]any)["name"] = ""
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, "metadata.name")
 }
 
 func TestCheckTemplateSpec_MetadataBlockAbsent(t *testing.T) {
-	// When metadata is nil both metadata.name and the label entry are reported.
 	doc := map[string]any{"apiVersion": "v1", "kind": "Pod"}
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
-	assertSpecError(t, err, "metadata.name")
-	assertSpecError(t, err, constants.ApplicationTemplateKey)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
+	assertSpecError(t, err, "metadata")
 }
 
 // -----------------------------------------------------------------------
-// Label checks — key presence (Podman, requireLabelValue=false)
+// Label checks — key presence enforced for both runtimes
 // -----------------------------------------------------------------------
 
-func TestCheckTemplateSpec_LabelKeyAbsent_Podman(t *testing.T) {
+func TestCheckTemplateSpec_LabelKeyAbsent(t *testing.T) {
+	// label map present but key missing — same code path for both runtimes.
 	doc := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -98,50 +93,18 @@ func TestCheckTemplateSpec_LabelKeyAbsent_Podman(t *testing.T) {
 			"labels": map[string]any{},
 		},
 	}
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, constants.ApplicationTemplateKey)
 }
 
-func TestCheckTemplateSpec_LabelKeyPresentEmptyValue_Podman(t *testing.T) {
-	// Podman: empty value is fine — it's a runtime expression.
-	require.NoError(t, checkTemplateSpec(validDoc(""), "podman", "svc.yaml.tmpl", false))
-}
-
-func TestCheckTemplateSpec_LabelsBlockAbsent_Podman(t *testing.T) {
+func TestCheckTemplateSpec_LabelsBlockAbsent(t *testing.T) {
 	doc := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
 		"metadata":   map[string]any{"name": "svc"},
 	}
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, constants.ApplicationTemplateKey)
-}
-
-// -----------------------------------------------------------------------
-// Label checks — non-empty value required (OpenShift, requireLabelValue=true)
-// -----------------------------------------------------------------------
-
-func TestCheckTemplateSpec_LabelKeyAbsent_OpenShift(t *testing.T) {
-	doc := map[string]any{
-		"apiVersion": "v1",
-		"kind":       "ConfigMap",
-		"metadata": map[string]any{
-			"name":   "svc",
-			"labels": map[string]any{},
-		},
-	}
-	err := checkTemplateSpec(doc, "openshift/templates", "svc.yaml", true)
-	assertSpecError(t, err, constants.ApplicationTemplateKey)
-}
-
-func TestCheckTemplateSpec_LabelEmptyValue_OpenShift(t *testing.T) {
-	// OpenShift: empty value means the label was not set by Helm — reported as missing.
-	err := checkTemplateSpec(validDoc(""), "openshift/templates", "svc.yaml", true)
-	assertSpecError(t, err, constants.ApplicationTemplateKey)
-}
-
-func TestCheckTemplateSpec_LabelNonEmpty_OpenShift(t *testing.T) {
-	require.NoError(t, checkTemplateSpec(validDoc("my-chart"), "openshift/templates", "svc.yaml", true))
 }
 
 // -----------------------------------------------------------------------
@@ -150,10 +113,9 @@ func TestCheckTemplateSpec_LabelNonEmpty_OpenShift(t *testing.T) {
 
 func TestCheckTemplateSpec_MultipleMissing(t *testing.T) {
 	doc := map[string]any{"kind": "Pod"} // apiVersion absent, no metadata block
-	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "svc.yaml.tmpl")
 	assertSpecError(t, err, "apiVersion")
-	assertSpecError(t, err, "metadata.name")
-	assertSpecError(t, err, constants.ApplicationTemplateKey)
+	assertSpecError(t, err, "metadata")
 }
 
 // -----------------------------------------------------------------------
@@ -162,6 +124,6 @@ func TestCheckTemplateSpec_MultipleMissing(t *testing.T) {
 
 func TestCheckTemplateSpec_ErrorContainsRuntimeAndFile(t *testing.T) {
 	doc := map[string]any{"apiVersion": "v1"} // kind + metadata missing
-	err := checkTemplateSpec(doc, "podman", "templates/svc.yaml.tmpl", false)
+	err := checkTemplateSpec(doc, "podman", "templates/svc.yaml.tmpl")
 	assertSpecError(t, err, "podman/templates/svc.yaml.tmpl")
 }
