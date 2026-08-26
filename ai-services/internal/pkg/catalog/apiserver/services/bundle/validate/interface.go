@@ -84,6 +84,17 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 			}
 		}
 
+		name := filepath.ToSlash(hdr.Name)
+
+		// Skip non-regular files and macOS AppleDouble resource-fork entries
+		// (._<name>) that archive tools may embed alongside real files.
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
+			continue
+		}
+		if strings.HasPrefix(filepath.Base(name), "._") {
+			continue
+		}
+
 		var content []byte
 		if hdr.Typeflag == tar.TypeReg {
 			content, err = io.ReadAll(tr)
@@ -95,7 +106,6 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 			}
 		}
 
-		name := filepath.ToSlash(hdr.Name)
 		stop, visitErr := visit(name, hdr, content)
 		if visitErr != nil {
 			return visitErr
