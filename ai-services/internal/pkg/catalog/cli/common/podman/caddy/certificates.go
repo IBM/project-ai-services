@@ -3,19 +3,14 @@ package caddy
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
-	certsDirName     = "certs"
-	containerDataDir = "/data/caddy"
-	dirPerm          = 0o755
-	filePerm         = 0o644
+	certsDirPath = "/etc/secret/ssl"
 )
 
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
@@ -27,28 +22,18 @@ func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath,
 		return nil
 	}
 
-	// Stage certificates with timestamped filenames (deletes old certificates)
-	certFilename, keyFilename, err := stageCertificates(baseDir, sslCertPath, sslKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to stage certificates for Caddy: %w", err)
-	}
-
-	// Define staged certificate paths with timestamped filenames
-	stagedCertPath := filepath.Join(baseDir, "common", "caddy", certsDirName, certFilename)
-	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", certsDirName, keyFilename)
-
 	// Get admin URL
 	adminURL, err := c.GetHostAdminURL(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}
 
-	// Load certificates via Admin API with timestamped paths
+	// Load certificates via Admin API using container paths
 	if err := utils.LoadUserCertificates(
-		stagedCertPath,
-		stagedKeyPath,
-		filepath.Join(containerDataDir, certsDirName, certFilename),
-		filepath.Join(containerDataDir, certsDirName, keyFilename),
+		sslCertPath,                             // host cert path for validation
+		sslKeyPath,                              // host key path for validation
+		fmt.Sprintf("%s/tls.crt", certsDirPath), // container cert path
+		fmt.Sprintf("%s/tls.key", certsDirPath), // container key path
 		adminURL,
 	); err != nil {
 		return fmt.Errorf("failed to load certificates via Admin API: %w", err)
@@ -59,59 +44,43 @@ func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath,
 	return nil
 }
 
-// stageCertificates stages SSL certificates for Caddy to use with timestamped filenames.
-// Deletes old certificate files before staging new ones to ensure only one set exists.
-// Returns the certificate and key filenames for use in loading.
-func stageCertificates(baseDir, sslCertPath, sslKeyPath string) (string, string, error) {
-	caddyDataDir := filepath.Join(baseDir, "common", "caddy")
-	certDir := filepath.Join(caddyDataDir, certsDirName)
-	if err := os.MkdirAll(certDir, dirPerm); err != nil {
-		return "", "", fmt.Errorf("failed to create Caddy cert directory: %w", err)
+// IsCustomCertLoaded checks whether custom SSL certificates are currently loaded in Caddy's live config.
+// It queries the Caddy Admin API at /config/apps/tls/certificates and returns true if a load_files entry
+// matching the expected container cert and key paths (/etc/secret/ssl/tls.crt and /etc/secret/ssl/tls.key)
+// is present. Returns false (without error) when the response is null or no matching entry is found.
+func (c *Context) IsCustomCertLoaded() (bool, error) {
+	adminURL, err := c.GetHostAdminURL()
+	if err != nil {
+		return false, err
 	}
 
-	// Delete old certificate files (tls-*.crt and tls-*.key)
-	oldCerts, _ := filepath.Glob(filepath.Join(certDir, "tls-*.crt"))
-	for _, oldCert := range oldCerts {
-		if err := os.Remove(oldCert); err != nil {
-			logger.Warningf("Failed to remove old certificate %s: %v", oldCert, err)
+	type loadFilesEntry struct {
+		Certificate string `json:"certificate"`
+		Key         string `json:"key"`
+	}
+	type certResponse struct {
+		LoadFiles []loadFilesEntry `json:"load_files"`
+	}
+
+	var result certResponse
+	resp, err := resty.New().R().
+		SetResult(&result).
+		Get(adminURL + "/config/apps/tls/certificates")
+	if err != nil {
+		return false, fmt.Errorf("failed to query Caddy certificates config: %w", err)
+	}
+	if resp.IsError() {
+		return false, fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode(), resp.String())
+	}
+
+	for _, entry := range result.LoadFiles {
+		if entry.Certificate == fmt.Sprintf("%s/tls.crt", certsDirPath) &&
+			entry.Key == fmt.Sprintf("%s/tls.key", certsDirPath) {
+			return true, nil
 		}
 	}
-	oldKeys, _ := filepath.Glob(filepath.Join(certDir, "tls-*.key"))
-	for _, oldKey := range oldKeys {
-		if err := os.Remove(oldKey); err != nil {
-			logger.Warningf("Failed to remove old key %s: %v", oldKey, err)
-		}
-	}
-
-	// Generate timestamped filenames
-	timestamp := time.Now().Unix()
-	certFilename := fmt.Sprintf("tls-%d.crt", timestamp)
-	keyFilename := fmt.Sprintf("tls-%d.key", timestamp)
-
-	stagedCertPath := filepath.Join(certDir, certFilename)
-	stagedKeyPath := filepath.Join(certDir, keyFilename)
-
-	// Read certificate and key files
-	certBytes, err := os.ReadFile(sslCertPath)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read certificate file: %w", err)
-	}
-
-	keyBytes, err := os.ReadFile(sslKeyPath)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read key file: %w", err)
-	}
-
-	// Write staged certificate and key with timestamped filenames
-	if err := os.WriteFile(stagedCertPath, certBytes, filePerm); err != nil {
-		return "", "", fmt.Errorf("failed to write staged certificate file: %w", err)
-	}
-
-	if err := os.WriteFile(stagedKeyPath, keyBytes, filePerm); err != nil {
-		return "", "", fmt.Errorf("failed to write staged key file: %w", err)
-	}
-
-	return certFilename, keyFilename, nil
+	
+	return false, nil
 }
 
 // Made with Bob

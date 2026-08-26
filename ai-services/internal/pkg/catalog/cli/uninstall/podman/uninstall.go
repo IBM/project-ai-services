@@ -62,6 +62,17 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
 	secretsToDelete = append(secretsToDelete, catalogConstants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName)
 
+	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
+	// If secret is created adding it to 'secretsToDelete' list
+	exists, err := rt.SecretExists(catalogConstants.CatalogCertSecretName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
+	}
+
+
 	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
 
 	// Delete catalog pods
@@ -76,12 +87,6 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 
 	// Delete volumes (only those without skip-cleanup label)
 	if err := deleteVolumes(ctx, rt, volumesToDelete); err != nil {
-		return err
-	}
-
-	// Delete caddy data
-	caddyDataPath := filepath.Join(baseDir, "common")
-	if err := dataDeletion(caddyDataPath); err != nil {
 		return err
 	}
 

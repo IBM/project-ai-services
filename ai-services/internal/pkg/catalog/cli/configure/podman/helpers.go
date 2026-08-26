@@ -4,16 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
-
-const certsDirName = "certs"
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
@@ -47,7 +45,7 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 
 // validateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
 // This function performs all validation checks including certificate validation.
-func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
+func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
 	// Get existing configuration from catalog-backend pod
 	existingOpts, err := getExistingConfigFromCatalogBackend(ctx, rt)
 	if err != nil {
@@ -55,13 +53,13 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 	}
 
 	// Validate configuration parameters haven't changed
-	if err := validateConfigParameters(existingOpts, newOpts, domainSuffix); err != nil {
+	if err := validateConfigParameters(existingOpts, newOpts, cadyCtx.GetDomainSuffix()); err != nil {
 		return err
 	}
 
 	// Validate certificate changes if SSL certificates are provided
 
-	return validateCertificateChanges(newOpts)
+	return validateCertificateChanges(rt, newOpts, cadyCtx)
 }
 
 // validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
@@ -84,19 +82,14 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 // validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
 // Allows updating custom certificate content (e.g., for expiry or renewal).
 // Uses glob patterns to detect timestamped certificate files.
-func validateCertificateChanges(opts *catalogUtils.PodmanConfigureOptions) error {
-	// Define staged certificate directory
-	certDir := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName)
-
-	// Check if any timestamped certificates exist from previous deployment
-	stagedCerts, _ := filepath.Glob(filepath.Join(certDir, "tls-*.crt"))
-	stagedKeys, _ := filepath.Glob(filepath.Join(certDir, "tls-*.key"))
-
-	stagedCertExists := len(stagedCerts) > 0
-	stagedKeyExists := len(stagedKeys) > 0
-
+func validateCertificateChanges(rt runtime.Runtime, opts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
+	isCustomCertLoaded, err := caddyCtx.IsCustomCertLoaded()
+	if err != nil {
+		return  fmt.Errorf("failed to check if custom cert is loaded: %w", err)
+	}
+	
 	// If no SSL paths provided in new config but staged certs exist, block cert type change
-	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && stagedCertExists && stagedKeyExists {
+	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && isCustomCertLoaded {
 		return fmt.Errorf("certificate type change not allowed: custom certificates are already configured. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
 	}
 
