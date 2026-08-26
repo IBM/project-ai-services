@@ -877,3 +877,9 @@ func (kc *OpenshiftClient) DeleteNamespace(ctx context.Context, name string) err
 
 	return nil
 }
+
+// HTTPProxy is not implemented on OpenShift — the control plane manages
+// OpenShift pods directly via the Kubernetes API without needing a tunnel.
+func (kc *OpenshiftClient) HTTPProxy(_ context.Context, _, _ string, _ map[string]string, _ []byte) (*types.HTTPProxyResponse, error) {
+	return nil, fmt.Errorf("HTTPProxy not implemented on OpenShift runtime")
+}

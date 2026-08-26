@@ -14,6 +14,10 @@ type DatasourceServiceInterface interface {
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 
+	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
+	// Sensitive credential fields are never included in any returned item.
+	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
+
 	// UpdateDatasource updates only the updatable credential fields for a datasource.
 	// It re-runs the connectivity test with the merged (new credentials + existing structural
 	// fields) metadata. If the test passes, the DB record is updated and the new credentials

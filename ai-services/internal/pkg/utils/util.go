@@ -755,3 +755,13 @@ func DirStats(dir string) (totalBytes int64, fileCount int) {
 
 	return totalBytes, fileCount
 }
+
+// ConvertRawJsontoMap unmarshals a raw JSON message into a map[string]any.
+func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON: %w", err)
+	}
+
+	return result, nil
+}
