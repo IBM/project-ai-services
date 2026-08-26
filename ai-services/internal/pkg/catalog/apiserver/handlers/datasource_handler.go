@@ -89,7 +89,7 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string						true	"Datasource ID (UUID)"
+//	@Param			id		path		string							true	"Datasource ID (UUID)"
 //	@Param			request	body		models.UpdateDatasourceRequest	true	"Credential update request"
 //	@Success		200		{object}	models.UpdateDatasourceResponse	"Datasource updated"
 //	@Failure		400		{object}	ErrorResponse					"Invalid request body or invalid ID"

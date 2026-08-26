@@ -1441,6 +1441,82 @@ const docTemplate = `{
                 }
             }
         },
+        "/datasources/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates the Authentication credential fields for a datasource as defined in the provider schema. Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Update datasource credentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Credential update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource updated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or invalid ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Connection test failed with new credentials",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -1913,6 +1989,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError": {
+            "type": "object",
+            "properties": {
+                "application_id": {
+                    "description": "ApplicationID is the UUID of the application whose Digitize service could not be updated.",
+                    "type": "string"
+                },
+                "application_name": {
+                    "description": "ApplicationName is the display name of that application, for UI rendering.",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error is the human-readable reason the propagation failed.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
             "type": "object",
             "required": [
@@ -1936,6 +2029,58 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest": {
+            "type": "object",
+            "required": [
+                "params"
+            ],
+            "properties": {
+                "params": {
+                    "description": "Params holds the credential fields to update. Only fields in the provider's\nschema whose ui:section is \"Authentication\" may be changed; structural fields\nare filtered out server-side.\nNote: binding:\"required\" only prevents null/missing — an empty map is rejected in the\nservice layer, which also validates that at least one updatable field is present.",
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "propagation_errors": {
+                    "description": "PropagationErrors lists any downstream Digitize propagation failures.\nOmitted when all propagations succeeded.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
