@@ -98,7 +98,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	}
 	syncService.Start(ctx)
 
-	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, catalogProvider)
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, svcDepRepo, catalogProvider)
 	if err != nil {
 		syncService.Stop(ctx)
 

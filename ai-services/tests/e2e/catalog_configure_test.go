@@ -258,19 +258,18 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 				return
 			}
 
-			infoCtx, infoCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer infoCancel()
+			// Always uninstall and re-configure to guarantee the next suite inherits a
+			// clean deployment on the default nip.io domain.  Merely checking whether
+			// the catalog is running is not sufficient: a prior test may have left it
+			// deployed with a custom domain (e.g. e2etest.local), which would cause
+			// the subsequent "ensures catalog service is running" step in e2e_suite_test.go
+			// to fail with a "domain change not allowed" error.
+			catalogUninstallIfRunning()
 
-			_, infoErr := cli.CatalogInfo(infoCtx, cfg, appRuntime)
-			if infoErr == nil {
-				logger.Infof("[TEARDOWN][catalog-configure] catalog is running — no restore needed")
-				return
-			}
-
-			logger.Infof("[TEARDOWN][catalog-configure] catalog not running after suite — restoring")
 			restoreCtx, restoreCancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
 			defer restoreCancel()
 
+			logger.Infof("[TEARDOWN][catalog-configure] restoring catalog to default nip.io domain")
 			out, err := cli.CatalogConfigure(restoreCtx, cfg, appRuntime)
 			if err != nil {
 				logger.Warningf("[TEARDOWN][catalog-configure] restore failed (non-fatal): %v\n%s", err, out)
@@ -492,6 +491,26 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 		// ── SSL Certificate Tests ─────────────────────────────────────────────
 
 		ginkgo.Context("SSL Certificate Configuration", func() {
+			// AfterEach guarantees the catalog is always restored to the default nip.io
+			// domain after every SSL test — even when an It block fails or panics.
+			// This prevents e2etest.local from leaking into subsequent tests.
+			// We force-uninstall first so that CatalogConfigure regenerates the nip.io URL
+			// from scratch, rather than seeing a "running" catalog and doing nothing.
+			ginkgo.AfterEach(func() {
+				if appRuntime != "podman" || bootstrap.GetCatalogAdminPassword() == "" {
+					return
+				}
+				catalogUninstallIfRunning()
+				restoreCtx, restoreCancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
+				defer restoreCancel()
+				out, rErr := cli.CatalogConfigure(restoreCtx, cfg, appRuntime)
+				if rErr != nil {
+					logger.Warningf("[TEST] SSL AfterEach catalog restore failed: %v\n%s", rErr, out)
+				} else {
+					logger.Infof("[TEST] SSL AfterEach catalog restored to default nip.io domain")
+				}
+			})
+
 			ginkgo.It(
 				"deploys catalog with custom SSL certificate and key",
 				ginkgo.Label("catalog-configure", "ssl", "spyre-dependent"),
@@ -507,7 +526,7 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					catalogUninstallIfRunning()
-					defer catalogRestoreDefault()
+					// restore is handled by AfterEach above
 
 					ctx, cancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
 					defer cancel()
@@ -529,25 +548,44 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 					skipIfNotPodman()
 					skipIfNoCatalogPassword()
 
-					infoCtx, infoCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					defer infoCancel()
-
-					if _, infoErr := cli.CatalogInfo(infoCtx, cfg, appRuntime); infoErr != nil {
-						ginkgo.Skip("catalog not running — skipping certificate reset test")
-					}
+					// --reset-certificate rejects domain changes, so the cert domain must
+					// match the domain of the running deployment. To make this test
+					// self-contained and order-independent we:
+					//   1. Deploy catalog with e2etest.local (initial cert).
+					//   2. Reset the cert to a freshly-generated cert for the same domain.
+					// The AfterEach above handles teardown (uninstall + restore to nip.io).
+					const resetDomain = "e2etest.local"
 
 					certDir, err := os.MkdirTemp("", "ais-catalog-reset-cert-*")
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					defer os.RemoveAll(certDir)
 
-					cert, err := bootstrap.GenerateSelfSignedWildcardCert(certDir, "e2etest.local")
+					initialCert, err := bootstrap.GenerateSelfSignedWildcardCert(certDir, resetDomain)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					catalogUninstallIfRunning()
+					// restore is handled by AfterEach above
+
+					deployCtx, deployCancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
+					defer deployCancel()
+
+					logger.Infof("[TEST] deploying catalog with domain %s before reset-certificate test", resetDomain)
+					deployOut, deployErr := cli.CatalogConfigureWithSSL(deployCtx, cfg, initialCert.CertPath, initialCert.KeyPath, appRuntime)
+					gomega.Expect(deployErr).NotTo(gomega.HaveOccurred(),
+						"initial SSL deploy should succeed; output:\n%s", deployOut)
+
+					resetCertDir, err := os.MkdirTemp("", "ais-catalog-reset-cert-new-*")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					defer os.RemoveAll(resetCertDir)
+
+					newCert, err := bootstrap.GenerateSelfSignedWildcardCert(resetCertDir, resetDomain)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					ctx, cancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
 					defer cancel()
 
-					logger.Infof("[TEST] running catalog configure --reset-certificate")
-					output, err := cli.CatalogConfigureResetCert(ctx, cfg, cert.CertPath, cert.KeyPath, appRuntime)
+					logger.Infof("[TEST] running catalog configure --reset-certificate (domain=%s)", resetDomain)
+					output, err := cli.CatalogConfigureResetCert(ctx, cfg, newCert.CertPath, newCert.KeyPath, appRuntime)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred(),
 						"--reset-certificate should succeed; output:\n%s", output)
 					gomega.Expect(cli.ValidateCatalogResetCertOutput(output)).To(gomega.Succeed())
@@ -666,7 +704,9 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 				},
 			)
 
-			// Each cycle uses the same domain (e2etest.local) — CLI rejects domain changes during --reset-certificate.
+			// All cycles use the same domain (e2etest.local). We first deploy with that domain
+			// so the running catalog matches; --reset-certificate rejects domain changes.
+			// The AfterEach above handles teardown (uninstall + restore to nip.io).
 			ginkgo.It(
 				"supports multiple consecutive certificate reset cycles",
 				ginkgo.Label("catalog-configure", "ssl", "reset", "spyre-dependent"),
@@ -674,17 +714,28 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 					skipIfNotPodman()
 					skipIfNoCatalogPassword()
 
-					infoCtx, infoCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					defer infoCancel()
-
-					if _, infoErr := cli.CatalogInfo(infoCtx, cfg, appRuntime); infoErr != nil {
-						ginkgo.Skip("catalog not running — skipping multiple reset cycles test")
-					}
-
 					const (
 						resetCycles = 2
 						resetDomain = "e2etest.local"
 					)
+
+					initialCertDir, err := os.MkdirTemp("", "ais-catalog-cycles-initial-*")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					defer os.RemoveAll(initialCertDir)
+
+					initialCert, err := bootstrap.GenerateSelfSignedWildcardCert(initialCertDir, resetDomain)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					catalogUninstallIfRunning()
+					// restore is handled by AfterEach above
+
+					deployCtx, deployCancel := context.WithTimeout(context.Background(), catalogConfigureTestTimeout)
+					defer deployCancel()
+
+					logger.Infof("[TEST] deploying catalog with domain %s before reset cycles", resetDomain)
+					deployOut, deployErr := cli.CatalogConfigureWithSSL(deployCtx, cfg, initialCert.CertPath, initialCert.KeyPath, appRuntime)
+					gomega.Expect(deployErr).NotTo(gomega.HaveOccurred(),
+						"initial SSL deploy should succeed; output:\n%s", deployOut)
 
 					for i := 1; i <= resetCycles; i++ {
 						certDir, err := os.MkdirTemp("", fmt.Sprintf("ais-catalog-cycle-%d-*", i))

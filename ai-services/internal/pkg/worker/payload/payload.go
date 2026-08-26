@@ -62,3 +62,15 @@ type ExecInContainer struct {
 type ListRoutes struct {
 	LabelSelector string `json:"labelSelector"`
 }
+
+// ─── HTTP proxy ───────────────────────────────────────────────────────────────
+
+// HTTPProxy is the request payload for COMMAND_TYPE_HTTP_PROXY.
+// The control plane sends this; the worker executes the HTTP request locally
+// against a pod endpoint and returns a runtimetypes.HTTPProxyResponse.
+type HTTPProxy struct {
+	Method    string            `json:"method"`
+	TargetURL string            `json:"target_url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      []byte            `json:"body,omitempty"`
+}
