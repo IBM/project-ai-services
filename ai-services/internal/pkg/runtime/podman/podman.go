@@ -1,19 +1,19 @@
 package podman
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/go-resty/resty/v2"
 
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -877,65 +877,50 @@ func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _
 // ─── HTTP proxy tunnel ────────────────────────────────────────────────────────
 
 // HTTPProxy makes an HTTP request to targetURL from the worker node and returns
-// the response to the control plane. The request executes against a local pod
-// endpoint so the control plane can reach pods that are not externally routed.
+// the response to the control plane. The targetURL hostname may be a Podman
+// pod name — it is resolved to the pod's infra-container IP via the Podman
+// socket before the request is made.
 //
-// The targetURL hostname may be a Podman pod name (e.g. "my-app--chat-bot").
-// Pod name DNS resolution only works inside Podman-networked containers, not
-// from the host OS. So if the hostname is not already an IP address we
-// resolve it to the pod's infra-container IP before making the request.
+// TODO: pod IP resolution works for rootful Podman where the pod network bridge
+// is visible on the host. For rootless Podman the resolved IP lives inside a
+// private network namespace and is unreachable from the host process; use a
+// Caddy-proxied URL or a hostPort mapping in that case.
 func (pc *PodmanClient) HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error) {
 	resolvedURL, err := pc.resolvePodNameInURL(targetURL)
 	if err != nil {
 		return nil, fmt.Errorf("HTTPProxy: resolve pod IP: %w", err)
 	}
 
-	var reqBody io.Reader
-	if len(body) > 0 {
-		reqBody = bytes.NewReader(body)
-	}
+	client := resty.New()
 
-	req, err := http.NewRequestWithContext(ctx, method, resolvedURL, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("HTTPProxy: build request: %w", err)
-	}
+	req := client.R().SetContext(ctx)
 	for k, v := range headers {
-		req.Header.Set(k, v)
+		req.SetHeader(k, v)
+	}
+	if len(body) > 0 {
+		req.SetBody(body)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := req.Execute(method, resolvedURL)
 	if err != nil {
 		return nil, fmt.Errorf("HTTPProxy: execute request: %w", err)
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Warningf("HTTPProxy: close response body: %v", closeErr)
-		}
-	}()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("HTTPProxy: read response body: %w", err)
-	}
-
-	respHeaders := make(map[string]string, len(resp.Header))
-	for k := range resp.Header {
-		respHeaders[k] = resp.Header.Get(k)
+	respHeaders := make(map[string]string, len(resp.Header()))
+	for k := range resp.Header() {
+		respHeaders[k] = resp.Header().Get(k)
 	}
 
 	return &types.HTTPProxyResponse{
-		StatusCode: resp.StatusCode,
+		StatusCode: resp.StatusCode(),
 		Headers:    respHeaders,
-		Body:       respBody,
+		Body:       resp.Body(),
 	}, nil
 }
 
 // resolvePodNameInURL rewrites the hostname in rawURL from a Podman pod name
-// to the pod's IP address. Pod name DNS is only available inside Podman
-// network namespaces; the host OS resolver cannot use it.
-//
-// If the hostname is already an IP address (or localhost) it is returned
-// unchanged.
+// to the pod's infra-container IP address. If the hostname is already an IP
+// or localhost it is returned unchanged.
 func (pc *PodmanClient) resolvePodNameInURL(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
