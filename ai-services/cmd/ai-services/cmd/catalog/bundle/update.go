@@ -28,11 +28,6 @@ Note:
   Use 'bundle validate' to check an archive without modifying the catalog.`,
 		Example: `  ai-services catalog bundle update 550e8400-e29b-41d4-a716-446655440000 --file ./my-service-v2.tar.gz`,
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			bundleID := args[0]
@@ -44,7 +39,7 @@ Note:
 
 			logger.InfofCtx(ctx, "Updating bundle %s from %s...\n", bundleID, filePath)
 
-			resp, err := c.UpdateBundle(bundleID, filePath)
+			resp, err := c.UpdateBundle(ctx, bundleID, filePath)
 			if err != nil {
 				return err
 			}

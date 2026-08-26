@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -75,9 +76,10 @@ func NewBundleClient() (*BundleClient, error) {
 
 // CreateBundle POSTs a .tar.gz archive as multipart/form-data to create a new bundle.
 // Returns the 201 BundleResponse (status always "active" on success).
-func (c *BundleClient) CreateBundle(filePath string) (*BundleResponse, error) {
+func (c *BundleClient) CreateBundle(ctx context.Context, filePath string) (*BundleResponse, error) {
 	var result BundleResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetFile("file", filePath).
 		SetResult(&result).
 		Post(bundlesRoute)
@@ -97,9 +99,10 @@ func (c *BundleClient) CreateBundle(filePath string) (*BundleResponse, error) {
 
 // UpdateBundle PUTs a replacement .tar.gz archive for the bundle identified by bundleID.
 // Returns the 200 BundleResponse with status "active" (fully synchronous).
-func (c *BundleClient) UpdateBundle(bundleID, filePath string) (*BundleResponse, error) {
+func (c *BundleClient) UpdateBundle(ctx context.Context, bundleID, filePath string) (*BundleResponse, error) {
 	var result BundleResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetFile("file", filePath).
 		SetResult(&result).
 		Put(fmt.Sprintf(bundleByIDRoute, bundleID))
@@ -118,8 +121,9 @@ func (c *BundleClient) UpdateBundle(bundleID, filePath string) (*BundleResponse,
 }
 
 // DeleteBundle sends DELETE /api/v1/catalog/bundles/:bundleID.
-func (c *BundleClient) DeleteBundle(bundleID string) error {
+func (c *BundleClient) DeleteBundle(ctx context.Context, bundleID string) error {
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		Delete(fmt.Sprintf(bundleByIDRoute, bundleID))
 	if err != nil {
 		return fmt.Errorf("delete bundle: %w", err)
@@ -136,9 +140,10 @@ func (c *BundleClient) DeleteBundle(bundleID string) error {
 }
 
 // GetBundle returns the full BundleResponse for a single bundle by its ID.
-func (c *BundleClient) GetBundle(bundleID string) (*BundleResponse, error) {
+func (c *BundleClient) GetBundle(ctx context.Context, bundleID string) (*BundleResponse, error) {
 	var result BundleResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(bundleByIDRoute, bundleID))
 	if err != nil {
@@ -156,9 +161,10 @@ func (c *BundleClient) GetBundle(bundleID string) (*BundleResponse, error) {
 }
 
 // ListBundles returns a paginated list of all registered bundles.
-func (c *BundleClient) ListBundles(page, pageSize int) (*BundleListResponse, error) {
+func (c *BundleClient) ListBundles(ctx context.Context, page, pageSize int) (*BundleListResponse, error) {
 	var result BundleListResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetQueryParam("page", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetResult(&result).
@@ -180,8 +186,9 @@ func (c *BundleClient) ListBundles(page, pageSize int) (*BundleListResponse, err
 // ValidateBundle POSTs to the validate endpoint without creating a bundle (no DB write, no reload).
 // Returns a BundleValidateResult on success. The component_type field is only populated for
 // component bundles; it is empty for service bundles.
-func (c *BundleClient) ValidateBundle(filePath string) (*BundleValidateResult, error) {
+func (c *BundleClient) ValidateBundle(ctx context.Context, filePath string) (*BundleValidateResult, error) {
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetFile("file", filePath).
 		Post(bundleValidateRoute)
 	if err != nil {

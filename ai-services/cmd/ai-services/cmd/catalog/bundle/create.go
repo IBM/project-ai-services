@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // NewCreateCmd implements: ai-services catalog bundle create --file <path>.
@@ -26,11 +27,6 @@ On success, the assigned bundle ID and metadata are printed.
 Note:
   Use 'bundle validate' to check an archive without registering it.`,
 		Example: `  ai-services catalog bundle create --file ./my-service-bundle.tar.gz`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
@@ -41,7 +37,7 @@ Note:
 
 			logger.InfofCtx(ctx, "Creating bundle from %s...\n", filePath)
 
-			resp, err := c.CreateBundle(filePath)
+			resp, err := c.CreateBundle(ctx, filePath)
 			if err != nil {
 				return err
 			}
@@ -54,7 +50,7 @@ Note:
 			logger.InfofCtx(ctx, "  Version:      %s\n", resp.Version)
 			logger.InfofCtx(ctx, "  Status:       %s\n", resp.Status)
 			if resp.SizeBytes != nil {
-				logger.InfofCtx(ctx, "  Size:         %s\n", formatBytes(*resp.SizeBytes))
+				logger.InfofCtx(ctx, "  Size:         %s\n", utils.FormatBytes(*resp.SizeBytes))
 			}
 
 			logger.InfolnCtx(ctx, "")

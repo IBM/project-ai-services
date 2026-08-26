@@ -22,11 +22,6 @@ Nothing is stored and the catalog is not modified.
 
 The command exits with a non-zero status if validation fails.`,
 		Example: `  ai-services catalog bundle validate --file ./my-service-bundle.tar.gz`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
@@ -37,10 +32,8 @@ The command exits with a non-zero status if validation fails.`,
 
 			logger.InfofCtx(ctx, "Validating bundle from %s...\n", filePath)
 
-			result, err := c.ValidateBundle(filePath)
+			result, err := c.ValidateBundle(ctx, filePath)
 			if err != nil {
-				logger.ErrorfCtx(ctx, "✗ Bundle validation failed: %v\n", err)
-
 				return err
 			}
 

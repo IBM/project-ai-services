@@ -31,11 +31,6 @@ Note:
 		Example: `  ai-services catalog bundle delete 550e8400-e29b-41d4-a716-446655440000
   ai-services catalog bundle delete 550e8400-e29b-41d4-a716-446655440000 --yes`,
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			bundleID := args[0]
@@ -58,7 +53,7 @@ Note:
 				return err
 			}
 
-			if err := c.DeleteBundle(bundleID); err != nil {
+			if err := c.DeleteBundle(ctx, bundleID); err != nil {
 				return err
 			}
 

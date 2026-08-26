@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // NewInfoCmd implements: ai-services catalog bundle info <bundle_id>.
@@ -19,11 +20,6 @@ or 'bundle create'. The output includes the catalog ID, type, version,
 on-disk directory name, status, size, creator, and registration timestamp.`,
 		Example: `  ai-services catalog bundle info 550e8400-e29b-41d4-a716-446655440000`,
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			bundleID := args[0]
@@ -33,7 +29,7 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 				return err
 			}
 
-			b, err := c.GetBundle(bundleID)
+			b, err := c.GetBundle(ctx, bundleID)
 			if err != nil {
 				return err
 			}
@@ -48,7 +44,7 @@ on-disk directory name, status, size, creator, and registration timestamp.`,
 			logger.InfofCtx(ctx, "Version:      %s\n", b.Version)
 			logger.InfofCtx(ctx, "Status:       %s\n", b.Status)
 			if b.SizeBytes != nil {
-				logger.InfofCtx(ctx, "Size:         %s\n", formatBytes(*b.SizeBytes))
+				logger.InfofCtx(ctx, "Size:         %s\n", utils.FormatBytes(*b.SizeBytes))
 			}
 			if b.CreatedBy != "" {
 				logger.InfofCtx(ctx, "Created by:   %s\n", b.CreatedBy)

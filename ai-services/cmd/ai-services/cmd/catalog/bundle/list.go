@@ -12,6 +12,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+const (
+	defaultPageSize = 20
+	tablePadding    = 3
+)
+
 // NewListCmd implements: ai-services catalog bundle list.
 func NewListCmd() *cobra.Command {
 	var (
@@ -31,11 +36,6 @@ and creation timestamp.
 Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 		Example: `  ai-services catalog bundle list`,
 		Args:    cobra.NoArgs,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
@@ -44,7 +44,7 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 				return err
 			}
 
-			resp, err := c.ListBundles(page, pageSize)
+			resp, err := c.ListBundles(ctx, page, pageSize)
 			if err != nil {
 				return err
 			}
@@ -54,13 +54,10 @@ Use 'bundle info <bundle_id>' to view full details for a specific bundle.`,
 	}
 
 	cmd.Flags().IntVar(&page, "page", 1, "Page number (1-indexed)")
-	const defaultPageSize = 20
 	cmd.Flags().IntVar(&pageSize, "page-size", defaultPageSize, "Number of items per page (1–100)")
 
 	return cmd
 }
-
-const tablePadding = 3
 
 func printBundleTable(ctx context.Context, resp *client.BundleListResponse) error {
 	p := resp.Pagination
