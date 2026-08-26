@@ -41,18 +41,18 @@ async def _run_digitize(
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
     try:
-        logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
+        logger.info(f"🚀 Digitization started for job: {job_id}")
         from digitize.pipeline.digitize import digitize
         await asyncio.to_thread(digitize, job_id, doc_id_dict)
-        logger.info(f"Digitization pipeline for job {job_id} finished")
+        logger.info(f"Digitization for job {job_id} completed successfully")
     except Exception as exc:
-        logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
+        logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
             models.JobStatus.FAILED,
-            error=f"Digitization pipeline error: {exc}",
+            error=f"Error occurred while processing digitization pipeline: {exc}",
         )
     finally:
         cleanup_staging_directory(job_id, settings.digitize.staging_dir)
@@ -71,18 +71,18 @@ async def _run_ingest(
     """
     job_staging_path = settings.digitize.staging_dir / job_id
     try:
-        logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
+        logger.info(f"🚀 Ingestion started for job: {job_id}")
         from digitize.pipeline.ingest import ingest
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
-        logger.info(f"Ingestion pipeline for job {job_id} finished")
+        logger.info(f"Ingestion for job {job_id} completed successfully")
     except Exception as exc:
-        logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
+        logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
             models.JobStatus.FAILED,
-            error=f"Ingestion pipeline error: {exc}",
+            error=f"Error occurred while processing ingestion pipeline: {exc}",
         )
     finally:
         cleanup_staging_directory(job_id, settings.digitize.staging_dir)
