@@ -314,7 +314,6 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
-          onComponentError={setHasSchemaError}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
