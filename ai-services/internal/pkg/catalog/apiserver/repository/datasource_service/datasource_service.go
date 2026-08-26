@@ -35,7 +35,7 @@ type ValidationError = validators.ValidationError
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
-	serviceDepsRepo dbrepo.ServiceDependencyRepository
+	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
 	encryptionKey   string
@@ -49,14 +49,14 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	serviceDepsRepo dbrepo.ServiceDependencyRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
-		serviceDepsRepo: serviceDepsRepo,
+		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
 		encryptionKey:   encryptionKey,
@@ -70,7 +70,7 @@ func NewDatasourceService(
 // CreateDatasource is the single create flow shared by all providers:
 //
 //  1. Validate the request body (provider existence + JSON-schema param validation).
-//  2. Duplicate-name guard (case-insensitive).
+//  2. Duplicate-name guard (case-insensitive — handled by LOWER() in the DB query).
 //  3. Test the connection — the outcome sets the initial connector status.
 //  4. Encrypt sensitive credential fields derived from the provider's schema.json.
 //  5. Persist the connector record.
@@ -171,7 +171,7 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		connectorIDs[i] = connectors[i].ID
 	}
 
-	serviceCounts, err := s.serviceDepsRepo.GetServiceCountByDependency(ctx, connectorIDs, dbmodels.DependencyTypeConnector)
+	serviceCounts, err := s.svcDepRepo.GetServiceCountByDependency(ctx, connectorIDs, dbmodels.DependencyTypeConnector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count connected services: %w", err)
 	}
@@ -395,7 +395,7 @@ func (s *DatasourceService) propagateCredentials(
 	//   service_dependencies → services → applications
 	// returning the application identity and the service's runtime endpoint URL for
 	// each row where dependency_id = datasourceID AND dependency_type = 'connector'.
-	serviceEndpoints, err := s.serviceDepsRepo.GetLinkedServiceEndpoints(
+	serviceEndpoints, err := s.svcDepRepo.GetLinkedServiceEndpoints(
 		ctx,
 		datasourceID,
 		dbmodels.DependencyTypeConnector,
