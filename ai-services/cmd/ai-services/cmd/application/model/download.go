@@ -53,8 +53,10 @@ func init() {
 }
 
 func download(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	if !legacyModel && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return downloadCatalogModels(templateName)
+		return downloadCatalogModels(ctx, templateName)
 	}
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
@@ -70,7 +72,7 @@ func download(cmd *cobra.Command) error {
 	}
 	logger.Infoln("Downloaded Models in application template" + templateName + ":")
 	for _, model := range models {
-		err := helpers.DownloadModel(model, modelDirectory)
+		err := helpers.DownloadModel(ctx, model, modelDirectory)
 		if err != nil {
 			return fmt.Errorf("failed to download model: %w", err)
 		}
@@ -80,8 +82,8 @@ func download(cmd *cobra.Command) error {
 }
 
 // downloadCatalogModels downloads models for services or architectures from the catalog.
-func downloadCatalogModels(templateID string) error {
-	models, err := getCatalogModels(templateID, "watsonx")
+func downloadCatalogModels(ctx context.Context, templateID string) error {
+	models, err := getCatalogModels(ctx, templateID, "watsonx")
 	if err != nil {
 		return err
 	}
@@ -98,7 +100,7 @@ func downloadCatalogModels(templateID string) error {
 	for _, model := range models {
 		logger.Infof("Downloading model: %s\n", model)
 
-		if err := helpers.DownloadModelContainer(context.Background(), model, modelDirectory); err != nil {
+		if err := helpers.DownloadModelContainer(ctx, model, modelDirectory); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", model, err)
 		}
 	}

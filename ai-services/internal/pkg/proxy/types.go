@@ -8,13 +8,13 @@ type ProxyManager interface {
 	RegisterRoute(ctx context.Context, route Route) error
 
 	// UnregisterRoute removes a route from the proxy by its ID
-	UnregisterRoute(routeID string) error
+	UnregisterRoute(ctx context.Context, routeID string) error
 
 	// HealthCheck verifies the proxy is available and responding
-	HealthCheck() error
+	HealthCheck(ctx context.Context) error
 
 	// GetRouteByID retrieves a specific route by its ID from the proxy
-	GetRouteByID(routeID string) (*Route, error)
+	GetRouteByID(ctx context.Context, routeID string) (*Route, error)
 }
 
 // Route represents a reverse proxy route configuration.

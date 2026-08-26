@@ -1,6 +1,7 @@
 package caddy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ const (
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
 // Certificate validation is done in the CLI command's PreRunE hook before calling this function.
 // Uses timestamped filenames to ensure Caddy loads fresh certificates without requiring a restart.
-func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) error {
+func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath, sslKeyPath string) error {
 	logger.Debugln("loading ssl certificate to caddy...")
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
@@ -37,7 +38,7 @@ func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) e
 	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", certsDirName, keyFilename)
 
 	// Get admin URL
-	adminURL, err := c.GetHostAdminURL()
+	adminURL, err := c.GetHostAdminURL(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}

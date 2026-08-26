@@ -20,7 +20,7 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
 	// Get application details from catalog API using existing utility
-	appDetails, err := cliUtils.GetAppDetailsWithComponents(opts.Name)
+	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, opts.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get application details: %w", err)
 	}
@@ -82,7 +82,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 
 	// Create digitize restore client and call Import API
 	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(importPayload); err != nil {
+	if err := client.CallImportAPI(ctx, importPayload); err != nil {
 		return err
 	}
 

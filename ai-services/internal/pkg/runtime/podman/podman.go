@@ -74,13 +74,16 @@ func NewPodmanClient() (*PodmanClient, error) {
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).
-func (pc *PodmanClient) ListImages() ([]types.Image, error) {
-	images, err := images.List(pc.Context, nil)
+func (pc *PodmanClient) ListImages(ctx context.Context) ([]types.Image, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	imgs, err := images.List(podCtx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return toImageList(images), nil
+	return toImageList(imgs), nil
 }
 
 func (pc *PodmanClient) PullImage(ctx context.Context, image string) error {
@@ -107,14 +110,17 @@ func (pc *PodmanClient) PullImage(ctx context.Context, image string) error {
 	return nil
 }
 
-func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
+func (pc *PodmanClient) ListPods(ctx context.Context, filters map[string][]string) ([]types.Pod, error) {
 	var listOpts pods.ListOptions
 
 	if len(filters) >= 1 {
 		listOpts.Filters = filters
 	}
 
-	podList, err := pods.List(pc.Context, &listOpts)
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	podList, err := pods.List(podCtx, &listOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -188,8 +194,11 @@ func (pc *PodmanClient) CreatePod(ctx context.Context, body io.Reader, opts map[
 	return toPodsList(kubeReport), nil
 }
 
-func (pc *PodmanClient) DeletePod(nameOrID string, force *bool) error {
-	_, err := pods.Remove(pc.Context, nameOrID, &pods.RemoveOptions{Force: force})
+func (pc *PodmanClient) DeletePod(ctx context.Context, id string, force *bool) error {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	_, err := pods.Remove(podCtx, id, &pods.RemoveOptions{Force: force})
 	if err != nil {
 		return fmt.Errorf("failed to delete the pod: %w", err)
 	}
@@ -197,8 +206,11 @@ func (pc *PodmanClient) DeletePod(nameOrID string, force *bool) error {
 	return nil
 }
 
-func (pc *PodmanClient) InspectContainer(nameOrId string) (*types.Container, error) {
-	stats, err := containers.Inspect(pc.Context, nameOrId, nil)
+func (pc *PodmanClient) InspectContainer(ctx context.Context, nameOrId string) (*types.Container, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	stats, err := containers.Inspect(podCtx, nameOrId, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)
 	}
@@ -210,22 +222,25 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*types.Container, err
 	return toInspectContainer(stats), nil
 }
 
-func (pc *PodmanClient) StopPod(nameOrID string) error {
-	inspectReport, err := pc.InspectPod(nameOrID)
+func (pc *PodmanClient) StopPod(ctx context.Context, id string) error {
+	inspectReport, err := pc.InspectPod(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to inspect pod: %w", err)
 	}
 
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
 	for _, container := range inspectReport.Containers {
 		// skipping infra container as it will be stopped when other containers are stopped
 		if container.ID != inspectReport.InfraContainerID {
-			err := containers.Stop(pc.Context, container.ID, nil)
+			err := containers.Stop(podCtx, container.ID, nil)
 			if err != nil {
 				return fmt.Errorf("failed to stop pod container %s; err: %w", container.ID, err)
 			}
 		}
 	}
-	_, err = pods.Stop(pc.Context, nameOrID, &pods.StopOptions{})
+	_, err = pods.Stop(podCtx, id, &pods.StopOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to stop the pod: %w", err)
 	}
@@ -233,8 +248,11 @@ func (pc *PodmanClient) StopPod(nameOrID string) error {
 	return nil
 }
 
-func (pc *PodmanClient) StartPod(nameOrID string) error {
-	_, err := pods.Start(pc.Context, nameOrID, &pods.StartOptions{})
+func (pc *PodmanClient) StartPod(ctx context.Context, id string) error {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	_, err := pods.Start(podCtx, id, &pods.StartOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start the pod: %w", err)
 	}
@@ -242,8 +260,11 @@ func (pc *PodmanClient) StartPod(nameOrID string) error {
 	return nil
 }
 
-func (pc *PodmanClient) InspectPod(nameOrID string) (*types.Pod, error) {
-	podInspectReport, err := pods.Inspect(pc.Context, nameOrID, nil)
+func (pc *PodmanClient) InspectPod(ctx context.Context, nameOrID string) (*types.Pod, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	podInspectReport, err := pods.Inspect(podCtx, nameOrID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
@@ -262,7 +283,10 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 	stdoutChan := make(chan string, logChannelBufferSize)
 	stderrChan := make(chan string, logChannelBufferSize)
 
-	logsCtx, cancelLogs := context.WithCancel(ctx)
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	logsCtx, cancelLogs := context.WithCancel(podCtx)
 	defer cancelLogs()
 
 	// Channel to signal goroutine completion
@@ -273,7 +297,7 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		waitDone := make(chan struct{})
 		go func() {
 			defer close(waitDone)
-			_, err := containers.Wait(ctx, containerNameOrID, nil)
+			_, err := containers.Wait(logsCtx, containerNameOrID, nil)
 			if err == nil {
 				// Container exited, cancel the logs streaming
 				cancelLogs()
@@ -320,12 +344,12 @@ func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context
 	}
 }
 
-func (pc *PodmanClient) PodLogs(podNameOrID string) error {
+func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string) error {
 	if podNameOrID == "" {
 		return errors.New("pod name or ID cannot be empty")
 	}
 
-	podInspect, err := pc.InspectPod(podNameOrID)
+	podInspect, err := pc.InspectPod(ctx, podNameOrID)
 	if err != nil {
 		return fmt.Errorf("failed to inspect pod: %w", err)
 	}
@@ -335,7 +359,7 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 	}
 
 	// creating context here that listens for Ctrl+C
-	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	for _, container := range podInspect.Containers {
@@ -346,12 +370,12 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 
 		logger.Infof("Streaming logs for container: %s", container.Name)
 
-		if err := pc.streamContainerLogs(ctx, container.ID); err != nil {
+		if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
 			return fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
 		}
 
 		// Check if context was cancelled
-		if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+		if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
 			return nil
 		}
 	}
@@ -359,24 +383,30 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 	return nil
 }
 
-func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
-	return pods.Exists(pc.Context, nameOrID, nil)
+func (pc *PodmanClient) PodExists(ctx context.Context, nameOrID string) (bool, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	return pods.Exists(podCtx, nameOrID, nil)
 }
 
-func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
+func (pc *PodmanClient) ContainerLogs(ctx context.Context, containerNameOrID string) error {
 	if containerNameOrID == "" {
 		return fmt.Errorf("container name or ID required to fetch logs")
 	}
 
 	// Creating context here that listens for Ctrl+C
-	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return pc.streamContainerLogs(ctx, containerNameOrID)
+	return pc.streamContainerLogs(sigCtx, containerNameOrID)
 }
 
-func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
-	return containers.Exists(pc.Context, nameOrID, nil)
+func (pc *PodmanClient) ContainerExists(ctx context.Context, nameOrID string) (bool, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	return containers.Exists(podCtx, nameOrID, nil)
 }
 
 // RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
@@ -422,32 +452,35 @@ func (pc *PodmanClient) RunContainerWithSpec(ctx context.Context, s *specgen.Spe
 	}
 }
 
-func (pc *PodmanClient) ListRoutes(_ string) ([]types.Route, error) {
+func (pc *PodmanClient) ListRoutes(_ context.Context, _ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) ListCRD(_ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
-	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+func (pc *PodmanClient) ListCRD(ctx context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
+	logger.ErrorlnCtx(ctx, "unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) DeleteNamespace(_ string) error {
-	logger.ErrorlnCtx(context.Background(), "unsupported method called!")
+func (pc *PodmanClient) DeleteNamespace(ctx context.Context, _ string) error {
+	logger.ErrorlnCtx(ctx, "unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) DeletePVCs(appLabel string) error {
+func (pc *PodmanClient) DeletePVCs(_ context.Context, _ string) error {
 	logger.Errorf("unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) DeleteSecret(name string) error {
-	err := secrets.Remove(pc.Context, name)
+func (pc *PodmanClient) DeleteSecret(ctx context.Context, name string) error {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	err := secrets.Remove(podCtx, name)
 	if err != nil {
 		return fmt.Errorf("failed to remove secret: %w", err)
 	}
@@ -455,8 +488,11 @@ func (pc *PodmanClient) DeleteSecret(name string) error {
 	return nil
 }
 
-func (pc *PodmanClient) DeleteVolume(name string) error {
-	err := volumes.Remove(pc.Context, name, nil)
+func (pc *PodmanClient) DeleteVolume(ctx context.Context, name string) error {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	err := volumes.Remove(podCtx, name, nil)
 	if err != nil {
 		return fmt.Errorf("failed to remove volume: %w", err)
 	}
@@ -464,17 +500,23 @@ func (pc *PodmanClient) DeleteVolume(name string) error {
 	return nil
 }
 
-func (pc *PodmanClient) VolumeExists(nameOrID string) (bool, error) {
-	return volumes.Exists(pc.Context, nameOrID, nil)
+func (pc *PodmanClient) VolumeExists(ctx context.Context, nameOrID string) (bool, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	return volumes.Exists(podCtx, nameOrID, nil)
 }
 
-func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
+func (pc *PodmanClient) ListSecrets(ctx context.Context, filters map[string][]string) ([]string, error) {
 	var listOpts secrets.ListOptions
 	if len(filters) >= 1 {
 		listOpts.Filters = filters
 	}
 
-	secretList, err := secrets.List(pc.Context, &listOpts)
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	secretList, err := secrets.List(podCtx, &listOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list secrets: %w", err)
 	}
@@ -487,17 +529,20 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 	return secretIDorNames, nil
 }
 
-func (pc *PodmanClient) SecretExists(nameOrID string) (bool, error) {
-	return secrets.Exists(pc.Context, nameOrID)
+func (pc *PodmanClient) SecretExists(ctx context.Context, nameOrID string) (bool, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	return secrets.Exists(podCtx, nameOrID)
 }
 
-func (pc *PodmanClient) UpdateSecret(name, deploymentName string, data map[string][]byte) error {
+func (pc *PodmanClient) UpdateSecret(_ context.Context, _, _ string, _ map[string][]byte) error {
 	logger.ErrorfCtx(pc.Context, "unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
 }
 
-func (pc *PodmanClient) GetNamespace() (string, error) {
+func (pc *PodmanClient) GetNamespace(_ context.Context) (string, error) {
 	logger.ErrorfCtx(pc.Context, "unsupported method called!")
 
 	return "", fmt.Errorf("unsupported method")
@@ -509,11 +554,14 @@ func (pc *PodmanClient) Type() types.RuntimeType {
 }
 
 // GetSystemInfo retrieves system resource information including CPU, memory, and accelerators.
-func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
+func (pc *PodmanClient) GetSystemInfo(ctx context.Context) (*models.SystemInfo, error) {
 	sysInfo := &models.SystemInfo{}
 
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
 	// Get Podman system info for CPU and memory
-	info, err := system.Info(pc.Context, nil)
+	info, err := system.Info(podCtx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get system info: %w", err)
 	}
@@ -542,7 +590,7 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// Populate accelerator information (Spyre cards)
-	sysInfo.Accelerators = getAcceleratorInfo(pc.Context)
+	sysInfo.Accelerators = getAcceleratorInfo(ctx)
 
 	return sysInfo, nil
 }
@@ -588,9 +636,12 @@ func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo 
 }
 
 // GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
-func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
+func (pc *PodmanClient) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
 	// Inspect the pod to get its details
-	podInspect, err := pods.Inspect(pc.Context, nameOrID, nil)
+	podInspect, err := pods.Inspect(podCtx, nameOrID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect pod: %w", err)
 	}
@@ -604,11 +655,14 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 	}
 
 	// Get stats and Spyre cards for all containers in the pod (excluding infra container)
-	return pc.aggregateContainerResourcesWithStats(podInspect)
+	return pc.aggregateContainerResourcesWithStats(ctx, podInspect)
 }
 
 // aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
-func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
+func (pc *PodmanClient) aggregateContainerResourcesWithStats(ctx context.Context, podInspect *entities.PodInspectReport) (*types.PodResources, error) {
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
 	var totalMemUsage uint64
 	var totalCPUs float64
 	spyreCards := []string{}
@@ -620,7 +674,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 		}
 
 		// Get container stats for actual CPU and memory usage using podman stats
-		statsChan, err := containers.Stats(pc.Context, []string{container.ID}, &containers.StatsOptions{
+		statsChan, err := containers.Stats(podCtx, []string{container.ID}, &containers.StatsOptions{
 			Stream: utils.BoolPtr(false), // Get a single snapshot, not streaming
 		})
 		if err != nil {
@@ -645,7 +699,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 		}
 
 		// Inspect container to get Spyre card annotations
-		containerInspect, err := containers.Inspect(pc.Context, container.ID, nil)
+		containerInspect, err := containers.Inspect(podCtx, container.ID, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}
@@ -810,7 +864,7 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 }
 
 // ExecInContainerWithCmd is not implemented for the Podman runtime.
-func (pc *PodmanClient) ExecInContainerWithCmd(_, _ string, _ []string) (string, error) {
+func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _ []string) (string, error) {
 	logger.Errorf("unsupported method called!")
 
 	return "", fmt.Errorf("unsupported method")

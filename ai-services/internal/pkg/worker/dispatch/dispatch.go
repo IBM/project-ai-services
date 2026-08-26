@@ -44,7 +44,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 	// ── Images ────────────────────────────────────────────────────────────────
 
 	case workerpb.CommandType_COMMAND_TYPE_LIST_IMAGES:
-		images, err := rt.ListImages()
+		images, err := rt.ListImages(ctx)
 
 		return marshalOr(images, err)
 
@@ -63,7 +63,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_pods payload: %w", err)
 		}
-		pods, err := rt.ListPods(req.Filters)
+		pods, err := rt.ListPods(ctx, req.Filters)
 
 		return marshalOr(pods, err)
 
@@ -82,7 +82,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode delete_pod payload: %w", err)
 		}
 
-		return nil, rt.DeletePod(req.ID, req.Force)
+		return nil, rt.DeletePod(ctx, req.ID, req.Force)
 
 	case workerpb.CommandType_COMMAND_TYPE_STOP_POD:
 		var req payload.NameOrID
@@ -90,7 +90,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode stop_pod payload: %w", err)
 		}
 
-		return nil, rt.StopPod(req.NameOrID)
+		return nil, rt.StopPod(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_START_POD:
 		var req payload.NameOrID
@@ -98,14 +98,14 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode start_pod payload: %w", err)
 		}
 
-		return nil, rt.StartPod(req.NameOrID)
+		return nil, rt.StartPod(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_INSPECT_POD:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode inspect_pod payload: %w", err)
 		}
-		pod, err := rt.InspectPod(req.NameOrID)
+		pod, err := rt.InspectPod(ctx, req.NameOrID)
 
 		return marshalOr(pod, err)
 
@@ -114,7 +114,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode pod_exists payload: %w", err)
 		}
-		exists, err := rt.PodExists(req.NameOrID)
+		exists, err := rt.PodExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -124,14 +124,14 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode pod_logs payload: %w", err)
 		}
 
-		return nil, rt.PodLogs(req.NameOrID)
+		return nil, rt.PodLogs(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode get_pod_resources payload: %w", err)
 		}
-		pr, err := rt.GetPodResources(req.NameOrID)
+		pr, err := rt.GetPodResources(ctx, req.NameOrID)
 
 		return marshalOr(pr, err)
 
@@ -142,7 +142,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_secrets payload: %w", err)
 		}
-		names, err := rt.ListSecrets(req.Filters)
+		names, err := rt.ListSecrets(ctx, req.Filters)
 
 		return marshalOr(names, err)
 
@@ -152,14 +152,14 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode delete_secret payload: %w", err)
 		}
 
-		return nil, rt.DeleteSecret(req.Name)
+		return nil, rt.DeleteSecret(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode secret_exists payload: %w", err)
 		}
-		exists, err := rt.SecretExists(req.NameOrID)
+		exists, err := rt.SecretExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -171,14 +171,14 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode delete_volume payload: %w", err)
 		}
 
-		return nil, rt.DeleteVolume(req.Name)
+		return nil, rt.DeleteVolume(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode volume_exists payload: %w", err)
 		}
-		exists, err := rt.VolumeExists(req.NameOrID)
+		exists, err := rt.VolumeExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -189,7 +189,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode inspect_container payload: %w", err)
 		}
-		c, err := rt.InspectContainer(req.NameOrID)
+		c, err := rt.InspectContainer(ctx, req.NameOrID)
 
 		return marshalOr(c, err)
 
@@ -198,7 +198,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode container_exists payload: %w", err)
 		}
-		exists, err := rt.ContainerExists(req.NameOrID)
+		exists, err := rt.ContainerExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -208,14 +208,14 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode container_logs payload: %w", err)
 		}
 
-		return nil, rt.ContainerLogs(req.NameOrID)
+		return nil, rt.ContainerLogs(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER:
 		var req payload.ExecInContainer
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode run_ephemeral_container payload: %w", err)
 		}
-		out, err := rt.ExecInContainerWithCmd(req.PodName, req.ContainerName, req.Command)
+		out, err := rt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
 
 		return marshalOr(out, err)
 
@@ -226,7 +226,7 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_routes payload: %w", err)
 		}
-		routes, err := rt.ListRoutes(req.LabelSelector)
+		routes, err := rt.ListRoutes(ctx, req.LabelSelector)
 
 		return marshalOr(routes, err)
 
@@ -238,10 +238,10 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 			return nil, fmt.Errorf("decode delete_pvcs payload: %w", err)
 		}
 
-		return nil, rt.DeletePVCs(req.Name)
+		return nil, rt.DeletePVCs(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_SYSTEM_INFO:
-		info, err := rt.GetSystemInfo()
+		info, err := rt.GetSystemInfo(ctx)
 
 		return marshalOr(info, err)
 

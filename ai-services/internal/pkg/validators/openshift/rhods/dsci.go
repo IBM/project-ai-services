@@ -1,6 +1,7 @@
 package rhods
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,7 @@ func (r *DSCInitialization) Description() string {
 }
 
 // Verify checks DSCInitialization is in Ready phase.
-func (r *DSCInitialization) Verify() error {
+func (r *DSCInitialization) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
@@ -37,7 +38,7 @@ func (r *DSCInitialization) Verify() error {
 		Kind:    constants.DSCIKind,
 	}
 
-	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
+	obj, exists, err := utils.GetExistingCustomResource(ctx, client, gvk)
 	if err != nil {
 		return fmt.Errorf("failed to get existing DSCInitialization: %w", err)
 	}

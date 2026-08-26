@@ -58,12 +58,12 @@ func GetCaddyProxyManager() (ProxyManager, error) {
 }
 
 // HealthCheck verifies Caddy is running and accessible.
-func (c *caddyManager) HealthCheck() error {
+func (c *caddyManager) HealthCheck(ctx context.Context) error {
 	url, err := url.JoinPath(c.adminURL, "config")
 	if err != nil {
 		return err
 	}
-	resp, err := c.httpClient.R().Get(url)
+	resp, err := c.httpClient.R().SetContext(ctx).Get(url)
 
 	if err != nil {
 		return fmt.Errorf("failed to connect to Caddy admin API: %w", err)
@@ -162,7 +162,7 @@ func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 }
 
 // GetRouteByID retrieves a specific route by its ID from Caddy.
-func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
+func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route, error) {
 	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build route ID URL: %w", err)
@@ -170,6 +170,7 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 
 	var rawRoute map[string]any
 	resp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetResult(&rawRoute).
 		Get(idURL)
 	if err != nil {
@@ -197,7 +198,7 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 
 // UnregisterRoute removes a route from Caddy by its ID.
 // Returns ErrRouteNotFound if the route doesn't exist (404), nil if successfully deleted (200).
-func (c *caddyManager) UnregisterRoute(routeID string) error {
+func (c *caddyManager) UnregisterRoute(ctx context.Context, routeID string) error {
 	if routeID == "" {
 		return fmt.Errorf("route ID cannot be empty")
 	}
@@ -207,7 +208,7 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 		return err
 	}
 
-	resp, err := c.httpClient.R().Delete(idURL)
+	resp, err := c.httpClient.R().SetContext(ctx).Delete(idURL)
 	if err != nil {
 		return fmt.Errorf("failed to unregister route: %w", err)
 	}
@@ -245,7 +246,7 @@ func RegisterRoutesForAppAndReturn(
 	servicePodName string,
 ) ([]Route, error) {
 	// Step 1: Perform health check on Caddy
-	if err := proxyManager.HealthCheck(); err != nil {
+	if err := proxyManager.HealthCheck(ctx); err != nil {
 		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
 			err,
@@ -352,7 +353,7 @@ func unregisterRoutes(ctx context.Context, proxyManager ProxyManager, routeIDs m
 	var failedRoutes []string
 
 	for routeID := range routeIDs {
-		if err := proxyManager.UnregisterRoute(routeID); err == nil {
+		if err := proxyManager.UnregisterRoute(ctx, routeID); err == nil {
 			logger.InfofCtx(ctx, "%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
 		} else if errors.Is(err, ErrRouteNotFound) {
 			logger.InfofCtx(ctx, "%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
