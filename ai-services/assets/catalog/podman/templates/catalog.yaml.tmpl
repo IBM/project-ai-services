@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret"
     ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-bundles"
+    ai-services.io/volume-skip-cleanup: "true"
   annotations:
     run.oci.keep_original_groups: "1"
     ai-services.io/routes: "8081:catalog-ui:ui, 8080:catalog-api:api"

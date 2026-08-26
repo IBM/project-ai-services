@@ -3,6 +3,7 @@ package common
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -99,13 +100,14 @@ func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 }
 
 // CallExportAPI calls the digitize Export API.
-func (c *DigitizeBackupClient) CallExportAPI() (*DigitizeExportResponse, error) {
+func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExportResponse, error) {
 	logger.Infoln("Calling digitize Export API...")
 
 	var exportResponse DigitizeExportResponse
 
 	logger.Infoln("Sending export request to: /v1/export?limit=-1")
 	resp, err := c.client.R().
+		SetContext(ctx).
 		SetQueryParam("limit", ExportAllRecordsLimit).
 		SetResult(&exportResponse).
 		Get("/v1/export")

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -14,13 +15,13 @@ import (
 )
 
 // FetchFilteredPods Fetch all pods for a given app based on label.
-func FetchFilteredPods(r runtime.Runtime, appName string) ([]types.Pod, error) {
+func FetchFilteredPods(ctx context.Context, r runtime.Runtime, appName string) ([]types.Pod, error) {
 	listFilters := map[string][]string{}
 	if appName != "" {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", appName)}
 	}
 
-	pods, err := r.ListPods(listFilters)
+	pods, err := r.ListPods(ctx, listFilters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -29,7 +30,7 @@ func FetchFilteredPods(r runtime.Runtime, appName string) ([]types.Pod, error) {
 }
 
 // PopulateTable Set table headers and rows.
-func PopulateTable(r runtime.Runtime, opts appTypes.ListOptions, pods []types.Pod) {
+func PopulateTable(ctx context.Context, r runtime.Runtime, opts appTypes.ListOptions, pods []types.Pod) {
 	// fetch the table writer object
 	printer := utils.NewTableWriter()
 	defer printer.CloseTableWriter()
@@ -38,7 +39,7 @@ func PopulateTable(r runtime.Runtime, opts appTypes.ListOptions, pods []types.Po
 	setTableHeaders(printer, opts.OutputWide)
 
 	// render each pod info as rows in the table
-	renderPodRows(r, printer, pods, opts.OutputWide)
+	renderPodRows(ctx, r, printer, pods, opts.OutputWide)
 }
 
 func setTableHeaders(printer *utils.Printer, outputWide bool) {
@@ -49,13 +50,13 @@ func setTableHeaders(printer *utils.Printer, outputWide bool) {
 	}
 }
 
-func renderPodRows(r runtime.Runtime, printer *utils.Printer, pods []types.Pod, wideOutput bool) {
+func renderPodRows(ctx context.Context, r runtime.Runtime, printer *utils.Printer, pods []types.Pod, wideOutput bool) {
 	for _, pod := range pods {
-		processAndAppendPodRow(r, printer, pod, wideOutput)
+		processAndAppendPodRow(ctx, r, printer, pod, wideOutput)
 	}
 }
 
-func processAndAppendPodRow(r runtime.Runtime, printer *utils.Printer, pod types.Pod, wideOutput bool) {
+func processAndAppendPodRow(ctx context.Context, r runtime.Runtime, printer *utils.Printer, pod types.Pod, wideOutput bool) {
 	appName := fetchPodNameFromLabels(pod.Labels)
 	if appName == "" {
 		// skip pods which are not linked to ai-services
@@ -63,7 +64,7 @@ func processAndAppendPodRow(r runtime.Runtime, printer *utils.Printer, pod types
 	}
 
 	// do pod inspect
-	pInfo, err := r.InspectPod(pod.ID)
+	pInfo, err := r.InspectPod(ctx, pod.ID)
 	if err != nil {
 		// log and skip pod if inspect failed
 		logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.ID, err)
@@ -72,7 +73,7 @@ func processAndAppendPodRow(r runtime.Runtime, printer *utils.Printer, pod types
 	}
 
 	// fetch pod row
-	rows := buildPodRow(r, appName, pInfo, wideOutput)
+	rows := buildPodRow(ctx, r, appName, pInfo, wideOutput)
 	// append pod row to the table
 	printer.AppendRow(rows...)
 }
@@ -81,15 +82,15 @@ func fetchPodNameFromLabels(labels map[string]string) string {
 	return labels[constants.ApplicationAnnotationKey]
 }
 
-func buildPodRow(r runtime.Runtime, appName string, pod *types.Pod, wideOutput bool) []string {
-	status := getPodStatus(r, pod)
+func buildPodRow(ctx context.Context, r runtime.Runtime, appName string, pod *types.Pod, wideOutput bool) []string {
+	status := getPodStatus(ctx, r, pod)
 
 	// if wide option flag is not set, then return appName, podName and status only
 	if !wideOutput {
 		return []string{appName, pod.Name, status}
 	}
 
-	containerNames := getContainerNames(r, pod)
+	containerNames := getContainerNames(ctx, r, pod)
 
 	podPorts, err := getPodPorts(pod)
 	if err != nil {
@@ -123,11 +124,11 @@ func getPodPorts(pInfo *types.Pod) ([]string, error) {
 	return podPorts, nil
 }
 
-func getContainerNames(r runtime.Runtime, pod *types.Pod) []string {
+func getContainerNames(ctx context.Context, r runtime.Runtime, pod *types.Pod) []string {
 	containerNames := []string{}
 
 	for _, container := range pod.Containers {
-		cInfo, err := r.InspectContainer(container.ID)
+		cInfo, err := r.InspectContainer(ctx, container.ID)
 		if err != nil {
 			// skip container if inspect failed
 			logger.Debugf("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.ID, err)
@@ -149,12 +150,12 @@ func getContainerNames(r runtime.Runtime, pod *types.Pod) []string {
 	return containerNames
 }
 
-func getPodStatus(r runtime.Runtime, pInfo *types.Pod) string {
+func getPodStatus(ctx context.Context, r runtime.Runtime, pInfo *types.Pod) string {
 	// if the pod Status is running, make sure to check if its healthy or not, otherwise fallback to default pod state
 	if pInfo.State == "Running" {
 		healthyContainers := 0
 		for _, container := range pInfo.Containers {
-			cInfo, err := r.InspectContainer(container.ID)
+			cInfo, err := r.InspectContainer(ctx, container.ID)
 			if err != nil {
 				// skip container if inspect failed
 				logger.Debugf("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err)

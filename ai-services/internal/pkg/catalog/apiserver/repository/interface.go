@@ -13,11 +13,14 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
-
 	// DeleteDatasource removes a datasource connector by ID.
 	// Returns a ValidationError with status 404 if not found, 409 if the connector is
 	// still linked to one or more services via service_dependencies.
 	DeleteDatasource(ctx context.Context, id uuid.UUID) error
+
+	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
+	// Sensitive credential fields are never included in any returned item.
+	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

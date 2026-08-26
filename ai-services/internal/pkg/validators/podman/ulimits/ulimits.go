@@ -1,6 +1,7 @@
 package ulimits
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,7 +26,7 @@ func (r *UlimitsRule) Description() string {
 	return "Validates that memlock and nofile ulimits are properly configured for the sentient group."
 }
 
-func (r *UlimitsRule) Verify() error {
+func (r *UlimitsRule) Verify(_ context.Context) error {
 	logger.Debugln("Validating ulimit configurations")
 
 	// Validate memlock configuration

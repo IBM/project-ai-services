@@ -87,7 +87,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 func (p *PodmanApplication) validateAndAllocateSpyreCards(ctx context.Context, templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
-	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
+	reqSpyreCardsCount, err := p.calculateReqSpyreCards(ctx, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
 	}
@@ -147,7 +147,7 @@ func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.Cr
 	logger.Infoln("-------")
 
 	// print the next steps to be performed at the end of create
-	if err := helpers.PrintNextSteps(tp, p.runtime, opts.Name, opts.TemplateName); err != nil {
+	if err := helpers.PrintNextSteps(ctx, tp, p.runtime, opts.Name, opts.TemplateName); err != nil {
 		// do not want to fail the overall create if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 
@@ -173,7 +173,7 @@ func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, ap
 	for _, model := range models {
 		s.UpdateMessage("Downloading model: " + model + "...")
 		err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
-			return helpers.DownloadModel(model, utils.GetModelsPath())
+			return helpers.DownloadModel(ctx, model, utils.GetModelsPath())
 		})
 		if err != nil {
 			s.Fail("failed to download model: " + model)
@@ -212,7 +212,7 @@ func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) e
 	return nil
 }
 
-func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
+func (p *PodmanApplication) calculateReqSpyreCards(ctx context.Context, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts
@@ -224,7 +224,7 @@ func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTem
 		}
 
 		// check if pod already exists and skip counting if it does exists
-		exists, err := p.runtime.PodExists(podSpec.Name)
+		exists, err := p.runtime.PodExists(ctx, podSpec.Name)
 		if err != nil {
 			return totalReqSpyreCounts, fmt.Errorf("failed to check pod status: %w", err)
 		}

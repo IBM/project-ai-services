@@ -1,6 +1,7 @@
 package openshift
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/common"
@@ -9,13 +10,13 @@ import (
 )
 
 // List returns information about running applications.
-func (o *OpenshiftApplication) List(opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
+func (o *OpenshiftApplication) List(ctx context.Context, opts appTypes.ListOptions) ([]appTypes.ApplicationInfo, error) {
 	if opts.ApplicationName == "" {
 		return nil, fmt.Errorf("application name is required for openshift runtime")
 	}
 
 	// filter and fetch pods based on appName
-	pods, err := common.FetchFilteredPods(o.runtime, opts.ApplicationName)
+	pods, err := common.FetchFilteredPods(ctx, o.runtime, opts.ApplicationName)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +29,7 @@ func (o *OpenshiftApplication) List(opts appTypes.ListOptions) ([]appTypes.Appli
 	}
 
 	// set table headers and rows
-	common.PopulateTable(o.runtime, opts, pods)
+	common.PopulateTable(ctx, o.runtime, opts, pods)
 
 	return nil, nil
 }

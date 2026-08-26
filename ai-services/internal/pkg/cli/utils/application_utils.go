@@ -1,15 +1,16 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-func GetAllApps(appClient *catalogClient.ApplicationClient) ([]types.Application, error) {
+func GetAllApps(ctx context.Context, appClient *catalogClient.ApplicationClient) ([]types.Application, error) {
 	// List all applications
-	listResponse, err := appClient.ListApplications(nil)
+	listResponse, err := appClient.ListApplications(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch applications: %w", err)
 	}
@@ -17,8 +18,8 @@ func GetAllApps(appClient *catalogClient.ApplicationClient) ([]types.Application
 	return listResponse.Data, nil
 }
 
-func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*types.Application, error) {
-	listResponse, err := appClient.ListApplications(nil)
+func GetAppByName(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*types.Application, error) {
+	listResponse, err := appClient.ListApplications(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -33,20 +34,20 @@ func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*
 
 // GetAppDetailsWithComponents retrieves full application details including services and components.
 // It first finds the app by name, then fetches full details by ID.
-func GetAppDetailsWithComponents(appName string) (*types.Application, error) {
-	appClient, err := catalogClient.NewApplicationClient()
+func GetAppDetailsWithComponents(ctx context.Context, appName string) (*types.Application, error) {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application client: %w", err)
 	}
 
 	// First, find the application by name to get its ID
-	app, err := GetAppByName(appClient, appName)
+	app, err := GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Then fetch full details including services and components
-	appDetails, err := appClient.GetApplication(app.ID)
+	appDetails, err := appClient.GetApplication(ctx, app.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application details: %w", err)
 	}

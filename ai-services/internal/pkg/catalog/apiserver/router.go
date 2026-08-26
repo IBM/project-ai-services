@@ -120,6 +120,7 @@ func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler
 	g.Use(authMw)
 	{
 		g.POST("", h.CreateDatasource)
+		g.GET("", h.ListDatasources)
 		g.DELETE("/:id", h.DeleteDatasource)
 	}
 }
