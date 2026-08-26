@@ -471,9 +471,14 @@ func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context
 		}
 	}
 
-	schema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	rawSchema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
 	if err != nil {
 		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	schema, err := catalog.ConnectorSchemaToMap(rawSchema)
+	if err != nil {
+		return fmt.Errorf("failed to decode param schema for provider %q: %w", req.ProviderID, err)
 	}
 
 	if len(schema) == 0 {

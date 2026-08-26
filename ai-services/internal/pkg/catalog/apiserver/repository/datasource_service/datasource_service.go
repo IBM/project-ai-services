@@ -102,9 +102,14 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
-	schema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	schema, err := catalog.ConnectorSchemaToMap(rawSchema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
 	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)

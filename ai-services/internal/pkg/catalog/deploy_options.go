@@ -326,9 +326,10 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	return schema, nil
 }
 
-// GetConnectorProviderParams returns the JSON schema for a specific connector provider's configuration.
-// If the schema file is not present, returns an empty schema instead of failing.
-func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connectorType, providerID string) (map[string]any, error) {
+// GetConnectorProviderParams returns the raw JSON schema bytes for a specific connector
+// provider's configuration, preserving the property order defined in schema.json.
+// If the schema file is not present, returns an empty JSON object instead of failing.
+func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connectorType, providerID string) (json.RawMessage, error) {
 	_, err := p.LoadConnector(connectorType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("connector provider not found: %w", err)
@@ -348,10 +349,10 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 	schemaPath := filepath.Join(connectorPath, "schema.json")
 	schemaFile, err := itemFS.Open(schemaPath)
 	if err != nil {
-		// Schema file is optional — return an empty schema rather than failing.
+		// Schema file is optional — return an empty JSON object rather than failing.
 		logger.WarningfCtx(ctx, "schema file not found at '%s': %v", schemaPath, err)
 
-		return map[string]any{}, nil
+		return json.RawMessage("{}"), nil
 	}
 	defer func() {
 		if closeErr := schemaFile.Close(); closeErr != nil {
@@ -359,9 +360,20 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 		}
 	}()
 
-	var schema map[string]any
-	if err := json.NewDecoder(schemaFile).Decode(&schema); err != nil {
+	var raw json.RawMessage
+	if err := json.NewDecoder(schemaFile).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
+	}
+
+	return raw, nil
+}
+
+// ConnectorSchemaToMap unmarshals a raw connector schema into a map[string]any for
+// internal callers that need to inspect individual properties (validation, encryption).
+func ConnectorSchemaToMap(raw json.RawMessage) (map[string]any, error) {
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, fmt.Errorf("failed to decode connector schema: %w", err)
 	}
 
 	return schema, nil
