@@ -200,3 +200,75 @@ class TestRecoverConnectorSyncState:
             result = recover_connector_sync_state()
             # Both connectors were in the affected list; count reflects that
             assert result == 2
+
+
+# ===========================================================================
+# _connector_scheduler_lifespan with delete_pending recovery
+# ===========================================================================
+
+class TestLifespanRecoveryDeletePending:
+    """Tests for lifespan startup recovery of delete_pending connectors."""
+
+    @pytest.mark.asyncio
+    async def test_lifespan_recovery_delete_pending(self):
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+        from digitize.app import _connector_scheduler_lifespan
+        from digitize.connectors.models import ConnectorStatus
+
+        # Mock connectors list
+        mock_conn_active = MagicMock()
+        mock_conn_active.id = "conn-active"
+        mock_conn_active.sync_status = ConnectorStatus.UP_TO_DATE
+        mock_conn_active.sync_interval_seconds = 300
+
+        mock_conn_delete = MagicMock()
+        mock_conn_delete.id = "conn-delete"
+        mock_conn_delete.sync_status = ConnectorStatus.DELETE_PENDING
+        mock_conn_delete.sync_interval_seconds = 300
+
+        mock_connectors = [mock_conn_active, mock_conn_delete]
+
+        # Mocks for functions/classes used in lifespan
+        mock_recover = MagicMock(return_value=0)
+        mock_list = MagicMock(return_value=mock_connectors)
+        mock_register = AsyncMock()
+        mock_teardown = AsyncMock()
+
+        # Mock scheduler instance
+        mock_sched_instance = AsyncMock()
+        mock_sched_instance.start_in_background = AsyncMock()
+        
+        # We need mock_sched_class to behave as an async context manager
+        mock_sched_class = MagicMock()
+        mock_sched_class.return_value.__aenter__.return_value = mock_sched_instance
+
+        # Mock database datastore and engine
+        mock_datastore = MagicMock()
+        
+        with patch("digitize.app.recover_connector_sync_state", mock_recover), \
+             patch("digitize.utils.db.list_connectors", mock_list), \
+             patch("digitize.connectors.scheduler.register_connector_job", mock_register), \
+             patch("digitize.api.v1.connectors._run_teardown", mock_teardown), \
+             patch("apscheduler.AsyncScheduler", mock_sched_class), \
+             patch("apscheduler.datastores.sqlalchemy.SQLAlchemyDataStore", return_value=mock_datastore), \
+             patch("digitize.db.connection.engine", MagicMock()):
+            
+            # Run the context manager
+            async with _connector_scheduler_lifespan():
+                # Let any background tasks (like the created task for teardown) yield control to execute
+                await asyncio.sleep(0.05)
+
+            # Assertions
+            mock_recover.assert_called_once()
+            mock_list.assert_called_once()
+            
+            # "conn-active" should be registered
+            mock_register.assert_awaited_once_with(
+                "conn-active",
+                300,
+                fire_immediately=False,
+            )
+            
+            # "conn-delete" should not be registered but teardown should be triggered
+            mock_teardown.assert_awaited_once_with("conn-delete")
