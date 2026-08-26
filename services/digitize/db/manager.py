@@ -19,6 +19,9 @@ from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 logger = get_logger("db_repository")
 
+# Sentinel used by update_connector to distinguish "not supplied" from explicit None.
+_UNSET: object = object()
+
 
 class DatabaseManager:
     """Manager for database operations with error handling and logging."""
@@ -790,13 +793,14 @@ class DatabaseManager:
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
         total_files: Optional[int] = None,
-        error: Optional[str] = None,
+        error: "Optional[str]" = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """
         Partial update of an existing connector.
 
-        Only non-None kwargs are written; connection_details is merged at the
-        key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Only non-``_UNSET`` kwargs are written; connection_details is merged at
+        the key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Pass ``error=None`` explicitly to clear a previously set error to NULL.
 
         Raises FileNotFoundError if no connector with the given id exists.
         """
@@ -809,7 +813,7 @@ class DatabaseManager:
                     values["allowed_extensions"] = allowed_extensions
                 if total_files is not None:
                     values["total_files"] = total_files
-                if error is not None:
+                if error is not _UNSET:
                     values["error"] = error
                 if connection_details is not None:
                     stmt = (
@@ -856,7 +860,7 @@ class DatabaseManager:
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
                     connector.last_sync_at, connector.sync_status,
-                    connector.last_sync_error, connector.total_files,
+                    connector.error, connector.total_files,
                 )
                 session.expunge(connector)
                 return connector
@@ -903,7 +907,7 @@ class DatabaseManager:
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
                         c.attached_at, c.last_sync_at, c.sync_status,
-                        c.last_sync_error, c.total_files,
+                        c.error, c.total_files,
                     )
                     session.expunge(c)
                 logger.debug(f"Listed {len(connectors)} connector(s)")
@@ -1267,12 +1271,16 @@ class DatabaseManager:
         connector_id: str,
         status: str,
         last_sync_at: Optional[datetime] = None,
+        error: Optional[str] = None,
     ) -> None:
         """
-        Update last_sync_at and sync_status on the connector row after a sync run.
+        Update last_sync_at, sync_status, and error on the connector row after a sync run.
 
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
+
+        ``error`` is written when provided (failure/cancel paths); it is cleared
+        to NULL on a successful completion so a past error does not persist.
         """
         try:
             with get_db_session() as session:
@@ -1281,13 +1289,18 @@ class DatabaseManager:
                     if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
                     else status
                 )
+                values: Dict[str, Any] = {
+                    "last_sync_at": last_sync_at or datetime.now(timezone.utc),
+                    "sync_status": connector_sync_status,
+                }
+                if status == SyncLogStatus.COMPLETED:
+                    values["error"] = None
+                elif error is not None:
+                    values["error"] = error
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(
-                        last_sync_at=last_sync_at or datetime.now(timezone.utc),
-                        sync_status=connector_sync_status,
-                    )
+                    .values(**values)
                 )
         except SQLAlchemyError as e:
             logger.error(
@@ -1493,8 +1506,8 @@ class DatabaseManager:
         Called on startup to unlock connectors that were mid-tick when the
         service crashed.  Returns the list of connector IDs that were reset.
 
-        Also stamps ``last_sync_error`` and ``error`` on every affected row so
-        that callers can see the crash reason without joining to sync-log rows.
+        Also stamps ``error`` on every affected row so that callers can see the
+        crash reason without joining to sync-log rows.
         """
         try:
             with get_db_session() as session:
@@ -1503,7 +1516,6 @@ class DatabaseManager:
                     .where(Connector.sync_status == ConnectorStatus.SYNCING)
                     .values(
                         sync_status=ConnectorStatus.OUT_OF_SYNC,
-                        last_sync_error=error,
                         error=error,
                     )
                     .returning(Connector.id)

@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"

@@ -1,6 +1,7 @@
 package rhods
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -30,7 +31,7 @@ func (r *DataScienceCluster) Description() string {
 }
 
 // Verify checks if DataScienceCluster is in ready phase.
-func (r *DataScienceCluster) Verify() error {
+func (r *DataScienceCluster) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
@@ -41,7 +42,7 @@ func (r *DataScienceCluster) Verify() error {
 		Kind:    constants.DSCKind,
 	}
 
-	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
+	obj, exists, err := utils.GetExistingCustomResource(ctx, client, gvk)
 	if err != nil {
 		return fmt.Errorf("failed to get existing DataScienceCluster: %w", err)
 	}

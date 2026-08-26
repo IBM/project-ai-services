@@ -24,6 +24,18 @@
       "minLength": 1,
       "ui:section": "Location"
     },
+    "prefix": {
+      "type": "string",
+      "title": "Prefix (optional)",
+      "description": "Optional key prefix to scope the connector to a sub-path within the bucket.",
+      "ui:section": "Location"
+    },
+    "delimiter": {
+      "type": "string",
+      "title": "Delimiter (optional)",
+      "description": "Optional delimiter character used when listing objects (e.g. '/').",
+      "ui:section": "Location"
+    },
     "access_key_id": {
       "type": "string",
       "title": "Access key ID",
@@ -39,21 +51,9 @@
       "minLength": 1,
       "ui:section": "Authentication"
     },
-    "prefix": {
-      "type": "string",
-      "title": "Prefix (optional)",
-      "description": "Optional key prefix to scope the connector to a sub-path within the bucket.",
-      "ui:section": "Location"
-    },
-    "delimiter": {
-      "type": "string",
-      "title": "Delimiter (optional)",
-      "description": "Optional delimiter character used when listing objects (e.g. '/').",
-      "ui:section": "Location"
-    },
     "allowed_extensions": {
       "type": "array",
-      "title": "File filters",
+      "title": "Include files by type",
       "description": "Restrict ingestion to files whose name ends with one of these extensions.",
       "ui:section": "File filters",
       "minItems": 1,

@@ -15,7 +15,7 @@ from typing import List, Optional
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
-from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
 import digitize.models as models
 from digitize.utils.db import get_status_manager
@@ -49,7 +49,7 @@ async def _run_digitize(
         await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format, file_checksum_dict)
         logger.info(f"Digitization for job {job_id} completed successfully")
     except Exception as exc:
-        logger.error(f"Error in digitization job {job_id}: {exc}")
+        logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
@@ -77,7 +77,7 @@ async def _run_ingest(
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
         logger.info(f"Ingestion for job {job_id} completed successfully")
     except Exception as exc:
-        logger.error(f"Error in ingestion job {job_id}: {exc}")
+        logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
@@ -310,17 +310,20 @@ async def create_job(
             concurrency_manager.release(op_key)
             logger.error(
                 f"Failed to dispatch task for job {job_id}, "
-                f"semaphore released: {exc}"
+                f"semaphore released: {exc}",
+                exc_info=True,
             )
-            APIError.raise_error("INTERNAL_SERVER_ERROR", str(exc))
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to dispatch job '{job_id}': {exc}")
 
         return {"job_id": job_id}
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        message = f"Failed to create job: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
-        logger.error(f"Unexpected error in create_job: {exc}")
-        APIError.raise_error("INTERNAL_SERVER_ERROR", str(exc))
+        logger.error(f"Unexpected error in create_job: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Unexpected error creating job: {exc}")
 
 
 @router.get(
@@ -358,11 +361,12 @@ async def list_jobs(
             data=jobs_data,
         )
     except HTTPException as exc:
-        logger.error(f"Server error in list_jobs: {exc.status_code} - {exc.detail}")
-        raise
+        message = f"Failed to list jobs: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Failed to retrieve jobs: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve jobs")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to retrieve jobs: {exc}")
 
 
 @router.get(
@@ -388,11 +392,9 @@ async def get_job(job_id: str):
 
         return job_data
     except HTTPException as exc:
-        logger.error(
-            f"HTTP error retrieving job {job_id}: "
-            f"status={exc.status_code}, detail={exc.detail}"
-        )
-        raise
+        message = f"Failed to get job '{job_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Failed to retrieve job {job_id}: {exc}", exc_info=True)
         APIError.raise_error(
@@ -443,11 +445,9 @@ async def delete_job(job_id: str):
         return
 
     except HTTPException as exc:
-        logger.error(
-            f"HTTP error deleting job {job_id}: "
-            f"status={exc.status_code}, detail={exc.detail}"
-        )
-        raise
+        message = f"Failed to delete job '{job_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Failed to delete job {job_id}: {exc}", exc_info=True)
         APIError.raise_error(

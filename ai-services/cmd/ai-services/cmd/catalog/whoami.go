@@ -32,12 +32,14 @@ Note:
 			// Once precheck passes, silence usage for any *later* internal errors.
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			info, err := c.Me()
+			info, err := c.Me(ctx)
 			if err != nil {
 				return fmt.Errorf("get user info: %w", err)
 			}

@@ -1,6 +1,7 @@
 package validators
 
 import (
+	"context"
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -44,7 +45,7 @@ func init() {
 
 // Rule defines the interface for validation rules.
 type Rule interface {
-	Verify() error
+	Verify(ctx context.Context) error
 	Message() string
 	Name() string
 	Level() constants.ValidationLevel

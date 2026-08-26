@@ -152,7 +152,7 @@ func WaitForSimilarityAPIReady(ctx context.Context, similarityBaseURL string, po
 
 // catalogClientNew wraps catalogClient.New() as a variable to allow test overrides and avoid import cycles.
 var catalogClientNew = func() (interface{ AccessToken() string }, error) {
-	return catalogClient.New()
+	return catalogClient.New(context.Background())
 }
 
 const (

@@ -57,9 +57,7 @@ func newPodmanGatherer() *podmanGatherer {
 //     no catalog pods exist at all (catalog was never installed).
 //   - Always-on: system info, secrets, network, volumes — Podman-level data
 //     that is useful regardless of catalog state.
-func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
-	ctx := context.Background()
-
+func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 	logger.InfolnCtx(ctx, "Starting must-gather for Podman runtime…")
 
 	rt, err := podmanRuntime.NewPodmanClient()
@@ -76,7 +74,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 
-	catalogInstalled, err := checkCatalogInstalled(rt)
+	catalogInstalled, err := checkCatalogInstalled(ctx, rt)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
@@ -106,8 +104,8 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 // ai-services.io/application=ai-services label is present, confirming that
 // the catalog has been installed (covers catalog, db, and caddy pods — any one
 // of them is sufficient).
-func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
-	pods, err := rt.ListPods(map[string][]string{
+func checkCatalogInstalled(ctx context.Context, rt *podmanRuntime.PodmanClient) (bool, error) {
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
 	})
 	if err != nil {
@@ -124,7 +122,7 @@ func checkCatalogInstalled(rt *podmanRuntime.PodmanClient) (bool, error) {
 func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.PodmanClient) {
 	g.baseDir = pkgutils.GetBaseDir() // safe fallback
 
-	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
 			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")
@@ -156,7 +154,7 @@ func (g *podmanGatherer) createOutputDir(base string) (string, error) {
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one), then collects inspect/logs/env for each.
 func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, appName string) {
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
 
@@ -182,7 +180,7 @@ func (g *podmanGatherer) collectApplicationPods(ctx context.Context, outDir, app
 // appropriate warning on error or empty result. Returns (apps, true) on
 // success, (nil, false) when the caller should skip collection.
 func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
-	apps, err := cliUtils.FetchApplications(appClient, appName)
+	apps, err := cliUtils.FetchApplications(ctx, appClient, appName)
 	if err != nil {
 		if appName != "" {
 			logger.WarningfCtx(ctx, "Application %q not found: %v\n", appName, err)
@@ -210,7 +208,7 @@ func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.Ap
 // each pod. Extracted to keep collectApplicationPods within complexity limits.
 func (g *podmanGatherer) collectPodsForApps(ctx context.Context, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
 	for _, app := range apps {
-		psResp, err := appClient.GetApplicationPS(app.ID)
+		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
 			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
 

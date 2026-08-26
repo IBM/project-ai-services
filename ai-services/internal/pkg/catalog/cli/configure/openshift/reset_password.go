@@ -13,10 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 )
 
-func ResetCatalogPassword() error {
+func ResetCatalogPassword(ctx context.Context) error {
 	catalog := catalogConstants.CatalogAppName
 	namespace := catalog
-	ctx := context.Background()
 
 	// Create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)
@@ -55,7 +54,7 @@ func ResetCatalogPassword() error {
 	s.Start(ctx)
 
 	// Update catalog admin password in secret
-	if err := rt.UpdateSecret(catalogConstants.CatalogSecretName, catalogConstants.CatalogDeploymentName, passwordSecretData); err != nil {
+	if err := rt.UpdateSecret(ctx, catalogConstants.CatalogSecretName, catalogConstants.CatalogDeploymentName, passwordSecretData); err != nil {
 		s.Fail("Password reset failed.")
 
 		return fmt.Errorf("failed to reset catalog password: %w", err)

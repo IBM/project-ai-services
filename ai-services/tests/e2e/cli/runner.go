@@ -257,12 +257,12 @@ func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][en
 
 // CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
 func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
-	appClient, err := client.NewApplicationClient()
+	appClient, err := client.NewApplicationClient(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("catalog client init: %w", err)
 	}
 
-	list, err := appClient.ListApplications(nil)
+	list, err := appClient.ListApplications(context.Background(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("list applications: %w", err)
 	}

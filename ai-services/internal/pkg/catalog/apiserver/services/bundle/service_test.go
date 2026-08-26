@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -291,7 +292,7 @@ func existingServiceRecord() *BundleResponse {
 		ID:          "550e8400-e29b-41d4-a716-446655440000",
 		Name:        "My Custom Service",
 		Status:      "active",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 		CreatedBy:   "admin",
@@ -336,7 +337,7 @@ func TestReplaceBundle_CatalogTypeMismatch(t *testing.T) {
 	// catalog_id check passes, catalog_type check fires.
 	existingComponent := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -356,7 +357,7 @@ func TestReplaceBundle_InvalidExistingID(t *testing.T) {
 	}()
 	badRecord := &BundleResponse{
 		ID:          "not-a-uuid",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 	}
@@ -444,7 +445,7 @@ func TestReplaceBundle_HappyPath(t *testing.T) {
 				ID:          fixedID,
 				Name:        "Updated Name",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "2.0.0",
 				SizeBytes:   &sz,
@@ -488,10 +489,10 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated Name"),
 		"values.yaml":   "key: value\n",
 	}, true)
-	archiveBytes, _, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, _, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
-	meta := &ServiceMetadata{id: "my-service", version: "2.0.0", displayName: "Updated Name"}
+	meta := &bundlemetadata.ServiceMetadataYAML{ID: "my-service", Type: bundlemetadata.CatalogTypeService, Version: "2.0.0", Name: "Updated Name"}
 
 	updateCalls := make([]models.BundleUpdate, 0, 2)
 	repo := &mockBundleRepo{
@@ -525,13 +526,13 @@ func TestActivateFailureMarksRowFailed(t *testing.T) {
 
 	// Call the activate step directly: update to active.
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	metaName := meta.Name
+	metaVersion := meta.Version
 	activateErr := svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
-		Name:      &name,
-		Version:   &version,
+		Name:      &metaName,
+		Version:   &metaVersion,
 	})
 	require.Error(t, activateErr)
 
@@ -558,7 +559,7 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", "Same Version"),
 	}, true)
-	archiveBytes, meta, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	repo := &mockBundleRepo{
@@ -570,7 +571,7 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 				ID:          fixedID,
 				Name:        "Same Version",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "1.0.0",
 				SizeBytes:   &sz,
@@ -607,8 +608,9 @@ func TestSameVersionNoOldDirCleanup(t *testing.T) {
 	assert.DirExists(t, newFinalDir)
 
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	name := sm.Name
+	version := sm.Version
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -641,12 +643,12 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", ""),
 	}, true)
-	archiveBytes, meta, err := peekMetadata(bytes.NewReader(archive))
+	archiveBytes, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	existing := &BundleResponse{
 		ID:          fixedID.String(),
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 	}
@@ -665,8 +667,9 @@ func TestGetByIDAfterActivationError(t *testing.T) {
 	// Now simulate the DB update+refetch path.
 	sizeBytes := int64(512)
 	statusActive := models.BundleStatusActive
-	name := meta.DisplayName()
-	version := meta.Version()
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	name := sm.Name
+	version := sm.Version
 	require.NoError(t, svc.repo.Update(context.Background(), fixedID, models.BundleUpdate{
 		Status:    &statusActive,
 		SizeBytes: &sizeBytes,
@@ -685,7 +688,7 @@ func TestReplaceBundle_ComponentBundle_CatalogIDMismatch(t *testing.T) {
 	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -741,7 +744,7 @@ func TestGetBundleByID_Found(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-svc",
 				Version:     "1.0.0",
 				CreatedBy:   "admin",
@@ -758,7 +761,7 @@ func TestGetBundleByID_Found(t *testing.T) {
 	assert.Equal(t, fixedID.String(), resp.ID)
 	assert.Equal(t, "My Service", resp.Name)
 	assert.Equal(t, "active", resp.Status)
-	assert.Equal(t, CatalogTypeService, resp.CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, resp.CatalogType)
 	assert.Equal(t, "my-svc", resp.CatalogID)
 	assert.Equal(t, "1.0.0", resp.Version)
 	assert.Equal(t, "admin", resp.CreatedBy)
@@ -837,10 +840,10 @@ func TestListBundles_PaginationMetadata(t *testing.T) {
 			assert.Equal(t, 10, filters.Offset) // (page 2 - 1) * 10
 			return []models.CatalogBundle{
 				{ID: id1, Name: "My Custom Service", Status: models.BundleStatusActive,
-					CatalogType: CatalogTypeService, CatalogID: "my-service", Version: "1.0.0",
+					CatalogType: bundlemetadata.CatalogTypeService, CatalogID: "my-service", Version: "1.0.0",
 					CreatedBy: "admin", SizeBytes: &sz, CreatedAt: now, UpdatedAt: now},
 				{ID: id2, Name: "My Custom LLM Provider", Status: models.BundleStatusActive,
-					CatalogType: CatalogTypeComponent, CatalogID: "llm--my-provider", Version: "1.0.0",
+					CatalogType: bundlemetadata.CatalogTypeComponent, CatalogID: "llm--my-provider", Version: "1.0.0",
 					CreatedBy: "admin", CreatedAt: now, UpdatedAt: now},
 			}, nil
 		},
@@ -851,11 +854,11 @@ func TestListBundles_PaginationMetadata(t *testing.T) {
 	require.Len(t, resp.Bundles, 2)
 
 	assert.Equal(t, id1.String(), resp.Bundles[0].ID)
-	assert.Equal(t, CatalogTypeService, resp.Bundles[0].CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, resp.Bundles[0].CatalogType)
 	assert.Equal(t, &sz, resp.Bundles[0].SizeBytes)
 
 	assert.Equal(t, id2.String(), resp.Bundles[1].ID)
-	assert.Equal(t, CatalogTypeComponent, resp.Bundles[1].CatalogType)
+	assert.Equal(t, bundlemetadata.CatalogTypeComponent, resp.Bundles[1].CatalogType)
 	assert.Nil(t, resp.Bundles[1].SizeBytes)
 
 	assert.Equal(t, 2, resp.Pagination.Page)
@@ -922,7 +925,7 @@ func TestReplaceBundle_ServiceRunningRepoError(t *testing.T) {
 func TestReplaceBundle_ComponentRunning(t *testing.T) {
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -952,7 +955,7 @@ func TestReplaceBundle_ComponentRunning(t *testing.T) {
 func TestReplaceBundle_ComponentRunningRepoError(t *testing.T) {
 	existing := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -1019,7 +1022,7 @@ func TestRowToResponse_NilSizeBytes(t *testing.T) {
 	row := &models.CatalogBundle{
 		ID:          id,
 		Status:      models.BundleStatusProcessing,
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "svc",
 		Version:     "1.0.0",
 	}
@@ -1055,7 +1058,7 @@ func existingBundleResponse() *BundleResponse {
 		ID:          "550e8400-e29b-41d4-a716-446655440000",
 		Name:        "My Custom Service",
 		Status:      "active",
-		CatalogType: CatalogTypeService,
+		CatalogType: bundlemetadata.CatalogTypeService,
 		CatalogID:   "my-service",
 		Version:     "1.0.0",
 		CreatedBy:   "admin",
@@ -1229,7 +1232,7 @@ func TestDeleteBundle_ServiceRunningRepoError(t *testing.T) {
 func TestDeleteBundle_ComponentRunning(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -1257,7 +1260,7 @@ func TestDeleteBundle_ComponentRunning(t *testing.T) {
 func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "llm--my-provider",
 		Version:     "1.0.0",
 	}
@@ -1285,7 +1288,7 @@ func TestDeleteBundle_ComponentRunningRepoError(t *testing.T) {
 func TestDeleteBundle_MalformedComponentCatalogID(t *testing.T) {
 	resp := &BundleResponse{
 		ID:          uuid.New().String(),
-		CatalogType: CatalogTypeComponent,
+		CatalogType: bundlemetadata.CatalogTypeComponent,
 		CatalogID:   "badformat", // missing "--"
 		Version:     "1.0.0",
 	}
@@ -1341,19 +1344,35 @@ func TestDeleteBundle_NoRunningInstances_Proceeds(t *testing.T) {
 // CatalogReloader — mock and reload tests
 // -----------------------------------------------------------------------
 
-// mockCatalogReloader is a test double for CatalogReloader.
-type mockCatalogReloader struct {
-	reload func(ctx context.Context) error
+// mockCatalogProvider is a test double for CatalogProvider.
+type mockCatalogProvider struct {
+	reload          func(ctx context.Context) error
+	serviceExists   func(id string) bool
+	componentExists func(componentType, id string) bool
 }
 
-func (m *mockCatalogReloader) Reload(ctx context.Context) error {
+func (m *mockCatalogProvider) Reload(ctx context.Context) error {
 	return m.reload(ctx)
 }
 
+func (m *mockCatalogProvider) ServiceExists(id string) bool {
+	if m.serviceExists != nil {
+		return m.serviceExists(id)
+	}
+	return false
+}
+
+func (m *mockCatalogProvider) ComponentExists(componentType, id string) bool {
+	if m.componentExists != nil {
+		return m.componentExists(componentType, id)
+	}
+	return false
+}
+
 // alwaysReloads returns a reloader that records the number of calls and always succeeds.
-func alwaysReloads() (*mockCatalogReloader, *int) {
+func alwaysReloads() (*mockCatalogProvider, *int) {
 	count := 0
-	r := &mockCatalogReloader{
+	r := &mockCatalogProvider{
 		reload: func(_ context.Context) error {
 			count++
 			return nil
@@ -1363,9 +1382,166 @@ func alwaysReloads() (*mockCatalogReloader, *int) {
 }
 
 // failsOnReload returns a reloader that always returns an error.
-func failsOnReload(err error) *mockCatalogReloader {
-	return &mockCatalogReloader{
+func failsOnReload(err error) *mockCatalogProvider {
+	return &mockCatalogProvider{
 		reload: func(_ context.Context) error { return err },
+	}
+}
+
+// TestValidateBundle_NoCatalogIDCheck verifies that ValidateBundle does not reject
+// an archive whose catalog_id already exists elsewhere — /validate is a pure
+// structural/semantic check and must not depend on catalog state. The collision
+// check only applies to ProcessBundle (POST).
+func TestValidateBundle_NoCatalogIDCheck(t *testing.T) {
+	catalog := &mockCatalogProvider{
+		serviceExists: func(_ string) bool { return true }, // would collide if checked
+	}
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
+	}, true)
+
+	raw, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	require.NotNil(t, raw)
+	result, ok := raw.(*BundleValidationResult)
+	require.True(t, ok, "ValidateBundle must return *BundleValidationResult")
+	assert.True(t, result.Valid)
+	assert.Equal(t, "service", result.CatalogType)
+	assert.Equal(t, "my-service", result.CatalogID)
+	assert.Equal(t, "1.0.0", result.Version)
+}
+
+// TestValidateBundle_BadArchive verifies that a non-gzip payload results in an error.
+func TestValidateBundle_BadArchive(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader([]byte("not-gzip")))
+	require.Error(t, err)
+	assertValidationError(t, err, http.StatusBadRequest, "invalid gzip")
+}
+
+// TestValidateBundle_MissingMetadataYAML verifies that an archive with no metadata.yaml
+// at the root returns a 400.
+func TestValidateBundle_MissingMetadataYAML(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"other.txt": "hello",
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	assertValidationError(t, err, http.StatusBadRequest, "metadata.yaml not found")
+}
+
+// TestValidateBundle_InvalidMetadataYAML verifies that a syntactically invalid
+// metadata.yaml results in a 400.
+func TestValidateBundle_InvalidMetadataYAML(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": "{\x00invalid yaml",
+	}, true)
+
+	_, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.Error(t, err)
+}
+
+// TestValidateBundle_ComponentBundle verifies that a valid component archive returns
+// the correct catalog_type and catalog_id in the result.
+// Component catalog_id is encoded as "<component_type>--<id>" by metaFields.
+func TestValidateBundle_ComponentBundle(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": componentMetaYAML("my-provider", "llm", "2.0.0"),
+	}, true)
+
+	raw, err := svc.ValidateBundle(context.Background(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	result, ok := raw.(*BundleValidationResult)
+	require.True(t, ok, "ValidateBundle must return *BundleValidationResult")
+	assert.True(t, result.Valid)
+	assert.Equal(t, "component", result.CatalogType)
+	assert.Equal(t, "llm--my-provider", result.CatalogID)
+	assert.Equal(t, "2.0.0", result.Version)
+}
+
+// TestProcessBundle_ServiceCollision_Returns422 verifies that POST /bundles rejects
+// an archive whose service id is already registered in the catalog (e.g. an embedded
+// item with no bundles-table row, so GetActiveByCatalogID alone would miss it).
+func TestProcessBundle_ServiceCollision_Returns422(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	catalog := &mockCatalogProvider{
+		serviceExists: func(id string) bool { return id == "my-service" },
+	}
+	svc := NewBundleService(repo, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", ""),
+	}, true)
+
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog service")
+}
+
+// TestProcessBundle_ComponentCollision_Returns422 verifies that POST /bundles rejects
+// an archive whose component (type, id) is already registered in the catalog.
+func TestProcessBundle_ComponentCollision_Returns422(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	catalog := &mockCatalogProvider{
+		componentExists: func(componentType, id string) bool {
+			return componentType == "llm" && id == "my-provider"
+		},
+	}
+	svc := NewBundleService(repo, nil, nil, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
+	}, true)
+
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "conflicts with an existing catalog component")
+}
+
+// TestReplaceBundle_NoCatalogCollisionCheck verifies that PUT /bundles/{id} does NOT
+// reject a replace even though the catalog reports the target id as already existing
+// — which it always will, since ReplaceBundle's whole purpose is to update an entry
+// that's already registered.
+func TestReplaceBundle_NoCatalogCollisionCheck(t *testing.T) {
+	noSvcRepo, noCompRepo := noRunningInstances()
+	catalog := &mockCatalogProvider{
+		serviceExists: func(_ string) bool { return true }, // would always collide if checked
+	}
+	repo := &mockBundleRepo{
+		update: func(_ context.Context, _ uuid.UUID, _ models.BundleUpdate) error {
+			return nil
+		},
+	}
+	svc := NewBundleService(repo, noSvcRepo, noCompRepo, catalog)
+
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml": serviceMetaYAML("my-service", "2.0.0", "Updated"),
+	}, true)
+	record := existingServiceRecord()
+	record.ID = uuid.MustParse("550e8400-e29b-41d4-a716-446655440000").String()
+
+	_, err := svc.ReplaceBundle(context.Background(), record, bytes.NewReader(archive), "admin")
+	// Extraction fails because bundleStorageRoot doesn't exist in tests — but that
+	// proves collision checking did NOT short-circuit first with a 422.
+	require.Error(t, err)
+	var valErr *validators.ValidationError
+	if assert.False(t, assertIsValidationError(err, &valErr), "must not be a ValidationError (i.e. not a collision 422)") {
+		return
 	}
 }
 
@@ -1398,7 +1574,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "1.0.0",
 				SizeBytes:   &sz,
@@ -1410,7 +1586,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 
 	// Call the activate → reload → re-fetch path directly, bypassing the
 	// filesystem step that requires bundleStorageRoot to exist.
-	svc := &bundleService{repo: repo, catalogReloader: reloader}
+	svc := &bundleService{repo: repo, catalog: reloader}
 
 	// Simulate what ProcessBundle does after a successful insert (steps 6–8).
 	ctx := context.Background()
@@ -1427,7 +1603,7 @@ func TestReloadAfterProcess_CalledOnSuccess(t *testing.T) {
 	}))
 
 	// Step 7: reload — loadBundleItems now sees the active row.
-	require.NoError(t, svc.catalogReloader.Reload(ctx))
+	require.NoError(t, svc.catalog.Reload(ctx))
 
 	// Step 8: re-fetch.
 	resp, err := svc.GetBundleByID(ctx, fixedID.String())
@@ -1468,15 +1644,15 @@ func TestReloadAfterProcess_FailureMarksRowFailed(t *testing.T) {
 	}
 
 	svc := &bundleService{
-		repo:            repo,
-		catalogReloader: failsOnReload(reloadErr),
+		repo:    repo,
+		catalog: failsOnReload(reloadErr),
 	}
 
 	// Drive the reload + markFailed path directly (extraction would fail against
 	// bundleStorageRoot, so we replicate just the post-insert steps).
 	ctx := context.Background()
 
-	if err := svc.catalogReloader.Reload(ctx); err != nil {
+	if err := svc.catalog.Reload(ctx); err != nil {
 		svc.markFailed(ctx, fixedID, err.Error())
 		require.ErrorContains(t, err, "reload boom")
 	}
@@ -1513,7 +1689,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 				ID:          fixedID,
 				Name:        "My Service",
 				Status:      models.BundleStatusActive,
-				CatalogType: CatalogTypeService,
+				CatalogType: bundlemetadata.CatalogTypeService,
 				CatalogID:   "my-service",
 				Version:     "2.0.0",
 				SizeBytes:   &sz,
@@ -1523,7 +1699,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 		},
 	}
 
-	svc := &bundleService{repo: repo, catalogReloader: reloader}
+	svc := &bundleService{repo: repo, catalog: reloader}
 	ctx := context.Background()
 
 	// Step 7: activate (mirrors what replaceBundleFiles does after rename).
@@ -1538,7 +1714,7 @@ func TestReloadAfterReplace_CalledOnSuccess(t *testing.T) {
 	}))
 
 	// Step 8: reload.
-	require.NoError(t, svc.catalogReloader.Reload(ctx))
+	require.NoError(t, svc.catalog.Reload(ctx))
 
 	// Step 10: re-fetch.
 	resp, err := svc.GetBundleByID(ctx, fixedID.String())
@@ -1565,7 +1741,7 @@ func TestReloadAfterReplace_FailureMarksRowFailed(t *testing.T) {
 			return nil
 		},
 	}
-	svc := &bundleService{repo: repo, catalogReloader: failsOnReload(reloadErr)}
+	svc := &bundleService{repo: repo, catalog: failsOnReload(reloadErr)}
 
 	ctx := context.Background()
 
@@ -1582,7 +1758,7 @@ func TestReloadAfterReplace_FailureMarksRowFailed(t *testing.T) {
 	}))
 
 	// Step 8: reload fails — replaceBundleFiles returns the error, ReplaceBundle calls markFailed.
-	if err := svc.catalogReloader.Reload(ctx); err != nil {
+	if err := svc.catalog.Reload(ctx); err != nil {
 		svc.markFailed(ctx, fixedID, err.Error())
 		require.ErrorContains(t, err, "reload after replace failed")
 	}
@@ -1613,10 +1789,10 @@ func TestDeleteBundle_ReloadCalledOnSuccess(t *testing.T) {
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
 	svc := &bundleService{
-		repo:            repo,
-		svcRepo:         noSvcRepo,
-		compRepo:        noCompRepo,
-		catalogReloader: reloader,
+		repo:     repo,
+		svcRepo:  noSvcRepo,
+		compRepo: noCompRepo,
+		catalog:  reloader,
 	}
 
 	resp := existingBundleResponse()
@@ -1649,10 +1825,10 @@ func TestDeleteBundle_ReloadFailureMarksRowFailed(t *testing.T) {
 	}
 	noSvcRepo, noCompRepo := noRunningInstances()
 	svc := &bundleService{
-		repo:            repo,
-		svcRepo:         noSvcRepo,
-		compRepo:        noCompRepo,
-		catalogReloader: failsOnReload(reloadErr),
+		repo:     repo,
+		svcRepo:  noSvcRepo,
+		compRepo: noCompRepo,
+		catalog:  failsOnReload(reloadErr),
 	}
 
 	resp := existingBundleResponse()

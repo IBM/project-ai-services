@@ -131,7 +131,7 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult:
     properties:
       catalog_id:
         type: string
@@ -428,6 +428,10 @@ definitions:
         type: string
       healthy:
         type: boolean
+      labels:
+        additionalProperties:
+          type: string
+        type: object
       pod_id:
         type: string
       pod_name:
@@ -1426,7 +1430,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult'
         "400":
           description: Bad Request
           schema:

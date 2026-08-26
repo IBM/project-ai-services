@@ -6,19 +6,19 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const certsDirName = "certs"
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
-func getExistingConfigFromCatalogBackend(rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(rt)
+func getExistingConfigFromCatalogBackend(ctx context.Context, rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -47,9 +47,9 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 
 // validateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
 // This function performs all validation checks including certificate validation.
-func validateReconfigureParameters(rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
+func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
 	// Get existing configuration from catalog-backend pod
-	existingOpts, err := getExistingConfigFromCatalogBackend(rt)
+	existingOpts, err := getExistingConfigFromCatalogBackend(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("failed to get existing configuration from catalog-backend: %w", err)
 	}
@@ -113,7 +113,7 @@ func validateCertificateChanges(opts *catalogUtils.PodmanConfigureOptions) error
 func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, sslCertPath, sslKeyPath string) error {
 	// Compute the current domain configuration based on the provided SSL certificates
 	// This uses the same logic as initial configuration
-	currentDomainSuffix, err := caddy.ComputeDomainConfig(sslCertPath, sslKeyPath, "")
+	currentDomainSuffix, err := utils.ComputeDomainSuffix(sslCertPath, sslKeyPath, "")
 	if err != nil {
 		return fmt.Errorf("failed to compute current domain: %w", err)
 	}
@@ -127,12 +127,12 @@ func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, 
 }
 
 // IsCatalogServiceRunning checks if the catalog service is configured and running.
-func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
-	_, _, err := catalogUtils.GetCatalogPodConfig(rt)
+func IsCatalogServiceRunning(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
-			logger.InfolnCtx(context.Background(), "Catalog service is not configured or running.")
-			logger.InfolnCtx(context.Background(), "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
+			logger.InfolnCtx(ctx, "Catalog service is not configured or running.")
+			logger.InfolnCtx(ctx, "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
 
 			return false, nil
 		}
@@ -145,9 +145,9 @@ func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
 
 // validateCatalogServiceAndConfirmReset validates that the catalog service is running
 // and confirms the reset action with the user. Returns true if the operation should proceed.
-func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string) (bool, error) {
+func validateCatalogServiceAndConfirmReset(ctx context.Context, rt runtime.Runtime, resetType string) (bool, error) {
 	// Validate catalog service is running
-	isCatalogRunning, err := IsCatalogServiceRunning(rt)
+	isCatalogRunning, err := IsCatalogServiceRunning(ctx, rt)
 	if err != nil {
 		return false, err
 	}
