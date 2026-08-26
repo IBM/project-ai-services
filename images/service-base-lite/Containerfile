@@ -12,7 +12,7 @@ RUN microdnf install -y python3.12-devel && \
 COPY requirements.txt .
 
 RUN python -m venv /var/venv && source /var/venv/bin/activate && \
-    pip install --upgrade pip && \
+    pip install --upgrade pip setuptools wheel && \
     pip install -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
