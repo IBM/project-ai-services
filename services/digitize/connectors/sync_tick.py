@@ -126,9 +126,10 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         _fail_tick(sync_seq, connector_id, RuntimeError(f"Connector {connector_id!r} not found"))
         return
 
-    scanner = build_scanner(config)
-
+    scanner = None
     try:
+        scanner = build_scanner(config)
+
         # Phase boundary: check for interrupt signals before any remote I/O starts.
         interrupt = _check_interrupt_call(connector_id, sync_seq)
         if interrupt:
@@ -182,12 +183,13 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         _fail_tick(sync_seq, connector_id, exc)
 
     finally:
-        try:
-            await asyncio.to_thread(scanner.close)
-        except Exception as close_exc:
-            logger.warning(
-                f"scanner.close() failed for connector {connector_id!r}: {close_exc}"
-            )
+        if scanner is not None:
+            try:
+                await asyncio.to_thread(scanner.close)
+            except Exception as close_exc:
+                logger.warning(
+                    f"scanner.close() failed for connector {connector_id!r}: {close_exc}"
+                )
 
 
 # ---------------------------------------------------------------------------
