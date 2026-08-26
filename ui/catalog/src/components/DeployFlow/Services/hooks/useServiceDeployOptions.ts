@@ -179,16 +179,19 @@ export const useServiceDeployOptions = (
     // --- Path B: deploy options cached — retry only errored models on reopen ---
     if (!deployOptions) return;
 
-    const llmError = storeState.componentModelsError[`${serviceId}:llm`];
+    const llmError =
+      storeState.componentModelsError[`${serviceId}:${COMPONENT_TYPES.LLM}`];
     if (llmError) {
-      setComponentModelsError(serviceId, "llm", null);
-      setComponentModelsLoading(serviceId, "llm", true);
+      setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, null);
+      setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, true);
       fetchLLMOptionsWithModels(serviceId, setProviderSchema, deployOptions)
-        .then((llmData) => setComponentModels(serviceId, "llm", llmData))
+        .then((llmData) =>
+          setComponentModels(serviceId, COMPONENT_TYPES.LLM, llmData),
+        )
         .catch((err) => {
           setComponentModelsError(
             serviceId,
-            "llm",
+            COMPONENT_TYPES.LLM,
             err instanceof Error ? err.message : "Failed to load LLM models",
           );
         });
@@ -196,7 +199,10 @@ export const useServiceDeployOptions = (
 
     const step1Components =
       deployOptions.components?.filter(
-        (c) => !["llm", "reranker"].includes(c.type) && c.providers.length > 0,
+        (c) =>
+          c.type !== COMPONENT_TYPES.LLM &&
+          c.type !== COMPONENT_TYPES.RERANKER &&
+          c.providers.length > 0,
       ) ?? [];
     step1Components.forEach((component) => {
       const err =

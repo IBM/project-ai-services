@@ -128,6 +128,42 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     onComponentError?.(!!inferenceModelsError);
   }, [inferenceModelsError, onComponentError]);
 
+  // Seed default model param for the LLM component when its models arrive from
+  // the store. Guarded by `if (llmConfig.params?.model) return` so it is
+  // idempotent — safe to re-run whenever componentModels changes.
+  useEffect(() => {
+    if (!selectedServiceId) return;
+
+    const serviceConfig = formData.services[selectedServiceId];
+    if (!serviceConfig) return;
+
+    const llmConfig = serviceConfig.components[COMPONENT_TYPES.LLM];
+    if (!llmConfig || llmConfig.params?.model) return;
+
+    const llmModels =
+      componentModels[`${selectedServiceId}:${COMPONENT_TYPES.LLM}`] ?? [];
+    const matchingModel = llmModels.find(
+      (m) => m.providerId === llmConfig.providerId,
+    );
+    if (!matchingModel) return;
+
+    onChange({
+      services: {
+        ...formData.services,
+        [selectedServiceId]: {
+          ...serviceConfig,
+          components: {
+            ...serviceConfig.components,
+            [COMPONENT_TYPES.LLM]: {
+              ...llmConfig,
+              params: { ...llmConfig.params, model: matchingModel.id },
+            },
+          },
+        },
+      },
+    });
+  }, [selectedServiceId, formData.services, componentModels, onChange]);
+
   const selectedServiceConfig = selectedServiceId
     ? formData.services[selectedServiceId]
     : null;
