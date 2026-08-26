@@ -22,19 +22,6 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
-      initContainers:
-        - name: emb-wait
-          image: "registry.access.redhat.com/ubi9/ubi-minimal:latest"
-          command:
-            - "/bin/sh"
-            - "-c"
-            - |
-              echo "Waiting for embedding endpoint to become ready..."
-              until curl -sf http://embedding-predictor:8080/v1/models > /dev/null; do
-                echo "Embedding not ready, retrying in 10s..."
-                sleep 10
-              done
-              echo "Embedding endpoint is ready."
       containers:
         - name: similarity-api
           image: "{{ .Values.similarity.image }}"
