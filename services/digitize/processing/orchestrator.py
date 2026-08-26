@@ -540,39 +540,13 @@ def process_documents(
                 if task is None:
                     pending_task_ids.discard(task_id)
                     continue
+                if task.status not in ("completed", "failed"):
+                    continue
                 path = task_id_to_path[task_id]
                 doc_id = doc_id_dict.get(Path(path).name)
-                if doc_id is None:
-                    file_name = path
-                else:
-                    file_name = doc_id
-                future = converter_executor.submit(convert_document, path, out_path, file_name)
-                conversion_futures[future] = path
-                if doc_id is not None:
-                    logger.debug(f"Submitted for conversion: {Path(path).name}")
-                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
-                    status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
-
-            process_futures = {}
-            chunk_futures = {}
-
-            # B. Handle Conversions -> Submit Processing
-            for fut in as_completed(conversion_futures):
-                path = conversion_futures[fut]
-                doc_id = doc_id_dict.get(Path(path).name)
-                try:
-                    converted_json, conv_time = fut.result()
-                    if not converted_json:
-                        if doc_id is not None:
-                            logger.error(f"Conversion failed for {path}: converted_json is None")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
-                        continue
-
-                    batch_stats[path] = {"timings": {"digitizing": round(float(conv_time or 0), 2)}}
+                pending_task_ids.discard(task_id)
 
                 if task.status == "completed":
-                    pending_task_ids.discard(task_id)
                     # Seed stats entry with conversion timing derived from task timestamps.
                     digitizing_time = 0.0
                     if task.started_at and task.completed_at:
@@ -606,7 +580,6 @@ def process_documents(
                     process_futures[p_future] = path
 
                 elif task.status == "failed":
-                    pending_task_ids.discard(task_id)
                     converted_pdf_stats.pop(path, None)
                     if doc_id is not None:
                         status_mgr.update_doc_metadata(
