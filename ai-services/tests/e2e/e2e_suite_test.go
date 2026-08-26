@@ -2629,7 +2629,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ binary TXT rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
 		})
 
-		// ── TC-2: Invalid level via JSON body ─────────────────────────────────
+		// ──  Invalid level via JSON body ─────────────────────────────────
 		//
 		// Rationale: The existing test "returns 400 for invalid level parameter
 		// via multipart form" only covers the multipart/form-data code path.
@@ -2653,7 +2653,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ invalid level via JSON body rejected (status=%d, msg=%s)", statusCode, errResp.Error.Message)
 		})
 
-		// ── TC-3: Both level and length supplied ──────────────────────────────
+		// ──  Both level and length supplied ──────────────────────────────
 		//
 		// Rationale: "level" (abstraction-based) and "length" (legacy word-count)
 		// are mutually exclusive.  Providing both in the same JSON body is
@@ -2677,7 +2677,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ level+length conflict rejected (status=%d)", statusCode)
 		})
 
-		// ── TC-5: Connectivity failure — unreachable summarize API ────────────
+		// ──  Connectivity failure — unreachable summarize API ────────────
 		//
 		// Rationale: When the summarization service is completely absent (not
 		// deployed, wrong namespace, network partition) callers must receive an
