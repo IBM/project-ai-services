@@ -71,6 +71,43 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse:
+    properties:
+      connected_services:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
       catalog_id:
@@ -1570,6 +1607,52 @@ paths:
       tags:
       - Catalog
   /datasources:
+    get:
+      description: Returns a paginated list of datasource connectors with optional
+        filters by status and provider.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: 'Filter by status: ''connected'' or ''offline'''
+        in: query
+        name: status
+        type: string
+      - description: Filter by provider ID (e.g. 'object_storage', 'file_system')
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List datasource connectors
+      tags:
+      - Datasources
     post:
       consumes:
       - application/json

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,8 +38,8 @@ type ApplicationClient struct {
 }
 
 // NewApplicationClient creates a new ApplicationClient with the given server URL and token.
-func NewApplicationClient() (*ApplicationClient, error) {
-	client, err := New()
+func NewApplicationClient(ctx context.Context) (*ApplicationClient, error) {
+	client, err := New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize client: %w", err)
 	}
@@ -60,9 +61,10 @@ func NewApplicationClient() (*ApplicationClient, error) {
 //	    DeploymentType: "services",
 //	    CatalogID: "rag",
 //	})
-func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*types.ApplicationListResponse, error) {
+func (c *ApplicationClient) ListApplications(ctx context.Context, params *ListApplicationsParams) (*types.ApplicationListResponse, error) {
 	var result types.ApplicationListResponse
 	req := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result)
 
 	if params != nil {
@@ -97,9 +99,10 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 
 // GetApplicationPS retrieves the process status and runtime information for an application.
 // It returns details about pods, containers, and their health status.
-func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSResponse, error) {
+func (c *ApplicationClient) GetApplicationPS(ctx context.Context, id string) (*types.ApplicationPSResponse, error) {
 	var result types.ApplicationPSResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(getApplicationPSRoute, id))
 	if err != nil {
@@ -126,8 +129,8 @@ func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSRes
 //	err := client.DeleteApplication("rag", &DeleteApplicationParams{
 //	    KeepData: true,
 //	})
-func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicationParams) error {
-	req := c.client.HTTPClient().R()
+func (c *ApplicationClient) DeleteApplication(ctx context.Context, id string, params *DeleteApplicationParams) error {
+	req := c.client.HTTPClient().R().SetContext(ctx)
 
 	if params != nil {
 		if params.KeepData {
@@ -151,9 +154,10 @@ func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicati
 }
 
 // GetApplication retrieves full details for a specific application by ID.
-func (c *ApplicationClient) GetApplication(id string) (*types.Application, error) {
+func (c *ApplicationClient) GetApplication(ctx context.Context, id string) (*types.Application, error) {
 	var result types.Application
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(getApplicationRoute, id))
 	if err != nil {
@@ -172,16 +176,16 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 
 // GetApplicationWithRefresh retrieves full details for a specific application by ID.
 // If the server returns 401 Unauthorized, it refreshes the access token once and retries.
-func (c *ApplicationClient) GetApplicationWithRefresh(id string) (*types.Application, error) {
-	result, err := c.GetApplication(id)
+func (c *ApplicationClient) GetApplicationWithRefresh(ctx context.Context, id string) (*types.Application, error) {
+	result, err := c.GetApplication(ctx, id)
 	if err != nil {
 		var httpErr *HTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
-			if refreshErr := c.client.RefreshToken(); refreshErr != nil {
+			if refreshErr := c.client.RefreshToken(ctx); refreshErr != nil {
 				return nil, err
 			}
 
-			return c.GetApplication(id)
+			return c.GetApplication(ctx, id)
 		}
 
 		return nil, err
@@ -192,9 +196,10 @@ func (c *ApplicationClient) GetApplicationWithRefresh(id string) (*types.Applica
 
 // CreateApplication creates a new application deployment via catalog API.
 // It accepts a CreateApplicationRequest with catalog ID, name, services, and components configuration.
-func (c *ApplicationClient) CreateApplication(req *models.CreateApplicationRequest) (*models.CreateApplicationResponse, error) {
+func (c *ApplicationClient) CreateApplication(ctx context.Context, req *models.CreateApplicationRequest) (*models.CreateApplicationResponse, error) {
 	var result models.CreateApplicationResponse
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetBody(req).
 		SetResult(&result).
 		Post(applicationsRoute)
@@ -213,9 +218,10 @@ func (c *ApplicationClient) CreateApplication(req *models.CreateApplicationReque
 
 // GetServiceDeployOptions retrieves deploy options for a specific service.
 // It returns available providers and dependency rules for the service and its components.
-func (c *ApplicationClient) GetServiceDeployOptions(serviceID string) (*types.DeployOptionsService, error) {
+func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, serviceID string) (*types.DeployOptionsService, error) {
 	var result types.DeployOptionsService
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(svcDeployOptionsRoute, serviceID))
 	if err != nil {
@@ -231,9 +237,10 @@ func (c *ApplicationClient) GetServiceDeployOptions(serviceID string) (*types.De
 
 // GetArchitectureDeployOptions retrieves deploy options for an architecture.
 // It returns available providers and dependency rules for all services in the architecture.
-func (c *ApplicationClient) GetArchitectureDeployOptions(architectureID string) (*types.DeployOptionsArchitecture, error) {
+func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, architectureID string) (*types.DeployOptionsArchitecture, error) {
 	var result types.DeployOptionsArchitecture
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(archDeployOptionsRoute, architectureID))
 	if err != nil {
@@ -248,9 +255,10 @@ func (c *ApplicationClient) GetArchitectureDeployOptions(architectureID string) 
 }
 
 // GetComponentProviderParams retrieves the parameter schema for a specific component provider.
-func (c *ApplicationClient) GetComponentProviderParams(componentType, providerID string) (map[string]any, error) {
+func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
 	var result map[string]any
 	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
 		SetResult(&result).
 		Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
 	if err != nil {

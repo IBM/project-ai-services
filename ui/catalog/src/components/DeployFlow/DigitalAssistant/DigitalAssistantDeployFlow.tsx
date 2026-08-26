@@ -64,7 +64,7 @@ export const DeployFlow = ({
   onSubmit,
 }: BaseDeployFlowProps) => {
   const { deployOptions, isLoading, isProviderParamsLoading, error } =
-    useDeployOptions();
+    useDeployOptions(open);
   const [hasStep1SchemaError, setHasStep1SchemaError] = useState(false);
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
 
@@ -236,6 +236,7 @@ export const DeployFlow = ({
       isDeploying={state.isDeploying}
       isPrimaryDisabled={
         shellIsLoading ||
+        !!error ||
         (!isLastStep && hasStep1SchemaError) ||
         (isLastStep && (hasStep2SchemaError || state.isEditing))
       }

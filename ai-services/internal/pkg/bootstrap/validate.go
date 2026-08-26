@@ -19,8 +19,7 @@ type validationResult struct {
 }
 
 // Validate runs all validation checks.
-func (p *BootstrapFactory) Validate(skip map[string]bool) error {
-	ctx := context.Background()
+func (p *BootstrapFactory) Validate(ctx context.Context, skip map[string]bool) error {
 	rules := GetRulesForRuntime()
 
 	var validationErrors []error
@@ -75,7 +74,7 @@ func executeRule(ctx context.Context, rule validators.Rule) validationResult {
 	s := spinner.New("Validating " + ruleName + " ...")
 	s.Start(ctx)
 
-	err := rule.Verify()
+	err := rule.Verify(ctx)
 	if err != nil {
 		s.StopWithHint(err.Error(), rule.Hint())
 

@@ -768,7 +768,7 @@ func (d *PodmanDeployer) deployComponentTemplate(
 	}
 
 	// Check if pod already exists
-	if exists, err := d.runtime.PodExists(finalPodSpec.Name); err != nil {
+	if exists, err := d.runtime.PodExists(ctx, finalPodSpec.Name); err != nil {
 		return fmt.Errorf("failed to check pod existence: %w", err)
 	} else if exists {
 		logger.InfofCtx(ctx, "Pod '%s' already exists, skipping deployment\n", podSpec.Name)
@@ -958,7 +958,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 		}
 	}
 
-	exists, err := d.runtime.PodExists(podSpec.Name)
+	exists, err := d.runtime.PodExists(ctx, podSpec.Name)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to check pod existence: %w", err)
 	}

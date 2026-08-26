@@ -223,7 +223,7 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, ns string, plan *
 // Routes are identified by the label "ai-services.io/service: <releaseName>".
 func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, ns, releaseName string, svc *ServicePlan) error {
 	labelSelector := fmt.Sprintf("ai-services.io/service=%s", releaseName)
-	routes, err := d.runtime.ListRoutes(labelSelector)
+	routes, err := d.runtime.ListRoutes(ctx, labelSelector)
 	if err != nil {
 		return fmt.Errorf("failed to list routes for release %s: %w", releaseName, err)
 	}

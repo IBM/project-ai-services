@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -46,7 +47,7 @@ type UserInfo struct {
 // It refreshes the access token only when it is about to expire (within
 // tokenRefreshSkew of its expiry time); otherwise the stored token is reused.
 // The insecure flag from stored credentials determines whether TLS verification is performed.
-func New() (*Client, error) {
+func New(ctx context.Context) (*Client, error) {
 	creds, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func New() (*Client, error) {
 	}
 
 	if c.accessTokenNeedsRefresh() {
-		if err := c.RefreshToken(); err != nil {
+		if err := c.RefreshToken(ctx); err != nil {
 			return nil, fmt.Errorf("refresh token: %w", err)
 		}
 	}
@@ -104,7 +105,7 @@ func (c *Client) accessTokenNeedsRefresh() bool {
 // NewWithLogin creates a Client by performing a fresh login with username/password.
 // The resulting tokens are saved to the local config file.
 // If insecure is true, TLS certificate verification will be skipped.
-func NewWithLogin(serverURL, username, password string, insecure bool) (*Client, error) {
+func NewWithLogin(ctx context.Context, serverURL, username, password string, insecure bool) (*Client, error) {
 	restyClient := resty.New().SetBaseURL(serverURL)
 
 	// Configure TLS settings based on the insecure flag
@@ -119,7 +120,7 @@ func NewWithLogin(serverURL, username, password string, insecure bool) (*Client,
 		httpClient: restyClient,
 	}
 
-	resp, err := c.Login(username, password)
+	resp, err := c.Login(ctx, username, password)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +148,10 @@ func NewWithLogin(serverURL, username, password string, insecure bool) (*Client,
 }
 
 // Login calls POST /api/v1/auth/login and returns the token pair.
-func (c *Client) Login(username, password string) (LoginResponse, error) {
+func (c *Client) Login(ctx context.Context, username, password string) (LoginResponse, error) {
 	var resp LoginResponse
 	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetBody(map[string]string{"username": username, "password": password}).
 		SetResult(&resp).
 		Post("/api/v1/auth/login")
@@ -166,9 +168,10 @@ func (c *Client) Login(username, password string) (LoginResponse, error) {
 
 // LoginWithMIQToken calls POST /api/v1/auth/token, passing the ManageIQ token in
 // the Authorization header. Used by IBM Power Mission Control (Flow B).
-func (c *Client) LoginWithMIQToken(miqToken string) (LoginResponse, error) {
+func (c *Client) LoginWithMIQToken(ctx context.Context, miqToken string) (LoginResponse, error) {
 	var resp LoginResponse
 	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+miqToken).
 		SetResult(&resp).
 		Post("/api/v1/auth/token")
@@ -186,7 +189,7 @@ func (c *Client) LoginWithMIQToken(miqToken string) (LoginResponse, error) {
 // NewWithMIQToken creates a Client by exchanging a ManageIQ token for a Catalog API JWT.
 // This is Flow B: used by IBM Power Mission Control which already holds a MIQ token.
 // The resulting tokens are saved to the local config file exactly like NewWithLogin.
-func NewWithMIQToken(serverURL, miqToken string, insecure bool) (*Client, error) {
+func NewWithMIQToken(ctx context.Context, serverURL, miqToken string, insecure bool) (*Client, error) {
 	restyClient := resty.New().SetBaseURL(serverURL)
 	if insecure {
 		restyClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec
@@ -197,7 +200,7 @@ func NewWithMIQToken(serverURL, miqToken string, insecure bool) (*Client, error)
 		httpClient: restyClient,
 	}
 
-	resp, err := c.LoginWithMIQToken(miqToken)
+	resp, err := c.LoginWithMIQToken(ctx, miqToken)
 	if err != nil {
 		return nil, err
 	}
@@ -223,9 +226,10 @@ func NewWithMIQToken(serverURL, miqToken string, insecure bool) (*Client, error)
 
 // RefreshToken calls POST /api/v1/auth/refresh using the stored refresh token
 // and updates the in-memory credentials (and persists them to disk).
-func (c *Client) RefreshToken() error {
+func (c *Client) RefreshToken(ctx context.Context) error {
 	var resp LoginResponse
 	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetBody(map[string]string{"refresh_token": c.creds.RefreshToken}).
 		SetResult(&resp).
 		Post("/api/v1/auth/refresh")
@@ -254,9 +258,10 @@ func (c *Client) RefreshToken() error {
 }
 
 // Me calls GET /api/v1/auth/me and returns the current user info.
-func (c *Client) Me() (UserInfo, error) {
+func (c *Client) Me(ctx context.Context) (UserInfo, error) {
 	var info UserInfo
 	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
 		SetResult(&info).
 		Get("/api/v1/auth/me")
 	if err != nil {
@@ -272,9 +277,10 @@ func (c *Client) Me() (UserInfo, error) {
 
 // Logout calls POST /api/v1/auth/logout to invalidate the access token on the server,
 // then removes the local credentials file.
-func (c *Client) Logout() error {
+func (c *Client) Logout(ctx context.Context) error {
 	// Best-effort server-side logout; ignore errors (token may already be expired).
 	_, _ = c.httpClient.R().
+		SetContext(ctx).
 		SetHeader("X-Refresh-Token", c.creds.RefreshToken).
 		Post("/api/v1/auth/logout")
 

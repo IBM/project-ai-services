@@ -1,6 +1,7 @@
 package power
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -24,7 +25,7 @@ func (r *PowerRule) Description() string {
 	return "Validates that the system is running on IBM Power11 (ppc64le)"
 }
 
-func (r *PowerRule) Verify() error {
+func (r *PowerRule) Verify(_ context.Context) error {
 	logger.Debugln("Validating IBM Power version...")
 
 	if runtime.GOARCH != "ppc64le" {

@@ -13,6 +13,9 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
+	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
+	// Sensitive credential fields are never included in any returned item.
+	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

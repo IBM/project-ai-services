@@ -69,7 +69,7 @@ type Options struct {
 func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
-	pods, err := rt.ListPods(map[string][]string{
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {workerconstants.WorkerProxyLabel},
 	})
 	if err != nil {
