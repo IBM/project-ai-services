@@ -1629,6 +1629,7 @@ class DatabaseManager:
         page_count: int,
         is_large: bool,
         status: ConversionTaskStatus = ConversionTaskStatus.QUEUED,
+        connector_id: Optional[str] = None,
     ) -> Optional[ConversionTask]:
         """
         Insert a single conversion_tasks row.
@@ -1643,6 +1644,7 @@ class DatabaseManager:
             page_count:    Document page count (0 for DOCX).
             is_large:      True when page_count >= heavy_doc_page_threshold.
             status:        Initial status — QUEUED or PENDING.
+            connector_id:  Owning connector UUID; None for user-submitted jobs.
 
         Returns:
             The created ConversionTask or None on failure.
@@ -1653,6 +1655,7 @@ class DatabaseManager:
                     task_id=task_id,
                     job_id=job_id,
                     doc_id=doc_id,
+                    connector_id=connector_id,
                     operation=operation,
                     cached_file=cached_file,
                     output_format=output_format,
@@ -1704,6 +1707,7 @@ class DatabaseManager:
                     task_id=t["task_id"],
                     job_id=t["job_id"],
                     doc_id=t["doc_id"],
+                    connector_id=t.get("connector_id"),
                     operation=t["operation"],
                     cached_file=t["cached_file"],
                     output_format=t["output_format"],
@@ -1730,8 +1734,8 @@ class DatabaseManager:
         then removes the object from the identity map so callers can use it
         freely after the ``with get_db_session()`` block exits.
         """
-        _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-             task.cached_file, task.output_format, task.page_count,
+        _ = (task.task_id, task.job_id, task.doc_id, task.connector_id,
+             task.operation, task.cached_file, task.output_format, task.page_count,
              task.is_large, task.status, task.result_path, task.error,
              task.queued_at, task.started_at, task.completed_at)
         session.expunge(task)
@@ -1954,25 +1958,31 @@ class DatabaseManager:
             return False
 
     @staticmethod
-    def peek_head(operation: str) -> Optional[ConversionTask]:
+    def peek_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Return the oldest 'queued' task for ``operation`` without locking.
+
+        Pass ``connector_id`` to scope the peek to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Used by the dispatcher to inspect the head weight before attempting
         an atomic claim.
         """
         try:
             with get_db_session() as session:
-                stmt = (
+                filters = [
+                    ConversionTask.status == "queued",
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
+                task = session.scalar(
                     select(ConversionTask)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                 )
-                task = session.scalar(stmt)
                 if task:
                     DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -1981,9 +1991,12 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def claim_head(operation: str) -> Optional[ConversionTask]:
+    def claim_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Atomically promote the oldest 'queued' task for ``operation`` to 'running'.
+
+        Pass ``connector_id`` to scope the claim to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Uses SELECT … FOR UPDATE SKIP LOCKED so concurrent callers never
         claim the same task.
@@ -1994,33 +2007,33 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
-                # Subquery: find the head task_id under a row-level lock
+                filters = [
+                    ConversionTask.status == "queued",
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
                 subq = (
                     select(ConversionTask.task_id)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                     .with_for_update(skip_locked=True)
                     .scalar_subquery()
                 )
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id == subq)
                     .values(
                         status=ConversionTaskStatus.RUNNING,
-                        started_at=now,
+                        started_at=datetime.now(timezone.utc),
                     )
                     .returning(ConversionTask)
                 )
-                result = session.execute(stmt)
-                row = result.fetchone()
+                row = session.execute(stmt).fetchone()
                 if row is None:
                     return None
-                # row[0] is the ORM object returned by RETURNING *
                 task = row[0]
                 DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -2031,10 +2044,14 @@ class DatabaseManager:
     @staticmethod
     def promote_pending(operation: str, quota: int) -> int:
         """
-        Promote as many 'pending' tasks as will fit under ``quota`` for ``operation``.
+        Promote as many 'pending' user tasks as will fit under ``quota`` for
+        ``operation``.
 
-        This keeps the 'queued' count ≤ quota while draining the pending backlog
-        in first-submitted-first-promoted order.
+        Only promotes tasks where ``connector_id IS NULL`` — connector tasks are
+        always inserted as 'queued' and never enter the pending backlog.
+
+        This keeps the user 'queued' count ≤ quota while draining the pending
+        backlog in first-submitted-first-promoted order.
 
         All three statements (count queued, select candidates, update status) run
         inside a single transaction under the same session-level advisory lock used
@@ -2061,11 +2078,12 @@ class DatabaseManager:
                 # sequence so no concurrent caller can interleave.
                 session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
 
-                # Count currently queued tasks for this operation.
+                # Count currently queued user tasks for this operation.
                 queued_count = session.scalar(
                     select(func.count()).where(
                         ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                 ) or 0
 
@@ -2073,12 +2091,13 @@ class DatabaseManager:
                 if headroom == 0:
                     return 0
 
-                # Fetch the oldest pending tasks that fit under the quota.
+                # Fetch the oldest pending user tasks that fit under the quota.
                 candidates = session.execute(
                     select(ConversionTask.task_id, ConversionTask.cached_file)
                     .where(
                         ConversionTask.status == ConversionTaskStatus.PENDING,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                     .order_by(ConversionTask.queued_at)
                     .limit(headroom)
@@ -2088,14 +2107,12 @@ class DatabaseManager:
                     return 0
 
                 candidate_ids = [row.task_id for row in candidates]
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id.in_(candidate_ids))
-                    .values(status=ConversionTaskStatus.QUEUED, queued_at=now)
+                    .values(status=ConversionTaskStatus.QUEUED, queued_at=datetime.now(timezone.utc))
                 )
-                result = cast(CursorResult, session.execute(stmt))
-                promoted = result.rowcount
+                promoted = cast(CursorResult, session.execute(stmt)).rowcount
                 if promoted:
                     logger.debug(f"Promoted {promoted} pending → queued for {operation}")
                     for row in candidates:
@@ -2105,6 +2122,67 @@ class DatabaseManager:
                 return promoted
         except SQLAlchemyError as e:
             logger.error(f"DB error promoting pending tasks for {operation}: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def get_connector_ids_with_queued_tasks() -> List[str]:
+        """
+        Return connector IDs that have at least one 'queued' ingestion task,
+        ordered by their oldest queued_at (FIFO — longest-waiting connector first).
+
+        Called each tick by the dispatcher's connector turn (turn 2) to build
+        the round-robin list.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.connector_id)
+                    .where(
+                        ConversionTask.status == "queued",
+                        ConversionTask.operation == "ingestion",
+                        ConversionTask.connector_id.is_not(None),
+                    )
+                    .group_by(ConversionTask.connector_id)
+                    .order_by(func.min(ConversionTask.queued_at))
+                )
+                return [row[0] for row in session.execute(stmt).all()]
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_connector_ids_with_queued_tasks: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def delete_conversion_tasks_for_connector(connector_id: str) -> int:
+        """
+        Delete all queued conversion_tasks rows owned by ``connector_id``.
+
+        Called as the first step of connector teardown, before checksum rows
+        and document rows are removed, to ensure the dispatcher never picks up
+        tasks that belong to a connector being deleted.
+
+        Returns:
+            Number of rows deleted.
+        """
+        try:
+            with get_db_session() as session:
+                result = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConversionTask).where(
+                            ConversionTask.connector_id == connector_id,
+                            ConversionTask.status == "queued",
+                        )
+                    ),
+                )
+                deleted = result.rowcount
+                if deleted:
+                    logger.info(
+                        f"Deleted {deleted} queued task(s) for connector {connector_id!r}"
+                    )
+                return deleted
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error deleting tasks for connector {connector_id!r}: {e}", exc_info=True
+            )
             return 0
 
 

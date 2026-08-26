@@ -347,6 +347,9 @@ class ConversionTask(Base):
     # Digitize document id; informational only
     doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Owning connector UUID — NULL for user-submitted jobs
+    connector_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Operation type — 'ingestion' | 'digitization'
     operation: Mapped[str] = mapped_column(String(50), nullable=False)
 
@@ -398,6 +401,8 @@ class ConversionTask(Base):
         Index("idx_ct_status_op_queued", "status", "operation", "queued_at"),
         # Supports get_conversion_task_by_job_id — called by pipeline pollers
         Index("idx_ct_job_id", "job_id"),
+        # Supports dispatcher connector round-robin pick (turn 2: queued tasks per connector)
+        Index("idx_ct_connector_queued", "connector_id", "status", "queued_at"),
     )
 
     def __repr__(self) -> str:
