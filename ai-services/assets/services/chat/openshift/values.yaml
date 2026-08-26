@@ -29,11 +29,6 @@ embedding:
   model:
     name: ""
 
-llm:
-  model:
-    name: ""
-  apiKey: ""
-
 reranker:
   model:
     name: ""
