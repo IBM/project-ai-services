@@ -53,13 +53,13 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 	}
 
 	// Validate configuration parameters haven't changed
-	if err := validateConfigParameters(existingOpts, newOpts, cadyCtx.GetDomainSuffix()); err != nil {
+	if err := validateConfigParameters(existingOpts, newOpts, caddyCtx.GetDomainSuffix()); err != nil {
 		return err
 	}
 
 	// Validate certificate changes if SSL certificates are provided
 
-	return validateCertificateChanges(rt, newOpts, cadyCtx)
+	return validateCertificateChanges(ctx, rt, newOpts, caddyCtx)
 }
 
 // validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
@@ -82,8 +82,9 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 // validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
 // Allows updating custom certificate content (e.g., for expiry or renewal).
 // Uses glob patterns to detect timestamped certificate files.
-func validateCertificateChanges(rt runtime.Runtime, opts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
-	isCustomCertLoaded, err := caddyCtx.IsCustomCertLoaded()
+func validateCertificateChanges(ctx context.Context, rt runtime.Runtime, opts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
+	// Check if any custom certificates exist from previous deployment
+	isCustomCertLoaded, err := caddyCtx.IsCustomCertLoaded(ctx)
 	if err != nil {
 		return  fmt.Errorf("failed to check if custom cert is loaded: %w", err)
 	}

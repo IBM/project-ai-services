@@ -48,8 +48,8 @@ func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath,
 // It queries the Caddy Admin API at /config/apps/tls/certificates and returns true if a load_files entry
 // matching the expected container cert and key paths (/etc/secret/ssl/tls.crt and /etc/secret/ssl/tls.key)
 // is present. Returns false (without error) when the response is null or no matching entry is found.
-func (c *Context) IsCustomCertLoaded() (bool, error) {
-	adminURL, err := c.GetHostAdminURL()
+func (c *Context) IsCustomCertLoaded(ctx context.Context) (bool, error) {
+	adminURL, err := c.GetHostAdminURL(ctx)
 	if err != nil {
 		return false, err
 	}

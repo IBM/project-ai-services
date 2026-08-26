@@ -96,7 +96,7 @@ func (d *DeployContext) CheckStatus(ctx context.Context) (bool, []string, error)
 	catalogResourceCount := len(d.templates)
 
 	// Checking if 'catalog-caddy-cert-secret' optional secret is present or not
-	exists, err := d.Runtime.SecretExists(catalogconstants.CatalogCertSecretName)
+	exists, err := d.Runtime.SecretExists(ctx, catalogconstants.CatalogCertSecretName)
 	if err != nil {
 		return false, nil, err
 	}

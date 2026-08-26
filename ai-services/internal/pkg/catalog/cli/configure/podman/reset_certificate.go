@@ -35,7 +35,7 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 	}
 
 	// Get existing catalog pod details
-	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
+	opts, err := prepareCatalogOpts(ctx, deployCtx, sslCertPath, sslKeyPath)
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 		return fmt.Errorf("failed to get Caddy pod name: %w", err)
 	}
 
-	if err := deleteSecretAndPod(deployCtx, caddyPodName, catalogConstant.CatalogCertSecretName); err != nil {
+	if err := deleteSecretAndPod(ctx, deployCtx, caddyPodName, catalogConstant.CatalogCertSecretName); err != nil {
 		return err
 	}
 
@@ -69,8 +69,8 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 
 // prepareCatalogOpts fetches the current catalog pod config, validates the base dir,
 // and ensures the domain has not changed relative to the new certificates.
-func prepareCatalogOpts(deployCtx *deploy.DeployContext, sslCertPath, sslKeyPath string) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
+func prepareCatalogOpts(ctx context.Context, deployCtx *deploy.DeployContext, sslCertPath, sslKeyPath string) (*catalogUtils.PodmanConfigureOptions, error) {
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -87,14 +87,14 @@ func prepareCatalogOpts(deployCtx *deploy.DeployContext, sslCertPath, sslKeyPath
 }
 
 // deleteSecretAndPod deletes the caddy cert secret and pod before redeployment.
-func deleteSecretAndPod(deployCtx *deploy.DeployContext, nameOrID, secretName string) error {
+func deleteSecretAndPod(ctx context.Context, deployCtx *deploy.DeployContext, nameOrID, secretName string) error {
 	logger.InfofCtx(context.Background(), "Deleting existing secret %s", secretName)
-	if err := deployCtx.Runtime.DeleteSecret(secretName); err != nil {
+	if err := deployCtx.Runtime.DeleteSecret(ctx, secretName); err != nil {
 		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
 	}
 
 	logger.InfofCtx(context.Background(), "Deleting existing pod %s", nameOrID)
-	if err := deployCtx.Runtime.DeletePod(nameOrID, utils.BoolPtr(true)); err != nil {
+	if err := deployCtx.Runtime.DeletePod(ctx, nameOrID, utils.BoolPtr(true)); err != nil {
 		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}
 

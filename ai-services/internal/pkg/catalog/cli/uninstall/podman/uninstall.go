@@ -64,7 +64,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 
 	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
 	// If secret is created adding it to 'secretsToDelete' list
-	exists, err := rt.SecretExists(catalogConstants.CatalogCertSecretName)
+	exists, err := rt.SecretExists(ctx, catalogConstants.CatalogCertSecretName)
 	if err != nil {
 		return err
 	}

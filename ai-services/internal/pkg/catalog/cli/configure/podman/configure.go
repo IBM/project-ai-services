@@ -99,7 +99,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		s.Stop("Catalog service already deployed")
 		logger.Infof("Existing resources: %v\n", existingResources)
 		// Validate domain, HTTPS port, base directory, and certificates haven't changed
-		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx.GetDomainSuffix()); err != nil {
+		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx); err != nil {
 			s.Fail("validation failed during reconfigure")
 
 			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
