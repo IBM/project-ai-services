@@ -219,6 +219,20 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 
 		return marshalOr(out, err)
 
+	// ── HTTP proxy tunnel ──────────────────────────────────────────────────────
+
+	case workerpb.CommandType_COMMAND_TYPE_HTTP_PROXY:
+		var req payload.HTTPProxy
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode http_proxy payload: %w", err)
+		}
+		result, err := rt.HTTPProxy(ctx, req.Method, req.TargetURL, req.Headers, req.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		return marshalOr(*result, nil)
+
 	// ── Network ───────────────────────────────────────────────────────────────
 
 	case workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES:
