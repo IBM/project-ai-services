@@ -31,7 +31,7 @@ var (
 	cachedSubscriptionList *operatorsv1alpha1.SubscriptionList
 )
 
-func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
+func applyYaml(ctx context.Context, c *openshift.OpenshiftClient, yaml []byte) error {
 	resourceList := []*unstructured.Unstructured{}
 
 	decoder := apiyaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(yaml)), yamlDecoderBufSz)
@@ -51,12 +51,12 @@ func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 	}
 
 	// Fetch subscription list once before processing resources
-	if err := loadSubscriptionList(c); err != nil {
+	if err := loadSubscriptionList(ctx, c); err != nil {
 		return fmt.Errorf("failed to load subscription list: %v", err)
 	}
 
 	for _, object := range resourceList {
-		if err := applyObject(c, object); err != nil {
+		if err := applyObject(ctx, c, object); err != nil {
 			return fmt.Errorf("error applying object %v", err.Error())
 		}
 	}
@@ -65,10 +65,10 @@ func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 }
 
 // loadSubscriptionList fetches and caches the subscription list if not already loaded.
-func loadSubscriptionList(c *openshift.OpenshiftClient) error {
+func loadSubscriptionList(ctx context.Context, c *openshift.OpenshiftClient) error {
 	if cachedSubscriptionList == nil {
 		cachedSubscriptionList = &operatorsv1alpha1.SubscriptionList{}
-		err := c.Client.List(c.Ctx, cachedSubscriptionList)
+		err := c.Client.List(ctx, cachedSubscriptionList)
 		if err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to list subscriptions: %w", err)
 		}
@@ -81,7 +81,7 @@ func loadSubscriptionList(c *openshift.OpenshiftClient) error {
 }
 
 // applyObject applies the desired object against the apiserver.
-func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured) error {
+func applyObject(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured) error {
 	// Retrieve name, namespace, groupVersionKind from given object.
 	name := object.GetName()
 	namespace := object.GetNamespace()
@@ -93,7 +93,7 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	kind := groupVersionKind.Kind
 
 	// Pre-apply handling based on resource kind
-	skip, err := handlePreApply(c, object, kind)
+	skip, err := handlePreApply(ctx, c, object, kind)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	objDesc := fmt.Sprintf("(%s) %s/%s", groupVersionKind.String(), namespace, name)
 
 	// Apply the k8s object with provided version kind in given namespace.
-	err = c.Client.Apply(c.Ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices, Force: utils.BoolPtr(true)})
+	err = c.Client.Apply(ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices, Force: utils.BoolPtr(true)})
 	if err != nil {
 		if apierrors.IsForbidden(err) {
 			return fmt.Errorf("missing required permissions to create %s", objDesc)
@@ -114,24 +114,24 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	}
 
 	// Post-apply handling based on resource kind
-	return handlePostApply(c, object, kind, namespace)
+	return handlePostApply(ctx, c, object, kind, namespace)
 }
 
 // handlePreApply performs pre-apply checks and modifications based on resource kind.
 // Returns true if the resource should be skipped.
-func handlePreApply(c *openshift.OpenshiftClient, object *unstructured.Unstructured, kind string) (bool, error) {
+func handlePreApply(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured, kind string) (bool, error) {
 	switch kind {
 	case "Subscription":
 		s = spinner.New("Applying operator configurations")
-		s.Start(c.Ctx)
+		s.Start(ctx)
 
-		if shouldSkipSubscription(c, object) {
+		if shouldSkipSubscription(ctx, c, object) {
 			return true, nil
 		}
 
 	case "DSCInitialization", "DataScienceCluster":
 		// Handle single-instance RHODS resources
-		if shouldSkipOrUpdateRHODSResource(c, object) {
+		if shouldSkipOrUpdateRHODSResource(ctx, c, object) {
 			return true, nil
 		}
 	}
@@ -140,24 +140,24 @@ func handlePreApply(c *openshift.OpenshiftClient, object *unstructured.Unstructu
 }
 
 // handlePostApply performs post-apply actions based on resource kind.
-func handlePostApply(c *openshift.OpenshiftClient, object *unstructured.Unstructured, kind, namespace string) error {
+func handlePostApply(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured, kind, namespace string) error {
 	switch kind {
 	case "Subscription":
-		return handleSubscriptionPostApply(c, object, namespace)
+		return handleSubscriptionPostApply(ctx, c, object, namespace)
 	default:
 		return nil
 	}
 }
 
 // handleSubscriptionPostApply waits for an operator to be ready after subscription is applied.
-func handleSubscriptionPostApply(c *openshift.OpenshiftClient, object *unstructured.Unstructured, namespace string) error {
+func handleSubscriptionPostApply(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured, namespace string) error {
 	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
 	if err != nil || !found || packageName == "" {
 		return nil
 	}
 
 	operatorLabel := getOperatorLabel(packageName)
-	if err := waitForOperator(c, packageName, namespace); err != nil {
+	if err := waitForOperator(ctx, c, packageName, namespace); err != nil {
 		s.Fail(fmt.Sprintf("%s is not ready", operatorLabel))
 
 		return fmt.Errorf("operator %s not ready: %w", packageName, err)
@@ -170,7 +170,7 @@ func handleSubscriptionPostApply(c *openshift.OpenshiftClient, object *unstructu
 
 // shouldSkipSubscription checks if a subscription should be skipped because it already exists.
 // If it exists and is ready, prints a message. Returns true if the subscription should be skipped.
-func shouldSkipSubscription(c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
+func shouldSkipSubscription(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
 	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
 	if err != nil || !found || packageName == "" || cachedSubscriptionList == nil {
 		return false
@@ -189,7 +189,7 @@ func shouldSkipSubscription(c *openshift.OpenshiftClient, object *unstructured.U
 
 		// Get the CSV to check if it's ready
 		csv := &operatorsv1alpha1.ClusterServiceVersion{}
-		if err := c.Client.Get(c.Ctx, client.ObjectKey{
+		if err := c.Client.Get(ctx, client.ObjectKey{
 			Name:      sub.Status.InstalledCSV,
 			Namespace: sub.Namespace,
 		}, csv); err == nil && csv.Status.Phase == operatorsv1alpha1.CSVPhaseSucceeded {
@@ -205,10 +205,10 @@ func shouldSkipSubscription(c *openshift.OpenshiftClient, object *unstructured.U
 }
 
 // fetchOperatorByPackage fetches the CSV for an operator by package name.
-func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, opNS string) (*operatorsv1alpha1.ClusterServiceVersion, error) {
+func fetchOperatorByPackage(ctx context.Context, c *openshift.OpenshiftClient, packageName string, opNS string) (*operatorsv1alpha1.ClusterServiceVersion, error) {
 	// List all subscriptions in the namespace
 	subList := &operatorsv1alpha1.SubscriptionList{}
-	if err := c.Client.List(c.Ctx, subList, client.InNamespace(opNS)); err != nil {
+	if err := c.Client.List(ctx, subList, client.InNamespace(opNS)); err != nil {
 		if apierrors.IsForbidden(err) {
 			return nil, fmt.Errorf("missing required permissions to list subscriptions")
 		}
@@ -236,7 +236,7 @@ func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, op
 	}
 
 	csv := &operatorsv1alpha1.ClusterServiceVersion{}
-	if err := c.Client.Get(c.Ctx, client.ObjectKey{
+	if err := c.Client.Get(ctx, client.ObjectKey{
 		Name:      sub.Status.InstalledCSV,
 		Namespace: opNS,
 	}, csv); err != nil {
@@ -251,9 +251,9 @@ func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, op
 }
 
 // waitForOperator waits for an operator to be ready after installation.
-func waitForOperator(c *openshift.OpenshiftClient, packageName string, opNS string) error {
-	return wait.PollUntilContextTimeout(c.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		csv, err := fetchOperatorByPackage(c, packageName, opNS)
+func waitForOperator(ctx context.Context, c *openshift.OpenshiftClient, packageName string, opNS string) error {
+	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
+		csv, err := fetchOperatorByPackage(pollCtx, c, packageName, opNS)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				// keep waiting until timeout
@@ -292,7 +292,7 @@ func getOperatorLabel(packageName string) string {
 
 // shouldSkipOrUpdateRHODSResource handles single-instance RHODS resources (DSC, DSCI).
 // Returns true if the resource should be skipped.
-func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
+func shouldSkipOrUpdateRHODSResource(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
 	kind := object.GetKind()
 
 	// Check if resource already exists
@@ -301,7 +301,7 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 		Version: constants.VersionV2,
 		Kind:    kind,
 	}
-	existingResource, exists, err := utils.GetExistingCustomResource(c, gvk)
+	existingResource, exists, err := utils.GetExistingCustomResource(ctx, c, gvk)
 	if err != nil {
 		logger.Debugf("Error checking for existing %s: %v", kind, err)
 

@@ -39,7 +39,7 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 	logger.Infoln("OpenSearch Backup (Sidecar Container Approach)")
 
 	// Get application details from catalog API
-	appDetails, err := cliUtils.GetAppDetailsWithComponents(appName)
+	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, appName)
 	if err != nil {
 		return fmt.Errorf("failed to get application details: %w", err)
 	}
@@ -98,7 +98,7 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 	logger.Infof("Backing up digitize metadata for application: %s\n", appName)
 	logger.Infoln("Digitize Export (API-based Approach)")
 
-	appDetails, err := cliUtils.GetAppDetailsWithComponents(appName)
+	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, appName)
 	if err != nil {
 		return fmt.Errorf("failed to get application details: %w", err)
 	}
@@ -119,7 +119,7 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 
 	// Create digitize backup client and call Export API
 	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
-	exportResponse, err := client.CallExportAPI()
+	exportResponse, err := client.CallExportAPI(ctx)
 	if err != nil {
 		return err
 	}

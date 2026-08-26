@@ -1,6 +1,7 @@
 package usergroup
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 
@@ -22,7 +23,7 @@ func (r *UsergroupRule) Description() string {
 	return "Validates that the sentient group exists for ulimit configurations."
 }
 
-func (r *UsergroupRule) Verify() error {
+func (r *UsergroupRule) Verify(_ context.Context) error {
 	logger.Debugln("Validating sentient group exists")
 
 	// Check if sentient group exists using getent

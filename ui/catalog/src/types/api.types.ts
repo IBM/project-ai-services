@@ -395,3 +395,30 @@ export interface ServiceDeploymentPayload {
 export type DeploymentPayload =
   | ArchitectureDeploymentPayload
   | ServiceDeploymentPayload;
+
+export type ConnectorStatus = "Connected" | "Offline";
+
+export interface ConnectorProvider {
+  id: string;
+  name: string;
+}
+
+export interface DataSourceConnectorApiResponse {
+  id: string;
+  name: string;
+  type: string;
+  provider: ConnectorProvider;
+  status: ConnectorStatus;
+  message: string;
+  connected_services: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataSourceConnectorsListResponse {
+  data: DataSourceConnectorApiResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}

@@ -22,10 +22,10 @@ const (
 	infoTitle  = "Info"
 )
 
-func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
+func PrintNextSteps(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -34,7 +34,7 @@ func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemp
 }
 
 // PrintNextStepsWithProxy prints next steps with proxy route information.
-func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+func PrintNextStepsWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
 	params := map[string]string{"AppName": app}
 
 	// Add route domains to params
@@ -47,8 +47,8 @@ func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app
 		params["HTTPS_PORT"] = httpsPort
 	}
 
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -56,10 +56,10 @@ func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app
 	return nil
 }
 
-func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
+func PrintInfo(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -68,7 +68,7 @@ func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate 
 }
 
 // PrintInfoWithProxy prints info with proxy route information.
-func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+func PrintInfoWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
 	params := map[string]string{"AppName": app}
 
 	// Add route domains to params
@@ -79,8 +79,8 @@ func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, app
 		params["HTTPS_PORT"] = httpsPort
 	}
 
-	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
-		logger.InfofCtx(context.Background(), "Unable to load steps: %v\n", err)
+	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)
 
 		return nil
 	}
@@ -89,7 +89,7 @@ func PrintInfoWithProxy(tp templates.Template, runtime runtime.Runtime, app, app
 }
 
 // populatePodValues -> populates the host values within the params.
-func populateHostValues(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populateHostValues(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
 		switch host.Type {
 		case "ip":
@@ -100,7 +100,7 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 			}
 			params["HOST_IP"] = hostIP
 		case "route":
-			route, err := runtime.ListRoutes("")
+			route, err := runtime.ListRoutes(ctx, "")
 			if err != nil {
 				return fmt.Errorf("unable to fetch the route: %w", err)
 			}
@@ -118,9 +118,9 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 	return nil
 }
 
-func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populatePodInfo(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, pod := range varsData.Pods {
-		exists, err := runtime.PodExists(pod.Name)
+		exists, err := runtime.PodExists(ctx, pod.Name)
 		if err != nil {
 			return fmt.Errorf("failed to check if pod exists: %w", err)
 		}
@@ -131,7 +131,7 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 			continue
 		}
 
-		pInfo, err := runtime.InspectPod(pod.Name)
+		pInfo, err := runtime.InspectPod(ctx, pod.Name)
 		if err != nil {
 			return fmt.Errorf("failed to inspect Pod '%s': %w", pod.Name, err)
 		}
@@ -154,9 +154,9 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 	return nil
 }
 
-func populateContainerInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populateContainerInfo(ctx context.Context, runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, container := range varsData.Containers {
-		exists, err := runtime.ContainerExists(container.Name)
+		exists, err := runtime.ContainerExists(ctx, container.Name)
 		if err != nil {
 			return fmt.Errorf("failed to check if container exists: %w", err)
 		}
@@ -167,7 +167,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 			continue
 		}
 
-		cInfo, err := runtime.InspectContainer(container.Name)
+		cInfo, err := runtime.InspectContainer(ctx, container.Name)
 		if err != nil {
 			return fmt.Errorf("failed to inspect Container '%s': %w", container.Name, err)
 		}
@@ -218,7 +218,7 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 	return strings.TrimSpace(result.String()), nil
 }
 
-func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
+func renderStepsMarkdown(ctx context.Context, tp templates.Template, runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
 		return nil
@@ -235,17 +235,17 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 	}
 
 	// populate the host values set in vars file
-	if err := populateHostValues(runtime, params, varsData); err != nil {
+	if err := populateHostValues(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate host values: %w", err)
 	}
 
 	// populate the pod info set in vars file
-	if err := populatePodInfo(runtime, params, varsData); err != nil {
+	if err := populatePodInfo(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate pod values: %w", err)
 	}
 
 	// populate the container info set in vars file
-	if err := populateContainerInfo(runtime, params, varsData); err != nil {
+	if err := populateContainerInfo(ctx, runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate container values: %w", err)
 	}
 
@@ -254,7 +254,6 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 		return fmt.Errorf("failed to execute info.md: %w", err)
 	}
 
-	ctx := context.Background()
 	logger.InfolnCtx(ctx, title+":")
 	logger.InfolnCtx(ctx, "-------")
 	logger.InfolnCtx(ctx, rendered.String())

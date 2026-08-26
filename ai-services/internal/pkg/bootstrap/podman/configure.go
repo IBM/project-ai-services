@@ -15,13 +15,11 @@ const (
 )
 
 // Configure performs the complete configuration of the Podman environment.
-func (p *PodmanBootstrap) Configure() error {
+func (p *PodmanBootstrap) Configure(ctx context.Context) error {
 	euid := os.Geteuid()
 	if euid != 0 {
 		return fmt.Errorf("podman bootstrap requires root privileges, either run as root or use sudo")
 	}
-
-	ctx := context.Background()
 
 	// 1. Install and configure Podman if not done
 	if err := ensurePodmanInstalled(ctx); err != nil {

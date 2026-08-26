@@ -101,7 +101,7 @@ func (img *Images) always(ctx context.Context, images []string) error {
 
 // IfNotPresent pulls only the missing images for a given app template.
 func (img *Images) IfNotPresent(ctx context.Context, images []string) error {
-	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
+	notFoundImages, err := FetchImagesNotFound(ctx, img.Runtime, images)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (img *Images) IfNotPresent(ctx context.Context, images []string) error {
 // never -> never pulls any image.
 // It checks whether all the images for given appTemplate is present locally, if not then raises an error.
 func (img *Images) never(ctx context.Context, images []string) error {
-	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
+	notFoundImages, err := FetchImagesNotFound(ctx, img.Runtime, images)
 	if err != nil {
 		return err
 	}

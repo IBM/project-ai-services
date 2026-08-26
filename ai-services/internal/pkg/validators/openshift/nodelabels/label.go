@@ -30,9 +30,7 @@ func (r *NodeLabelsRule) Description() string {
 }
 
 // Verify checks node labels in the cluster.
-func (r *NodeLabelsRule) Verify() error {
-	ctx := context.Background()
-
+func (r *NodeLabelsRule) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create OpenShift client: %w", err)

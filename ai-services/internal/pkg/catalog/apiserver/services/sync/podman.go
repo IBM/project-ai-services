@@ -31,8 +31,8 @@ func newPodmanSync(catalogProvider *catalogpkg.CatalogProvider) *podmanSync {
 
 // FetchPodStatuses fetches all pods labelled with the given templateID and returns their statuses.
 // It uses InspectPod and InspectContainer (via common.ProcessPod) to derive state and health.
-func (s *podmanSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	filteredPods, err := common.FetchFilteredPods(rt, templateID)
+func (s *podmanSync) FetchPodStatuses(ctx context.Context, rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
+	filteredPods, err := common.FetchFilteredPods(ctx, rt, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pods: %w", err)
 	}
@@ -43,7 +43,7 @@ func (s *podmanSync) FetchPodStatuses(rt runtime.Runtime, templateID string) ([]
 
 	var podStatuses []*PodStatus
 	for _, pod := range filteredPods {
-		processedPod, err := common.ProcessPod(rt, pod)
+		processedPod, err := common.ProcessPod(ctx, rt, pod)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process pod: %w", err)
 		}
@@ -103,11 +103,11 @@ func validateResourceExistenceChecks(ctx context.Context, expectedSecretNames, e
 }
 
 // validateResourceExistence is a generic helper to validate resource existence via the provided lookup func.
-func validateResourceExistence(ctx context.Context, resourceNames []string, resourceType string, existsFunc func(string) (bool, error)) string {
+func validateResourceExistence(ctx context.Context, resourceNames []string, resourceType string, existsFunc func(context.Context, string) (bool, error)) string {
 	var missing []string
 
 	for _, name := range resourceNames {
-		exists, err := existsFunc(name)
+		exists, err := existsFunc(ctx, name)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to check %s existence for %s: %v", resourceType, name, err)
 

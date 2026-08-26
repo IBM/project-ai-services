@@ -3,6 +3,7 @@ package utils
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -415,11 +416,11 @@ func checkParamsInValues(param string, values map[string]any) bool {
 }
 
 // GetExistingCustomResource checks if a single instance resource exists and return the object.
-func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
+func GetExistingCustomResource(ctx context.Context, client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk)
 
-	if err := client.Client.List(client.Ctx, list); err != nil {
+	if err := client.Client.List(ctx, list); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil
 		}
@@ -753,4 +754,14 @@ func DirStats(dir string) (totalBytes int64, fileCount int) {
 	})
 
 	return totalBytes, fileCount
+}
+
+// ConvertRawJsontoMap unmarshals a raw JSON message into a map[string]any.
+func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON: %w", err)
+	}
+
+	return result, nil
 }

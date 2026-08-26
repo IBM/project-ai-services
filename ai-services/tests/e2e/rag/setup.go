@@ -81,7 +81,7 @@ func judgeModelAlreadyDownloaded() bool {
 }
 
 // DownloadJudgeModel logs in to the RH registry and downloads the judge model if not already present.
-func DownloadJudgeModel(_ context.Context, _ *config.Config) error {
+func DownloadJudgeModel(ctx context.Context, _ *config.Config) error {
 	if judgeModelAlreadyDownloaded() {
 		logger.Infof("[JUDGE] Judge model already present at %s/%s — skipping download", ModelPath, Model)
 
@@ -98,7 +98,7 @@ func DownloadJudgeModel(_ context.Context, _ *config.Config) error {
 	}
 	logger.Infof("[JUDGE] RH Registry login completed")
 
-	if modelErr := helpers.DownloadModel(Model, ModelPath); modelErr != nil {
+	if modelErr := helpers.DownloadModel(ctx, Model, ModelPath); modelErr != nil {
 		logger.Errorf("error downloading LLM as Judge model %v", modelErr)
 
 		return fmt.Errorf("error downloading LLM as Judge model: %w", modelErr)
