@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -144,47 +143,28 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 
 // DeleteDatasource removes a datasource connector by ID.
 // Returns 404 if not found, 409 if the connector is still linked to one or more services.
+//
+// The existence check, in-use check, and DELETE all run inside a single serializable
+// transaction (owned by the repository layer) so a concurrent link cannot slip between
+// the guard and the delete.
 func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) error {
-	// Phase 1: verify the connector exists.
-	_, err := s.connectorRepo.GetByID(ctx, id, false)
+	linkedCount, err := s.connectorRepo.DeleteIfUnlinked(ctx, id, dbmodels.DependencyTypeConnector)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %q not found", id),
 			}
 		}
 
-		return fmt.Errorf("failed to fetch connector: %w", err)
-	}
-
-	// Phase 2: best-effort conflict guard — reject deletion if any service_dependencies rows reference
-	// this connector (i.e. it is still connected to at least one application). The database
-	// remains the source of truth via the foreign key constraint enforced at delete time.
-	linkedServices, err := s.svcDepRepo.GetServicesByDependency(ctx, id, dbmodels.DependencyTypeConnector)
-	if err != nil {
-		return fmt.Errorf("failed to check connector dependencies: %w", err)
-	}
-
-	if len(linkedServices) > 0 {
-		return &ValidationError{
-			Code:    http.StatusConflict,
-			Message: fmt.Sprintf("datasource is connected to %d application(s) and cannot be deleted", len(linkedServices)),
-		}
-	}
-
-	// Phase 3: delete the connector record. If another request links the connector after the
-	// guard above, rely on the database foreign key constraint and translate it to 409.
-	if err := s.connectorRepo.Delete(ctx, id); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23001" {
+		if errors.Is(err, dbrepo.ErrConnectorInUse) {
 			return &ValidationError{
 				Code:    http.StatusConflict,
-				Message: "datasource is connected to one or more applications and cannot be deleted",
+				Message: fmt.Sprintf("datasource is connected to %d application(s) and cannot be deleted", linkedCount),
 			}
 		}
 
-		return fmt.Errorf("failed to delete connector: %w", err)
+		return fmt.Errorf("failed to delete datasource: %w", err)
 	}
 
 	return nil
