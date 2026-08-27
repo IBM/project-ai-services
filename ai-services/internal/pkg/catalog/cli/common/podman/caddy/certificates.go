@@ -79,7 +79,7 @@ func (c *Context) IsCustomCertLoaded(ctx context.Context) (bool, error) {
 			return true, nil
 		}
 	}
-	
+
 	return false, nil
 }
 

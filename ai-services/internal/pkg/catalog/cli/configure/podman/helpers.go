@@ -59,7 +59,7 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 
 	// Validate certificate changes if SSL certificates are provided
 
-	return validateCertificateChanges(ctx, rt, newOpts, caddyCtx)
+	return validateCertificateChanges(ctx, newOpts, caddyCtx)
 }
 
 // validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
@@ -82,14 +82,14 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 // validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
 // Allows updating custom certificate content (e.g., for expiry or renewal).
 // Uses glob patterns to detect timestamped certificate files.
-func validateCertificateChanges(ctx context.Context, rt runtime.Runtime, opts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
+func validateCertificateChanges(ctx context.Context, opts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
 	// Check if any custom certificates exist from previous deployment
 	isCustomCertLoaded, err := caddyCtx.IsCustomCertLoaded(ctx)
 	if err != nil {
-		return  fmt.Errorf("failed to check if custom cert is loaded: %w", err)
+		return fmt.Errorf("failed to check if custom cert is loaded: %w", err)
 	}
-	
-	// If no SSL paths provided in new config but staged certs exist, block cert type change
+
+	// If no SSL paths provided in new config but custom certs loaded in caddy, block cert type change
 	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && isCustomCertLoaded {
 		return fmt.Errorf("certificate type change not allowed: custom certificates are already configured. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
 	}

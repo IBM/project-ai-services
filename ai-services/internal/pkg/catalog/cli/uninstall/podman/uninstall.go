@@ -72,7 +72,6 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
 	}
 
-
 	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
 
 	// Delete catalog pods
