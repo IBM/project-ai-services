@@ -1539,14 +1539,13 @@ paths:
       - Catalog
   /connectors:
     get:
-      description: Returns registered providers. When connector_type is supplied only
-        that type is returned; omitting it returns all providers across all connector
-        types.
+      description: Returns registered providers. When type is supplied only that type
+        is returned; omitting it returns all providers across all connector types.
       parameters:
       - description: Filter by connector type (e.g. 'datasource'). Omit to return
           all types.
         in: query
-        name: connector_type
+        name: type
         type: string
       produces:
       - application/json

@@ -1271,7 +1271,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.",
                 "produces": [
                     "application/json"
                 ],
@@ -1283,7 +1283,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
-                        "name": "connector_type",
+                        "name": "type",
                         "in": "query"
                     }
                 ],
