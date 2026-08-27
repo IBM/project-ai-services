@@ -74,7 +74,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	if catalogInstalled {
 		g.collectCatalogArtifacts(ctx, outDir)
-		collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		_ = collectApplicationPods(ctx, g, outDir, opts.applicationName)
 		g.collectModelsInfo(ctx, outDir)
 	} else {
 		logger.WarninglnCtx(ctx, "No catalog pods found — catalog is not installed. Skipping application pods, catalog artifacts, and models collection.")

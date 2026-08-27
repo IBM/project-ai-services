@@ -17,7 +17,6 @@ ai-services must-gather --runtime <podman|openshift> [flags]
 | `--runtime` | — | *(required)* | Runtime to target: `podman` or `openshift`. |
 | `--output-dir` | `-o` | `.` | Parent directory; a `must-gather.local.<timestamp>` sub-directory is created inside. |
 | `--application` | `-a` | *(all)* | Limit application pod collection to this application name. |
-| `--namespace` | `-n` | `ai-services` | **OpenShift only.** Application namespace to collect from. Ignored when `--runtime podman` is used. |
 
 ### Examples
 
@@ -35,11 +34,8 @@ ai-services must-gather --runtime podman --output-dir /tmp/debug
 
 # --- OpenShift ---
 
-# Collect everything from the default namespace (ai-services)
+# Collect everything from all applications
 ai-services must-gather --runtime openshift
-
-# Collect from a custom namespace
-ai-services must-gather --runtime openshift --namespace my-namespace
 
 # Collect only pods belonging to the "rag" application
 ai-services must-gather --runtime openshift --application rag
@@ -135,14 +131,15 @@ other sections.
 
 The catalog backend Deployment and its pods carry the label
 `ai-services.io/application=ai-services`. If no pods matching that label are
-found in the target namespace, the following sections are **skipped entirely**:
+found in the catalog namespace (`ai-services`), the following sections are
+**skipped entirely**:
 
 - Application pods (inspect, logs)
 - Catalog pods (inspect, logs)
 - Catalog credentials file
 
-System info, network, secrets, and volumes are **always collected** regardless
-of catalog state.
+System info, secrets, and volumes are **always collected** regardless of
+catalog state.
 
 #### 4. You must be logged in to the catalog for application data
 
@@ -198,12 +195,12 @@ must-gather.local.<timestamp>/
 ├── catalog/
 │   ├── pods/
 │   │   └── <pod-name>/
-│   │       ├── inspect.json          # full corev1.Pod object (sanitized)
+│   │       ├── inspect.json                    # full corev1.Pod object (sanitized)
 │   │       ├── inspect/
-│   │       │   └── <container>.json  # container spec + status (sanitized)
+│   │       │   └── <container>.json            # container spec + status (sanitized)
 │   │       └── logs/
-│   │           └── <container>.log   # last 1000 lines (sanitized)
-│   └── catalog-credentials.json     # tokens redacted
+│   │           └── <container>.log             # last 1000 lines (sanitized)
+│   └── catalog-credentials.json               # tokens redacted
 ├── pods/
 │   └── <app-pod-name>/
 │       ├── inspect.json
@@ -212,17 +209,19 @@ must-gather.local.<timestamp>/
 │       └── logs/
 │           └── <container>.log
 ├── events/
-│   └── events.json                   # namespace-scoped K8s Events (sanitized)
+│   └── events.json                             # K8s Events per app namespace (sanitized)
 ├── secrets/
-│   └── secrets.json                  # K8s Secret metadata only — data field stripped
+│   ├── catalog-secrets.json                   # K8s Secrets from ai-services ns (metadata only)
+│   └── <app-namespace>-secrets.json           # K8s Secrets from each app ns (metadata only)
 ├── system/
-│   ├── version.json                  # cluster server version
-│   └── nodes.json                    # node list (sanitized)
+│   ├── version.json                            # cluster server version
+│   └── nodes.json                              # node list (sanitized)
 ├── network/
-│   ├── services.json                 # K8s Services (sanitized)
-│   └── routes.json                   # OpenShift Routes (sanitized)
+│   ├── services.json                           # K8s Services per app namespace (sanitized)
+│   └── routes.json                             # OpenShift Routes per app namespace (sanitized)
 └── volumes/
-    └── pvcs.json                     # PersistentVolumeClaims (sanitized)
+    ├── catalog-pvcs.json                       # PVCs from ai-services ns (sanitized)
+    └── <app-namespace>-pvcs.json              # PVCs from each app ns (sanitized)
 ```
 
 ---
@@ -278,13 +277,14 @@ must-gather --runtime podman
 ### OpenShift
 
 ```
-must-gather --runtime openshift [--namespace <ns>]
+must-gather --runtime openshift
   │
   ├─► Connect to cluster (kubeconfig / in-cluster)   [HARD FAIL if unreachable]
   │
   ├─► Create output directory
   │
-  ├─► Check catalog installed?   (label: ai-services.io/application=ai-services in namespace)
+  ├─► Check catalog installed?   (label: ai-services.io/application=ai-services
+  │                                in catalog namespace "ai-services")
   │     │
   │     ├─ YES ─► Collect catalog pods (inspect + container inspect + logs)
   │     │
@@ -294,26 +294,24 @@ must-gather --runtime openshift [--namespace <ns>]
   │     │           ├─ List apps via catalog API
   │     │           │   ├─ --application given → warn if not found, skip
   │     │           │   └─ no --application    → collect all apps
+  │     │           ├─ Derive app namespace from UUID (ai-services-<8 chars>)
   │     │           └─ Per app: pod inspect + container inspect + logs
   │     │
   │     └─ NO  ─► Skip catalog-dependent steps (warning logged)
   │
-  ├─► Collect system info           (always)
+  ├─► Collect system info           (always, from catalog namespace)
   │     ├─ cluster server version
   │     └─ node list
   │
-  ├─► Collect network info          (always)
-  │     ├─ K8s Services
-  │     └─ OpenShift Routes
+  ├─► Collect catalog namespace secrets/PVCs   (always)
+  │     ├─ secrets/catalog-secrets.json
+  │     └─ volumes/catalog-pvcs.json
   │
-  ├─► Collect events                (always)
-  │     └─ K8s Events in namespace
-  │
-  ├─► Collect secret metadata       (always)
-  │     └─ K8s Secrets — data field stripped entirely before writing
-  │
-  └─► Collect volume info           (always)
-        └─ PersistentVolumeClaims
+  └─► Per app namespace (derived from catalog API)   (always)
+        ├─ Collect events → events/events.json
+        ├─ Collect secrets → secrets/<app-namespace>-secrets.json
+        ├─ Collect network → network/services.json + routes.json
+        └─ Collect PVCs → volumes/<app-namespace>-pvcs.json
 ```
 
 ---
@@ -346,7 +344,7 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 > **Note (OpenShift):** Kubernetes Secret `data` and `stringData` fields are
 > stripped at the struct level before the file is written — the sanitizer is a
 > second line of defence, not the primary guard. Only metadata (name, type,
-> labels, annotations, creation timestamp) is included in `secrets.json`.
+> labels, annotations, creation timestamp) is included in the secrets files.
 
 ---
 
@@ -373,10 +371,10 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 |---|---|
 | Cluster unreachable / no kubeconfig | Hard fail — command exits non-zero immediately. |
 | Insufficient RBAC (e.g. cannot list pods) | Per-step warning; all other sections continue. |
-| Catalog not installed (no catalog pods in namespace) | Catalog artifacts and application pods are skipped with a single warning. System/network/secrets/volumes are still collected. |
+| Catalog not installed (no catalog pods in `ai-services` namespace) | Catalog artifacts and application pods are skipped with a single warning. System/secrets/volumes are still collected from the catalog namespace. |
 | Not logged in to catalog | Application pod collection is skipped with a warning. Catalog pods and other sections are still collected. |
 | `--application` given, app not found | Warning is printed; gather continues and collects everything else. |
-| `--namespace` points to a non-existent namespace | API calls return empty results or 404 errors surfaced as per-step warnings. |
+| No applications found in catalog | Application pods skipped with a warning; all other collection continues. |
 | Output directory not writable | Hard fail — `createOutputDir` returns an error and the command exits non-zero. |
 | Individual file write failure | Warning only; collection of remaining files continues. |
 

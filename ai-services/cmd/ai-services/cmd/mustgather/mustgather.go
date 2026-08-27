@@ -15,14 +15,12 @@ var (
 	runtimeType     string
 	outputDir       string
 	applicationName string
-	namespace       string
 )
 
 // gatherOptions carries options forwarded from the cobra command.
 type gatherOptions struct {
 	outputDir       string
 	applicationName string
-	namespace       string
 }
 
 // gatherer is the common interface implemented by every runtime-specific collector.
@@ -41,16 +39,19 @@ for support and troubleshooting purposes.
 Gathered data includes pod details, container logs, network and volume
 information. All sensitive values are automatically redacted.`,
 		Example: `  # Collect from all applications (podman)
-  ai-services must-gather --runtime podman
+		ai-services must-gather --runtime podman
 
-  # Collect from a specific application (podman)
-  ai-services must-gather --runtime podman --application rag
+		# Collect from a specific application (podman)
+		ai-services must-gather --runtime podman --application rag
 
-  # Write output to a custom directory
-  ai-services must-gather --runtime podman --output-dir /tmp/debug
+		# Write output to a custom directory
+		ai-services must-gather --runtime podman --output-dir /tmp/debug
 
-  # Collect from an application namespace (openshift)
-  ai-services must-gather --runtime openshift --namespace ai-services-2b4410e6`,
+		# Collect from all applications (openshift)
+		ai-services must-gather --runtime openshift
+
+		# Collect from a specific application (openshift)
+		ai-services must-gather --runtime openshift --application rag`,
 		Args:              cobra.NoArgs,
 		PersistentPreRunE: mustGatherPreRun,
 		RunE:              mustGatherRun,
@@ -66,9 +67,6 @@ information. All sensitive values are automatically redacted.`,
 	cmd.PersistentFlags().StringVarP(&applicationName, "application", "a", "",
 		"Limit collection to this application name (default: all applications)")
 
-	cmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "",
-		"Application namespace to collect from, e.g. ai-services-2b4410e6 (required when --runtime openshift)")
-
 	return cmd
 }
 
@@ -83,10 +81,6 @@ func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
 		)
 	}
 
-	if rt == types.RuntimeTypeOpenShift && namespace == "" {
-		return fmt.Errorf("--namespace is required when using --runtime openshift.\n Provide the application namespace (e.g. ai-services-2b4410e6)")
-	}
-
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
 	logger.Debugf("Using runtime: %s\n", rt)
 
@@ -99,7 +93,6 @@ func mustGatherRun(cmd *cobra.Command, _ []string) error {
 	opts := gatherOptions{
 		outputDir:       outputDir,
 		applicationName: applicationName,
-		namespace:       namespace,
 	}
 
 	g, err := newGatherer(vars.RuntimeFactory.GetRuntimeType())

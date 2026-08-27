@@ -102,27 +102,27 @@ type podCollector interface {
 
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one) and delegates per-pod collection to pc.
-func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName string) {
+func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName string) []string {
 	appClient, err := catalogClient.NewApplicationClient()
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
 
-		return
+		return nil
 	}
 
 	apps, ok := fetchApplicationsForGather(ctx, appClient, appName)
 	if !ok {
-		return
+		return nil
 	}
 
 	podsDir := filepath.Join(outDir, "pods")
 	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
 		logger.WarningfCtx(ctx, "Failed to create pods directory: %v\n", err)
 
-		return
+		return nil
 	}
 
-	collectPodsForApps(ctx, pc, appClient, podsDir, apps)
+	return collectPodsForApps(ctx, pc, appClient, podsDir, apps)
 }
 
 // fetchApplicationsForGather fetches the application list from the catalog API
@@ -155,10 +155,10 @@ func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.Ap
 
 // collectPodsForApps iterates over apps, fetches their PS data from the catalog
 // API, and calls pc.collectPod for each pod name returned.
-//
-// For OpenShift, the namespace is derived from the application UUID using
-// AppNamespace ("ai-services-<first 8 chars of UUID>").
-func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) {
+func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, podsDir string, apps []catalogTypes.Application) []string {
+	seen := make(map[string]struct{})
+	var namespaces []string
+
 	for _, app := range apps {
 		// Derive the app-scoped namespace (OpenShift only; Podman ignores it).
 		appNamespace := appNamespaceForID(ctx, app)
@@ -177,7 +177,17 @@ func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalog
 		for _, p := range psResp.Components {
 			pc.collectPod(ctx, podsDir, p.PodName, appNamespace)
 		}
+
+		// Record the namespace once per app (skip empty — Podman path).
+		if appNamespace != "" {
+			if _, exists := seen[appNamespace]; !exists {
+				seen[appNamespace] = struct{}{}
+				namespaces = append(namespaces, appNamespace)
+			}
+		}
 	}
+
+	return namespaces
 }
 
 // appNamespaceForID parses app.ID as a UUID and returns the derived OpenShift

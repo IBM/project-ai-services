@@ -20,15 +20,14 @@ import (
 // Kubernetes API (client-go / controller-runtime).
 //
 // Two namespace scopes are in play:
-//   - catalogNS  ("ai-services")          — where the catalog backend/db/UI live.
-//   - namespace  (--namespace flag value)  — the application namespace supplied
-//     by the user, of the form "ai-services-<first 8 chars of UUID>".
+//   - catalogNS ("ai-services")           — where the catalog backend/db/UI live.
+//   - appNamespaces                        — one per application, derived from the
+//     app UUID via the catalog API as "ai-services-<first 8 chars of UUID>".
 //
 // checkCatalogInstalled uses the catalog client (catalogNS). All other catalog
 // artifact collection also targets catalogNS.
 type openshiftGatherer struct {
 	sanitizer *sanitize.SecretSanitizer
-	namespace string // application namespace from --namespace flag
 }
 
 func newOpenshiftGatherer() *openshiftGatherer {
@@ -43,21 +42,14 @@ func newOpenshiftGatherer() *openshiftGatherer {
 //   - Catalog-dependent: catalog pods, app pods, catalog credentials — skipped
 //     when no catalog pods exist in the catalog namespace.
 //   - Always-on: system info, K8s secrets, services/routes, PVCs, events —
-//     collected from the application namespace regardless of catalog state.
+//     collected from every discovered app namespace (and the catalog namespace).
 func (g *openshiftGatherer) gather(opts gatherOptions) (string, error) {
 	ctx := context.Background()
-	g.namespace = opts.namespace
 
 	logger.InfolnCtx(ctx, "Starting must-gather for OpenShift runtime…")
 
 	// catalogClient is scoped to the fixed catalog namespace ("ai-services").
-	catalogClient, err := openshiftRuntime.NewOpenshiftClientWithNamespace(catalogConstants.CatalogAppName)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to OpenShift cluster: %w", err)
-	}
-
-	// appClient is scoped to the application namespace provided by --namespace.
-	appClient, err := openshiftRuntime.NewOpenshiftClientWithNamespace(g.namespace)
+	catalogCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(catalogConstants.CatalogAppName)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to OpenShift cluster: %w", err)
 	}
@@ -69,30 +61,44 @@ func (g *openshiftGatherer) gather(opts gatherOptions) (string, error) {
 
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 	logger.InfofCtx(ctx, "Catalog namespace: %s\n", catalogConstants.CatalogAppName)
-	logger.InfofCtx(ctx, "Application namespace: %s\n", g.namespace)
 
-	catalogInstalled, err := checkCatalogInstalled(catalogClient)
+	catalogInstalled, err := checkCatalogInstalled(catalogCl)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
 
+	// appNamespaces holds the derived namespace for every application that will
+	// be collected. Populated from the catalog API below.
+	var appNamespaces []string
+
 	if catalogInstalled {
-		g.collectCatalogArtifacts(ctx, catalogClient, outDir)
-		collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		g.collectCatalogArtifacts(ctx, catalogCl, outDir)
+		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
 	} else {
 		logger.WarninglnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+" — catalog is not installed. Skipping catalog artifacts and application pod collection.")
 	}
 
-	// Always collected
-	g.collectSystemInfo(ctx, appClient, outDir)
-	g.collectEventInfo(ctx, appClient, outDir)
+	// Always collected from the catalog namespace.
+	g.collectSystemInfo(ctx, catalogCl, outDir)
 	// Secrets are collected from both namespaces into separate files
-	g.collectSecretInfo(ctx, catalogClient, "catalog-secrets.json", outDir)
-	g.collectSecretInfo(ctx, appClient, "secrets.json", outDir)
-	g.collectNetworkInfo(ctx, appClient, outDir)
-	// PVCs are collected from both namespaces into separate files
-	g.collectVolumeInfo(ctx, catalogClient, "catalog-pvcs.json", outDir)
-	g.collectVolumeInfo(ctx, appClient, "pvcs.json", outDir)
+	g.collectSecretInfo(ctx, catalogCl, "catalog-secrets.json", outDir)
+	// PVCs are collected from both namespaces into separate files to avoid
+	g.collectVolumeInfo(ctx, catalogCl, "catalog-pvcs.json", outDir)
+
+	// Always collected from every application namespace derived from the catalog API.
+	for _, ns := range appNamespaces {
+		appCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
+		if err != nil {
+			logger.WarningfCtx(ctx, "Failed to create client for app namespace %q: %v\n", ns, err)
+
+			continue
+		}
+
+		g.collectEventInfo(ctx, appCl, outDir)
+		g.collectSecretInfo(ctx, appCl, ns+"-secrets.json", outDir)
+		g.collectNetworkInfo(ctx, appCl, outDir)
+		g.collectVolumeInfo(ctx, appCl, ns+"-pvcs.json", outDir)
+	}
 
 	return outDir, nil
 }
