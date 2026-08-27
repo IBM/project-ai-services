@@ -1,6 +1,10 @@
 import { api } from "@/api/axios";
 import { WORKERS_ENDPOINTS } from "@/constants/api-endpoints.constants";
-import type { WorkerApiResponse, WorkerListResponse } from "@/types/api.types";
+import type {
+  WorkerApiResponse,
+  WorkerListResponse,
+  WorkerRegisterResponse,
+} from "@/types/api.types";
 import type { WorkerResourceRow } from "@/components/WorkerResourcesTable/types";
 
 export function transformWorkerToRow(
@@ -16,28 +20,34 @@ export function transformWorkerToRow(
   };
 }
 
+export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
+  const response = await api.get<WorkerApiResponse[]>(
+    WORKERS_ENDPOINTS.LIST_WORKERS,
+  );
+  return response.data;
+}
+
 export async function fetchWorkerResources(
   page = 1,
   pageSize = 20,
 ): Promise<WorkerListResponse> {
-  const response = await api.get<WorkerApiResponse[]>(
-    WORKERS_ENDPOINTS.LIST_WORKERS,
-  );
-  const allItems = response.data;
+  const allItems = await fetchAllWorkerResources();
   const start = (page - 1) * pageSize;
-  const end = start + pageSize;
 
   return {
-    data: allItems.slice(start, end),
+    data: allItems.slice(start, start + pageSize),
     total: allItems.length,
     page,
     page_size: pageSize,
   };
 }
 
-export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
-  const response = await api.get<WorkerApiResponse[]>(
-    WORKERS_ENDPOINTS.LIST_WORKERS,
+export async function registerWorker(
+  workerName: string,
+): Promise<WorkerRegisterResponse> {
+  const response = await api.post<WorkerRegisterResponse>(
+    WORKERS_ENDPOINTS.REGISTER_WORKER,
+    { worker_name: workerName },
   );
   return response.data;
 }
