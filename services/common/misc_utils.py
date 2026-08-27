@@ -27,6 +27,7 @@ class DoclingConversionError(Exception):
 class RequestIDFilter(logging.Filter):
     """Filter to inject request_id from ContextVar into log records."""
     def filter(self, record):
+        """Inject the current request_id from ContextVar into the log record."""
         record.request_id = request_id_ctx.get()
         return True
 
@@ -34,6 +35,7 @@ class RequestIDFilter(logging.Filter):
 class RequestIDFormatter(logging.Formatter):
     """Custom formatter that conditionally includes request_id only when present."""
     def format(self, record):
+        """Format the log record, conditionally including request_id when present."""
         # Get the request_id from the record
         request_id = getattr(record, 'request_id', '-')
 
@@ -55,12 +57,14 @@ class EndpointFilter(logging.Filter):
     These endpoints are only logged when LOG_LEVEL is set to DEBUG.
     """
     def __init__(self, log_level, filtered_paths):
+        """Initialize the filter with the active log level and paths to suppress."""
         super().__init__()
         self.log_level = log_level
         # Endpoints to filter out at INFO level
         self.filtered_paths = filtered_paths
 
     def filter(self, record):
+        """Return False for health-check and polling GET requests at INFO level."""
         # If DEBUG level, allow all logs through
         if self.log_level == logging.DEBUG:
             return True
@@ -110,11 +114,11 @@ def configure_uvicorn_logging(log_level, filtered_paths):
 
 
 def set_request_id(request_id: str):
-    #Set the request ID for the current context.
+    """Set the request ID for the current context."""
     request_id_ctx.set(request_id)
 
 def get_request_id() -> str:
-    # Get the request ID from the current context. Currently unused.
+    """Get the request ID from the current context."""
     return request_id_ctx.get()
 
 LOG_LEVEL = logging.INFO
@@ -126,10 +130,12 @@ table_suffix = "_table.json"
 table_chunk_suffix = "_table_chunk.json"
 
 def set_log_level(level):
+    """Set the global log level used by all loggers created via get_logger."""
     global LOG_LEVEL
     LOG_LEVEL = level
 
 def get_logger(name):
+    """Create or retrieve a named logger configured with the global log level and request-ID formatting."""
     logger = logging.getLogger(name)
     logger.setLevel(LOG_LEVEL)
     logger.propagate = False
@@ -154,6 +160,7 @@ def get_logger(name):
 
 
 def create_llm_session(pool_maxsize, pool_connections: int = 3, pool_block: bool = True):
+    """Create a shared HTTP session with a bounded connection pool for LLM and embedding API calls."""
     global SESSION
 
     # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
@@ -175,6 +182,7 @@ def create_llm_session(pool_maxsize, pool_connections: int = 3, pool_block: bool
 
 
 def get_txt_tab_filenames(file_paths, out_path):
+    """Derive text and table output filenames from a list of input file paths and an output directory."""
     original_filenames = [fp.split('/')[-1] for fp in file_paths]
     input_txt_files, input_tab_files = [], []
     for fn in original_filenames:
@@ -188,7 +196,7 @@ _model_max_len_cache: dict[tuple[str, str], int] = {}
 
 
 def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len: int, api_key: str | None = None) -> int:
-    """Resolve model max length, trying three sources in priority order:
+    """Resolve model max length, trying three sources in priority order.
 
     1. ``/model/info`` (LiteLLM proxy) — reads ``model_info.max_tokens`` for the
        entry whose ``model_name`` matches *model_name*.
@@ -280,6 +288,7 @@ def get_reranker_endpoint():
 
 
 def setup_digitized_doc_dir():
+    """Create and return the digitized documents directory configured in settings."""
     from digitize.settings import settings
 
     os.makedirs(settings.digitize.digitized_docs_dir, exist_ok=True)
@@ -306,6 +315,7 @@ def generate_file_checksum(file) -> str:
     return md5.hexdigest()
 
 def verify_checksum(file, checksum_file):
+    """Verify a file's MD5 checksum against a stored checksum file."""
     file_checksum = generate_file_checksum(file)
     f = open(checksum_file, "r")
     data = f.read()
@@ -371,6 +381,7 @@ def validate_document_file(filename: str, content) -> None:
         raise ValueError(f"File is empty: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
+    """Return the set of files from original_files that have not yet been processed."""
     return set(original_files).difference(set(processed_pdfs))
 
 _UNSET = object()

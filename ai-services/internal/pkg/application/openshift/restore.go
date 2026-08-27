@@ -58,7 +58,7 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, bac
 
 	// Create digitize restore client and call Import API
 	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(importPayload); err != nil {
+	if err := client.CallImportAPI(ctx, importPayload); err != nil {
 		return err
 	}
 
@@ -72,7 +72,7 @@ func (o *OpenshiftApplication) getDigitizeAPIURL(ctx context.Context, appName st
 	logger.Infof("Fetching digitize route from OpenShift...\n")
 
 	// List all routes in the namespace using the runtime interface
-	routes, err := o.runtime.ListRoutes("")
+	routes, err := o.runtime.ListRoutes(ctx, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to list routes: %w", err)
 	}

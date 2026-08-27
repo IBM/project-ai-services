@@ -6,6 +6,7 @@ import type {
   ArchitectureDetailsResponse,
   DeployOptionsResponse,
   ProviderSchema,
+  LLMOption,
 } from "@/types/api.types";
 
 interface ProviderParamsCache {
@@ -13,7 +14,7 @@ interface ProviderParamsCache {
   fetchedAt: number;
 }
 
-interface ServiceParamsCache {
+export interface ServiceParamsCache {
   data: ProviderSchema;
   fetchedAt: number;
 }
@@ -61,6 +62,14 @@ interface DeployState {
 
   // Service params error map - keyed by serviceId, absent means loading or cached
   serviceParamsError: Record<string, string>;
+
+  // Model options for global components, keyed by componentType — not persisted
+  globalComponentModels: Record<string, LLMOption[]>;
+  setGlobalComponentModels: (
+    componentType: string,
+    models: LLMOption[],
+  ) => void;
+  getGlobalComponentModels: (componentType: string) => LLMOption[];
 
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
@@ -176,6 +185,18 @@ export const useDeployStore = create<DeployState>()(
       // Service params state
       serviceParams: {},
       serviceParamsError: {},
+
+      // Global component model options (not persisted)
+      globalComponentModels: {},
+      setGlobalComponentModels: (componentType, models) =>
+        set((state) => ({
+          globalComponentModels: {
+            ...state.globalComponentModels,
+            [componentType]: models,
+          },
+        })),
+      getGlobalComponentModels: (componentType) =>
+        get().globalComponentModels[componentType] || [],
 
       // Architectures actions
       setArchitectures: (data) =>
@@ -425,6 +446,7 @@ export const useDeployStore = create<DeployState>()(
           providerParamsError: {},
           serviceParams: {},
           serviceParamsError: {},
+          globalComponentModels: {},
         });
       },
 

@@ -3,6 +3,7 @@
 package caddy
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -33,7 +34,7 @@ func NewContext(podName string, domainSuffix string) *Context {
 }
 
 // GetHostAdminURL retrieves the Caddy admin URL for host VM use, caching the result.
-func (c *Context) GetHostAdminURL() (string, error) {
+func (c *Context) GetHostAdminURL(ctx context.Context) (string, error) {
 	if c.hostAdminURL != "" {
 		return c.hostAdminURL, nil
 	}
@@ -43,7 +44,7 @@ func (c *Context) GetHostAdminURL() (string, error) {
 		return "", fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
-	adminPort, err := getCaddyAdminPort(rt, c.podName)
+	adminPort, err := getCaddyAdminPort(ctx, rt, c.podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Caddy admin port: %w", err)
 	}
@@ -65,13 +66,13 @@ func (c *Context) GetContainerAdminURL() string {
 }
 
 // GetHTTPSPort retrieves the Caddy HTTPS port.
-func (c *Context) GetHTTPSPort(rt *podman.PodmanClient) (string, error) {
-	return getHTTPSPort(rt, c.podName)
+func (c *Context) GetHTTPSPort(ctx context.Context, rt *podman.PodmanClient) (string, error) {
+	return getHTTPSPort(ctx, rt, c.podName)
 }
 
 // CreateProxyManager creates a Caddy proxy manager.
-func (c *Context) CreateProxyManager() (proxy.ProxyManager, error) {
-	adminURL, err := c.GetHostAdminURL()
+func (c *Context) CreateProxyManager(ctx context.Context) (proxy.ProxyManager, error) {
+	adminURL, err := c.GetHostAdminURL(ctx)
 	if err != nil {
 		return nil, err
 	}

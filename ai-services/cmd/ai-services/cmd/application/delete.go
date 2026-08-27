@@ -82,7 +82,7 @@ Arguments:
 		}
 
 		// Default: use new implementation via catalog
-		return deleteApplication(applicationName)
+		return deleteApplication(cmd.Context(), applicationName)
 	},
 }
 
@@ -126,12 +126,12 @@ func buildDeleteFlagValidator() *flagvalidator.FlagValidator {
 	return builder.Build()
 }
 
-func deleteApplication(appName string) error {
-	appClient, err := catalogClient.NewApplicationClient()
+func deleteApplication(ctx context.Context, appName string) error {
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
 	}
-	app, err := cliUtils.GetAppByName(appClient, appName)
+	app, err := cliUtils.GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		return err
 	}
@@ -157,8 +157,8 @@ func deleteApplication(appName string) error {
 
 	// Retry deletion if it fails
 	logger.Infof("Deleting application %s...\n", appName)
-	err = utils.Retry(context.Background(), vars.RetryCount, vars.RetryInterval, nil, func() error {
-		return appClient.DeleteApplication(app.ID, &deleteParams)
+	err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
+		return appClient.DeleteApplication(ctx, app.ID, &deleteParams)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to delete application after %d retries: %w", vars.RetryCount, err)
@@ -166,7 +166,7 @@ func deleteApplication(appName string) error {
 
 	// Poll to verify deletion is complete
 	logger.Infof("Waiting for application %s to be deleted...\n", appName)
-	if err := waitForApplicationDeletion(appClient, app.ID); err != nil {
+	if err := waitForApplicationDeletion(ctx, appClient, app.ID); err != nil {
 		return fmt.Errorf("failed to verify application deletion: %w", err)
 	}
 
@@ -176,15 +176,18 @@ func deleteApplication(appName string) error {
 }
 
 // waitForApplicationDeletion polls the application status until it's fully deleted.
-func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appID string) error {
+func waitForApplicationDeletion(ctx context.Context, appClient *catalogClient.ApplicationClient, appID string) error {
 	const (
 		pollInterval = 5 * time.Second
 		maxAttempts  = 12
 	)
 
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
+
 	for range maxAttempts {
 		// Check if application still exists via API
-		app, err := appClient.GetApplication(appID)
+		app, err := appClient.GetApplication(ctx, appID)
 		if err != nil {
 			// Check if it's an HTTPError with 404 status code
 			var httpErr *catalogClient.HTTPError
@@ -202,8 +205,13 @@ func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appI
 			// Application still exists, continue polling
 		}
 
-		// Wait before next poll
-		time.Sleep(pollInterval)
+		// Wait before next poll, but honour context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			timer.Reset(pollInterval)
+		}
 	}
 
 	return fmt.Errorf("timeout waiting for application deletion after %v", maxAttempts*pollInterval)

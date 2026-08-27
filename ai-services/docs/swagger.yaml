@@ -16,6 +16,42 @@ definitions:
     - provider_id
     - version
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem:
+    properties:
+      application_id:
+        description: ApplicationID is the UUID of the application that owns this service.
+        type: string
+      application_name:
+        description: ApplicationName is the human-readable display name of the owning
+          application.
+        type: string
+      err_msg:
+        description: |-
+          ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
+          no endpoint registered). Empty on success.
+        type: string
+      last_sync_at:
+        description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
+          or null when unavailable.
+        type: string
+      service:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo'
+        description: Service contains the catalog identity (id + resolved name) of
+          the owning application.
+      sync_status:
+        description: |-
+          SyncStatus is the current sync state sourced from the Digitize pod.
+          Set to "unknown" when the Digitize pod is unreachable.
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
       catalog_id:
@@ -39,6 +75,115 @@ definitions:
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse:
     properties:
       id:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest:
+    properties:
+      name:
+        description: |-
+          Name is the unique human-readable label for this connector.
+          Must be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are
+          allowed. Duplicate-name detection is case-insensitive ("My-DB" and "my-db" conflict).
+        maxLength: 100
+        minLength: 3
+        type: string
+      params:
+        additionalProperties: {}
+        description: |-
+          Params holds the provider-specific configuration. Sensitive fields (format: "password"
+          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
+        type: object
+      provider_id:
+        description: ProviderID identifies the provider implementation (e.g. "object_storage",
+          "file_system").
+        type: string
+    required:
+    - name
+    - params
+    - provider_id
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:
+    properties:
+      id:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse:
+    properties:
+      connected_services:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse:
+    properties:
+      created_at:
+        description: CreatedAt is the creation timestamp.
+        type: string
+      id:
+        description: ID is the UUID of the datasource connector.
+        type: string
+      message:
+        description: Message contains a human-readable description of the current
+          status (may be empty).
+        type: string
+      metadata:
+        additionalProperties: {}
+        description: |-
+          Metadata holds the non-sensitive configuration fields.
+          Sensitive fields (e.g. secret_access_key, private_key) are always stripped.
+        type: object
+      name:
+        description: Name is the unique human-readable label.
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+        description: Provider contains the provider ID and its resolved display name.
+      services:
+        description: |-
+          Services lists every service currently connected to this datasource,
+          enriched with live sync state from each service's Digitize pod.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem'
+        type: array
+      status:
+        description: Status is the current connectivity status ("connected" or "offline").
+        type: string
+      type:
+        description: Type is always "datasource".
+        type: string
+      updated_at:
+        description: UpdatedAt is the last-update timestamp.
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
@@ -75,6 +220,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse'
         type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse:
     properties:
@@ -99,7 +246,7 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult:
     properties:
       catalog_id:
         type: string
@@ -112,46 +259,6 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker:
-    properties:
-      id:
-        type: string
-      last_heartbeat:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      registered_at:
-        type: string
-      runtime_type:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType'
-      status:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus'
-      updated_at:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType:
-    enum:
-    - unknown
-    - podman
-    - openshift
-    type: string
-    x-enum-varnames:
-    - WorkerRuntimeTypeUnknown
-    - WorkerRuntimeTypePodman
-    - WorkerRuntimeTypeOpenShift
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus:
-    enum:
-    - pending
-    - ready
-    - disconnected
-    type: string
-    x-enum-varnames:
-    - WorkerStatusPending
-    - WorkerStatusReady
-    - WorkerStatusDisconnected
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       catalog_id:
@@ -436,6 +543,10 @@ definitions:
         type: string
       healthy:
         type: boolean
+      labels:
+        additionalProperties:
+          type: string
+        type: object
       pod_id:
         type: string
       pod_name:
@@ -566,6 +677,26 @@ definitions:
     - Exited
     - Removing
     - Dead
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker:
+    properties:
+      id:
+        type: string
+      last_heartbeat:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      registered_at:
+        type: string
+      runtime_type:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
     properties:
       available:
@@ -1209,7 +1340,19 @@ paths:
       - Authentication
   /catalog/bundles:
     get:
-      description: Returns all registered bundles ordered by created_at DESC.
+      description: Returns a paginated list of all registered bundles ordered by created_at
+        DESC.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:
@@ -1217,6 +1360,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleListResponse'
+        "400":
+          description: Invalid pagination parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
@@ -1398,7 +1545,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult'
         "400":
           description: Bad Request
           schema:
@@ -1470,14 +1617,13 @@ paths:
       - Catalog
   /connectors:
     get:
-      description: Returns registered providers. When connector_type is supplied only
-        that type is returned; omitting it returns all providers across all connector
-        types.
+      description: Returns registered providers. When type is supplied only that type
+        is returned; omitting it returns all providers across all connector types.
       parameters:
       - description: Filter by connector type (e.g. 'datasource'). Omit to return
           all types.
         in: query
-        name: connector_type
+        name: type
         type: string
       produces:
       - application/json
@@ -1537,6 +1683,180 @@ paths:
       summary: Get connector provider parameters
       tags:
       - Catalog
+  /datasources:
+    get:
+      description: Returns a paginated list of datasource connectors with optional
+        filters by status and provider.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: 'Filter by status: ''connected'' or ''offline'''
+        in: query
+        name: status
+        type: string
+      - description: Filter by provider ID (e.g. 'object_storage', 'file_system')
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List datasource connectors
+      tags:
+      - Datasources
+    post:
+      consumes:
+      - application/json
+      description: Validates the request, tests the connection, encrypts credentials,
+        and persists a new datasource connector. Returns 422 if the connection test
+        fails.
+      parameters:
+      - description: Datasource creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Datasource created
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Provider not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource name already exists
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Connection test failed
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create datasource connector
+      tags:
+      - Datasources
+  /datasources/{id}:
+    delete:
+      description: Deletes a datasource connector by ID. Returns 409 Conflict if the
+        connector is still linked to one or more applications.
+      parameters:
+      - description: Datasource connector ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Datasource deleted
+        "400":
+          description: Invalid connector ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource is connected to one or more applications
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete datasource connector
+      tags:
+      - Datasources
+    get:
+      description: Returns the full details of a datasource connector including non-sensitive
+        metadata and the list of connected services enriched with live sync state
+        from each service's Digitize pod.
+      parameters:
+      - description: Datasource UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource detail
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse'
+        "400":
+          description: Invalid UUID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a single datasource connector
+      tags:
+      - Datasources
   /resources:
     get:
       description: Retrieves system resource information including CPU, memory, and
@@ -1707,7 +2027,7 @@ paths:
           description: List of workers
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker'
             type: array
         "500":
           description: Internal error
@@ -1724,7 +2044,7 @@ paths:
       - application/json
       description: |-
         Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.
-        The operator passes this token when starting the worker daemon (`worker start --token <token>`).
+        The operator passes this token when starting the worker daemon (`worker join --token <token>`).
       parameters:
       - description: Worker registration request
         in: body

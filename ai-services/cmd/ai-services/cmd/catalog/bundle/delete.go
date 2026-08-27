@@ -1,0 +1,70 @@
+package bundle
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+)
+
+// NewDeleteCmd implements: ai-services catalog bundle delete <bundle_id> [--yes].
+func NewDeleteCmd() *cobra.Command {
+	var skipConfirm bool
+
+	cmd := &cobra.Command{
+		Use:   "delete <bundle_id>",
+		Short: "Delete a catalog bundle",
+		Long: `Permanently remove a catalog bundle and deregister it from the catalog.
+
+The bundle is identified by its UUID, shown in the output of 'bundle list'
+or 'bundle create'. Both the stored archive and the catalog registration are
+removed. The catalog is reloaded automatically after deletion.
+
+If a service or component is currently running from this bundle, the deletion
+is rejected until those instances are deleted.
+
+Note:
+  Existing deployed applications are not affected by deleting a bundle.`,
+		Example: `  ai-services catalog bundle delete 550e8400-e29b-41d4-a716-446655440000
+  ai-services catalog bundle delete 550e8400-e29b-41d4-a716-446655440000 --yes`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			bundleID := args[0]
+
+			if !skipConfirm {
+				confirmed, err := utils.ConfirmAction(fmt.Sprintf("Delete bundle %s?", bundleID))
+				if err != nil {
+					return err
+				}
+
+				if !confirmed {
+					logger.InfolnCtx(ctx, "Aborted.")
+
+					return nil
+				}
+			}
+
+			c, err := client.NewBundleClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			if err := c.DeleteBundle(ctx, bundleID); err != nil {
+				return err
+			}
+
+			logger.InfolnCtx(ctx, "✓ Bundle deleted.")
+			logger.InfolnCtx(ctx, "")
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&skipConfirm, "yes", false, "Skip the confirmation prompt")
+
+	return cmd
+}

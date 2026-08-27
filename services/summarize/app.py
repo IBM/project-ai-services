@@ -68,6 +68,11 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_siz
 
 @asynccontextmanager
 async def lifespan(app):
+    """Manage application lifespan events (startup and shutdown).
+
+    Sets up logging, connection pooling, model initializations, database tables,
+    cache directories, and initiates recovering zombie jobs.
+    """
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
@@ -145,6 +150,11 @@ app = FastAPI(
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -153,7 +163,7 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 def swagger_root():
-    """Expose Swagger UI at the root path (/)"""
+    """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="AI-Services Summarization API - Swagger UI",
@@ -163,6 +173,10 @@ ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
 
 @app.exception_handler(SummarizeException)
 async def summarize_exception_handler(request: Request, exc: SummarizeException):
+    """Global exception handler for SummarizeException.
+
+    Formats summarization-related errors into standard API JSON error responses.
+    """
     return JSONResponse(
         status_code=exc.code,
         content={
@@ -175,6 +189,10 @@ async def summarize_exception_handler(request: Request, exc: SummarizeException)
     )
 
 def initialize_models():
+    """Initialize endpoint configurations for the LLM model.
+
+    Retrieves model details and caches them in the global `llm_model_dict` variable.
+    """
     global llm_model_dict
     llm_model_dict = get_llm_endpoint()
 
@@ -1416,6 +1434,7 @@ async def bulk_delete_jobs(confirm: Optional[bool] = None):
     response_description="Service health status"
 )
 async def health():
+    """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
 
 

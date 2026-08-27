@@ -10,7 +10,7 @@ from similarity.settings import settings
 
 
 class SimilaritySearchRequest(BaseModel):
-    """Request body for POST /v1/similarity-search"""
+    """Request body for POST /v1/similarity-search."""
     query: str = Field(..., description="Natural language search query")
     mode: str = Field(
         default="dense",
@@ -38,7 +38,7 @@ class SimilaritySearchResult(BaseModel):
 
 
 class SimilaritySearchResponse(BaseModel):
-    """Response from POST /v1/similarity-search
+    """Response from POST /v1/similarity-search.
 
     Note: Timing information is provided in response headers:
     - X-Retrieve-Time: Time spent retrieving documents (seconds)

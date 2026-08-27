@@ -29,7 +29,7 @@ func configureCmd() *cobra.Command {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)
 			}
 
-			if err := bootstrapInstance.Configure(); err != nil {
+			if err := bootstrapInstance.Configure(cmd.Context()); err != nil {
 				return fmt.Errorf("bootstrap configuration failed: %w", err)
 			}
 

@@ -1,5 +1,5 @@
 """
-Diagnostic Logger Framework
+Diagnostic Logger Framework.
 
 This module provides simplified system diagnostics logging for crash scenarios.
 It captures critical system metrics before the application crashes, including:
@@ -585,7 +585,7 @@ class StderrMonitor:
         ]
     
     def start(self):
-        """Start monitoring stderr"""
+        """Start monitoring stderr."""
         if self._monitor_thread is not None and self._monitor_thread.is_alive():
             self.logger.warning("stderr monitor already running")
             return
@@ -611,7 +611,7 @@ class StderrMonitor:
             self.logger.error(f"Failed to start stderr monitor: {e}")
     
     def stop(self):
-        """Stop monitoring stderr"""
+        """Stop monitoring stderr."""
         if self._monitor_thread is None:
             return
         
@@ -635,7 +635,7 @@ class StderrMonitor:
             self.logger.error(f"Error stopping stderr monitor: {e}")
     
     def _monitor_loop(self):
-        """Monitor stderr for error patterns"""
+        """Monitor stderr for error patterns."""
         try:
             with os.fdopen(self.read_fd, 'rb', buffering=0) as f:
                 while not self._stop_event.is_set():
@@ -693,7 +693,7 @@ class SignalHandler:
         self.original_handlers = {}
     
     def setup(self):
-        """Setup signal handlers for fatal signals"""
+        """Setup signal handlers for fatal signals."""
         # Signals to handle
         signals_to_handle = []
         
@@ -729,7 +729,7 @@ class SignalHandler:
             self.logger.info(f"Signal handlers installed for: {[signal.Signals(s).name for s in signals_to_handle]}")
     
     def _signal_handler(self, signum, frame):
-        """Handle fatal signals"""
+        """Handle fatal signals."""
         signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
         
         self.logger.info(f"⚠️  Received fatal signal: {signal_name} ({signum})")
@@ -755,8 +755,8 @@ class SignalHandler:
 
 
 def setup_comprehensive_crash_handler(logger: logging.Logger) -> tuple:
-    """
-    Setup comprehensive crash handling with three layers:
+    """Set up comprehensive crash handling with three layers.
+
     1. Python exception handler (sys.excepthook)
     2. stderr monitor (for C-level library errors)
     3. Signal handler (for segfaults and fatal signals)

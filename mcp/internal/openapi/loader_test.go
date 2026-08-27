@@ -140,7 +140,7 @@ func TestLoadFromURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data, err := loadFromURL(tt.url)
+			data, err := loadFromURL(tt.url, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("loadFromURL() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -189,7 +189,7 @@ func TestLoadDescription(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			doc, err := LoadDescription(tt.ref)
+			doc, err := LoadDescription(tt.ref, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadDescription() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -222,7 +222,7 @@ func TestLoadDescriptionFromURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	doc, err := LoadDescription(server.URL + "/api.yaml")
+	doc, err := LoadDescription(server.URL + "/api.yaml", false)
 	if err != nil {
 		t.Fatalf("LoadDescription() from URL failed: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestLoadDescriptionFromURL(t *testing.T) {
 
 func TestLoadDescriptionRefResolution(t *testing.T) {
 	// Load spec with references
-	doc, err := LoadDescription("testdata/with-refs.yaml")
+	doc, err := LoadDescription("testdata/with-refs.yaml", false)
 	if err != nil {
 		t.Fatalf("LoadDescription() failed: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestLoadDescriptionInvalidYAML(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	_, err = LoadDescription(invalidFile)
+	_, err = LoadDescription(invalidFile, false)
 	if err == nil {
 		t.Error("LoadDescription() should fail on invalid YAML")
 	}
@@ -468,7 +468,7 @@ func TestLoadFromURLWithValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := loadFromURL(tt.url)
+			_, err := loadFromURL(tt.url, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("loadFromURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
 				return
@@ -542,7 +542,7 @@ func TestLoadDescriptionWithSecurityValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := LoadDescription(tt.ref)
+			_, err := LoadDescription(tt.ref, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadDescription(%q) error = %v, wantErr %v", tt.ref, err, tt.wantErr)
 				return
@@ -568,4 +568,28 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestLoadDescriptionTLSSkipVerify(t *testing.T) {
+	// TLS test server presents a self-signed certificate
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		content, _ := os.ReadFile("testdata/minimal.yaml")
+		w.WriteHeader(http.StatusOK)
+		w.Write(content)
+	}))
+	defer server.Close()
+
+	// Without skip, the self-signed certificate must be rejected
+	if _, err := LoadDescription(server.URL+"/api.yaml", false); err == nil {
+		t.Error("LoadDescription() should fail against a self-signed certificate when tlsSkipVerify is false")
+	}
+
+	// With skip, the description loads
+	doc, err := LoadDescription(server.URL+"/api.yaml", true)
+	if err != nil {
+		t.Fatalf("LoadDescription() with tlsSkipVerify failed: %v", err)
+	}
+	if doc == nil || doc.Info == nil {
+		t.Fatal("LoadDescription() with tlsSkipVerify returned incomplete document")
+	}
 }

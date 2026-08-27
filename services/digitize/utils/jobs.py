@@ -1,20 +1,22 @@
-"""
-Job lifecycle utilities — utils/jobs.py
+""" Job lifecycle utilities — utils/jobs.py.
 
 Coordinator layer between the API routers and the DB/storage layers:
 job initialisation, file staging, active-job guards, document content
 retrieval, and bulk deletion helpers.
 """
+import asyncio
 import uuid
 from typing import Optional
 
 from common.misc_utils import get_logger
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
     JobStatus,
     DocStatus,
 )
+from digitize.parsing.pdf import get_document_page_count
 from digitize.settings import settings
 from digitize.utils.db import (
     create_job,
@@ -87,7 +89,6 @@ def generate_uuid():
     """
     # Generate a random UUID (uuid4)
     generated_uuid = uuid.uuid4()
-    logger.debug(f"Generated UUID: {generated_uuid}")
     return str(generated_uuid)
 
 
@@ -139,7 +140,6 @@ def initialize_job_state(
     # Now create document metadata in both database and file system
     for doc in documents_info:
         doc_id = doc_id_dict[doc]
-        logger.debug(f"Generated document id {doc_id} for file: {doc}")
         create_document(
             doc_name=doc,
             doc_id=doc_id,
@@ -148,6 +148,7 @@ def initialize_job_state(
             operation=operation,
             submitted_at=submitted_at
         )
+    logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
     # Record ALREADY_EXISTS entries for files stripped from the batch.
     # Created AFTER the job row exists (foreign key constraint).
@@ -178,6 +179,72 @@ def initialize_job_state(
             )
 
     return doc_id_dict
+
+
+async def enqueue_conversion_tasks(
+    job_id: str,
+    op_key: str,
+    filenames: list[str],
+    doc_id_dict: dict[str, str],
+    staging_dir,
+    output_format: OutputFormat,
+    quota: int,
+    queued_for_op: int,
+) -> None:
+    """
+    Insert conversion_tasks rows for every file in the job in a single
+    atomic DB transaction.
+
+    Page counts are still fetched sequentially (each is a file read that
+    must complete before ``is_large`` can be determined), but all INSERT
+    rows are batched into one ``session.add_all()`` call so the number of
+    DB round-trips is reduced from N (one per file) to 1.
+
+    The batch insert is atomic: if any row fails the entire set is rolled
+    back, leaving no partial state for the caller to reason about.
+
+    Slots up to the free quota are inserted as ``queued``; the rest as
+    ``pending`` (the dispatcher will promote them as capacity frees up).
+
+    Args:
+        job_id:        Job identifier.
+        op_key:        ``"ingestion"`` or ``"digitization"``.
+        filenames:     Ordered list of filenames being submitted.
+        doc_id_dict:   Mapping of filename → document ID.
+        staging_dir:   Path to the job's staging directory.
+        output_format: Requested output format.
+        quota:         Per-operation queue quota from settings.
+        queued_for_op: Number of tasks already queued for this operation.
+    """
+    from digitize.db.manager import db_manager
+
+    slots_free = max(0, quota - queued_for_op)
+    tasks = []
+
+    for idx, filename in enumerate(filenames):
+        task_id = generate_uuid()
+        doc_id = doc_id_dict[filename]
+        file_path = staging_dir / filename
+        page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
+        is_large = page_count >= settings.digitize.heavy_doc_page_threshold
+        task_status = ConversionTaskStatus.QUEUED if idx < slots_free else ConversionTaskStatus.PENDING
+        tasks.append({
+            "task_id":       task_id,
+            "job_id":        job_id,
+            "doc_id":        doc_id,
+            "operation":     op_key,
+            "cached_file":   str(file_path),
+            "output_format": output_format.value,
+            "page_count":    page_count,
+            "is_large":      is_large,
+            "status":        task_status,
+        })
+        logger.debug(
+            f"Prepared task {task_id} for {filename} "
+            f"(op={op_key}, status={task_status}, large={is_large})"
+        )
+
+    db_manager.create_conversion_tasks_batch(tasks)
 
 
 async def stage_upload_files(

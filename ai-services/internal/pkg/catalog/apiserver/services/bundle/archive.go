@@ -12,11 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	"go.yaml.in/yaml/v3"
 )
 
 const (
+	// BundleFileExtension is the required file extension for bundle uploads.
+	BundleFileExtension = ".tar.gz"
+
 	// bundleStorageRoot is the mount path for the dedicated catalog-bundles volume.
 	bundleStorageRoot = "/data/catalog-bundles"
 
@@ -34,17 +37,6 @@ const (
 	// supplementary GID the container runtime assigns to the apiserver process.
 	dirPerm = 0o750
 )
-
-// rawMetadataYAML holds the minimal set of fields decoded from root metadata.yaml.
-// Only these fields are read during peekMetadata; full semantic validation is deferred
-// to ValidateBundle (not yet implemented).
-type rawMetadataYAML struct {
-	ID            string `yaml:"id"`
-	Type          string `yaml:"type"`
-	Name          string `yaml:"name"`
-	Version       string `yaml:"version"`
-	ComponentType string `yaml:"component_type"`
-}
 
 // bundleDirPath returns the canonical on-disk directory for a bundle.
 //
@@ -66,55 +58,57 @@ func catalogTypeToDir(catalogType string) string {
 }
 
 // peekMetadata reads the entire archive into memory, locates the root metadata.yaml,
-// parses the minimal identity fields, and returns:
+// parses all required fields, and returns:
 //   - the raw archive bytes (so callers can hand the same bytes to extractAndMeasure
-//     without re-reading the original io.Reader), and
-//   - the parsed BundleMetadata.
+//     without re-reading the original io.Reader),
+//   - either a *bundlemetadata.ServiceMetadataYAML or *bundlemetadata.ComponentMetadataYAML, and
+//   - the top-level directory name inferred from the archive structure (empty for flat archives).
+//
+// Threading topDir out avoids a redundant extra scan by each runtime validator, which
+// would otherwise call resolveTopDir / inferTopDir on the same bytes a second time.
 //
 // Returns *ValidationError{Code:400} on I/O or archive errors and
 // *ValidationError{Code:422} on missing/invalid metadata fields.
-func peekMetadata(r io.Reader) ([]byte, BundleMetadata, error) {
+func peekMetadata(r io.Reader) ([]byte, any, string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, nil, &validators.ValidationError{
+		return nil, nil, "", &validators.ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("failed to read archive: %s", err),
 		}
 	}
 
-	meta, err := parseMetadataFromBytes(data)
+	meta, topDir, err := parseMetadataFromBytes(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
-	return data, meta, nil
+	return data, meta, topDir, nil
 }
 
 // parseMetadataFromBytes walks the gzip-compressed tar archive stored in data,
 // finds the root metadata.yaml (either at the top level or one directory deep),
 // and delegates to parseMetadataYAML.
-func parseMetadataFromBytes(data []byte) (BundleMetadata, error) {
+// It also returns the inferred topDir so callers do not need a second scan.
+func parseMetadataFromBytes(data []byte) (any, string, error) {
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, &validators.ValidationError{
+		return nil, "", &validators.ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("invalid gzip archive: %s", err),
 		}
 	}
 	defer func() { _ = gr.Close() }()
 
-	tr := tar.NewReader(gr)
-
-	return scanArchiveForMetadata(tr)
+	return scanArchiveForMetadata(tar.NewReader(gr))
 }
 
-// scanArchiveForMetadata walks tar entries looking for a root metadata.yaml
-// and delegates parsing to parseMetadataYAML.
-func scanArchiveForMetadata(tr *tar.Reader) (BundleMetadata, error) {
-	// topDir is inferred from the first archive entry that contains a slash.
-	// The directory name is never validated — it is only used to locate
-	// <topDir>/metadata.yaml. A flat archive (no top-level directory) is also
-	// handled via the name == "metadata.yaml" branch below.
+// scanArchiveForMetadata walks tar entries looking for the root metadata.yaml
+// and delegates to parseMetadataYAML once found.
+// topDir is inferred from the first entry that contains a slash; flat archives
+// (no top-level directory) are handled via the bare "metadata.yaml" match.
+// It returns both the parsed metadata and the inferred topDir.
+func scanArchiveForMetadata(tr *tar.Reader) (any, string, error) {
 	var topDir string
 
 	for {
@@ -123,7 +117,7 @@ func scanArchiveForMetadata(tr *tar.Reader) (BundleMetadata, error) {
 			break
 		}
 		if err != nil {
-			return nil, &validators.ValidationError{
+			return nil, "", &validators.ValidationError{
 				Code:    http.StatusBadRequest,
 				Message: fmt.Sprintf("error reading archive: %s", err),
 			}
@@ -135,14 +129,14 @@ func scanArchiveForMetadata(tr *tar.Reader) (BundleMetadata, error) {
 
 		meta, done, err := tryReadMetadataEntry(tr, hdr, topDir)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if done {
-			return meta, nil
+			return meta, topDir, nil
 		}
 	}
 
-	return nil, &validators.ValidationError{
+	return nil, "", &validators.ValidationError{
 		Code:    http.StatusBadRequest,
 		Message: "metadata.yaml not found in archive root",
 	}
@@ -151,7 +145,7 @@ func scanArchiveForMetadata(tr *tar.Reader) (BundleMetadata, error) {
 // tryReadMetadataEntry checks whether hdr is the root metadata.yaml entry and,
 // if so, reads and parses it. Returns (meta, true, nil) on success,
 // (nil, false, nil) when hdr is not the target entry, and (nil, false, err) on error.
-func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (BundleMetadata, bool, error) {
+func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (any, bool, error) {
 	name := filepath.ToSlash(hdr.Name)
 	isRootMeta := name == "metadata.yaml" ||
 		(topDir != "" && name == topDir+"/metadata.yaml")
@@ -176,59 +170,11 @@ func tryReadMetadataEntry(tr *tar.Reader, hdr *tar.Header, topDir string) (Bundl
 	return meta, true, nil
 }
 
-// parseMetadataYAML decodes raw YAML bytes into the appropriate BundleMetadata
-// concrete type based on the `type` field.
-//
-// Accepted types: "service", "component".
-// Returns *ValidationError{Code:422} for missing required fields or unknown types.
-func parseMetadataYAML(data []byte) (BundleMetadata, error) {
-	var raw rawMetadataYAML
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, &validators.ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("failed to parse metadata.yaml: %s", err),
-		}
-	}
-
-	if raw.ID == "" {
-		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'id' is required"}
-	}
-	if raw.Type == "" {
-		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'type' is required"}
-	}
-	if raw.Version == "" {
-		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'version' is required"}
-	}
-
-	switch raw.Type {
-	case CatalogTypeService:
-		return &ServiceMetadata{
-			id:          raw.ID,
-			version:     raw.Version,
-			displayName: raw.Name,
-		}, nil
-
-	case CatalogTypeComponent:
-		if raw.ComponentType == "" {
-			return nil, &validators.ValidationError{
-				Code:    http.StatusUnprocessableEntity,
-				Message: "metadata.yaml: 'component_type' is required for type=component",
-			}
-		}
-
-		return &ComponentMetadata{
-			id:            raw.ID,
-			componentType: raw.ComponentType,
-			version:       raw.Version,
-			displayName:   raw.Name,
-		}, nil
-
-	default:
-		return nil, &validators.ValidationError{
-			Code:    http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf("metadata.yaml: unsupported type %q (expected %q or %q)", raw.Type, CatalogTypeService, CatalogTypeComponent),
-		}
-	}
+// parseMetadataYAML decodes raw YAML bytes, validates all required fields via
+// bundlemetadata.ParseRootMetadata, and returns the appropriate concrete type.
+// Returns *bundlemetadata.ServiceMetadataYAML or *bundlemetadata.ComponentMetadataYAML.
+func parseMetadataYAML(data []byte) (any, error) {
+	return bundlemetadata.ParseRootMetadata(data)
 }
 
 // extractAndMeasure extracts data (a gzip-compressed tar archive) into destDir,
@@ -251,9 +197,7 @@ func extractAndMeasure(data []byte, destDir string) (int64, error) {
 	}
 	defer func() { _ = gr.Close() }()
 
-	tr := tar.NewReader(gr)
-
-	return extractEntries(tr, destDir)
+	return extractEntries(tar.NewReader(gr), destDir)
 }
 
 // extractEntries iterates over all tar entries and writes regular files and

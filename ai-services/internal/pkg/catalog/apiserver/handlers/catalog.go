@@ -15,17 +15,9 @@ type CatalogHandler struct {
 	provider *catalog.CatalogProvider
 }
 
-// NewCatalogHandler creates a new catalog handler.
-func NewCatalogHandler() *CatalogHandler {
-	provider, err := catalog.NewCatalogProvider()
-	if err != nil {
-		// Log error but don't fail - let individual requests handle it
-		panic(fmt.Sprintf("Failed to initialize catalog provider: %v", err))
-	}
-
-	return &CatalogHandler{
-		provider: provider,
-	}
+// NewCatalogHandler creates a new catalog handler backed by the given provider.
+func NewCatalogHandler(provider *catalog.CatalogProvider) *CatalogHandler {
+	return &CatalogHandler{provider: provider}
 }
 
 // ListArchitectures godoc
@@ -237,17 +229,17 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 // ListConnectorProviders godoc
 //
 //	@Summary		List connector providers
-//	@Description	Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.
+//	@Description	Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			connector_type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
-//	@Success		200				{array}		types.Connector	"List of providers"
-//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
-//	@Failure		404				{object}	ErrorResponse	"Connector type not found"
+//	@Param			type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
+//	@Success		200		{array}		types.Connector	"List of providers"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse	"Connector type not found"
 //	@Router			/connectors [get]
 func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
-	connectorType := c.Query("connector_type")
+	connectorType := c.Query("type")
 
 	var providers []*types.Connector
 	if connectorType == "" {
@@ -289,7 +281,7 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 	connectorType := c.Param("connector_type")
 	providerID := c.Param("provider_id")
 
-	schema, err := h.provider.GetConnectorProviderParams(c.Request.Context(), connectorType, providerID)
+	raw, err := h.provider.GetConnectorProviderParams(c.Request.Context(), connectorType, providerID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", connectorType, providerID, err),
@@ -298,7 +290,8 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, schema)
+	// Write the raw JSON bytes directly so the property order defined in schema.json is preserved.
+	c.Data(http.StatusOK, "application/json; charset=utf-8", raw)
 }
 
 // GetServiceParams godoc

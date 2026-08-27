@@ -98,6 +98,11 @@ def process_text_docx(converted_doc, docx_path, out_path):
 
 
 def process_text(converted_doc, doc_path, out_path):
+    """Process and extract textual content from a converted document.
+
+    Builds an outline or Table of Contents structure, groups paragraphs, and saves
+    the structured text representation to a JSON file.
+    """
     from digitize.parsing.pdf import get_toc, load_pdf_pages, find_text_font_size, get_matching_header_lvl
 
     page_count = 0

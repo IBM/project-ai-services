@@ -21,8 +21,91 @@ const (
 	caddyAPITimeout = 10 * time.Second
 )
 
-// ValidateCertificateFiles verifies that certificate and key files exist and are readable.
-func ValidateCertificateFiles(certPath, keyPath string) error {
+// ComputeDomainSuffix resolves the domain suffix used for certificate and routing
+// configuration. Priority: cert domain > custom domain name > hostIP.nip.io.
+func ComputeDomainSuffix(sslCertPath, sslKeyPath, domainName string) (string, error) {
+	if sslCertPath != "" && sslKeyPath != "" {
+		extracted, err := ExtractDomainFromCertificate(sslCertPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to extract domain from certificate: %w", err)
+		}
+
+		return extracted, nil
+	}
+
+	if domainName != "" {
+		return domainName, nil
+	}
+
+	hostIP, err := GetHostIP()
+	if err != nil {
+		return "", fmt.Errorf("failed to get host IP for domain suffix: %w", err)
+	}
+
+	return fmt.Sprintf("%s.nip.io", hostIP), nil
+}
+
+// ValidateSSLFlags is the shared entry-point for SSL flag validation used by
+// commands that accept --ssl-cert, --ssl-key, and --domain-name. It:
+//   - is a no-op when both paths are empty,
+//   - returns an error when only one of the pair is set,
+//   - prints a warning to stderr when a domain name is also supplied (it is
+//     ignored in favour of the domain embedded in the certificate),
+//   - validates file existence, cert/key pair match, and wildcard SAN.
+func ValidateSSLFlags(certPath, keyPath, domainName string) error {
+	if certPath == "" && keyPath == "" {
+		return nil
+	}
+
+	if err := checkSSLFlagsPaired(certPath, keyPath); err != nil {
+		return err
+	}
+
+	warnIfBothCertAndDomainProvided(certPath, keyPath, domainName)
+
+	return validateSSLCertificates(certPath, keyPath)
+}
+
+// checkSSLFlagsPaired returns an error when only one of --ssl-cert / --ssl-key
+// is provided; both must be supplied together or neither.
+func checkSSLFlagsPaired(certPath, keyPath string) error {
+	if (certPath != "" && keyPath == "") || (certPath == "" && keyPath != "") {
+		return fmt.Errorf("--ssl-cert and --ssl-key must be used together")
+	}
+
+	return nil
+}
+
+// warnIfBothCertAndDomainProvided prints a stderr warning when the caller
+// supplies both a certificate and a custom domain name. The domain is ignored
+// because it will be extracted from the certificate instead.
+func warnIfBothCertAndDomainProvided(certPath, keyPath, domainName string) {
+	if certPath != "" && keyPath != "" && domainName != "" {
+		fmt.Fprintf(os.Stderr, "Warning: Both SSL certificate and --domain-name provided. "+
+			"The domain from the certificate will be used, and --domain-name will be ignored.\n\n")
+	}
+}
+
+// validateSSLCertificates runs file-existence, key-pair match, and wildcard-SAN
+// checks against the provided certificate and key paths.
+func validateSSLCertificates(certPath, keyPath string) error {
+	if err := validateCertificateFiles(certPath, keyPath); err != nil {
+		return fmt.Errorf("certificate validation failed: %w", err)
+	}
+
+	if err := validateCertificateKeyPair(certPath, keyPath); err != nil {
+		return fmt.Errorf("certificate and key validation failed: %w", err)
+	}
+
+	if err := validateWildcardCertificate(certPath); err != nil {
+		return fmt.Errorf("wildcard certificate validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateCertificateFiles verifies that certificate and key files exist and are readable.
+func validateCertificateFiles(certPath, keyPath string) error {
 	// Validate paths are not empty (fail-fast)
 	if certPath == "" {
 		return fmt.Errorf("certificate path is empty")
@@ -83,7 +166,7 @@ func LoadCertificate(certPath string) (*x509.Certificate, error) {
 }
 
 // ValidateCertificateKeyPair verifies that a certificate and private key match.
-func ValidateCertificateKeyPair(certPath, keyPath string) error {
+func validateCertificateKeyPair(certPath, keyPath string) error {
 	// Load the certificate and key pair
 	_, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -94,7 +177,7 @@ func ValidateCertificateKeyPair(certPath, keyPath string) error {
 }
 
 // ValidateWildcardCertificate checks if a certificate contains a wildcard SAN entry.
-func ValidateWildcardCertificate(certPath string) error {
+func validateWildcardCertificate(certPath string) error {
 	cert, err := LoadCertificate(certPath)
 	if err != nil {
 		return err

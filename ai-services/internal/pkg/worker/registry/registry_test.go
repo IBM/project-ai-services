@@ -184,12 +184,24 @@ func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
 func TestRegistry_RegisterIdempotent(t *testing.T) {
 	reg := New(nil)
 
-	e1, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
-	e2, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
+	e1, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
 
-	// Both calls must return the same in-memory entry pointer.
+	// A second Register for the same name returns ErrWorkerAlreadyActive.
+	_, err = reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err == nil {
+		t.Fatal("expected ErrWorkerAlreadyActive on second Register, got nil")
+	}
+
+	// The original entry must still be retrievable.
+	e2, ok := reg.Get("worker-1")
+	if !ok {
+		t.Fatal("expected worker-1 to still be in the registry")
+	}
 	if e1 != e2 {
-		t.Error("expected same entry on second Register, got a different pointer")
+		t.Error("expected same in-memory entry after duplicate Register attempt")
 	}
 }
 
@@ -318,5 +330,55 @@ func TestRegistry_ValidateToken_Invalid(t *testing.T) {
 
 	if _, err := reg.ValidateToken("garbage"); err == nil {
 		t.Fatal("expected error for invalid token")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SweepStale tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestRegistry_SweepStale_PendingNotSwept(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	// Pre-register creates a pending row with no heartbeat.
+	if _, err := reg.Preregister(context.Background(), "worker-pending"); err != nil {
+		t.Fatalf("Preregister: %v", err)
+	}
+
+	// Sweep with a zero timeout — would sweep anything with a nil heartbeat.
+	reg.SweepStale(context.Background(), 0)
+
+	workers, _ := repo.GetAll(context.Background())
+	if len(workers) != 1 {
+		t.Fatalf("expected 1 worker, got %d", len(workers))
+	}
+	if workers[0].Status != models.WorkerStatusPending {
+		t.Errorf("expected status %q, got %q", models.WorkerStatusPending, workers[0].Status)
+	}
+}
+
+func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	// Insert a ready worker whose heartbeat is already in the past.
+	past := time.Now().Add(-2 * time.Minute)
+	w := &models.Worker{
+		Name:          "worker-stale",
+		RuntimeType:   models.WorkerRuntimeTypePodman,
+		Status:        models.WorkerStatusReady,
+		LastHeartbeat: &past,
+	}
+	if err := repo.Upsert(context.Background(), w); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// Sweep with a 1-minute timeout — the worker is 2 minutes stale.
+	reg.SweepStale(context.Background(), time.Minute)
+
+	workers, _ := repo.GetAll(context.Background())
+	if workers[0].Status != models.WorkerStatusDisconnected {
+		t.Errorf("expected status %q, got %q", models.WorkerStatusDisconnected, workers[0].Status)
 	}
 }

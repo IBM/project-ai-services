@@ -1,7 +1,6 @@
 package application
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,7 +76,7 @@ Supported targets:
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
-		ctx := context.Background()
+		ctx := cmd.Context()
 
 		// Once precheck passes, silence usage for any later internal errors
 		cmd.SilenceUsage = true

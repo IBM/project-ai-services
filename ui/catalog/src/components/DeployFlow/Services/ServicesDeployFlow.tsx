@@ -1,10 +1,10 @@
 import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import { COMPONENT_TYPES } from "@/constants";
 import type {
   ServicesDeployFlowProps,
   DeployFlowState,
   DeployFlowAction,
 } from "./types.ts";
-import type { ComponentConfig } from "../Shared/types";
 import { ACTION_TYPES } from "./types.ts";
 import {
   sharedDeployFlowReducer,
@@ -14,8 +14,8 @@ import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
-import { StepOne } from "./steps/StepOne";
-import { StepTwo } from "./steps/StepTwo";
+import { StepOne } from "./steps/ServicesStepOne";
+import { ServicesStepTwo as StepTwo } from "./steps/ServicesStepTwo";
 import { StepZero } from "./steps/StepZero";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
@@ -71,7 +71,7 @@ export const ServicesDeployFlow = ({
   onSubmit,
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
-  const [hasSchemaError, setHasSchemaError] = useState(false);
+  const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
   const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId ?? null,
@@ -87,6 +87,7 @@ export const ServicesDeployFlow = ({
   const { deployOptions, llmModels, isLoading, error, llmError } =
     useServiceDeployOptions(
       shouldFetchDeployOptions ? state.selectedServiceId : null,
+      open,
     );
 
   // Get component models loading and error state from store
@@ -110,7 +111,8 @@ export const ServicesDeployFlow = ({
     if (!deployOptions) return [];
     return (
       deployOptions.components?.filter(
-        (c) => c.type !== "llm" && c.type !== "reranker",
+        (c) =>
+          c.type !== COMPONENT_TYPES.LLM && c.type !== COMPONENT_TYPES.RERANKER,
       ) || []
     );
   }, [deployOptions]);
@@ -168,12 +170,8 @@ export const ServicesDeployFlow = ({
     }
   }, [open, state.currentStep, deployOptions, state.selectedServiceId]);
 
-  // Get provider schemas and component models from store
   const providerSchemas = useServiceDeployStore(
     (state) => state.providerSchemas,
-  );
-  const componentModels = useServiceDeployStore(
-    (state) => state.componentModels,
   );
 
   // Helper function to check if all required credential fields are filled for all services
@@ -201,84 +199,20 @@ export const ServicesDeployFlow = ({
     }
 
     const requiredFields = providerSchema.required;
-    const llmParams = llmComponent.params || {};
+    // Credentials land in serviceConfig.params; model lands in llmComponent.params.
+    // Check both so required fields are found regardless of which bag they're in.
+    const allParams = {
+      ...(llmComponent.params || {}),
+      ...(serviceConfig.params || {}),
+    };
 
-    // Check if all required fields have non-empty values
     return requiredFields.every((fieldKey) => {
-      const value = llmParams[fieldKey];
+      const value = allParams[fieldKey];
       return (
         value !== undefined && value !== null && String(value).trim() !== ""
       );
     });
   }, [state.selectedServiceId, state.formData.services, providerSchemas]);
-
-  // Set default model values from component models after they're fetched
-  useEffect(() => {
-    if (!open || !state.selectedServiceId || !deployOptions || isLoading) {
-      return;
-    }
-
-    const serviceConfig = state.formData.services[state.selectedServiceId];
-    if (!serviceConfig) return;
-
-    // Check each component to see if it needs a default model value set
-    const updates: Record<string, ComponentConfig> = {};
-    let hasUpdates = false;
-
-    deployOptions.components?.forEach((component) => {
-      const componentConfig = serviceConfig.components[component.type];
-      if (!componentConfig) return;
-
-      // If component already has a model set, skip it
-      if (componentConfig.params && componentConfig.params.model) return;
-
-      // Get component models from store
-      const componentKey = `${state.selectedServiceId}:${component.type}`;
-      const models = componentModels[componentKey] || [];
-      const selectedProviderId = componentConfig.providerId;
-      const matchingModelForProvider = models.find(
-        (model) => model.providerId === selectedProviderId,
-      );
-
-      // Only set a default model when it belongs to the currently selected provider
-      if (matchingModelForProvider) {
-        updates[component.type] = {
-          ...componentConfig,
-          params: {
-            ...componentConfig.params,
-            model: matchingModelForProvider.id,
-          },
-        };
-        hasUpdates = true;
-      }
-    });
-
-    // Apply updates if any
-    if (hasUpdates) {
-      dispatch({
-        type: ACTION_TYPES.UPDATE_FORM_DATA,
-        payload: {
-          services: {
-            ...state.formData.services,
-            [state.selectedServiceId]: {
-              ...serviceConfig,
-              components: {
-                ...serviceConfig.components,
-                ...updates,
-              },
-            },
-          },
-        },
-      });
-    }
-  }, [
-    open,
-    state.selectedServiceId,
-    state.formData.services,
-    deployOptions,
-    isLoading,
-    componentModels,
-  ]);
 
   const {
     handleNext,
@@ -324,7 +258,7 @@ export const ServicesDeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitializedFormData.current = null;
-    setHasSchemaError(false);
+    setHasStep2SchemaError(false);
     onClose();
   };
 
@@ -339,10 +273,11 @@ export const ServicesDeployFlow = ({
 
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
+    !!shellError ||
     (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
     (isLastStep && state.isEditing) ||
     (isLastStep && !areAllRequiredFieldsFilled) ||
-    (isLastStep && (hasSchemaError || hasLlmError));
+    (isLastStep && (hasStep2SchemaError || hasLlmError));
 
   const steps = [
     { ...STEPS[0], complete: !!state.selectedServiceId },
@@ -399,7 +334,7 @@ export const ServicesDeployFlow = ({
           llmModelsWithProviders={llmModels}
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
-          onSchemaError={setHasSchemaError}
+          onComponentError={setHasStep2SchemaError}
         />
       )}
     </DeployTearsheetShell>

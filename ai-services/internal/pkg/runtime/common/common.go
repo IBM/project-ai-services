@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -10,13 +11,13 @@ import (
 )
 
 // FetchFilteredPods Fetch all pods for a given app based on label.
-func FetchFilteredPods(r runtime.Runtime, appID string) ([]types.Pod, error) {
+func FetchFilteredPods(ctx context.Context, r runtime.Runtime, appID string) ([]types.Pod, error) {
 	listFilters := map[string][]string{}
 	if appID != "" {
 		listFilters["label"] = []string{fmt.Sprintf("%s=%s", constants.ApplicationTemplateKey, appID)}
 	}
 
-	pods, err := r.ListPods(listFilters)
+	pods, err := r.ListPods(ctx, listFilters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -24,9 +25,9 @@ func FetchFilteredPods(r runtime.Runtime, appID string) ([]types.Pod, error) {
 	return pods, nil
 }
 
-func ProcessPod(r runtime.Runtime, pod types.Pod) (*types.Pod, error) {
+func ProcessPod(ctx context.Context, r runtime.Runtime, pod types.Pod) (*types.Pod, error) {
 	// do pod inspect
-	pInfo, err := r.InspectPod(pod.ID)
+	pInfo, err := r.InspectPod(ctx, pod.ID)
 	if err != nil {
 		// log and skip pod if inspect failed
 		logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.ID, err)
@@ -34,7 +35,7 @@ func ProcessPod(r runtime.Runtime, pod types.Pod) (*types.Pod, error) {
 		return nil, nil
 	}
 	// load pod status
-	pInfo.Status, pInfo.Health = getPodStatus(r, pInfo)
+	pInfo.Status, pInfo.Health = getPodStatus(ctx, r, pInfo)
 
 	// truncate podID to 13 characters
 	const podIDShortLength = 13
@@ -48,12 +49,12 @@ func ProcessPod(r runtime.Runtime, pod types.Pod) (*types.Pod, error) {
 	return pInfo, nil
 }
 
-func getPodStatus(r runtime.Runtime, pInfo *types.Pod) (string, string) {
+func getPodStatus(ctx context.Context, r runtime.Runtime, pInfo *types.Pod) (string, string) {
 	// if the pod Status is running, make sure to check if its healthy or not, otherwise fallback to default pod state
 	if pInfo.State == "Running" {
 		healthyContainers := 0
 		for i, container := range pInfo.Containers {
-			cInfo, err := r.InspectContainer(container.ID)
+			cInfo, err := r.InspectContainer(ctx, container.ID)
 			if err != nil {
 				// skip container if inspect failed
 				logger.Debugf("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err)

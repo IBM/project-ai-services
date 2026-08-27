@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -32,12 +32,14 @@ Note:
 			// Once precheck passes, silence usage for any *later* internal errors.
 			cmd.SilenceUsage = true
 
-			c, err := client.New()
+			ctx := cmd.Context()
+
+			c, err := client.New(ctx)
 			if err != nil {
 				return err
 			}
 
-			info, err := c.Me()
+			info, err := c.Me(ctx)
 			if err != nil {
 				return fmt.Errorf("get user info: %w", err)
 			}

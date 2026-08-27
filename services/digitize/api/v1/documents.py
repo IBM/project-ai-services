@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from common.misc_utils import get_logger
-from common.error_utils import APIError, ErrorCode, http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
 import digitize.models as models
 from digitize.pipeline.cleanup import reset_db
@@ -86,6 +86,10 @@ async def list_documents(
         description="Filter by document name (partial match, case-insensitive)",
     ),
 ):
+    """Retrieve a paginated list of documents matching the specified filters.
+
+    Supports filtering by processing status, filename pattern, and connector source ID.
+    """
     try:
         logger.debug(
             f"Fetching documents with filters: limit={limit}, offset={offset}, "
@@ -123,11 +127,15 @@ async def list_documents(
         )
 
     except HTTPException as exc:
-        logger.error(f"Failed to list documents, HTTP error: {exc}")
-        raise
+        message = f"Failed to list documents: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error in list_documents: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error listing documents: {exc}",
+        )
 
 
 @router.get(
@@ -145,6 +153,10 @@ async def get_document_metadata(
     doc_id: str,
     details: bool = Query(False, description="Include detailed metadata (pages, tables, timing)"),
 ):
+    """Retrieve detailed metadata of a specific document by its ID.
+
+    Allows optionally including deeper page/table/timing processing metrics.
+    """
     try:
         from digitize.utils.db import get_document, is_connector_sourced_document
 
@@ -156,13 +168,18 @@ async def get_document_metadata(
 
         return get_document(doc_id, include_details=details)
     except FileNotFoundError as exc:
+        logger.warning(f"Document '{doc_id}' not found: {exc}")
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
     except HTTPException as exc:
-        logger.error(f"Failed to get document {doc_id}, HTTP error: {exc}")
-        raise
+        message = f"Failed to get document '{doc_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error in get_document_metadata: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching metadata for document '{doc_id}': {exc}",
+        )
 
 
 @router.get(
@@ -178,19 +195,28 @@ async def get_document_metadata(
     response_description="Document content in the specified output format",
 )
 async def get_document_content(doc_id: str):
+    """Retrieve the parsed/extracted textual content of a digitized document by its ID."""
     try:
         return dg_util.get_document_content(doc_id)
     except FileNotFoundError as exc:
+        logger.warning(f"Content file for document '{doc_id}' not found: {exc}")
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
     except json.JSONDecodeError as exc:
-        logger.error(f"Failed to parse content file for document {doc_id}: {exc}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document content")
+        logger.error(f"Failed to parse content file for document '{doc_id}': {exc}")
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to parse content file for document '{doc_id}': {exc}",
+        )
     except HTTPException as exc:
-        logger.error(f"Failed to get document content for {doc_id}, HTTP error: {exc}")
-        raise
+        message = f"Failed to get content for document '{doc_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error in get_document_content: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error fetching content for document '{doc_id}': {exc}",
+        )
 
 
 @router.delete(
@@ -210,14 +236,13 @@ async def get_document_content(doc_id: str):
     response_description="No content on successful deletion",
 )
 async def delete_document(doc_id: str):
-    """
-    Delete a single document — follows the 'Always-Clean-VDB' strategy:
+    """Delete a single document — follows the 'Always-Clean-VDB' strategy.
     1. Connector guard  — 404 for connector-sourced docs
     2. Fetch metadata
     3. Active-job guard
     4. VDB cleanup (high priority)
     5. File & metadata cleanup
-    6. Database record removal
+    6. Database record removal.
     """
     try:
         # 1. Connector guard — connector-sourced docs cannot be deleted via this API.
@@ -233,8 +258,8 @@ async def delete_document(doc_id: str):
         doc_metadata = None
         try:
             doc_metadata = dg_util.get_document(doc_id, include_details=False)
-        except FileNotFoundError:
-            logger.error(f"Metadata for {doc_id} not found. Proceeding with VDB cleanup.")
+        except FileNotFoundError as exc:
+            logger.warning(f"Metadata for document '{doc_id}' not found, proceeding with VDB cleanup: {exc}")
 
         # 3. Active-job guard.
         if doc_metadata:
@@ -249,16 +274,23 @@ async def delete_document(doc_id: str):
             delete_document_data(doc_id)
         except Exception as exc:
             logger.error(f"Document teardown failed for {doc_id}: {exc}")
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+            APIError.raise_error(
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                f"Document teardown failed for '{doc_id}': {exc}",
+            )
 
         return None
 
     except HTTPException as exc:
-        logger.error(f"Failed to delete document {doc_id}, HTTP error: {exc}")
-        raise
+        message = f"Failed to delete document '{doc_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error deleting document {doc_id}: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error deleting document '{doc_id}': {exc}",
+        )
 
 
 @router.delete(
@@ -280,6 +312,10 @@ async def delete_document(doc_id: str):
 async def bulk_delete_documents(
     confirm: bool = Query(..., description="Must be true to proceed with bulk deletion"),
 ):
+    """Bulk delete all documents, clearing storage and resetting index stores.
+
+    Requires explicit confirmation via query parameter.
+    """
     try:
         if not confirm:
             logger.error("Bulk delete rejected: confirm parameter is false")
@@ -303,8 +339,12 @@ async def bulk_delete_documents(
         return None
 
     except HTTPException as exc:
-        logger.error(f"Failed to bulk delete documents, HTTP error: {exc}")
-        raise
+        message = f"Failed to bulk delete documents: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
     except Exception as exc:
         logger.error(f"Unexpected error during bulk deletion: {exc}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(exc))
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Unexpected error during bulk document deletion: {exc}",
+        )
