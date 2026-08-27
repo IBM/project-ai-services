@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -15,10 +16,10 @@ import (
 
 // FetchApplications retrieves either all applications or a specific application by name.
 // If appName is empty, it fetches all applications. Otherwise, it fetches the specified application.
-func FetchApplications(appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, error) {
+func FetchApplications(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, error) {
 	if appName == "" {
 		// Fetch all applications when no specific name is provided
-		applicationList, err := GetAllApps(appClient)
+		applicationList, err := GetAllApps(ctx, appClient)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch all applications: %w", err)
 		}
@@ -27,7 +28,7 @@ func FetchApplications(appClient *catalogClient.ApplicationClient, appName strin
 	}
 
 	// Fetch specific application by name
-	application, err := GetAppByName(appClient, appName)
+	application, err := GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch application '%s': %w", appName, err)
 	}
@@ -99,19 +100,19 @@ func getContainerNamesFromAPI(pod catalogTypes.Pod) []string {
 	return containerNames
 }
 
-func GetPodsFromApplicationsPS(appName string) ([]types.Pod, error) {
+func GetPodsFromApplicationsPS(ctx context.Context, appName string) ([]types.Pod, error) {
 	var pods []types.Pod //nolint: prealloc
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	app, err := GetAppByName(appClient, appName)
+	app, err := GetAppByName(ctx, appClient, appName)
 	if err != nil {
 		return nil, err
 	}
 
-	psResp, err := appClient.GetApplicationPS(app.ID)
+	psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch application: %w", err)
 	}

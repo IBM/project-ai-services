@@ -1,4 +1,4 @@
-import type { DeployOptionsResponse } from "@/types/api.types";
+import type { DeployOptionsResponse, ProviderSchema } from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
 import type {
@@ -23,5 +23,5 @@ export type DeployFlowAction =
 
 export interface StepProps extends BaseStepProps {
   deployOptions: DeployOptionsResponse;
-  onSchemaError?: (hasError: boolean) => void;
+  providerParamsByType: Record<string, Record<string, ProviderSchema>>;
 }

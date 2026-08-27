@@ -20,6 +20,22 @@ const (
 	CatalogTypeConnectors = "connectors"
 )
 
+// Connector type constants.
+const (
+	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
+	ConnectorTypeDatasource = "datasource"
+)
+
+// Datasource provider ID constants.
+// These values must match the connector IDs defined in the catalog assets
+// (assets/connectors/datasource/<id>/metadata.yaml).
+const (
+	// DatasourceProviderObjectStorage is the provider ID for S3-compatible object storage connectors.
+	DatasourceProviderObjectStorage = "object_storage"
+	// DatasourceProviderFileSystem is the provider ID for SSH/SFTP file system connectors.
+	DatasourceProviderFileSystem = "file_system"
+)
+
 // Catalog name constants.
 const (
 	// CatalogAppName represents the catalog name.
@@ -68,6 +84,13 @@ const (
 const (
 	// DefaultHTTPSPort is the default HTTPS port.
 	DefaultHTTPSPort = "443"
+)
+
+// Environment variable name constants.
+const (
+	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
+	// encrypt sensitive connector credential fields at rest.
+	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
 )
 
 // Made with Bob

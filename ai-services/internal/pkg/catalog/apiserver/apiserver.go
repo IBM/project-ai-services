@@ -52,6 +52,7 @@ type APIServerOptions struct {
 	TokenManager       *auth.TokenManager
 	Blacklist          repository.TokenBlacklist
 	ApplicationService repository.ApplicationServiceInterface
+	DatasourceService  repository.DatasourceServiceInterface
 	BundleService      bundlesvc.BundleServiceInterface
 	CatalogProvider    *catalog.CatalogProvider
 
@@ -70,6 +71,7 @@ type APIserver struct {
 	tokenManager       *auth.TokenManager
 	blacklist          repository.TokenBlacklist
 	applicationService repository.ApplicationServiceInterface
+	datasourceService  repository.DatasourceServiceInterface
 	bundleService      bundlesvc.BundleServiceInterface
 	catalogProvider    *catalog.CatalogProvider
 
@@ -93,6 +95,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		tokenManager:       options.TokenManager,
 		blacklist:          options.Blacklist,
 		applicationService: options.ApplicationService,
+		datasourceService:  options.DatasourceService,
 		bundleService:      options.BundleService,
 		catalogProvider:    options.CatalogProvider,
 		workerGatewayPort:  options.WorkerGatewayPort,
@@ -117,7 +120,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.bundleService, a.catalogProvider)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.datasourceService, a.bundleService, a.catalogProvider)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

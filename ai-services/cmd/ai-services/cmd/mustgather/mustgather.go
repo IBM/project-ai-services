@@ -100,7 +100,7 @@ func mustGatherRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	outDir, err := g.gather(opts)
+	outDir, err := g.gather(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("must-gather failed: %w", err)
 	}

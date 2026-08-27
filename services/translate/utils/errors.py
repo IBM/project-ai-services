@@ -38,17 +38,24 @@ def _raise_file_too_large(detail: str) -> NoReturn:
     )
 
 
-def _raise_job_not_complete(detail: str) -> NoReturn:
-    raise HTTPException(
-        status_code=409,
-        detail={"error": {"code": "JOB_NOT_COMPLETE", "message": detail, "status": 409}},
-    )
-
-
 def _raise_job_failed(detail: str) -> NoReturn:
     raise HTTPException(
         status_code=410,
         detail={"error": {"code": "JOB_FAILED", "message": detail, "status": 410}},
+    )
+
+
+def _raise_context_limit_exceeded(detail: str, diagnostics: dict) -> NoReturn:
+    raise HTTPException(
+        status_code=413,
+        detail={
+            "error": {
+                "code": "CONTEXT_LIMIT_EXCEEDED",
+                "message": detail,
+                "status": 413,
+                "diagnostics": diagnostics,
+            }
+        },
     )
 
 # Made with Bob

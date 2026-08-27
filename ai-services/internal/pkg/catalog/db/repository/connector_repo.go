@@ -18,7 +18,11 @@ import (
 var ErrConnectorNotFound = errors.New("connector not found")
 
 // ConnectorFilters defines optional filters and pagination parameters for List queries.
+// All fields are optional at the repository level; omitted fields are not included in the
+// WHERE clause. Callers that scope queries to a specific type (e.g. ListDatasources, which
+// always sets Type = "datasource") are responsible for populating the relevant fields.
 type ConnectorFilters struct {
+	Type     string                 // Optional: filter by connector type (e.g. "datasource")
 	Status   models.ConnectorStatus // Optional: filter by connector status
 	Provider string                 // Optional: filter by provider identifier (e.g. "object_storage", "file_system")
 	Limit    int                    // Optional: maximum number of records to return
@@ -35,6 +39,9 @@ type ConnectorUpdateFields struct {
 type ConnectorRepository interface {
 	// Insert creates a new connector, populating the ID, CreatedAt, and UpdatedAt fields on success.
 	Insert(ctx context.Context, connector *models.Connector) error
+	// GetByName retrieves a connector by its unique name.
+	// Returns nil (not an error) when no connector with that name exists.
+	GetByName(ctx context.Context, name string) (*models.Connector, error)
 	// GetByID retrieves a connector by its UUID.
 	// When includeCreds is false the metadata column is omitted (safe for API responses).
 	// When includeCreds is true the full row including metadata is returned; callers are
@@ -160,6 +167,29 @@ func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector)
 	return nil
 }
 
+// GetByName retrieves a connector by its unique name.
+// The comparison is case-insensitive so that "My-DB" and "my-db" are treated as the same name.
+// Returns nil (not an error) when no connector with that name exists.
+func (r *connectorRepo) GetByName(ctx context.Context, name string) (*models.Connector, error) {
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE LOWER(name) = LOWER($1)`
+
+	rows, err := r.pool.Query(ctx, query, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connector by name: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to get connector by name: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	return scanConnector(rows)
+}
+
 // GetByID retrieves a connector by UUID.
 // Pass includeCreds=false for API responses (metadata omitted).
 // Pass includeCreds=true for internal paths that need credentials (sync job, Digitize propagation);
@@ -203,6 +233,10 @@ func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 	whereClauses := []string{}
 
 	if filters != nil {
+		if filters.Type != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("type = $%d", len(args)+1))
+			args = append(args, filters.Type)
+		}
 		if filters.Status != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", len(args)+1))
 			args = append(args, filters.Status)

@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -432,6 +435,66 @@ func formatParamKeys(keys []string) string {
 	}
 
 	return strings.Join(quoted, ", ")
+}
+
+// ConnectorValidator validates CreateDatasourceRequest payloads against the catalog.
+type ConnectorValidator struct {
+	provider *catalog.CatalogProvider
+}
+
+// datasourceNameRe restricts connector names to letters, digits, hyphens, and underscores.
+// This matches the character set allowed by most cloud resource naming conventions.
+var datasourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// NewConnectorValidator creates a new ConnectorValidator backed by the given catalog provider.
+func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidator {
+	return &ConnectorValidator{provider: provider}
+}
+
+// ValidateCreateDatasourceRequest validates the full CreateDatasourceRequest:
+//  1. Validates the name contains only allowed characters (letters, digits, hyphens, underscores).
+//  2. Verifies the provider exists in the catalog under the "datasource" connector type.
+//  3. Validates params against the provider's JSON Schema (if one is present).
+func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context, req apimodels.CreateDatasourceRequest) error {
+	// Name character validation — case-insensitive duplicate detection is handled at
+	// the DB query level via LOWER(name) = LOWER($1).
+	if !datasourceNameRe.MatchString(req.Name) {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: "Datasource name may only contain letters, digits, hyphens (-), and underscores (_)",
+		}
+	}
+
+	if !v.provider.ConnectorExists(catalogconstants.ConnectorTypeDatasource, req.ProviderID) {
+		return &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("Datasource provider %q not found in catalog", req.ProviderID),
+		}
+	}
+
+	rawSchema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
+	if err != nil {
+		return fmt.Errorf("failed to decode param schema for provider %q: %w", req.ProviderID, err)
+	}
+
+	if len(schema) == 0 {
+		// No schema defined for this provider — no parameter constraints to enforce.
+		return nil
+	}
+
+	if len(req.Params) == 0 {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("Params is required for datasource provider %q", req.ProviderID),
+		}
+	}
+
+	return ValidateParams(req.Params, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
 }
 
 // Made with Bob

@@ -41,6 +41,73 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest:
+    properties:
+      name:
+        description: |-
+          Name is the unique human-readable label for this connector.
+          Must be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are
+          allowed. Duplicate-name detection is case-insensitive ("My-DB" and "my-db" conflict).
+        maxLength: 100
+        minLength: 3
+        type: string
+      params:
+        additionalProperties: {}
+        description: |-
+          Params holds the provider-specific configuration. Sensitive fields (format: "password"
+          in the JSON schema) are encrypted at rest; all other fields are stored in plain text.
+        type: object
+      provider_id:
+        description: ProviderID identifies the provider implementation (e.g. "object_storage",
+          "file_system").
+        type: string
+    required:
+    - name
+    - params
+    - provider_id
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:
+    properties:
+      id:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse:
+    properties:
+      connected_services:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
       catalog_id:
@@ -101,7 +168,7 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult:
     properties:
       catalog_id:
         type: string
@@ -1400,7 +1467,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.ServiceValidationResult'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult'
         "400":
           description: Bad Request
           schema:
@@ -1539,6 +1606,102 @@ paths:
       summary: Get connector provider parameters
       tags:
       - Catalog
+  /datasources:
+    get:
+      description: Returns a paginated list of datasource connectors with optional
+        filters by status and provider.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: 'Filter by status: ''connected'' or ''offline'''
+        in: query
+        name: status
+        type: string
+      - description: Filter by provider ID (e.g. 'object_storage', 'file_system')
+        in: query
+        name: provider
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List datasource connectors
+      tags:
+      - Datasources
+    post:
+      consumes:
+      - application/json
+      description: Validates the request, tests the connection, encrypts credentials,
+        and persists a new datasource connector. Returns 422 if the connection test
+        fails.
+      parameters:
+      - description: Datasource creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Datasource created
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Provider not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource name already exists
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Connection test failed
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create datasource connector
+      tags:
+      - Datasources
   /resources:
     get:
       description: Retrieves system resource information including CPU, memory, and

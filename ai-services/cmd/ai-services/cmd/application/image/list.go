@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -28,13 +29,13 @@ var listCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		return list(templateName)
+		return list(cmd.Context(), templateName)
 	},
 }
 
-func list(templateName string) error {
+func list(ctx context.Context, templateName string) error {
 	if !legacyImage && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return listCatalogImages(templateName)
+		return listCatalogImages(ctx, templateName)
 	}
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
@@ -60,8 +61,8 @@ func list(templateName string) error {
 }
 
 // listCatalogImages lists container images for services or architectures from the catalog.
-func listCatalogImages(templateID string) error {
-	images, err := getCatalogImages(templateID)
+func listCatalogImages(ctx context.Context, templateID string) error {
+	images, err := getCatalogImages(ctx, templateID)
 	if err != nil {
 		return err
 	}

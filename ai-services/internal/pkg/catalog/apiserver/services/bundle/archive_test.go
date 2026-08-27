@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,13 +58,18 @@ func buildArchive(t *testing.T, entries map[string]string, wrapInTopDir bool) []
 }
 
 // serviceMetaYAML returns a minimal valid service metadata.yaml body.
+// name may be empty; a placeholder is used when omitted so the 'name' check passes.
 func serviceMetaYAML(id, version, name string) string {
-	return "id: " + id + "\ntype: service\nversion: " + version + "\nname: " + name + "\n"
+	n := name
+	if n == "" {
+		n = id
+	}
+	return "id: " + id + "\ntype: service\nversion: " + version + "\nname: " + n + "\ndescription: test\nstandalone: true\nabout:\n  - section\n"
 }
 
 // componentMetaYAML returns a minimal valid component metadata.yaml body.
 func componentMetaYAML(id, componentType, version string) string {
-	return "id: " + id + "\ntype: component\ncomponent_type: " + componentType + "\nversion: " + version + "\n"
+	return "id: " + id + "\ntype: component\ncomponent_type: " + componentType + "\nversion: " + version + "\nname: " + id + "\ndescription: test\n"
 }
 
 // -----------------------------------------------------------------------
@@ -71,12 +77,12 @@ func componentMetaYAML(id, componentType, version string) string {
 // -----------------------------------------------------------------------
 
 func TestBundleDirPath_Service(t *testing.T) {
-	got := bundleDirPath(CatalogTypeService, "my-service", "1.0.0")
+	got := bundleDirPath(bundlemetadata.CatalogTypeService, "my-service", "1.0.0")
 	assert.Equal(t, "/data/catalog-bundles/services/my-service-1.0.0", got)
 }
 
 func TestBundleDirPath_Component(t *testing.T) {
-	got := bundleDirPath(CatalogTypeComponent, "llm--my-provider", "2.1.0")
+	got := bundleDirPath(bundlemetadata.CatalogTypeComponent, "llm--my-provider", "2.1.0")
 	assert.Equal(t, "/data/catalog-bundles/components/llm--my-provider-2.1.0", got)
 }
 
@@ -86,14 +92,15 @@ func TestBundleDirPath_UnknownTypeUsesPlural(t *testing.T) {
 	assert.Equal(t, "/data/catalog-bundles/widgets/my-widget-1.0.0", got)
 }
 
-func TestCatalogTypeToDir(t *testing.T) {
-	tests := []struct{ input, want string }{
-		{CatalogTypeService, "services"},
-		{CatalogTypeComponent, "components"},
-		{"architecture", "architectures"},
+func TestBundleDirPath_TypePluralisation(t *testing.T) {
+	// bundleDirPath appends "s" to the catalog type for the on-disk subdirectory.
+	tests := []struct{ catalogType, want string }{
+		{bundlemetadata.CatalogTypeService, "/data/catalog-bundles/services/svc-1.0.0"},
+		{bundlemetadata.CatalogTypeComponent, "/data/catalog-bundles/components/svc-1.0.0"},
+		{"architecture", "/data/catalog-bundles/architectures/svc-1.0.0"},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, catalogTypeToDir(tt.input), "input=%s", tt.input)
+		assert.Equal(t, tt.want, bundleDirPath(tt.catalogType, "svc", "1.0.0"), "catalogType=%s", tt.catalogType)
 	}
 }
 
@@ -106,14 +113,15 @@ func TestPeekMetadata_ServiceWrapped(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("my-service", "1.0.0", "My Service"),
 	}, true)
 
-	data, meta, err := peekMetadata(bytes.NewReader(archive))
+	data, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 	// raw bytes returned must equal the original archive
 	assert.Equal(t, archive, data)
-	assert.Equal(t, "my-service", meta.CatalogID())
-	assert.Equal(t, CatalogTypeService, meta.CatalogType())
-	assert.Equal(t, "1.0.0", meta.Version())
-	assert.Equal(t, "My Service", meta.DisplayName())
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	assert.Equal(t, "my-service", sm.ID)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, sm.Type)
+	assert.Equal(t, "1.0.0", sm.Version)
+	assert.Equal(t, "My Service", sm.Name)
 }
 
 func TestPeekMetadata_ServiceFlat(t *testing.T) {
@@ -122,11 +130,12 @@ func TestPeekMetadata_ServiceFlat(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("flat-svc", "2.0.0", "Flat"),
 	}, false)
 
-	_, meta, err := peekMetadata(bytes.NewReader(archive))
+	_, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
-	assert.Equal(t, "flat-svc", meta.CatalogID())
-	assert.Equal(t, CatalogTypeService, meta.CatalogType())
-	assert.Equal(t, "2.0.0", meta.Version())
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	assert.Equal(t, "flat-svc", sm.ID)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, sm.Type)
+	assert.Equal(t, "2.0.0", sm.Version)
 }
 
 func TestPeekMetadata_ComponentWrapped(t *testing.T) {
@@ -134,16 +143,14 @@ func TestPeekMetadata_ComponentWrapped(t *testing.T) {
 		"metadata.yaml": componentMetaYAML("my-provider", "llm", "1.0.0"),
 	}, true)
 
-	_, meta, err := peekMetadata(bytes.NewReader(archive))
+	_, meta, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
-	// CatalogID must be the composite <component_type>--<id>
-	assert.Equal(t, "llm--my-provider", meta.CatalogID())
-	assert.Equal(t, CatalogTypeComponent, meta.CatalogType())
-	assert.Equal(t, "1.0.0", meta.Version())
-	// ComponentType is accessible via type assertion
-	cm, ok := meta.(*ComponentMetadata)
-	require.True(t, ok)
-	assert.Equal(t, "llm", cm.ComponentType())
+	cm := meta.(*bundlemetadata.ComponentMetadataYAML)
+	// CatalogID is the composite <component_type>--<id>
+	assert.Equal(t, "llm--my-provider", cm.ComponentType+"--"+cm.ID)
+	assert.Equal(t, bundlemetadata.CatalogTypeComponent, cm.Type)
+	assert.Equal(t, "1.0.0", cm.Version)
+	assert.Equal(t, "llm", cm.ComponentType)
 }
 
 func TestPeekMetadata_MetadataNestedDeeper_NotFound(t *testing.T) {
@@ -152,7 +159,7 @@ func TestPeekMetadata_MetadataNestedDeeper_NotFound(t *testing.T) {
 		"subdir/metadata.yaml": serviceMetaYAML("deep", "1.0.0", ""),
 	}, true)
 
-	_, _, err := peekMetadata(bytes.NewReader(archive))
+	_, _, _, err := peekMetadata(bytes.NewReader(archive))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -160,7 +167,7 @@ func TestPeekMetadata_MetadataNestedDeeper_NotFound(t *testing.T) {
 }
 
 func TestPeekMetadata_NotGzip(t *testing.T) {
-	_, _, err := peekMetadata(bytes.NewReader([]byte("not a gzip")))
+	_, _, _, err := peekMetadata(bytes.NewReader([]byte("not a gzip")))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -173,7 +180,7 @@ func TestPeekMetadata_EmptyArchive(t *testing.T) {
 	require.NoError(t, gzip.NewWriter(&buf).Close()) // minimal valid gzip, no tar content
 	require.NoError(t, gw.Close())
 
-	_, _, err := peekMetadata(bytes.NewReader(buf.Bytes()))
+	_, _, _, err := peekMetadata(bytes.NewReader(buf.Bytes()))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -184,7 +191,7 @@ func TestPeekMetadata_NoMetadataYAML(t *testing.T) {
 		"other.yaml": "irrelevant: true\n",
 	}, true)
 
-	_, _, err := peekMetadata(bytes.NewReader(archive))
+	_, _, _, err := peekMetadata(bytes.NewReader(archive))
 	var valErr *validators.ValidationError
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, http.StatusBadRequest, valErr.Code)
@@ -198,13 +205,13 @@ func TestPeekMetadata_ReturnedBytesCanBeReused(t *testing.T) {
 		"metadata.yaml": serviceMetaYAML("svc", "1.0.0", ""),
 	}, true)
 
-	data, _, err := peekMetadata(bytes.NewReader(archive))
+	data, _, _, err := peekMetadata(bytes.NewReader(archive))
 	require.NoError(t, err)
 
 	// A second peek on the returned bytes must succeed.
-	_, meta2, err := peekMetadata(bytes.NewReader(data))
+	_, meta2, _, err := peekMetadata(bytes.NewReader(data))
 	require.NoError(t, err)
-	assert.Equal(t, "svc", meta2.CatalogID())
+	assert.Equal(t, "svc", meta2.(*bundlemetadata.ServiceMetadataYAML).ID)
 }
 
 // -----------------------------------------------------------------------
@@ -212,31 +219,31 @@ func TestPeekMetadata_ReturnedBytesCanBeReused(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestParseMetadataYAML_ServiceMinimal(t *testing.T) {
-	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.0.0\n"))
+	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.0.0\nname: n\ndescription: d\nstandalone: true\nabout:\n  - section\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "svc", meta.CatalogID())
-	assert.Equal(t, CatalogTypeService, meta.CatalogType())
-	assert.Equal(t, "1.0.0", meta.Version())
-	assert.Empty(t, meta.DisplayName()) // name is optional
+	sm := meta.(*bundlemetadata.ServiceMetadataYAML)
+	assert.Equal(t, "svc", sm.ID)
+	assert.Equal(t, bundlemetadata.CatalogTypeService, sm.Type)
+	assert.Equal(t, "1.0.0", sm.Version)
 }
 
 func TestParseMetadataYAML_ServiceWithName(t *testing.T) {
-	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.2.3\nname: My Svc\n"))
+	meta, err := parseMetadataYAML([]byte("id: svc\ntype: service\nversion: 1.2.3\nname: My Svc\ndescription: d\nstandalone: true\nabout:\n  - section\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "My Svc", meta.DisplayName())
+	assert.Equal(t, "My Svc", meta.(*bundlemetadata.ServiceMetadataYAML).Name)
 }
 
 func TestParseMetadataYAML_ComponentAllFields(t *testing.T) {
 	meta, err := parseMetadataYAML([]byte(
-		"id: prov\ntype: component\ncomponent_type: embedding\nversion: 3.0.0\nname: My Embedder\n",
+		"id: prov\ntype: component\ncomponent_type: embedding\nversion: 3.0.0\nname: My Embedder\ndescription: d\n",
 	))
 	require.NoError(t, err)
-	assert.Equal(t, "embedding--prov", meta.CatalogID())
-	assert.Equal(t, CatalogTypeComponent, meta.CatalogType())
-	assert.Equal(t, "3.0.0", meta.Version())
-	assert.Equal(t, "My Embedder", meta.DisplayName())
-	cm := meta.(*ComponentMetadata)
-	assert.Equal(t, "embedding", cm.ComponentType())
+	cm := meta.(*bundlemetadata.ComponentMetadataYAML)
+	assert.Equal(t, "embedding--prov", cm.ComponentType+"--"+cm.ID)
+	assert.Equal(t, bundlemetadata.CatalogTypeComponent, cm.Type)
+	assert.Equal(t, "3.0.0", cm.Version)
+	assert.Equal(t, "My Embedder", cm.Name)
+	assert.Equal(t, "embedding", cm.ComponentType)
 }
 
 func TestParseMetadataYAML_MissingID(t *testing.T) {
@@ -255,12 +262,12 @@ func TestParseMetadataYAML_MissingVersion(t *testing.T) {
 }
 
 func TestParseMetadataYAML_ComponentMissingComponentType(t *testing.T) {
-	_, err := parseMetadataYAML([]byte("id: prov\ntype: component\nversion: 1.0.0\n"))
+	_, err := parseMetadataYAML([]byte("id: prov\ntype: component\nversion: 1.0.0\nname: n\ndescription: d\n"))
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'component_type' is required")
 }
 
 func TestParseMetadataYAML_UnknownType(t *testing.T) {
-	_, err := parseMetadataYAML([]byte("id: x\ntype: architecture\nversion: 1.0.0\n"))
+	_, err := parseMetadataYAML([]byte("id: x\ntype: architecture\nversion: 1.0.0\nname: n\ndescription: d\n"))
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported type")
 }
 
@@ -497,27 +504,6 @@ func TestExtractAndMeasure_FileContentCorrect(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(destDir, "podman", "templates", "svc.yaml.tmpl"))
 	require.NoError(t, err)
 	assert.Equal(t, wantContent, string(got))
-}
-
-// -----------------------------------------------------------------------
-// BundleMetadata concrete types
-// -----------------------------------------------------------------------
-
-func TestServiceMetadata_AllMethods(t *testing.T) {
-	m := &ServiceMetadata{id: "svc", version: "1.2.3", displayName: "My Svc"}
-	assert.Equal(t, "svc", m.CatalogID())
-	assert.Equal(t, CatalogTypeService, m.CatalogType())
-	assert.Equal(t, "1.2.3", m.Version())
-	assert.Equal(t, "My Svc", m.DisplayName())
-}
-
-func TestComponentMetadata_AllMethods(t *testing.T) {
-	m := &ComponentMetadata{id: "prov", componentType: "reranker", version: "2.0.0", displayName: "Re-rank"}
-	assert.Equal(t, "reranker--prov", m.CatalogID())
-	assert.Equal(t, CatalogTypeComponent, m.CatalogType())
-	assert.Equal(t, "2.0.0", m.Version())
-	assert.Equal(t, "Re-rank", m.DisplayName())
-	assert.Equal(t, "reranker", m.ComponentType())
 }
 
 // -----------------------------------------------------------------------

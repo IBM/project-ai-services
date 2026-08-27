@@ -20,7 +20,7 @@ type TemplateRouteInfo struct {
 
 // RegisterCatalogRoutes registers routes with Caddy and returns route domains.
 // Accepts pre-extracted route infos from templates.
-func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, routeInfos []TemplateRouteInfo) (map[string]string, error) {
+func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, caddyCtx *Context, routeInfos []TemplateRouteInfo) (map[string]string, error) {
 	if len(routeInfos) == 0 {
 		logger.Infof("No templates found with routes annotation, skipping route registration\n")
 
@@ -28,7 +28,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 	}
 
 	// Create proxy manager using Caddy context
-	proxyManager, err := caddyCtx.CreateProxyManager()
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxy manager: %w", err)
 	}
@@ -42,7 +42,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 		logger.Debugf("Registering routes for pod: %s\n", info.PodName)
 
 		// Register routes and get the built routes back
-		routes, err := proxy.RegisterRoutesForAppAndReturn(context.Background(), constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
+		routes, err := proxy.RegisterRoutesForAppAndReturn(ctx, constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 
@@ -64,9 +64,9 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 // Accepts pre-extracted route infos from templates.
-func GetCatalogRouteInfo(caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
+func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
 	// Create proxy manager
-	proxyManager, err := caddyCtx.CreateProxyManager()
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create proxy manager: %w", err)
 	}
@@ -74,11 +74,11 @@ func GetCatalogRouteInfo(caddyCtx *Context, runtime *podman.PodmanClient, routeI
 	// Build route domains map by querying Caddy
 	routeDomains := make(map[string]string)
 	for _, info := range routeInfos {
-		processRouteInfo(info, proxyManager, routeDomains)
+		processRouteInfo(ctx, info, proxyManager, routeDomains)
 	}
 
 	// Get Caddy HTTPS port
-	httpsPort, err := caddyCtx.GetHTTPSPort(runtime)
+	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, runtime)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
 	}
@@ -134,7 +134,7 @@ func parseRouteEntry(routeEntry, podName string) string {
 
 // processRouteInfo processes route information and populates the routeDomains map.
 // Queries Caddy for each route and adds it to the map with a standardized variable name.
-func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
+func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
 	// Parse routes annotation to extract subdomains
 	// Format: "port:subdomain:type, port:subdomain:type, ..."
 	// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
@@ -145,7 +145,7 @@ func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, r
 		}
 
 		// Query Caddy for this route (route ID is the subdomain)
-		actualRoute, err := proxyManager.GetRouteByID(subdomain)
+		actualRoute, err := proxyManager.GetRouteByID(ctx, subdomain)
 		if err != nil {
 			// Log warning but continue - route might not exist yet
 			logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)

@@ -44,9 +44,7 @@ func newPodmanGatherer() *podmanGatherer {
 //     no catalog pods exist at all (catalog was never installed).
 //   - Always-on: system info, secrets, network, volumes — Podman-level data
 //     that is useful regardless of catalog state.
-func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
-	ctx := context.Background()
-
+func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 	logger.InfolnCtx(ctx, "Starting must-gather for Podman runtime…")
 
 	rt, err := podmanRuntime.NewPodmanClient()
@@ -63,7 +61,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 
-	catalogInstalled, err := checkCatalogInstalled(rt)
+	catalogInstalled, err := checkCatalogInstalled(ctx, rt)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
@@ -96,7 +94,7 @@ func (g *podmanGatherer) gather(opts gatherOptions) (string, error) {
 func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.PodmanClient) {
 	g.baseDir = pkgutils.GetBaseDir() // safe fallback
 
-	config, _, err := catalogUtils.GetCatalogPodConfig(rt)
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
 		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
 			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")

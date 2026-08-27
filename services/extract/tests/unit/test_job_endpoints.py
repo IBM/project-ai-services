@@ -74,6 +74,7 @@ class TestCreateExtractJob:
              patch("extract.api.v1.jobs.stage_uploaded_file"), \
              patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
              patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs._process_extract_job", new=AsyncMock()), \
              _patch_job_limiter_free():
             resp = self._post_job(extract_test_client)
 

@@ -37,7 +37,7 @@ Examples:
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return uninstall.Uninstall(cliutils.UninstallOptions{
+			return uninstall.Uninstall(cmd.Context(), cliutils.UninstallOptions{
 				Runtime:     vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
 				SkipCleanup: skipCleanup,

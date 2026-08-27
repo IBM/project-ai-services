@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,17 +14,17 @@ import (
 )
 
 // Start starts a stopped application.
-func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
+func (p *PodmanApplication) Start(ctx context.Context, opts appTypes.StartOptions) error {
 	var pods []types.Pod
 	var err error
 	// if legacy flag is set, get pods from runtime; otherwise use catalog API
 	if opts.Legacy {
-		pods, err = p.fetchPodsFromRuntime(opts.Name)
+		pods, err = p.fetchPodsFromRuntime(ctx, opts.Name)
 		if err != nil {
 			return err
 		}
 	} else {
-		pods, err = cliutils.GetPodsFromApplicationsPS(opts.Name)
+		pods, err = cliutils.GetPodsFromApplicationsPS(ctx, opts.Name)
 		if err != nil {
 			return err
 		}
@@ -36,7 +37,7 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	}
 
 	// Filter pods based on provided pod names or annotation
-	podsToStart, err := p.fetchPodsToStart(pods, opts.PodNames)
+	podsToStart, err := p.fetchPodsToStart(ctx, pods, opts.PodNames)
 	if err != nil {
 		return err
 	}
@@ -46,12 +47,12 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 		return nil
 	}
 
-	return p.confirmAndStartPods(podsToStart, opts.AutoYes, opts.SkipLogs)
+	return p.confirmAndStartPods(ctx, podsToStart, opts.AutoYes, opts.SkipLogs)
 }
 
 // Start implementation helper methods.
-func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, error) {
-	pods, err := p.runtime.ListPods(map[string][]string{
+func (p *PodmanApplication) fetchPodsFromRuntime(ctx context.Context, appName string) ([]types.Pod, error) {
+	pods, err := p.runtime.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
@@ -61,15 +62,15 @@ func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, e
 	return pods, nil
 }
 
-func (p *PodmanApplication) fetchPodsToStart(pods []types.Pod, podNames []string) ([]types.Pod, error) {
+func (p *PodmanApplication) fetchPodsToStart(ctx context.Context, pods []types.Pod, podNames []string) ([]types.Pod, error) {
 	if len(podNames) > 0 {
 		return p.filterPodsByNameForStart(pods, podNames)
 	}
 	// No pod names provided, start pods based on annotation
-	return p.filterPodsByAnnotationForStart(pods)
+	return p.filterPodsByAnnotationForStart(ctx, pods)
 }
 
-func (p *PodmanApplication) confirmAndStartPods(podsToStart []types.Pod, autoYes, skipLogs bool) error {
+func (p *PodmanApplication) confirmAndStartPods(ctx context.Context, podsToStart []types.Pod, autoYes, skipLogs bool) error {
 	p.logPodsToStart(podsToStart)
 	printLogs := p.shouldPrintLogs(podsToStart, skipLogs)
 
@@ -87,12 +88,12 @@ func (p *PodmanApplication) confirmAndStartPods(podsToStart []types.Pod, autoYes
 
 	logger.Infoln("Proceeding to start pods...")
 
-	if err := p.startPods(podsToStart); err != nil {
+	if err := p.startPods(ctx, podsToStart); err != nil {
 		return err
 	}
 
 	if printLogs {
-		if err := p.printPodLogs(podsToStart); err != nil {
+		if err := p.printPodLogs(ctx, podsToStart); err != nil {
 			return err
 		}
 	}
@@ -117,11 +118,11 @@ func (p *PodmanApplication) shouldPrintLogs(podsToStart []types.Pod, skipLogs bo
 	return true
 }
 
-func (p *PodmanApplication) startPods(podsToStart []types.Pod) error {
+func (p *PodmanApplication) startPods(ctx context.Context, podsToStart []types.Pod) error {
 	var errors []string
 	for _, pod := range podsToStart {
 		logger.Infof("Starting the pod: %s\n", pod.Name)
-		podData, err := p.runtime.InspectPod(pod.Name)
+		podData, err := p.runtime.InspectPod(ctx, pod.Name)
 		if err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
@@ -134,7 +135,7 @@ func (p *PodmanApplication) startPods(podsToStart []types.Pod) error {
 
 			continue
 		}
-		if err := p.runtime.StartPod(pod.ID); err != nil {
+		if err := p.runtime.StartPod(ctx, pod.ID); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
 
@@ -151,10 +152,10 @@ func (p *PodmanApplication) startPods(podsToStart []types.Pod) error {
 	return nil
 }
 
-func (p *PodmanApplication) printPodLogs(podsToStart []types.Pod) error {
+func (p *PodmanApplication) printPodLogs(ctx context.Context, podsToStart []types.Pod) error {
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
-	if err := p.runtime.PodLogs(podsToStart[0].Name); err != nil {
+	if err := p.runtime.PodLogs(ctx, podsToStart[0].Name); err != nil {
 		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 			logger.Infoln("Log following stopped.")
 
@@ -190,13 +191,13 @@ func (p *PodmanApplication) filterPodsByNameForStart(pods []types.Pod, podNames 
 	return podsToStart, nil
 }
 
-func (p *PodmanApplication) filterPodsByAnnotationForStart(pods []types.Pod) ([]types.Pod, error) {
+func (p *PodmanApplication) filterPodsByAnnotationForStart(ctx context.Context, pods []types.Pod) ([]types.Pod, error) {
 	var podsToStart []types.Pod
 
 outerloop:
 	for _, pod := range pods {
 		for _, container := range pod.Containers {
-			data, err := p.runtime.InspectContainer(container.Name)
+			data, err := p.runtime.InspectContainer(ctx, container.Name)
 			if err != nil {
 				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 			}

@@ -64,7 +64,7 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	if !opts.SkipCleanup {
 		logger.Debugln("Cleaning up Persistent Volume Claims...")
 
-		if err := o.runtime.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", app)); err != nil {
+		if err := o.runtime.DeletePVCs(ctx, fmt.Sprintf("ai-services.io/application=%s", app)); err != nil {
 			return fmt.Errorf("failed to cleanup PVCs: %w", err)
 		}
 	}

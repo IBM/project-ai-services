@@ -21,6 +21,7 @@
       "type": "string",
       "title": "Bucket name",
       "description": "Name of the S3 bucket to use as the content source.",
+      "minLength": 1,
       "ui:section": "Location"
     },
     "prefix": {
@@ -39,6 +40,7 @@
       "type": "string",
       "title": "Access key ID",
       "description": "S3-compatible access key identifier.",
+      "minLength": 1,
       "ui:section": "Authentication"
     },
     "secret_access_key": {
@@ -46,6 +48,7 @@
       "title": "Secret access key",
       "description": "S3-compatible secret access key.",
       "format": "password",
+      "minLength": 1,
       "ui:section": "Authentication"
     },
     "allowed_extensions": {

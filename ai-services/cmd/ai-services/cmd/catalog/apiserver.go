@@ -83,6 +83,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	svcRepo := repository.NewServiceRepository(pool)
 	compRepo := repository.NewComponentRepository(pool)
 	svcDepRepo := repository.NewServiceDependencyRepository(pool)
+	connectorRepo := repository.NewConnectorRepository(pool)
 
 	catalogProvider, err := catalog.NewCatalogProvider(bundleRepo)
 	if err != nil {
@@ -96,6 +97,13 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
 	}
 	syncService.Start(ctx)
+
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, svcDepRepo, catalogProvider)
+	if err != nil {
+		syncService.Stop(ctx)
+
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
+	}
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	workerRepo := repository.NewWorkerRepository(pool)
@@ -117,6 +125,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType()),
+		DatasourceService:  datasourceSvc,
 		BundleService:      bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo, catalogProvider),
 		CatalogProvider:    catalogProvider,
 		WorkerGatewayPort:  workerGatewayPort,

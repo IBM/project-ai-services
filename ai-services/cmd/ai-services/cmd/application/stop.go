@@ -58,15 +58,16 @@ Note:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
+		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
 		// For podman runtime with default mode, validate application name using catalog API
 		if !legacyStop && rt == types.RuntimeTypePodman {
-			appClient, err := catalogClient.NewApplicationClient()
+			appClient, err := catalogClient.NewApplicationClient(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
 			}
-			if _, err := utils.GetAppByName(appClient, applicationName); err != nil {
+			if _, err := utils.GetAppByName(ctx, appClient, applicationName); err != nil {
 				return err
 			}
 		}
@@ -85,7 +86,7 @@ Note:
 			Legacy:   legacyStop,
 		}
 
-		return app.Stop(opts)
+		return app.Stop(ctx, opts)
 	},
 }
 

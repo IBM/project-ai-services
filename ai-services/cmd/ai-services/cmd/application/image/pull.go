@@ -30,13 +30,13 @@ var pullCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		return pull(templateName)
+		return pull(cmd.Context(), templateName)
 	},
 }
 
-func pull(template string) error {
+func pull(ctx context.Context, template string) error {
 	if !legacyImage && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		return pullCatalogImages(templateName)
+		return pullCatalogImages(ctx, templateName)
 	}
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
@@ -60,12 +60,12 @@ func pull(template string) error {
 	}
 
 	// Use shared helper function with retry logic
-	return image.PullImageFromRegistry(context.Background(), runtimeClient, images)
+	return image.PullImageFromRegistry(ctx, runtimeClient, images)
 }
 
 // pullCatalogImages pulls container images for services or architectures from the catalog.
-func pullCatalogImages(templateID string) error {
-	images, err := getCatalogImages(templateID)
+func pullCatalogImages(ctx context.Context, templateID string) error {
+	images, err := getCatalogImages(ctx, templateID)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func pullCatalogImages(templateID string) error {
 	}
 
 	// Use shared helper function with retry logic
-	if err := image.PullImageFromRegistry(context.Background(), runtimeClient, images); err != nil {
+	if err := image.PullImageFromRegistry(ctx, runtimeClient, images); err != nil {
 		return err
 	}
 
