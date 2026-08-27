@@ -26,9 +26,9 @@ import {
   Tooltip,
 } from '@carbon/react';
 import { SidePanel, NoDataEmptyState } from '@carbon/ibm-products';
-import { Download, Renew, Add, CheckmarkFilled, InProgress, ErrorFilled, TrashCan } from '@carbon/icons-react';
+import { Download, Renew, Add, CheckmarkFilled, InProgress, ErrorFilled, TrashCan, Close } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/useTheme';
-import { getAllJobs, getJobById, uploadDocuments, deleteJob, Job } from '../../services/api';
+import { getAllJobs, getJobById, uploadDocuments, deleteJob, cancelJob, Job } from '../../services/api';
 import IngestSidePanel from '../../components/IngestSidePanel';
 import { calculateDuration } from '../../utils/dateUtils';
 import { exportToCSV, validateFilename } from '../../utils/csvExport';
@@ -56,8 +56,10 @@ interface JobMonitorState {
   isIngestSidePanelOpen: boolean;
   uploadStatus: NotificationStatus;
   deleteStatus: NotificationStatus;
+  cancelStatus: NotificationStatus;
   showDeleteModal: boolean;
   jobToDelete: string | null;
+  isCancelling: boolean;
   isConfirmed: boolean;
   toastOpen: boolean;
   errorMessage: string;
@@ -81,8 +83,11 @@ type JobMonitorAction =
   | { type: 'SET_INGEST_SIDE_PANEL_OPEN'; payload: boolean }
   | { type: 'SET_UPLOAD_STATUS'; payload: NotificationStatus }
   | { type: 'SET_DELETE_STATUS'; payload: NotificationStatus }
+  | { type: 'SET_CANCEL_STATUS'; payload: NotificationStatus }
   | { type: 'HIDE_UPLOAD_STATUS' }
   | { type: 'HIDE_DELETE_STATUS' }
+  | { type: 'HIDE_CANCEL_STATUS' }
+  | { type: 'SET_IS_CANCELLING'; payload: boolean }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' }
   | { type: 'CLOSE_DELETE_MODAL_KEEP_JOB' }
@@ -111,7 +116,9 @@ const initialState: JobMonitorState = {
   isIngestSidePanelOpen: false,
   uploadStatus: { show: false, kind: 'info', title: '' },
   deleteStatus: { show: false, kind: 'info', title: '' },
+  cancelStatus: { show: false, kind: 'info', title: '' },
   showDeleteModal: false,
+  isCancelling: false,
   jobToDelete: null,
   isConfirmed: false,
   toastOpen: false,
@@ -181,6 +188,11 @@ const jobMonitorReducer = (
         ...state,
         deleteStatus: action.payload,
       };
+    case 'SET_CANCEL_STATUS':
+      return {
+        ...state,
+        cancelStatus: action.payload,
+      };
     case 'HIDE_UPLOAD_STATUS':
       return {
         ...state,
@@ -191,6 +203,13 @@ const jobMonitorReducer = (
         ...state,
         deleteStatus: { show: false, kind: 'info', title: '' },
       };
+    case 'HIDE_CANCEL_STATUS':
+      return {
+        ...state,
+        cancelStatus: { show: false, kind: 'info', title: '' },
+      };
+    case 'SET_IS_CANCELLING':
+      return { ...state, isCancelling: action.payload };
     case 'OPEN_DELETE_MODAL':
       return {
         ...state,
@@ -275,6 +294,7 @@ const headers = [
   { key: 'started', header: 'Started' },
   { key: 'duration', header: 'Duration' },
   { key: 'view_action', header: '' },
+  { key: 'cancel_action', header: '' },
   { key: 'delete_action', header: '' },
 ];
 
@@ -294,6 +314,13 @@ const getStatusIcon = (status: string) => {
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
+    case JOB_STATUS.CANCEL_PENDING:
+    case DISPLAY_STATUS.CANCEL_PENDING:
+      return <InProgress size={16} className={styles.statusIconCancelling} />;
+    case JOB_STATUS.CANCELLED:
+    case DISPLAY_STATUS.CANCELLED:
+    case DOC_STATUS.CANCELLED:
+      return <Close size={16} className={styles.statusIconCancelled} />;
     case DOC_STATUS.ALREADY_EXISTS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
@@ -516,6 +543,41 @@ const JobMonitorPage = () => {
     }
   };
 
+  const handleCancelJob = async (jobId: string) => {
+    dispatch({ type: 'SET_IS_CANCELLING', payload: true });
+    try {
+      await cancelJob(jobId);
+      dispatch({
+        type: 'SET_CANCEL_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Job cancelled successfully',
+        },
+      });
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_CANCEL_STATUS' });
+      }, 3000);
+      fetchJobs();
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to cancel job';
+      dispatch({
+        type: 'SET_CANCEL_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Failed to cancel job',
+          subtitle: msg,
+        },
+      });
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_CANCEL_STATUS' });
+      }, 5000);
+    } finally {
+      dispatch({ type: 'SET_IS_CANCELLING', payload: false });
+    }
+  };
+
   const getJobName = (job: Job) => {
     // First priority: use job_name if available
     if (job.job_name) {
@@ -542,6 +604,10 @@ const JobMonitorPage = () => {
       return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTING : DISPLAY_STATUS.DIGITIZING;
     } else if (job.status === JOB_STATUS.ACCEPTED) {
       return DISPLAY_STATUS.ACCEPTED;
+    } else if (job.status === JOB_STATUS.CANCEL_PENDING) {
+      return DISPLAY_STATUS.CANCEL_PENDING;
+    } else if (job.status === JOB_STATUS.CANCELLED) {
+      return DISPLAY_STATUS.CANCELLED;
     }
     return job.status;
   };
@@ -601,7 +667,7 @@ const JobMonitorPage = () => {
         filename,
         headers,
         rows: exportRows,
-        excludeColumns: ['view_action', 'delete_action'],
+        excludeColumns: ['view_action', 'cancel_action', 'delete_action'],
       });
 
       dispatch({
@@ -685,6 +751,17 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
+      cancel_action: (job.status === JOB_STATUS.ACCEPTED || job.status === JOB_STATUS.IN_PROGRESS || job.status === JOB_STATUS.CANCEL_PENDING) ? (
+        <Button
+          hasIconOnly
+          kind="ghost"
+          size="sm"
+          renderIcon={Close}
+          iconDescription="Cancel job"
+          disabled={state.isCancelling}
+          onClick={() => handleCancelJob(job.job_id)}
+        />
+      ) : null,
       delete_action: (
         <Button
           hasIconOnly
@@ -759,6 +836,33 @@ const JobMonitorPage = () => {
                 dispatch({ type: 'HIDE_DELETE_STATUS' });
               }}
               lowContrast
+            />
+          </div>
+        )}
+
+        {/* Cancel Status Notification */}
+        {state.cancelStatus.show && state.cancelStatus.kind === 'error' && (
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Dismiss"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.cancelStatus.title}
+              subtitle={state.cancelStatus.subtitle}
+              onActionButtonClick={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
+              onCloseButtonClick={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
+              lowContrast
+            />
+          </div>
+        )}
+        {state.cancelStatus.show && state.cancelStatus.kind === 'success' && (
+          <div className={styles.notificationWrapper}>
+            <ToastNotification
+              kind="success"
+              title={state.cancelStatus.title}
+              onClose={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
+              timeout={3000}
             />
           </div>
         )}

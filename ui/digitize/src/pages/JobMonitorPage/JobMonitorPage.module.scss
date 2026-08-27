@@ -187,6 +187,14 @@
   fill: var(--cds-support-info);
 }
 
+.statusIconCancelling {
+  fill: var(--cds-support-warning);
+}
+
+.statusIconCancelled {
+  fill: var(--cds-text-secondary);
+}
+
 .statusIconWarning {
   fill: var(--cds-support-warning);
 }
