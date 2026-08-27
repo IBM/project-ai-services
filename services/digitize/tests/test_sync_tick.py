@@ -1038,6 +1038,57 @@ class TestProcessNewFilesExtra:
                 asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
                                                [("a.pdf", "ck1"), ("b.pdf", "ck2")]))
 
+    def test_all_files_invalid_skips_job_creation(self):
+        """When every file in a batch fails validation, no job must be created."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")), \
+                 patch(f"{DB_MODULE}.initialize_job_state") as mock_init, \
+                 patch(f"{DB_MODULE}.ingest") as mock_ingest:
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("remote/fake.pdf", "ck1")]))
+
+        mock_init.assert_not_called()
+        mock_ingest.assert_not_called()
+
+    def test_all_files_invalid_does_not_set_batch_failed(self):
+        """A batch where all files are skipped due to invalid format must not raise RuntimeError."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
+                # must not raise
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("remote/fake.pdf", "ck1")]))
+
+    def test_mixed_batch_only_valid_files_ingested(self):
+        """In a mixed batch, only the valid file reaches ingest; the invalid one is deleted."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        def _validate(filename, _bytes):
+            if filename == "fake.pdf":
+                raise ValueError("bad format")
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=_validate), \
+                 patch(f"{DB_MODULE}.initialize_job_state",
+                       return_value={"works.pdf": "doc-1"}) as mock_init:
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
+
+        # initialize_job_state must only see the valid file
+        mock_init.assert_called_once()
+        call_args = mock_init.call_args
+        assert call_args is not None
+        assert call_args.kwargs["documents_info"] == ["works.pdf"]
+
 
 # ---------------------------------------------------------------------------
 # run_tick — _handle_interrupt wiring

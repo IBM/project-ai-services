@@ -346,6 +346,9 @@ async def _process_new_files(
                     f"Connector {connector_id!r} interrupted (type={interrupt.value})"
                 )
 
+            if not filename_to_checksum:
+                continue
+
             filenames = list(filename_to_checksum.keys())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
             doc_id_dict = initialize_job_state(
