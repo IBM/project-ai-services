@@ -1780,6 +1780,45 @@ paths:
       tags:
       - Datasources
   /datasources/{id}:
+    delete:
+      description: Deletes a datasource connector by ID. Returns 409 Conflict if the
+        connector is still linked to one or more applications.
+      parameters:
+      - description: Datasource connector ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Datasource deleted
+        "400":
+          description: Invalid connector ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource is connected to one or more applications
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete datasource connector
+      tags:
+      - Datasources
     get:
       description: Returns the full details of a datasource connector including non-sensitive
         metadata and the list of connected services enriched with live sync state

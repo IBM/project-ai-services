@@ -17,6 +17,10 @@ type DatasourceServiceInterface interface {
 	// connected services enriched with live sync state from each service's Digitize pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.
 	GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error)
+	// DeleteDatasource removes a datasource connector by ID.
+	// Returns a ValidationError with status 404 if not found, 409 if the connector is
+	// still linked to one or more services via service_dependencies.
+	DeleteDatasource(ctx context.Context, id uuid.UUID) error
 	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
 	// Sensitive credential fields are never included in any returned item.
 	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)

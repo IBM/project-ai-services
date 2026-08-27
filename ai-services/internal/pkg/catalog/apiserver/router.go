@@ -122,5 +122,6 @@ func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler
 		g.POST("", h.CreateDatasource)
 		g.GET("", h.ListDatasources)
 		g.GET("/:id", h.GetDatasource)
+		g.DELETE("/:id", h.DeleteDatasource)
 	}
 }
