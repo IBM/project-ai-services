@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
-	certsDirPath = "/etc/secret/ssl"
+	containerCertPath = "/etc/secret/ssl/tls.crt"
+	containerkeyPath  = "/etc/secret/ssl/tls.key"
 )
 
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
@@ -30,10 +30,10 @@ func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath,
 
 	// Load certificates via Admin API using container paths
 	if err := utils.LoadUserCertificates(
-		sslCertPath,                             // host cert path for validation
-		sslKeyPath,                              // host key path for validation
-		fmt.Sprintf("%s/tls.crt", certsDirPath), // container cert path
-		fmt.Sprintf("%s/tls.key", certsDirPath), // container key path
+		sslCertPath,       // host cert path for validation
+		sslKeyPath,        // host key path for validation
+		containerCertPath, // container cert path
+		containerkeyPath,  // container key path
 		adminURL,
 	); err != nil {
 		return fmt.Errorf("failed to load certificates via Admin API: %w", err)
@@ -54,28 +54,14 @@ func (c *Context) IsCustomCertLoaded(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	type loadFilesEntry struct {
-		Certificate string `json:"certificate"`
-		Key         string `json:"key"`
-	}
-	type certResponse struct {
-		LoadFiles []loadFilesEntry `json:"load_files"`
-	}
-
-	var result certResponse
-	resp, err := resty.New().R().
-		SetResult(&result).
-		Get(adminURL + "/config/apps/tls/certificates")
+	result, err := utils.GetCaddyCertificates(ctx, adminURL)
 	if err != nil {
-		return false, fmt.Errorf("failed to query Caddy certificates config: %w", err)
-	}
-	if resp.IsError() {
-		return false, fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode(), resp.String())
+		return false, err
 	}
 
 	for _, entry := range result.LoadFiles {
-		if entry.Certificate == fmt.Sprintf("%s/tls.crt", certsDirPath) &&
-			entry.Key == fmt.Sprintf("%s/tls.key", certsDirPath) {
+		if entry.Certificate == containerCertPath &&
+			entry.Key == containerkeyPath {
 			return true, nil
 		}
 	}

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
@@ -20,6 +21,17 @@ const (
 	// caddyAPITimeout is the timeout duration for Caddy API requests.
 	caddyAPITimeout = 10 * time.Second
 )
+
+// LoadFilesEntry represents a single certificate/key pair entry in Caddy's load_files configuration.
+type LoadFilesEntry struct {
+	Certificate string `json:"certificate"`
+	Key         string `json:"key"`
+}
+
+// CertResponse represents the response from Caddy's /config/apps/tls/certificates endpoint.
+type CertResponse struct {
+	LoadFiles []LoadFilesEntry `json:"load_files"`
+}
 
 // ComputeDomainSuffix resolves the domain suffix used for certificate and routing
 // configuration. Priority: cert domain > custom domain name > hostIP.nip.io.
@@ -417,6 +429,23 @@ func loadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
 	}
 
 	return nil
+}
+
+// GetCaddyCertificates queries the Caddy Admin API and returns the current TLS certificates configuration.
+func GetCaddyCertificates(ctx context.Context, adminURL string) (*CertResponse, error) {
+	var result CertResponse
+	client := resty.New().SetTimeout(caddyAPITimeout)
+	resp, err := client.R().
+		SetResult(&result).
+		Get(adminURL + "/config/apps/tls/certificates")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query Caddy certificates config: %w", err)
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode(), resp.String())
+	}
+
+	return &result, nil
 }
 
 // Made with Bob

@@ -103,7 +103,7 @@ func (d *DeployContext) CheckStatus(ctx context.Context) (bool, []string, error)
 	if exists {
 		existingResources = append(existingResources, catalogconstants.CatalogCertSecretName)
 	} else {
-		// When 'catalog-caddy-cert-secret' secret not created, decerement catalogResourceCount by one,
+		// When 'catalog-caddy-cert-secret' secret not created, decrement catalogResourceCount by one,
 		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
 		catalogResourceCount--
 	}

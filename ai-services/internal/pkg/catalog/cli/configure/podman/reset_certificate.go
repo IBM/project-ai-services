@@ -55,7 +55,7 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 
 	opts.SSLCertPath = sslCertPath
 	opts.SSLKeyPath = sslKeyPath
-	caddyCtx, err := executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
+	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}
@@ -91,12 +91,12 @@ func prepareCatalogOpts(ctx context.Context, deployCtx *deploy.DeployContext, ss
 
 // deleteSecretAndPod deletes the caddy cert secret and pod before redeployment.
 func deleteSecretAndPod(ctx context.Context, deployCtx *deploy.DeployContext, nameOrID, secretName string) error {
-	logger.InfofCtx(context.Background(), "Deleting existing secret %s", secretName)
+	logger.InfofCtx(ctx, "Deleting existing secret %s", secretName)
 	if err := deployCtx.Runtime.DeleteSecret(ctx, secretName); err != nil {
 		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
 	}
 
-	logger.InfofCtx(context.Background(), "Deleting existing pod %s", nameOrID)
+	logger.InfofCtx(ctx, "Deleting existing pod %s", nameOrID)
 	if err := deployCtx.Runtime.DeletePod(ctx, nameOrID, utils.BoolPtr(true)); err != nil {
 		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}
