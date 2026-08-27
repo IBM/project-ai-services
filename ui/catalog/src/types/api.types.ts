@@ -423,7 +423,7 @@ export interface DataSourceConnectorsListResponse {
   page_size: number;
 }
 
-/** Shape returned by GET /api/v1/connectors?connector_type=datasource */
+/** Shape returned by GET /api/v1/connectors?type=datasource */
 export interface ConnectorType {
   type: string;
   id: string;

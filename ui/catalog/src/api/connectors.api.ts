@@ -61,7 +61,7 @@ export async function fetchConnectorTypes(): Promise<ConnectorType[]> {
   const res = await api.get<ConnectorType[]>(
     CONNECTORS_ENDPOINTS.GET_CONNECTOR_TYPES,
     {
-      params: { connector_type: "datasource" },
+      params: { type: "datasource" },
     },
   );
   return res.data;
