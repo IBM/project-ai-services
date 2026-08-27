@@ -302,6 +302,8 @@ const WorkerResourcesTable = ({
                         noData={noData}
                         noSearchResults={noSearchResults}
                         entityName="worker resource"
+                        noDataTitle="No worker resources registered yet"
+                        noDataSubtitle="To register a new worker resource, click Register."
                         className={styles.noDataContent}
                       />
                     </TableContainer>

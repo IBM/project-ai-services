@@ -14,6 +14,10 @@ interface TableEmptyStatesProps {
   entityName: string;
   /** Optional CSS class forwarded to the NoDataEmptyState root element. */
   className?: string;
+  /** Override the title shown when the table has no rows and no error. */
+  noDataTitle?: string;
+  /** Override the subtitle shown when the table has no rows and no error. */
+  noDataSubtitle?: string;
 }
 
 const TableEmptyStates = ({
@@ -22,6 +26,8 @@ const TableEmptyStates = ({
   noSearchResults,
   entityName,
   className,
+  noDataTitle,
+  noDataSubtitle,
 }: TableEmptyStatesProps) => {
   if (fetchError) {
     return (
@@ -36,8 +42,10 @@ const TableEmptyStates = ({
   if (noData) {
     return (
       <NoDataEmptyState
-        title={`Start by adding a ${entityName}`}
-        subtitle={`To deploy a new ${entityName}, click Deploy.`}
+        title={noDataTitle ?? `Start by adding a ${entityName}`}
+        subtitle={
+          noDataSubtitle ?? `To deploy a new ${entityName}, click Deploy.`
+        }
         className={className}
       />
     );

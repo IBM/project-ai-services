@@ -16,28 +16,24 @@ export function transformWorkerToRow(
   };
 }
 
-export async function fetchWorkerResources(
-  page = 1,
-  pageSize = 20,
-): Promise<WorkerListResponse> {
-  const response = await api.get<WorkerApiResponse[]>(
-    WORKERS_ENDPOINTS.LIST_WORKERS,
-  );
-  const allItems = response.data;
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-
-  return {
-    data: allItems.slice(start, end),
-    total: allItems.length,
-    page,
-    page_size: pageSize,
-  };
-}
-
 export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
   const response = await api.get<WorkerApiResponse[]>(
     WORKERS_ENDPOINTS.LIST_WORKERS,
   );
   return response.data;
+}
+
+export async function fetchWorkerResources(
+  page = 1,
+  pageSize = 20,
+): Promise<WorkerListResponse> {
+  const allItems = await fetchAllWorkerResources();
+  const start = (page - 1) * pageSize;
+
+  return {
+    data: allItems.slice(start, start + pageSize),
+    total: allItems.length,
+    page,
+    page_size: pageSize,
+  };
 }
