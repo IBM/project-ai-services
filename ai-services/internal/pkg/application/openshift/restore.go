@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/uuid"
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
@@ -35,24 +34,24 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
-	// Get component ID for opensearch
-	templateID, err := cliUtils.GetComponentID(appDetails, "opensearch")
-	if err != nil {
-		return fmt.Errorf("failed to get opensearch component ID: %w", err)
-	}
-	logger.Infof("OpenSearch component ID: %s\n", templateID)
-
-	// Derive namespace using catalog convention: "ai-services-<first 8 chars of app UUID>"
-	appUUID, err := uuid.Parse(appDetails.ID)
-	if err != nil {
-		return fmt.Errorf("failed to parse application UUID: %w", err)
-	}
-	namespace := catalogUtils.AppNamespace(appUUID)
-	logger.Infof("Namespace: %s\n", namespace)
-
 	// Execute restore based on target
 	switch opts.Target {
 	case "opensearch":
+		// Get component ID (templateID) — used as ai-services.io/template label selector
+		templateID, err := cliUtils.GetComponentID(appDetails, "opensearch")
+		if err != nil {
+			return fmt.Errorf("failed to get opensearch component ID: %w", err)
+		}
+		logger.Infof("OpenSearch component ID: %s\n", templateID)
+
+		// Derive namespace: "ai-services-<first 8 chars of app UUID>"
+		appUUID, err := uuid.Parse(appDetails.ID)
+		if err != nil {
+			return fmt.Errorf("failed to parse application UUID: %w", err)
+		}
+		namespace := catalogUtils.AppNamespace(appUUID)
+		logger.Infof("Namespace: %s\n", namespace)
+
 		return restore.RestoreOpenSearch(ctx, templateID, namespace, absFilename)
 	case "digitize":
 		return o.restoreDigitize(ctx, appDetails, absFilename)
@@ -88,39 +87,6 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appDetails *
 	logger.Infof("✓ Digitize metadata restore completed successfully\n")
 
 	return nil
-}
-
-// getDigitizeAPIURL retrieves the digitize API URL from OpenShift routes.
-func (o *OpenshiftApplication) getDigitizeAPIURL(ctx context.Context, appName string) (string, error) {
-	logger.Infof("Fetching digitize route from OpenShift...\n")
-
-	// List all routes in the namespace using the runtime interface
-	routes, err := o.runtime.ListRoutes(ctx, "")
-	if err != nil {
-		return "", fmt.Errorf("failed to list routes: %w", err)
-	}
-
-	// Find the digitize-api route
-	// Route naming convention: digitize-api
-	var digitizeRoute string
-	for _, route := range routes {
-		// Check if route name is "digitize-api"
-		routeName := strings.ToLower(route.Name)
-		if routeName == "digitize-api" {
-			digitizeRoute = route.HostPort
-
-			break
-		}
-	}
-
-	if digitizeRoute == "" {
-		return "", fmt.Errorf("digitize-api route not found. Please ensure the digitize-api route exists in the namespace")
-	}
-
-	// Construct the full API URL with https scheme
-	apiURL := fmt.Sprintf("https://%s", digitizeRoute)
-
-	return apiURL, nil
 }
 
 // Made with Bob
