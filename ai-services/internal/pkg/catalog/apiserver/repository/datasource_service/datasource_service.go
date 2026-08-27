@@ -2,6 +2,7 @@ package datasourceservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -422,7 +424,7 @@ func (s *DatasourceService) propagateCredentials(
 	var propErrors []apimodels.PropagationError
 
 	for _, svc := range serviceEndpoints {
-		baseURL := svc.URL
+		baseURL := extractAPIEndpointURL(svc.EndpointsJSON)
 		if baseURL == "" {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ApplicationID:   svc.ApplicationID.String(),
@@ -433,7 +435,7 @@ func (s *DatasourceService) propagateCredentials(
 			continue
 		}
 
-		if err := updateDigitizeConnector(ctx, baseURL, datasourceID.String(), credPayload); err != nil {
+		if err := catalogclient.NewDigitizeClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ApplicationID:   svc.ApplicationID.String(),
 				ApplicationName: svc.ApplicationName,
@@ -522,6 +524,31 @@ func decryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	}
 
 	return result, nil
+}
+
+// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "api".
+// Both Podman and OpenShift deployers register the Digitize backend URL with type "api".
+// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
+func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
+	if len(endpointsJSON) == 0 {
+		return ""
+	}
+
+	var endpoints []map[string]any
+	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+		return ""
+	}
+
+	for _, ep := range endpoints {
+		if t, ok := ep["type"].(string); ok && t == "api" {
+			if u, ok := ep["url"].(string); ok {
+				return u
+			}
+		}
+	}
+
+	return ""
 }
 
 // Made with Bob

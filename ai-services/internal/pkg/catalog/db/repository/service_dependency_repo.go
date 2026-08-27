@@ -10,18 +10,25 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
-// LinkedServiceEndpoint holds the information needed to call a downstream service
-// (e.g. Digitize) during credential propagation: the service's reachable URL and
-// the application it belongs to.
-type LinkedServiceEndpoint struct {
+// LinkedServiceRow is the raw result of the service_dependencies → services → applications
+// join. It exposes all fetched columns so consumers can decide what to extract.
+// EndpointsJSON is the raw JSONB endpoints array from the services table; consumers are
+// responsible for parsing it to extract the URL they need.
+type LinkedServiceRow struct {
 	// ServiceID is the DB UUID of the linked service.
 	ServiceID uuid.UUID
 	// ApplicationID is the DB UUID of the application that owns the service.
 	ApplicationID uuid.UUID
 	// ApplicationName is the display name of the application.
 	ApplicationName string
-	// URL is the first service-type endpoint URL for this service (empty when none registered).
-	URL string
+	// ApplicationCatalogID is the catalog_id of the owning application (e.g. "rag").
+	ApplicationCatalogID string
+	// ApplicationDeploymentType is the deployment_type of the owning application
+	// ("architectures" or "services"), used to resolve the display name from catalog metadata.
+	ApplicationDeploymentType string
+	// EndpointsJSON is the raw JSONB value of the services.endpoints column.
+	// Consumers parse this to extract the endpoint URL relevant to their use case.
+	EndpointsJSON json.RawMessage
 }
 
 // ServiceDependencyRepository defines the interface for service dependency data operations.
@@ -41,11 +48,10 @@ type ServiceDependencyRepository interface {
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
 	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
-	// all rows matching dependencyID + dependencyType, returning the application context and
-	// the first service-type endpoint URL for each linked service.
-	// Used by the credential propagation flow to resolve downstream service base URLs in one
-	// query rather than N individual lookups.
-	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error)
+	// all rows matching dependencyID + dependencyType, returning the raw DB columns for each
+	// linked service. Consumers are responsible for extracting the specific endpoint URL they
+	// need from EndpointsJSON.
+	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -210,11 +216,12 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 
 // GetLinkedServiceEndpoints joins service_dependencies → services → applications for all
 // rows where dependency_id = dependencyID AND dependency_type = dependencyType, returning
-// the application identity and the first "service"-typed endpoint URL per linked service.
-// A single query is issued regardless of how many services are linked.
-func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error) {
+// the raw DB columns for each linked service. Consumers parse EndpointsJSON to extract
+// the endpoint URL they need. A single query is issued regardless of how many services
+// are linked.
+func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error) {
 	query := `
-		SELECT sd.service_id, a.id, a.name, s.endpoints
+		SELECT sd.service_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM service_dependencies sd
 		INNER JOIN services     s ON s.id = sd.service_id
 		INNER JOIN applications a ON a.id = s.app_id
@@ -228,54 +235,22 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	}
 	defer rows.Close()
 
-	var results []LinkedServiceEndpoint
+	var results []LinkedServiceRow
 	for rows.Next() {
-		var (
-			ep            LinkedServiceEndpoint
-			endpointsJSON []byte
-		)
+		var row LinkedServiceRow
 
-		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &endpointsJSON); err != nil {
-			return nil, fmt.Errorf("failed to scan linked service endpoint row: %w", err)
+		if err := rows.Scan(&row.ServiceID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan linked service row: %w", err)
 		}
 
-		ep.URL = extractAPIEndpointURL(endpointsJSON)
-		results = append(results, ep)
+		results = append(results, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating linked service endpoints: %w", err)
+		return nil, fmt.Errorf("error iterating linked service rows: %w", err)
 	}
 
 	return results, nil
-}
-
-// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
-// and returns the URL of the first entry whose "type" is "api".
-// Both Podman and OpenShift deployers register the Digitize backend URL with type "api"
-// (Podman route annotation "4000:digitize-backend-<slug>:api"; OpenShift route label
-// "ai-services.io/endpoint-type: api"). This is the base URL used to call
-// Digitize's /v1/connectors endpoint during credential propagation.
-// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
-func extractAPIEndpointURL(endpointsJSON []byte) string {
-	if len(endpointsJSON) == 0 {
-		return ""
-	}
-
-	var endpoints []map[string]any
-	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-		return ""
-	}
-
-	for _, ep := range endpoints {
-		if t, ok := ep["type"].(string); ok && t == "api" {
-			if u, ok := ep["url"].(string); ok {
-				return u
-			}
-		}
-	}
-
-	return ""
 }
 
 // Made with Bob
