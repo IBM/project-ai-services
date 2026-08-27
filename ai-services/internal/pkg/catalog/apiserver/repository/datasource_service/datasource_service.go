@@ -204,7 +204,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		},
 		Status:    string(connector.Status),
 		Message:   connector.Message,
-		Metadata:  stripSensitiveFields(connector.Metadata, sensitiveFields),
+		Metadata:  catalogutils.StripSensitiveFields(connector.Metadata, sensitiveFields),
 		Services:  services,
 		CreatedAt: connector.CreatedAt,
 		UpdatedAt: connector.UpdatedAt,
@@ -414,19 +414,6 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	}
 
 	return result, nil
-}
-
-// stripSensitiveFields returns a copy of metadata with all keys listed in sensitiveFields removed.
-// The original map is never mutated. A nil or empty metadata returns an empty map.
-func stripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bool) map[string]any {
-	result := make(map[string]any, len(metadata))
-	for k, v := range metadata {
-		if !sensitiveFields[k] {
-			result[k] = v
-		}
-	}
-
-	return result
 }
 
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
