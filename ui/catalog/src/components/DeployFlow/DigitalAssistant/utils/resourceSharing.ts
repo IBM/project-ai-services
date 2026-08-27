@@ -24,10 +24,3 @@ export function getResourceSharingKey(
     return `${serviceId}-${providerId}-${componentType}`;
   }
 }
-
-// Checks if provider uses model-based resource sharing across services
-export function isModelBasedSharing(params: Record<string, unknown>): boolean {
-  return (
-    params.model !== undefined && params.model !== null && params.model !== ""
-  );
-}

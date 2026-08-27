@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 )
 
 const (
@@ -71,4 +72,25 @@ func (c *DigitizeClient) UpdateConnector(ctx context.Context, connectorID string
 	}
 
 	return fmt.Errorf("failed to propagate credentials to Digitize service after %d attempt(s): %w", digitizeMaxRetries+1, lastErr)
+}
+
+// GetConnectorSync calls GET /v1/connectors/{connectorID} on the Digitize pod and
+// returns the connector's sync_status and last_sync_at values.
+// Returns an error when the HTTP call fails or the pod returns a non-200 status.
+func (c *DigitizeClient) GetConnectorSync(ctx context.Context, connectorID string) (*apimodels.ConnectorSyncState, error) {
+	var result apimodels.ConnectorSyncState
+
+	resp, err := c.http.R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get("/v1/connectors/" + connectorID)
+	if err != nil {
+		return nil, fmt.Errorf("digitize request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("digitize returned status %d", resp.StatusCode())
+	}
+
+	return &result, nil
 }

@@ -1511,6 +1511,62 @@ const docTemplate = `{
             }
         },
         "/datasources/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Get a single datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource detail",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "put": {
                 "security": [
                     {
@@ -2048,6 +2104,50 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
+            "type": "object",
+            "properties": {
+                "application_id": {
+                    "description": "ApplicationID is the UUID of the application that owns this service.",
+                    "type": "string"
+                },
+                "application_name": {
+                    "description": "ApplicationName is the human-readable display name of the owning application.",
+                    "type": "string"
+                },
+                "err_msg": {
+                    "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
+                "last_sync_at": {
+                    "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
+                    "type": "string"
+                },
+                "service": {
+                    "description": "Service contains the catalog identity (id + resolved name) of the owning application.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
+                        }
+                    ]
+                },
+                "sync_status": {
+                    "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
@@ -2170,6 +2270,59 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "CreatedAt is the creation timestamp.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the datasource connector.",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Message contains a human-readable description of the current status (may be empty).",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "Metadata holds the non-sensitive configuration fields.\nSensitive fields (e.g. secret_access_key, private_key) are always stripped.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "description": "Name is the unique human-readable label.",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider contains the provider ID and its resolved display name.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo"
+                        }
+                    ]
+                },
+                "services": {
+                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each service's Digitize pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
+                    }
+                },
+                "status": {
+                    "description": "Status is the current connectivity status (\"connected\" or \"offline\").",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is always \"datasource\".",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "UpdatedAt is the last-update timestamp.",
                     "type": "string"
                 }
             }

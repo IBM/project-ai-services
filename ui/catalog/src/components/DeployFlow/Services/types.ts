@@ -33,5 +33,4 @@ export interface StepProps extends BaseStepProps {
   llmModelsWithProviders?: LLMOption[];
   serviceDescription?: string;
   isLoadingLlmModels?: boolean;
-  onSchemaError?: (hasError: boolean) => void;
 }
