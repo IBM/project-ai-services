@@ -42,6 +42,13 @@ type ConnectedServiceInfo struct {
 	Name string `json:"name"`
 }
 
+// ConnectorSyncState holds the sync fields returned by the Digitize pod's
+// GET /v1/connectors/{id} endpoint.
+type ConnectorSyncState struct {
+	SyncStatus string  `json:"sync_status"`
+	LastSyncAt *string `json:"last_sync_at"`
+}
+
 // ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
 // Identity fields are sourced from the service_dependencies → services → applications DB join;
 // sync fields are fetched live from the service's Digitize pod and gracefully degrade to

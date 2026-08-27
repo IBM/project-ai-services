@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -399,23 +400,23 @@ func stripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bo
 }
 
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
-// and returns the sync_status, last_sync_at, and a non-empty errMsg string when the state
-// could not be fetched (empty baseURL or HTTP failure). The caller embeds errMsg in the
-// response item so users know why sync state is unavailable; the connector record is
-// always returned regardless of sync-state fetch outcome.
+// using catalogclient.DigitizeClient (resty-based) and returns the sync_status, last_sync_at,
+// and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
+// The caller embeds errMsg in the response item so users know why sync state is unavailable;
+// the connector record is always returned regardless of sync-state fetch outcome.
 func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
 	if baseURL == "" {
 		return "unknown", nil, "no api endpoint registered for this service"
 	}
 
-	syncStatus, lastSyncAt, err := fetchConnectorSyncFromDigitize(ctx, baseURL, connectorID.String())
+	state, err := catalogclient.NewDigitizeClient(baseURL).GetConnectorSync(ctx, connectorID.String())
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to fetch sync state for datasource %s from %s: %v", connectorID, baseURL, err)
 
 		return "unknown", nil, fmt.Sprintf("failed to fetch sync state: %v", err)
 	}
 
-	return syncStatus, lastSyncAt, ""
+	return state.SyncStatus, state.LastSyncAt, ""
 }
 
 // extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
