@@ -9,6 +9,7 @@ import uuid
 from typing import Optional
 
 from common.misc_utils import get_logger
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -226,7 +227,7 @@ async def enqueue_conversion_tasks(
         file_path = staging_dir / filename
         page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
         is_large = page_count >= settings.digitize.heavy_doc_page_threshold
-        task_status = "queued" if idx < slots_free else "pending"
+        task_status = ConversionTaskStatus.QUEUED if idx < slots_free else ConversionTaskStatus.PENDING
         tasks.append({
             "task_id":       task_id,
             "job_id":        job_id,

@@ -1948,7 +1948,7 @@ class DatabaseManager:
                 # Count currently queued tasks for this operation.
                 queued_count = session.scalar(
                     select(func.count()).where(
-                        ConversionTask.status == "queued",
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
                     )
                 ) or 0
@@ -1961,7 +1961,7 @@ class DatabaseManager:
                 candidates = session.execute(
                     select(ConversionTask.task_id, ConversionTask.cached_file)
                     .where(
-                        ConversionTask.status == "pending",
+                        ConversionTask.status == ConversionTaskStatus.PENDING,
                         ConversionTask.operation == operation,
                     )
                     .order_by(ConversionTask.queued_at)
@@ -1976,7 +1976,7 @@ class DatabaseManager:
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id.in_(candidate_ids))
-                    .values(status="queued", queued_at=now)
+                    .values(status=ConversionTaskStatus.QUEUED, queued_at=now)
                 )
                 result = cast(CursorResult, session.execute(stmt))
                 promoted = result.rowcount

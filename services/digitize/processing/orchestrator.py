@@ -29,8 +29,9 @@ from common.misc_utils import (
     text_suffix,
 )
 from common.thread_utils import ContextAwareThreadPoolExecutor
-from digitize.utils.db import get_status_manager
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import DocStatus, JobStatus
+from digitize.utils.db import get_status_manager
 from digitize.processing.language import (
     collect_header_font_sizes,
     count_tokens,
@@ -544,7 +545,7 @@ def process_documents(
                     pending_task_ids.discard(task_id)
                     task_deadlines.pop(task_id, None)
                     continue
-                if task.status not in ("completed", "failed"):
+                if task.status not in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
                     # Start the deadline clock the first time we see this task.
                     if task_id not in task_deadlines:
                         task_deadlines[task_id] = time.monotonic() + timeout_s
@@ -572,7 +573,7 @@ def process_documents(
                 doc_id = doc_id_dict.get(Path(path).name)
                 pending_task_ids.discard(task_id)
 
-                if task.status == "completed":
+                if task.status == ConversionTaskStatus.COMPLETED:
                     # Seed stats entry with conversion timing derived from task timestamps.
                     digitizing_time = 0.0
                     if task.started_at and task.completed_at:
@@ -605,7 +606,7 @@ def process_documents(
                     )
                     process_futures[p_future] = path
 
-                elif task.status == "failed":
+                elif task.status == ConversionTaskStatus.FAILED:
                     converted_pdf_stats.pop(path, None)
                     if doc_id is not None:
                         status_mgr.update_doc_metadata(

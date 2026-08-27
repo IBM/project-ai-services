@@ -13,6 +13,7 @@ from pathlib import Path
 
 from common.misc_utils import get_logger, get_utc_timestamp
 from digitize.db.manager import db_manager
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager
@@ -95,21 +96,29 @@ def digitize(
 
     try:
         # Phase 1: wait until the dispatcher picks up the task (queued → running).
-        task = _poll_until(job_id, {"running", "completed", "failed"}, deadline, timeout_s, "start")
+        task = _poll_until(
+            job_id,
+            {ConversionTaskStatus.RUNNING, ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            deadline, timeout_s, "start",
+        )
 
         # Mark IN_PROGRESS as soon as the dispatcher starts running.
-        if task is not None and task.status == "running" and doc_id:
+        if task is not None and task.status == ConversionTaskStatus.RUNNING and doc_id:
             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
             status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
         # Phase 2: wait until the dispatcher reaches a terminal state.
-        task = _poll_until(job_id, {"completed", "failed"}, deadline, timeout_s, "complete")
+        task = _poll_until(
+            job_id,
+            {ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            deadline, timeout_s, "complete",
+        )
 
     except _DeadlineExceeded as exc:
         _fail(str(exc))
         return
 
-    if task is None or task.status == "failed":
+    if task is None or task.status == ConversionTaskStatus.FAILED:
         _fail((task.error or "Conversion failed") if task else "Task row missing")
         return
 

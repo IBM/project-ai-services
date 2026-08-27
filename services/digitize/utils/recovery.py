@@ -17,6 +17,7 @@ import shutil
 from pathlib import Path
 
 from common.misc_utils import get_logger, cleanup_staging_directory
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.utils.db import (
     close_open_sync_log,
@@ -227,10 +228,14 @@ def recover_conversion_tasks() -> int:
 
     try:
         tasks = db_manager.get_conversion_tasks(
-            status=["running", "queued", "pending"]
-        )
+                status=[
+                    ConversionTaskStatus.RUNNING,
+                    ConversionTaskStatus.QUEUED,
+                    ConversionTaskStatus.PENDING,
+                ]
+            )
         for task in tasks:
-            if task.status == "running":
+            if task.status == ConversionTaskStatus.RUNNING:
                 # Best-effort: clean chunk directories left over from the crashed run
                 try:
                     chunk_dir = Path(task.cached_file).parent / "chunks"
@@ -241,7 +246,7 @@ def recover_conversion_tasks() -> int:
                         f"Could not clean chunk dir for task {task.task_id}: {clean_err}"
                     )
                 db_manager.update_task_status(
-                    task.task_id, "failed",
+                    task.task_id, ConversionTaskStatus.FAILED,
                     error="Service restarted during conversion",
                 )
                 logger.warning(f"Recovery: task {task.task_id} running→failed")
@@ -251,7 +256,7 @@ def recover_conversion_tasks() -> int:
                 # row is gone and will not be restarted.  Fail unconditionally so
                 # the job surfaces a clean terminal state rather than hanging forever.
                 db_manager.update_task_status(
-                    task.task_id, "failed",
+                    task.task_id, ConversionTaskStatus.FAILED,
                     error="Service restarted before conversion could complete",
                 )
                 logger.warning(
