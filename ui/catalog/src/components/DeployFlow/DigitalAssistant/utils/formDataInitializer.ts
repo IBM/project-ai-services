@@ -7,9 +7,8 @@ import type { DeployOptionsResponse } from "@/types/api.types";
 import type {
   DeployFormData,
   ComponentConfig,
+  ServiceConfig,
 } from "@/components/DeployFlow/Shared/types";
-import type { ServiceConfig } from "@/components/DeployFlow/DigitalAssistant/types";
-import { getDefaultInferenceBackendProviderId } from "./inferenceComponentHelper";
 
 // Initializes form data structure from deploy options with default values
 export function initializeFormData(
@@ -51,21 +50,11 @@ export function initializeFormData(
       }
     });
 
-    // Determine inference backend provider using generic logic
-    // This checks for components with multiple providers that expect model input
-    const inferenceBackendProviderId = getDefaultInferenceBackendProviderId(
-      service.components,
-    );
-
     services[service.id] = {
       enabled: true,
       version: service.version || deployOptions.version,
       components,
-      params: {}, // Service-level params from schema
-      // Set inferenceBackend to LLM or reranker's default provider if service has either component
-      ...(inferenceBackendProviderId && {
-        inferenceBackend: inferenceBackendProviderId,
-      }),
+      params: {},
     };
   });
 
