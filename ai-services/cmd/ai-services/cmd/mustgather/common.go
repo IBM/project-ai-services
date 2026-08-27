@@ -83,8 +83,8 @@ func collectCatalogCredentials(ctx context.Context, san *sanitize.SecretSanitize
 // checkCatalogInstalled returns true if any pod carrying the
 // ai-services.io/application=ai-services label is present in the runtime,
 // confirming the catalog has been installed.
-func checkCatalogInstalled(rt runtime.Runtime) (bool, error) {
-	pods, err := rt.ListPods(map[string][]string{
+func checkCatalogInstalled(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
 	})
 	if err != nil {
@@ -103,7 +103,7 @@ type podCollector interface {
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one) and delegates per-pod collection to pc.
 func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName string) []string {
-	appClient, err := catalogClient.NewApplicationClient()
+	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
 
@@ -129,7 +129,7 @@ func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appNam
 // and normalises warnings. Returns (apps, true) on success, (nil, false) when
 // the caller should skip collection.
 func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) ([]catalogTypes.Application, bool) {
-	apps, err := cliUtils.FetchApplications(appClient, appName)
+	apps, err := cliUtils.FetchApplications(ctx, appClient, appName)
 	if err != nil {
 		if appName != "" {
 			logger.WarningfCtx(ctx, "Application %q not found: %v\n", appName, err)
@@ -163,7 +163,7 @@ func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalog
 		// Derive the app-scoped namespace (OpenShift only; Podman ignores it).
 		appNamespace := appNamespaceForID(ctx, app)
 
-		psResp, err := appClient.GetApplicationPS(app.ID)
+		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
 			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
 

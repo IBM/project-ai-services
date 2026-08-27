@@ -43,9 +43,7 @@ func newOpenshiftGatherer() *openshiftGatherer {
 //     when no catalog pods exist in the catalog namespace.
 //   - Always-on: system info, K8s secrets, services/routes, PVCs, events —
 //     collected from every discovered app namespace (and the catalog namespace).
-func (g *openshiftGatherer) gather(opts gatherOptions) (string, error) {
-	ctx := context.Background()
-
+func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 	logger.InfolnCtx(ctx, "Starting must-gather for OpenShift runtime…")
 
 	// catalogClient is scoped to the fixed catalog namespace ("ai-services").
@@ -62,7 +60,7 @@ func (g *openshiftGatherer) gather(opts gatherOptions) (string, error) {
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
 	logger.InfofCtx(ctx, "Catalog namespace: %s\n", catalogConstants.CatalogAppName)
 
-	catalogInstalled, err := checkCatalogInstalled(catalogCl)
+	catalogInstalled, err := checkCatalogInstalled(ctx, catalogCl)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
@@ -123,7 +121,7 @@ func (g *openshiftGatherer) collectCatalogArtifacts(ctx context.Context, rt *ope
 // collectCatalogPods lists all pods labelled ai-services.io/application=ai-services
 // in the catalog namespace and collects inspect + logs for each.
 func (g *openshiftGatherer) collectCatalogPods(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, catDir string) {
-	pods, err := rt.ListPods(map[string][]string{
+	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {"ai-services.io/application=" + catalogConstants.CatalogAppName},
 	})
 	if err != nil {

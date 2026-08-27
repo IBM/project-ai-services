@@ -1,6 +1,7 @@
 package mustgather
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -25,7 +26,7 @@ type gatherOptions struct {
 
 // gatherer is the common interface implemented by every runtime-specific collector.
 type gatherer interface {
-	gather(opts gatherOptions) (string, error)
+	gather(ctx context.Context, opts gatherOptions) (string, error)
 }
 
 // MustGatherCmd returns the must-gather cobra command.
