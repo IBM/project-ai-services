@@ -19,10 +19,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 )
 
 const (
-	defaultHelmTimeout = 10 * time.Minute
+	defaultHelmTimeout    = 10 * time.Minute
+	predictorPollInterval = 15 * time.Second
+	predictorWaitTimeout  = 10 * time.Minute
 )
 
 // Type aliases for deployment plan types.
@@ -167,6 +170,22 @@ func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, ns
 func (d *OpenShiftDeployer) deployComponent(ctx context.Context, ns string, plan *DeploymentPlan, comp *ComponentPlan) error {
 	if err := helmInstallOrUpgrade(ctx, ns, catalogutils.HelmReleaseName(plan.ApplicationID, strings.ReplaceAll(comp.ComponentType, "_", "-")), comp.CatalogPath, comp.Values, comp.DatabaseID.String()); err != nil {
 		return err
+	}
+
+	// KServe marks an InferenceService "Ready=True" only once the predictor pod is fully up.
+	// Helm considers the InferenceService "Current" as soon as the CRD is accepted,
+	// so we must poll the InferenceService status directly.
+	if oc, ok := d.runtime.(*openshiftRuntime.OpenshiftClient); ok {
+		isvcName := comp.ComponentType
+
+		logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
+
+		waitCtx, cancel := context.WithTimeout(ctx, predictorWaitTimeout)
+		defer cancel()
+
+		if err := oc.WaitForInferenceServiceReady(waitCtx, isvcName, predictorPollInterval); err != nil {
+			return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
+		}
 	}
 
 	if err := d.updateComponentEndpoint(ctx, ns, comp); err != nil {

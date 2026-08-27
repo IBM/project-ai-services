@@ -184,12 +184,24 @@ func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
 func TestRegistry_RegisterIdempotent(t *testing.T) {
 	reg := New(nil)
 
-	e1, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
-	e2, _ := reg.Register(context.Background(), "worker-1", "podman", nil)
+	e1, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
 
-	// Both calls must return the same in-memory entry pointer.
+	// A second Register for the same name returns ErrWorkerAlreadyActive.
+	_, err = reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err == nil {
+		t.Fatal("expected ErrWorkerAlreadyActive on second Register, got nil")
+	}
+
+	// The original entry must still be retrievable.
+	e2, ok := reg.Get("worker-1")
+	if !ok {
+		t.Fatal("expected worker-1 to still be in the registry")
+	}
 	if e1 != e2 {
-		t.Error("expected same entry on second Register, got a different pointer")
+		t.Error("expected same in-memory entry after duplicate Register attempt")
 	}
 }
 

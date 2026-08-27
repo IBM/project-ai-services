@@ -120,79 +120,67 @@ export async function fetchLLMOptionsWithModels(
   ) => void,
   deployOptions?: ServiceDeployOptions,
 ): Promise<LLMOption[]> {
-  try {
-    const options =
-      deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
 
-    const llmComponent = options.components.find(
-      (component) => component.type === "llm",
-    );
+  const llmComponent = options.components.find(
+    (component) => component.type === "llm",
+  );
 
-    if (!llmComponent || !llmComponent.providers) {
-      return [];
-    }
-
-    const llmOptionsPromises = llmComponent.providers.map(async (provider) => {
-      try {
-        if (provider.schema) {
-          const schema = await fetchProviderSchema("llm", provider.id);
-
-          if (setProviderSchema) {
-            setProviderSchema(serviceId, "llm", provider.id, schema);
-          }
-
-          if (schema.properties.model?.oneOf) {
-            return schema.properties.model.oneOf.map((option) => ({
-              id: option.const,
-              text: option.title || option.const,
-              providerId: provider.id,
-              providerName: provider.name,
-            }));
-          }
-
-          const modelDefault = schema.properties.model?.default;
-          if (modelDefault) {
-            return [
-              {
-                id: modelDefault,
-                text: modelDefault,
-                providerId: provider.id,
-                providerName: provider.name,
-              },
-            ];
-          }
-        }
-
-        return [
-          {
-            id: provider.id,
-            text: provider.name,
-            providerId: provider.id,
-            providerName: provider.name,
-          },
-        ];
-      } catch (error) {
-        console.error(
-          `Failed to fetch schema for provider ${provider.id}:`,
-          error,
-        );
-        return [
-          {
-            id: provider.id,
-            text: provider.name,
-            providerId: provider.id,
-            providerName: provider.name,
-          },
-        ];
-      }
-    });
-
-    const allOptionsArrays = await Promise.all(llmOptionsPromises);
-    return allOptionsArrays.flat();
-  } catch (error) {
-    console.error("Failed to fetch LLM options with models:", error);
+  if (!llmComponent || !llmComponent.providers) {
     return [];
   }
+
+  const llmOptionsPromises = llmComponent.providers.map(async (provider) => {
+    if (!provider.schema) {
+      return [
+        {
+          id: provider.id,
+          text: provider.name,
+          providerId: provider.id,
+          providerName: provider.name,
+        },
+      ];
+    }
+
+    const schema = await fetchProviderSchema("llm", provider.id);
+
+    if (setProviderSchema) {
+      setProviderSchema(serviceId, "llm", provider.id, schema);
+    }
+
+    if (schema.properties.model?.oneOf) {
+      return schema.properties.model.oneOf.map((option) => ({
+        id: option.const,
+        text: option.title || option.const,
+        providerId: provider.id,
+        providerName: provider.name,
+      }));
+    }
+
+    const modelDefault = schema.properties.model?.default;
+    if (modelDefault) {
+      return [
+        {
+          id: modelDefault,
+          text: modelDefault,
+          providerId: provider.id,
+          providerName: provider.name,
+        },
+      ];
+    }
+
+    return [
+      {
+        id: provider.id,
+        text: provider.name,
+        providerId: provider.id,
+        providerName: provider.name,
+      },
+    ];
+  });
+
+  const allOptionsArrays = await Promise.all(llmOptionsPromises);
+  return allOptionsArrays.flat();
 }
 
 // Fetches component models with schemas for any component type
@@ -207,74 +195,59 @@ export async function fetchComponentModelsWithSchemas(
   ) => void,
   deployOptions?: ServiceDeployOptions,
 ): Promise<LLMOption[]> {
-  try {
-    const options =
-      deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
 
-    const component = options.components.find((c) => c.type === componentType);
+  const component = options.components.find((c) => c.type === componentType);
 
-    if (!component || !component.providers) {
+  if (!component || !component.providers) {
+    return [];
+  }
+
+  const modelOptionsPromises = component.providers.map(async (provider) => {
+    if (!provider.schema) {
       return [];
     }
 
-    const modelOptionsPromises = component.providers.map(async (provider) => {
-      try {
-        if (provider.schema) {
-          const schema = await fetchProviderSchema(componentType, provider.id);
+    const schema = await fetchProviderSchema(componentType, provider.id);
 
-          if (setProviderSchema) {
-            setProviderSchema(serviceId, componentType, provider.id, schema);
-          }
+    if (setProviderSchema) {
+      setProviderSchema(serviceId, componentType, provider.id, schema);
+    }
 
-          if (schema.properties.model?.oneOf) {
-            return schema.properties.model.oneOf.map((option) => ({
-              id: option.const,
-              text: option.title || option.const,
-              providerId: provider.id,
-              providerName: provider.name,
-            }));
-          }
+    if (schema.properties.model?.oneOf) {
+      return schema.properties.model.oneOf.map((option) => ({
+        id: option.const,
+        text: option.title || option.const,
+        providerId: provider.id,
+        providerName: provider.name,
+      }));
+    }
 
-          const modelDefault = schema.properties.model?.default;
-          if (modelDefault) {
-            return [
-              {
-                id: modelDefault,
-                text: modelDefault,
-                providerId: provider.id,
-                providerName: provider.name,
-              },
-            ];
-          }
-        }
+    const modelDefault = schema.properties.model?.default;
+    if (modelDefault) {
+      return [
+        {
+          id: modelDefault,
+          text: modelDefault,
+          providerId: provider.id,
+          providerName: provider.name,
+        },
+      ];
+    }
 
-        return [];
-      } catch (error) {
-        console.error(
-          `Failed to fetch schema for ${componentType} provider ${provider.id}:`,
-          error,
-        );
-        return [];
-      }
-    });
-
-    const allOptionsArrays = await Promise.all(modelOptionsPromises);
-    const allOptions = allOptionsArrays.flat();
-
-    // Deduplicate by model ID
-    return allOptions.reduce((acc, option) => {
-      if (!acc.some((existing) => existing.id === option.id)) {
-        acc.push(option);
-      }
-      return acc;
-    }, [] as LLMOption[]);
-  } catch (error) {
-    console.error(
-      `Failed to fetch ${componentType} options with models:`,
-      error,
-    );
     return [];
-  }
+  });
+
+  const allOptionsArrays = await Promise.all(modelOptionsPromises);
+  const allOptions = allOptionsArrays.flat();
+
+  // Deduplicate by model ID
+  return allOptions.reduce((acc, option) => {
+    if (!acc.some((existing) => existing.id === option.id)) {
+      acc.push(option);
+    }
+    return acc;
+  }, [] as LLMOption[]);
 }
 
 // Fetches a list of deployed applications with optional filtering parameters

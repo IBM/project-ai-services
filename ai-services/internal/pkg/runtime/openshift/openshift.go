@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -819,14 +820,62 @@ func (kc *OpenshiftClient) isDeploymentReady(ctx context.Context, name string) (
 		s.AvailableReplicas == desired, nil
 }
 
+// WaitForInferenceServiceReady polls the KServe InferenceService with the given name in the
+// client's namespace until its Ready condition is True, or the context is cancelled.
+func (kc *OpenshiftClient) WaitForInferenceServiceReady(ctx context.Context, isvcName string, pollInterval time.Duration) error {
+	isvc := &unstructured.Unstructured{}
+	isvc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "serving.kserve.io",
+		Version: "v1beta1",
+		Kind:    "InferenceService",
+	})
+
+	for {
+		err := kc.Client.Get(ctx, client.ObjectKey{Namespace: kc.Namespace, Name: isvcName}, isvc)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return nil
+			}
+
+			return fmt.Errorf("failed to get InferenceService %q: %w", isvcName, err)
+		}
+
+		conditions, _, _ := unstructured.NestedSlice(isvc.Object, "status", "conditions")
+		for _, c := range conditions {
+			cond, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			if cond["type"] == "Ready" {
+				if fmt.Sprint(cond["status"]) == "True" {
+					logger.InfofCtx(ctx, "InferenceService %q is ready\n", isvcName)
+
+					return nil
+				}
+
+				break
+			}
+		}
+
+		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, pollInterval)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for InferenceService %q to become ready: %w", isvcName, ctx.Err())
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 // rolloutRestartDeployment triggers a rollout restart for the named deployment by
 // patching the pod template annotation "kubectl.kubernetes.io/restartedAt", which is
 // the same mechanism used by `kubectl rollout restart deployment <name>`.
 func (kc *OpenshiftClient) rolloutRestartDeployment(ctx context.Context, name string) error {
-	patch := map[string]interface{}{
-		"spec": map[string]interface{}{
-			"template": map[string]interface{}{
-				"metadata": map[string]interface{}{
+	patch := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{
 					"annotations": map[string]string{
 						"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339),
 					},
