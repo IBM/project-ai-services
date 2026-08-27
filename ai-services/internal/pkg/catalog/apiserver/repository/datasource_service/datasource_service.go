@@ -477,13 +477,13 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 	}
 
 	// Phase 5: decrypt existing metadata to get the full current field set.
-	decryptedExisting, err := decryptSensitiveFields(existing.Metadata, sensitive, s.encryptionKey)
+	decryptedExisting, err := catalogutils.DecryptSensitiveFields(existing.Metadata, sensitive, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt existing connector credentials: %w", err)
 	}
 
 	// Phase 6: merge — start from the existing full metadata, then overlay the filtered updates.
-	merged := mergeMaps(decryptedExisting, filteredUpdates)
+	merged := pkgutils.MergeMaps(decryptedExisting, filteredUpdates)
 
 	// Phase 7: connectivity test with the merged metadata.
 	if testErr := tester.TestConnection(ctx, merged); testErr != nil {
@@ -629,55 +629,6 @@ func datasourceItemFromConnector(c *dbmodels.Connector) apimodels.DatasourceItem
 	}
 }
 
-// mergeMaps returns a new map that starts with all keys from base, then overlays overrides.
-// Neither input map is modified.
-func mergeMaps(base, overrides map[string]any) map[string]any {
-	merged := make(map[string]any, len(base)+len(overrides))
-	for k, v := range base {
-		merged[k] = v
-	}
-
-	for k, v := range overrides {
-		merged[k] = v
-	}
-
-	return merged
-}
-
-// decryptSensitiveFields returns a copy of params where every key listed in sensitiveKeys
-// has its ciphertext value replaced with the corresponding plaintext.
-// Fields that are not in sensitiveKeys are copied as-is.
-func decryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
-	if len(sensitiveKeys) == 0 || len(params) == 0 {
-		return params, nil
-	}
-
-	if encryptionKey == "" {
-		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
-	}
-
-	result := make(map[string]any, len(params))
-	for k, v := range params {
-		if sensitiveKeys[k] {
-			ciphertext, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("sensitive field %q must be a string", k)
-			}
-
-			plaintext, err := catalogutils.Decrypt(ciphertext, encryptionKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decrypt field %q: %w", k, err)
-			}
-
-			result[k] = plaintext
-		} else {
-			result[k] = v
-		}
-	}
-
-	return result, nil
-}
-
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
 // using catalogclient.DigitizeClient (resty-based) and returns the sync_status, last_sync_at,
 // and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
@@ -700,7 +651,7 @@ func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL s
 
 // extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
 // and returns the URL of the first entry whose "type" is "api".
-// Both Podman and OpenShift deployers register the Digitize backend URL with type "api".
+// Both Podman and OpenShift deployers register the service backend URL with type "api".
 // Returns an empty string when the array is empty, malformed, or contains no "api" entry.
 func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 	if len(endpointsJSON) == 0 {
