@@ -14,7 +14,15 @@ SCRIPT_DIR = Path(__file__).parent
 SCHEMA_FILE = SCRIPT_DIR / 'init_schema.sql'
 
 # Expected tables for digitize service
-EXPECTED_TABLES = {'jobs', 'documents', 'conversion_tasks'}
+EXPECTED_TABLES = {
+    'jobs',
+    'documents',
+    'conversion_tasks',
+    'document_checksum',
+    'connectors',
+    'connector_document_checksum',
+    'connector_sync_logs',
+}
 
 
 if __name__ == '__main__':
