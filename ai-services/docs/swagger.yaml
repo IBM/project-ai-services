@@ -1595,14 +1595,13 @@ paths:
       - Catalog
   /connectors:
     get:
-      description: Returns registered providers. When connector_type is supplied only
-        that type is returned; omitting it returns all providers across all connector
-        types.
+      description: Returns registered providers. When type is supplied only that type
+        is returned; omitting it returns all providers across all connector types.
       parameters:
       - description: Filter by connector type (e.g. 'datasource'). Omit to return
           all types.
         in: query
-        name: connector_type
+        name: type
         type: string
       produces:
       - application/json
@@ -1808,6 +1807,45 @@ paths:
       security:
       - BearerAuth: []
       summary: Update datasource credentials
+      tags:
+      - Datasources
+    delete:
+      description: Deletes a datasource connector by ID. Returns 409 Conflict if the
+        connector is still linked to one or more applications.
+      parameters:
+      - description: Datasource connector ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Datasource deleted
+        "400":
+          description: Invalid connector ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Datasource is connected to one or more applications
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete datasource connector
       tags:
       - Datasources
   /resources:

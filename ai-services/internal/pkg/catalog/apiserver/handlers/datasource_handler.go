@@ -83,6 +83,45 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// DeleteDatasource godoc
+//
+//	@Summary		Delete datasource connector
+//	@Description	Deletes a datasource connector by ID. Returns 409 Conflict if the connector is still linked to one or more applications.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Datasource connector ID (UUID)"
+//	@Success		204	"Datasource deleted"
+//	@Failure		400	{object}	ErrorResponse	"Invalid connector ID format"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Datasource not found"
+//	@Failure		409	{object}	ErrorResponse	"Datasource is connected to one or more applications"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/datasources/{id} [delete]
+func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid datasource ID format"})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DeleteDatasource(c.Request.Context(), id); err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to delete datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // ListDatasources godoc
 //
 //	@Summary		List datasource connectors

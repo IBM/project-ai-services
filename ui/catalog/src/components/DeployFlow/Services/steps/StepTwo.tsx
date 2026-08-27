@@ -123,6 +123,39 @@ export const StepTwo: React.FC<StepProps> = ({
     onSchemaError?.(!!llmModelsError);
   }, [llmModelsError, onSchemaError]);
 
+  // Seed default model param for the LLM component when its models arrive from the store.
+  useEffect(() => {
+    if (!selectedServiceId) return;
+
+    const serviceConfig = formData.services[selectedServiceId];
+    if (!serviceConfig) return;
+
+    const llmConfig = serviceConfig.components.llm;
+    if (!llmConfig || llmConfig.params?.model) return;
+
+    const llmModels = componentModels[`${selectedServiceId}:llm`] || [];
+    const matchingModel = llmModels.find(
+      (m) => m.providerId === llmConfig.providerId,
+    );
+    if (!matchingModel) return;
+
+    onChange({
+      services: {
+        ...formData.services,
+        [selectedServiceId]: {
+          ...serviceConfig,
+          components: {
+            ...serviceConfig.components,
+            llm: {
+              ...llmConfig,
+              params: { ...llmConfig.params, model: matchingModel.id },
+            },
+          },
+        },
+      },
+    });
+  }, [selectedServiceId, formData.services, componentModels, onChange]);
+
   // Get the service configuration for the selected service
   const selectedServiceConfig = selectedServiceId
     ? formData.services[selectedServiceId]
