@@ -47,8 +47,6 @@ type ConnectedServiceInfo struct {
 // sync fields are fetched live from the service's Digitize pod and gracefully degrade to
 // "unknown" when unreachable.
 type ConnectedServiceItem struct {
-	// ServiceID is the UUID of the connected service row.
-	ServiceID string `json:"service_id"`
 	// ApplicationID is the UUID of the application that owns this service.
 	ApplicationID string `json:"application_id"`
 	// ApplicationName is the human-readable display name of the owning application.
@@ -60,6 +58,9 @@ type ConnectedServiceItem struct {
 	SyncStatus string `json:"sync_status"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
+	// ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
+	// no endpoint registered). Empty on success.
+	ErrMsg string `json:"err_msg,omitempty"`
 }
 
 // GetDatasourceResponse is the response body for GET /api/v1/datasources/:id.

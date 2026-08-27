@@ -2,6 +2,7 @@ package datasourceservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -186,7 +187,10 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 	sensitiveFields := sensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked services and enrich each with live Digitize sync state.
-	services := s.buildConnectedServices(ctx, id)
+	services, err := s.buildConnectedServices(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build connected services for datasource %s: %w", id, err)
+	}
 
 	return &apimodels.GetDatasourceResponse{
 		ID:   connector.ID.String(),
@@ -291,35 +295,38 @@ func (s *DatasourceService) connectorToResponse(c *dbmodels.Connector, connected
 // buildConnectedServices queries service_dependencies for all services linked to the given
 // connector and enriches each with live sync state from its Digitize pod.
 // GetLinkedServiceEndpoints issues a single JOIN query (service_dependencies → services →
-// applications) returning the application identity and the first "api"-typed endpoint URL.
-// A query failure is non-fatal: a warning is logged and an empty slice is returned so that
-// the caller can still return the connector record successfully.
-func (s *DatasourceService) buildConnectedServices(ctx context.Context, connectorID uuid.UUID) []apimodels.ConnectedServiceItem {
-	linkedServices, err := s.svcDepRepo.GetLinkedServiceEndpoints(
+// applications) returning the raw DB columns. The "api"-typed endpoint URL is extracted
+// here from EndpointsJSON. A DB query failure is propagated to the caller.
+// Sync-state fetch failures per service are non-fatal: ErrMsg is set on the item so the
+// caller receives full context without the connector record being blocked.
+func (s *DatasourceService) buildConnectedServices(ctx context.Context, connectorID uuid.UUID) ([]apimodels.ConnectedServiceItem, error) {
+	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(
 		ctx,
 		connectorID,
 		dbmodels.DependencyTypeConnector,
 	)
 	if err != nil {
-		logger.WarningfCtx(ctx, "failed to query linked services for datasource %s: %v", connectorID, err)
-
-		return nil
+		return nil, fmt.Errorf("failed to query linked services: %w", err)
 	}
 
-	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedServices))
-	for _, svc := range linkedServices {
-		syncStatus, lastSyncAt := fetchDigitzeSyncState(ctx, connectorID, svc.URL)
-		services = append(services, apimodels.ConnectedServiceItem{
-			ServiceID:       svc.ServiceID.String(),
-			ApplicationID:   svc.ApplicationID.String(),
-			ApplicationName: svc.ApplicationName,
-			Service:         s.resolveServiceInfo(svc.ApplicationCatalogID, svc.ApplicationDeploymentType),
+	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedRows))
+	for _, row := range linkedRows {
+		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
+		syncStatus, lastSyncAt, syncErr := fetchDigitzeSyncState(ctx, connectorID, baseURL)
+		item := apimodels.ConnectedServiceItem{
+			ApplicationID:   row.ApplicationID.String(),
+			ApplicationName: row.ApplicationName,
+			Service:         s.resolveServiceInfo(row.ApplicationCatalogID, row.ApplicationDeploymentType),
 			SyncStatus:      syncStatus,
 			LastSyncAt:      lastSyncAt,
-		})
+		}
+		if syncErr != "" {
+			item.ErrMsg = syncErr
+		}
+		services = append(services, item)
 	}
 
-	return services
+	return services, nil
 }
 
 // resolveServiceInfo builds a ConnectedServiceInfo by loading the display name from catalog
@@ -392,21 +399,48 @@ func stripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bo
 }
 
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
-// and returns the sync_status and last_sync_at values.
-// If the Digitize pod is unreachable or baseURL is empty, it degrades gracefully:
-// sync_status is set to "unknown" and last_sync_at is nil. No error is returned to the caller
-// because sync state degradation must never prevent the catalog record from being returned.
-func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string) {
+// and returns the sync_status, last_sync_at, and a non-empty errMsg string when the state
+// could not be fetched (empty baseURL or HTTP failure). The caller embeds errMsg in the
+// response item so users know why sync state is unavailable; the connector record is
+// always returned regardless of sync-state fetch outcome.
+func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
 	if baseURL == "" {
-		return "unknown", nil
+		return "unknown", nil, "no api endpoint registered for this service"
 	}
 
 	syncStatus, lastSyncAt, err := fetchConnectorSyncFromDigitize(ctx, baseURL, connectorID.String())
 	if err != nil {
-		return "unknown", nil
+		logger.WarningfCtx(ctx, "failed to fetch sync state for datasource %s from %s: %v", connectorID, baseURL, err)
+
+		return "unknown", nil, fmt.Sprintf("failed to fetch sync state: %v", err)
 	}
 
-	return syncStatus, lastSyncAt
+	return syncStatus, lastSyncAt, ""
+}
+
+// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "api".
+// Both Podman and OpenShift deployers register the service backend URL with type "api".
+// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
+func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
+	if len(endpointsJSON) == 0 {
+		return ""
+	}
+
+	var endpoints []map[string]any
+	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+		return ""
+	}
+
+	for _, ep := range endpoints {
+		if t, ok := ep["type"].(string); ok && t == "api" {
+			if u, ok := ep["url"].(string); ok {
+				return u
+			}
+		}
+	}
+
+	return ""
 }
 
 // Made with Bob
