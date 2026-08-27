@@ -7,6 +7,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +22,16 @@ import (
 // ErrWorkerAlreadyActive is returned by Register when the named worker already
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
+
+// ErrUnsupportedRuntimeType is returned by Register when runtimeType is not a
+// recognised value (podman or openshift).
+var ErrUnsupportedRuntimeType = fmt.Errorf("unsupported runtime_type")
+
+// validRuntimeTypes is the list of runtime type strings accepted by Register.
+var validRuntimeTypes = []models.WorkerRuntimeType{
+	models.WorkerRuntimeTypePodman,
+	models.WorkerRuntimeTypeOpenShift,
+}
 
 const (
 	// commandChannelSize is the buffer size for the per-worker command channel.
@@ -100,6 +111,10 @@ func New(repo repository.WorkerRepository) *Registry {
 // workerName must come from the validated token — callers must not trust the name
 // the worker declares in its RegisterRequest.
 func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
+	if !slices.Contains(validRuntimeTypes, models.WorkerRuntimeType(runtimeType)) {
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedRuntimeType, runtimeType)
+	}
+
 	r.mu.Lock()
 	if _, exists := r.workers[workerName]; exists {
 		r.mu.Unlock()

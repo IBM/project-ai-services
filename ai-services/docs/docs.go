@@ -1271,7 +1271,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.",
                 "produces": [
                     "application/json"
                 ],
@@ -1283,7 +1283,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
-                        "name": "connector_type",
+                        "name": "type",
                         "in": "query"
                     }
                 ],
@@ -1497,6 +1497,67 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Connection test failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a datasource connector by ID. Returns 409 Conflict if the connector is still linked to one or more applications.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Delete datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource connector ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Datasource deleted"
+                    },
+                    "400": {
+                        "description": "Invalid connector ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Datasource is connected to one or more applications",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }

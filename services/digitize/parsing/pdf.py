@@ -140,10 +140,9 @@ def load_pdf_pages(pdf_path):
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
                 pdf_pages.append(page.extract_words(extra_attrs=["size", "fontname"]))
-    except Exception as e:
-        logger.warning(f"Failed to load PDF pages from {pdf_path}: {e}")
+    except (PDFSyntaxError, FileNotFoundError, OSError) as e:
+        logger.warning(f"Failed to load PDF pages from {pdf_path}: {e}", exc_info=True)
         return []
-    
     return pdf_pages
 
 def find_text_font_size(

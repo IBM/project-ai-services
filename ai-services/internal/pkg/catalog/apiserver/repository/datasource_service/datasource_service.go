@@ -2,6 +2,7 @@ package datasourceservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -25,7 +26,7 @@ const (
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
-// DatasourceService is the single implementation of the create-datasource flow.
+// DatasourceService is the single implementation of the datasource connector business logic.
 // It is provider-agnostic: provider-specific behaviour (connection testing) is
 // delegated to a ConnectionTester looked up from the testers registry.
 // Sensitive-field identification is derived at runtime from each provider's
@@ -138,6 +139,35 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	return &apimodels.CreateDatasourceResponse{ID: connector.ID.String()}, nil
+}
+
+// DeleteDatasource removes a datasource connector by ID.
+// Returns 404 if not found, 409 if the connector is still linked to one or more services.
+//
+// The existence check, in-use check, and DELETE all run inside a single serializable
+// transaction (owned by the repository layer) so a concurrent link cannot slip between
+// the guard and the delete.
+func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) error {
+	linkedCount, err := s.connectorRepo.DeleteIfUnlinked(ctx, id, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
+			return &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: fmt.Sprintf("datasource %q not found", id),
+			}
+		}
+
+		if errors.Is(err, dbrepo.ErrConnectorInUse) {
+			return &ValidationError{
+				Code:    http.StatusConflict,
+				Message: fmt.Sprintf("datasource is connected to %d application(s) and cannot be deleted", linkedCount),
+			}
+		}
+
+		return fmt.Errorf("failed to delete datasource: %w", err)
+	}
+
+	return nil
 }
 
 // ListDatasources returns a paginated list of datasource connectors, optionally filtered
