@@ -1993,6 +1993,10 @@ const docTemplate = `{
                     "description": "ApplicationName is the human-readable display name of the owning application.",
                     "type": "string"
                 },
+                "err_msg": {
+                    "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
                 "last_sync_at": {
                     "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
                     "type": "string"
@@ -2004,10 +2008,6 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
                         }
                     ]
-                },
-                "service_id": {
-                    "description": "ServiceID is the UUID of the connected service row.",
-                    "type": "string"
                 },
                 "sync_status": {
                     "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
