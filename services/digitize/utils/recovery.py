@@ -5,11 +5,19 @@ Implements a fast single-query recovery strategy: on startup a single
 database query locates all zombie jobs (accepted / in_progress at the
 time of the previous crash) and marks them as failed.
 
+Also sweeps the ``conversion_tasks`` table to recover tasks that were
+left in ``running`` state when the service crashed, and verifies that
+``queued``/``pending`` tasks still have their cached input files.
+
 This mirrors the pattern introduced in digitize-api-sample where
 recovery logic is isolated from the general utility bag.
 """
 
+import shutil
+from pathlib import Path
+
 from common.misc_utils import get_logger, cleanup_staging_directory
+from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.utils.db import (
     close_open_sync_log,
@@ -194,3 +202,74 @@ def recover_connector_sync_state() -> int:
         logger.debug("No stuck connector syncs found on startup")
 
     return len(affected_ids)
+
+
+def recover_conversion_tasks() -> int:
+    """
+    On startup, sweep the ``conversion_tasks`` table.
+
+    All three active statuses are failed unconditionally:
+
+    - ``running``  → ``failed``  (process died mid-conversion; chunk state unknown)
+    - ``queued``   → ``failed``  (pipeline task that polled this row is gone)
+    - ``pending``  → ``failed``  (same — no pipeline task will ever promote or consume it)
+
+    The pipeline tasks (``_run_ingest`` / ``_run_digitize``) are fire-and-forget
+    asyncio tasks created by the previous process.  They are not restarted on
+    startup, so any task they were responsible for polling will never reach the
+    job-level status update even if the dispatcher re-runs it.
+
+    Returns:
+        Number of tasks that were recovered (status changed).
+    """
+    from digitize.db.manager import db_manager
+
+    recovered = 0
+
+    try:
+        tasks = db_manager.get_conversion_tasks(
+                status=[
+                    ConversionTaskStatus.RUNNING,
+                    ConversionTaskStatus.QUEUED,
+                    ConversionTaskStatus.PENDING,
+                ]
+            )
+        for task in tasks:
+            if task.status == ConversionTaskStatus.RUNNING:
+                # Best-effort: clean chunk directories left over from the crashed run
+                try:
+                    chunk_dir = Path(task.cached_file).parent / "chunks"
+                    if chunk_dir.exists():
+                        shutil.rmtree(chunk_dir)
+                except Exception as clean_err:
+                    logger.warning(
+                        f"Could not clean chunk dir for task {task.task_id}: {clean_err}"
+                    )
+                db_manager.update_task_status(
+                    task.task_id, ConversionTaskStatus.FAILED,
+                    error="Service restarted during conversion",
+                )
+                logger.warning(f"Recovery: task {task.task_id} running→failed")
+                recovered += 1
+            else:
+                # queued / pending — the pipeline task that would have polled this
+                # row is gone and will not be restarted.  Fail unconditionally so
+                # the job surfaces a clean terminal state rather than hanging forever.
+                db_manager.update_task_status(
+                    task.task_id, ConversionTaskStatus.FAILED,
+                    error="Service restarted before conversion could complete",
+                )
+                logger.warning(
+                    f"Recovery: task {task.task_id} {task.status}→failed"
+                )
+                recovered += 1
+
+    except Exception as exc:
+        logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
+
+    if recovered:
+        logger.info(f"🔄 Recovered {recovered} conversion task(s) on startup")
+    else:
+        logger.debug("✅ No stale conversion tasks found on startup")
+
+    return recovered

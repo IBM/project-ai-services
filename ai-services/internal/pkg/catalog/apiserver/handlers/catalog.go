@@ -229,17 +229,17 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 // ListConnectorProviders godoc
 //
 //	@Summary		List connector providers
-//	@Description	Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.
+//	@Description	Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			connector_type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
-//	@Success		200				{array}		types.Connector	"List of providers"
-//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
-//	@Failure		404				{object}	ErrorResponse	"Connector type not found"
+//	@Param			type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
+//	@Success		200		{array}		types.Connector	"List of providers"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse	"Connector type not found"
 //	@Router			/connectors [get]
 func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
-	connectorType := c.Query("connector_type")
+	connectorType := c.Query("type")
 
 	var providers []*types.Connector
 	if connectorType == "" {
