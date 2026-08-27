@@ -43,7 +43,7 @@ from pathlib import Path
 
 from common.misc_utils import get_logger
 from digitize.db.manager import db_manager
-from digitize.db.models import ConversionTask
+from digitize.db.models import ConversionTask, ConversionTaskStatus
 from digitize.models import OutputFormat
 from digitize.parsing.converter import convert_document_format
 from digitize.settings import settings
@@ -109,14 +109,14 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         cached_path = Path(task.cached_file)
         if not cached_path.exists():
             db_manager.update_task_status(
-                task.task_id, "failed",
+                task.task_id, ConversionTaskStatus.FAILED,
                 error="Cached input file missing at dispatch time",
             )
             logger.warning(f"Task {task.task_id}: cached file missing — marked failed")
             return
 
         # Mark task as running — pipeline layer picks this up via poll.
-        db_manager.update_task_status(task.task_id, "running")
+        db_manager.update_task_status(task.task_id, ConversionTaskStatus.RUNNING)
 
         # Convert in a child process — CPU-bound, no GIL release
         out_dir = settings.digitize.digitized_docs_dir
@@ -130,12 +130,12 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
             OutputFormat(task.output_format),
         )
 
-        db_manager.update_task_status(task.task_id, "completed", result_path=result_path)
+        db_manager.update_task_status(task.task_id, ConversionTaskStatus.COMPLETED, result_path=result_path)
         logger.info(f"Task {task.task_id} completed → {result_path}")
 
     except Exception as exc:
         logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
-        db_manager.update_task_status(task.task_id, "failed", error=str(exc))
+        db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
 
     finally:
         # Delete the staged input file — result_path is kept until user exports.

@@ -551,8 +551,9 @@ def process_documents(
                     if time.monotonic() >= task_deadlines[task_id]:
                         path = task_id_to_path[task_id]
                         doc_id = doc_id_dict.get(Path(path).name)
+                        doc_name = Path(task.cached_file).name if task.cached_file else Path(path).name
                         error = (
-                            f"Conversion task {task_id} did not complete within "
+                            f"Conversion task {task_id} ({doc_name}) did not complete within "
                             f"{timeout_s:.0f}s — dispatcher may be stalled"
                         )
                         logger.error(error)

@@ -16,7 +16,7 @@ from common.misc_utils import get_logger
 from digitize.db.models import (
     Job, Document, DocumentChecksum,
     Connector, ConnectorDocumentChecksum, ConnectorSyncLog,
-    ConversionTask,
+    ConversionTask, ConversionTaskStatus,
 )
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
@@ -1512,7 +1512,7 @@ class DatabaseManager:
         output_format: str,
         page_count: int,
         is_large: bool,
-        status: str = "queued",
+        status: ConversionTaskStatus = ConversionTaskStatus.QUEUED,
     ) -> Optional[ConversionTask]:
         """
         Insert a single conversion_tasks row.
@@ -1526,7 +1526,7 @@ class DatabaseManager:
             output_format: 'json' | 'md' | 'txt'.
             page_count:    Document page count (0 for DOCX).
             is_large:      True when page_count >= heavy_doc_page_threshold.
-            status:        Initial status — 'queued' or 'pending'.
+            status:        Initial status — QUEUED or PENDING.
 
         Returns:
             The created ConversionTask or None on failure.
@@ -1700,7 +1700,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = select(func.count()).where(
-                    ConversionTask.status == "queued",
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
                     ConversionTask.operation == operation,
                 )
                 return session.scalar(stmt) or 0
@@ -1720,7 +1720,7 @@ class DatabaseManager:
             with get_db_session() as session:
                 stmt = (
                     select(ConversionTask.operation, func.count())
-                    .where(ConversionTask.status == "queued")
+                    .where(ConversionTask.status == ConversionTaskStatus.QUEUED)
                     .group_by(ConversionTask.operation)
                 )
                 rows = session.execute(stmt).all()
@@ -1772,7 +1772,7 @@ class DatabaseManager:
 
                 queued = session.scalar(
                     select(func.count()).where(
-                        ConversionTask.status == "queued",
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
                     )
                 ) or 0
@@ -1812,9 +1812,9 @@ class DatabaseManager:
                 updates: Dict[str, Any] = {
                     "status": status,
                 }
-                if status == "running":
+                if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in ("completed", "failed"):
+                if status in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -1845,7 +1845,7 @@ class DatabaseManager:
                 stmt = (
                     select(ConversionTask)
                     .where(
-                        ConversionTask.status == "queued",
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
                     )
                     .order_by(ConversionTask.queued_at)
@@ -1877,7 +1877,7 @@ class DatabaseManager:
                 subq = (
                     select(ConversionTask.task_id)
                     .where(
-                        ConversionTask.status == "queued",
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
                     )
                     .order_by(ConversionTask.queued_at)
@@ -1890,7 +1890,7 @@ class DatabaseManager:
                     update(ConversionTask)
                     .where(ConversionTask.task_id == subq)
                     .values(
-                        status="running",
+                        status=ConversionTaskStatus.RUNNING,
                         started_at=now,
                     )
                     .returning(ConversionTask)

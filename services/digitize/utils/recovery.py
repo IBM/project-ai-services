@@ -205,7 +205,7 @@ def recover_connector_sync_state() -> int:
 
 def recover_conversion_tasks() -> int:
     """
-    On startup, sweep the ``conversion_tasks`` table:
+    On startup, sweep the ``conversion_tasks`` table.
 
     - ``running``  → ``failed``  (process died mid-conversion; chunk state unknown)
     - ``queued``   → keep if cached file present; else ``failed``

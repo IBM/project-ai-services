@@ -4,6 +4,7 @@ SQLAlchemy ORM models for digitize metadata storage.
 These models map to the PostgreSQL schema defined in init_schema.sql.
 """
 
+import enum
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -284,6 +285,15 @@ class ConnectorSyncLog(Base):
         return f"<ConnectorSyncLog(connector_id='{self.connector_id}', seq={self.seq})>"
 
 
+class ConversionTaskStatus(str, enum.Enum):
+    """Lifecycle statuses for a ConversionTask row."""
+    PENDING   = "pending"    # over-quota; waiting for queue headroom
+    QUEUED    = "queued"     # admitted to queue; waiting for semaphore slot
+    RUNNING   = "running"    # semaphore slot acquired
+    COMPLETED = "completed"  # conversion finished successfully
+    FAILED    = "failed"     # conversion failed or timed out
+
+
 class ConversionTask(Base):
     """
     Conversion task model representing a single Docling conversion work item.
@@ -321,7 +331,7 @@ class ConversionTask(Base):
     # True when page_count >= heavy_doc_page_threshold
     is_large: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # Lifecycle status
+    # Lifecycle status — use ConversionTaskStatus values; stored as VARCHAR in DB
     status: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Written on completion

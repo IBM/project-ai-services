@@ -9,6 +9,7 @@ conversion_tasks row.  This function is the sole owner of job and
 document status transitions for digitization jobs.
 """
 import time
+from pathlib import Path
 
 from common.misc_utils import get_logger, get_utc_timestamp
 from digitize.db.manager import db_manager
@@ -38,8 +39,9 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
     task = db_manager.get_conversion_task_by_job_id(job_id)
     while task is not None and task.status not in terminal_statuses:
         if time.monotonic() >= deadline:
+            doc_name = Path(task.cached_file).name if task.cached_file else "unknown"
             raise _DeadlineExceeded(
-                f"Conversion task for job {job_id} did not {phase_label} within "
+                f"Conversion task for job {job_id} ({doc_name}) did not {phase_label} within "
                 f"{timeout_s:.0f}s — dispatcher may be stalled"
             )
         time.sleep(settings.digitize.conversion_poll_interval)
