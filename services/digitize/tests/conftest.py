@@ -348,7 +348,6 @@ def mock_conversion_task():
     task.queued_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     task.started_at = None
     task.completed_at = None
-    task.updated_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     return task
 
 

@@ -64,7 +64,6 @@ def _ct(**kwargs):
         queued_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         started_at=None,
         completed_at=None,
-        updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
     defaults.update(kwargs)
     t = Mock()
