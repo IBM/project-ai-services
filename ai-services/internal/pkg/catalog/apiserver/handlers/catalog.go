@@ -233,20 +233,20 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			type	query		string			false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
-//	@Success		200		{array}		types.Connector	"List of providers"
-//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
-//	@Failure		404		{object}	ErrorResponse	"Connector type not found"
+//	@Param			type	query		string						false	"Filter by connector type (e.g. 'datasource'). Omit to return all types."
+//	@Success		200		{array}		types.ConnectorResponse		"List of providers"
+//	@Failure		401		{object}	ErrorResponse				"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse				"Connector type not found"
 //	@Router			/connectors [get]
 func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
 	connectorType := c.Query("type")
 
-	var providers []*types.Connector
+	var connectors []*types.Connector
 	if connectorType == "" {
-		providers = h.provider.ListAllConnectors()
+		connectors = h.provider.ListAllConnectors()
 	} else {
 		var err error
-		providers, err = h.provider.ListConnectors(connectorType)
+		connectors, err = h.provider.ListConnectors(connectorType)
 		if err != nil {
 			c.JSON(http.StatusNotFound, ErrorResponse{
 				Error: fmt.Sprintf("connector type %q not found", connectorType),
@@ -256,12 +256,12 @@ func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
 		}
 	}
 
-	// Return an empty array rather than null when no providers are registered yet.
-	if providers == nil {
-		providers = []*types.Connector{}
+	response := make([]types.ConnectorResponse, len(connectors))
+	for i, conn := range connectors {
+		response[i] = types.ToConnectorResponse(conn)
 	}
 
-	c.JSON(http.StatusOK, providers)
+	c.JSON(http.StatusOK, response)
 }
 
 // GetConnectorProviderParams godoc

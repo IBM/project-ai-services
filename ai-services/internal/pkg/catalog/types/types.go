@@ -182,12 +182,39 @@ type ComponentSummary struct {
 
 // Connector holds the metadata loaded from a connector's metadata.yaml file.
 type Connector struct {
-	Type          string `yaml:"type" json:"type"`                     // always "connector"
-	ID            string `yaml:"id" json:"id"`                         // e.g. "object_storage", "file_system"
-	Name          string `yaml:"name" json:"name"`                     // display name
-	Description   string `yaml:"description" json:"description"`       // short description
-	ConnectorType string `yaml:"connector_type" json:"connector_type"` // e.g. "datasource"
-	ConnectorName string `yaml:"connector_name" json:"connector_name"` // display label for connector_type
+	Type          string `yaml:"type"`          // always "connector"
+	ID            string `yaml:"id"`            // e.g. "object_storage", "file_system"
+	Name          string `yaml:"name"`          // provider display name
+	Description   string `yaml:"description"`   // short description
+	ConnectorType string `yaml:"connector_type"` // e.g. "datasource"
+	ConnectorName string `yaml:"connector_name"` // display label for connector_type, e.g. "Data sources"
+}
+
+// ConnectorProvider holds the provider-level fields nested inside ConnectorResponse.
+type ConnectorProvider struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ConnectorResponse is the API response shape for a connector entry.
+type ConnectorResponse struct {
+	Type     string            `json:"type"`     // connector_type, e.g. "datasource"
+	Name     string            `json:"name"`     // connector_name, e.g. "Data sources"
+	Provider ConnectorProvider `json:"provider"` // provider identity
+}
+
+// ToConnectorResponse converts a Connector into the API response shape.
+func ToConnectorResponse(c *Connector) ConnectorResponse {
+	return ConnectorResponse{
+		Type: c.ConnectorType,
+		Name: c.ConnectorName,
+		Provider: ConnectorProvider{
+			ID:          c.ID,
+			Name:        c.Name,
+			Description: c.Description,
+		},
+	}
 }
 
 // RuntimeMetadata contains runtime-specific metadata.

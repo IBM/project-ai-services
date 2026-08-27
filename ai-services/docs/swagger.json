@@ -2613,31 +2613,37 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider": {
             "type": "object",
             "properties": {
-                "connector_name": {
-                    "description": "display label for connector_type",
-                    "type": "string"
-                },
-                "connector_type": {
-                    "description": "e.g. \"datasource\"",
-                    "type": "string"
-                },
                 "description": {
-                    "description": "short description",
                     "type": "string"
                 },
                 "id": {
-                    "description": "e.g. \"object_storage\", \"file_system\"",
                     "type": "string"
                 },
                 "name": {
-                    "description": "display name",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "connector_name, e.g. \"Data sources\"",
                     "type": "string"
                 },
+                "provider": {
+                    "description": "provider identity",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider"
+                        }
+                    ]
+                },
                 "type": {
-                    "description": "always \"connector\"",
+                    "description": "connector_type, e.g. \"datasource\"",
                     "type": "string"
                 }
             }

@@ -228,7 +228,7 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 | `DELETE` | `/datasources/:id`                                          | Delete a datasource (only if not connected to any application)                                           |
 | `GET`    | `/datasources/:id/services`                                 | List all services connected to a datasource with sync status                                             |
 | `GET`    | `/connectors/:connector_type/providers/:provider_id/params` | Get the input schema for a provider (use `connector_type=datasource`)                                    |
-| `GET`    | `/connectors[?connector_type=datasource]`                   | List all supported datasource provider types (use `connector_type=datasource` to filter for datasources) |
+| `GET`    | `/connectors[?type=datasource]`                             | List all supported datasource provider types (use `type=datasource` to filter for datasources)           |
 
 ### 5.2 Application-Datasource Connection APIs
 
@@ -462,27 +462,39 @@ Returns the JSON Schema for the connector creation/edit form, read directly from
 
 ### 6.7 List Providers for a Connector Type
 
-**`GET /api/v1/connectors[?connector_type=datasource]`**
+**`GET /api/v1/connectors[?type=datasource]`**
 
 Returns all registered providers for the given connector type, discovered from the `assets/connectors/<connector_type>/` directory (see Section 8.4). The UI uses this to populate the provider picker when creating a new connector.
 
-**Example:** `GET /api/v1/connectors[?connector_type=datasource]`
+**Query parameters:**
+
+| Parameter | Type   | Required | Description                                                         |
+| --------- | ------ | -------- | ------------------------------------------------------------------- |
+| `type`    | string | No       | Filter by connector type (e.g. `datasource`). Omit to return all.  |
+
+**Example:** `GET /api/v1/connectors?type=datasource`
 
 **Response `200 OK`:**
 
 ```json
 [
   {
-    "id": "s3",
-    "name": "Amazon S3",
-    "description": "Amazon S3 bucket or IBM Cloud Object Storage bucket via HMAC credentials",
-    "schema": "/api/v1/connectors/datasource/providers/s3/schema"
+    "type": "datasource",
+    "name": "Data sources",
+    "provider": {
+      "id": "object_storage",
+      "name": "Object storage",
+      "description": "HTTPS based connection with cloud S3-compatible object storage support"
+    }
   },
   {
-    "id": "ssh",
-    "name": "Remote SSH",
-    "description": "Remote server accessible via SSH private key",
-    "schema": "/api/v1/connectors/datasource/providers/ssh/schema"
+    "type": "datasource",
+    "name": "Data sources",
+    "provider": {
+      "id": "file_system",
+      "name": "File system",
+      "description": "SSH based connection with IBM i, AIX, Linux and Windows support."
+    }
   }
 ]
 ```
