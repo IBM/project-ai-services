@@ -46,6 +46,9 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 		return fmt.Errorf("failed to get Caddy pod name: %w", err)
 	}
 
+	// Delete the cert secret and Caddy pod to reset the custom certificate.
+	// For self-signed certs, the secret may not exist, but execution never reaches here
+	// because a domain change is rejected earlier.
 	if err := deleteSecretAndPod(ctx, deployCtx, caddyPodName, catalogConstant.CatalogCertSecretName); err != nil {
 		return err
 	}
