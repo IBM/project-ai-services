@@ -484,7 +484,8 @@ Returns all registered providers for the given connector type, discovered from t
     "provider": {
       "id": "object_storage",
       "name": "Object storage",
-      "description": "HTTPS based connection with cloud S3-compatible object storage support"
+      "description": "HTTPS based connection with cloud S3-compatible object storage support",
+      "schema": "/api/v1/connectors/datasource/providers/object_storage/params"
     }
   },
   {
@@ -493,7 +494,8 @@ Returns all registered providers for the given connector type, discovered from t
     "provider": {
       "id": "file_system",
       "name": "File system",
-      "description": "SSH based connection with IBM i, AIX, Linux and Windows support."
+      "description": "SSH based connection with IBM i, AIX, Linux and Windows support.",
+      "schema": "/api/v1/connectors/datasource/providers/file_system/params"
     }
   }
 ]

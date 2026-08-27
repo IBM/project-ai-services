@@ -195,6 +195,7 @@ type ConnectorProvider struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Schema      string `json:"schema"` // path to the provider's JSON Schema params endpoint
 }
 
 // ConnectorResponse is the API response shape for a connector entry.
@@ -213,6 +214,7 @@ func ToConnectorResponse(c *Connector) ConnectorResponse {
 			ID:          c.ID,
 			Name:        c.Name,
 			Description: c.Description,
+			Schema:      "/api/v1/connectors/" + c.ConnectorType + "/providers/" + c.ID + "/params",
 		},
 	}
 }

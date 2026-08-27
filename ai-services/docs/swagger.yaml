@@ -436,6 +436,9 @@ definitions:
         type: string
       name:
         type: string
+      schema:
+        description: path to the provider's JSON Schema params endpoint
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse:
     properties:

@@ -2630,6 +2630,10 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "schema": {
+                    "description": "path to the provider's JSON Schema params endpoint",
+                    "type": "string"
                 }
             }
         },
