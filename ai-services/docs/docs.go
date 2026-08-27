@@ -1293,7 +1293,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse"
                             }
                         }
                     },

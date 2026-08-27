@@ -182,10 +182,10 @@ type ComponentSummary struct {
 
 // Connector holds the metadata loaded from a connector's metadata.yaml file.
 type Connector struct {
-	Type          string `yaml:"type"`          // always "connector"
-	ID            string `yaml:"id"`            // e.g. "object_storage", "file_system"
-	Name          string `yaml:"name"`          // provider display name
-	Description   string `yaml:"description"`   // short description
+	Type          string `yaml:"type"`           // always "connector"
+	ID            string `yaml:"id"`             // e.g. "object_storage", "file_system"
+	Name          string `yaml:"name"`           // provider display name
+	Description   string `yaml:"description"`    // short description
 	ConnectorType string `yaml:"connector_type"` // e.g. "datasource"
 	ConnectorName string `yaml:"connector_name"` // display label for connector_type, e.g. "Data sources"
 }
