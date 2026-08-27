@@ -1,3 +1,5 @@
+import { api } from "@/api/axios";
+import { CONNECTORS_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
   DataSourceConnectorApiResponse,
   DataSourceConnectorsListResponse,
@@ -14,35 +16,35 @@ export function transformConnectorToRow(
     type: connector.provider.name,
     services: connector.connected_services,
     // Suppress the message column for healthy connectors — no warning to show.
-    messages: connector.status === "Connected" ? "" : (connector.message ?? ""),
+    messages: connector.status === "connected" ? "" : (connector.message ?? ""),
     actions: "actions",
   };
 }
 
 export async function fetchDataSourceConnectors(
   page = 1,
-  pageSize = 10,
+  pageSize = 20,
 ): Promise<DataSourceConnectorsListResponse> {
-  const { default: mockData } =
-    await import("@/pages/Connectors/datasource-connectors-mock-data.json");
-
-  const allItems = mockData.data as DataSourceConnectorApiResponse[];
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const pageItems = allItems.slice(start, end);
-
-  return {
-    data: pageItems,
-    total: allItems.length,
-    page,
-    page_size: pageSize,
-  };
+  const res = await api.get<DataSourceConnectorsListResponse>(
+    CONNECTORS_ENDPOINTS.LIST_CONNECTORS,
+    { params: { page, page_size: pageSize } },
+  );
+  return res.data;
 }
 
 export async function fetchAllDataSourceConnectors(): Promise<
   DataSourceConnectorApiResponse[]
 > {
-  const { default: mockData } =
-    await import("@/pages/Connectors/datasource-connectors-mock-data.json");
-  return mockData.data as DataSourceConnectorApiResponse[];
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: DataSourceConnectorApiResponse[] = [];
+
+  while (hasNext) {
+    const response = await fetchDataSourceConnectors(currentPage, 100);
+    allData.push(...response.data);
+    hasNext = response.pagination?.has_next ?? false;
+    currentPage++;
+  }
+
+  return allData;
 }
