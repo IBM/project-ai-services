@@ -7,7 +7,7 @@ requiring an actual PostgreSQL database connection.
 
 import sys
 import types
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -184,7 +184,8 @@ def mock_db_operations():
          patch('digitize.utils.db.get_document') as mock_get_document, \
          patch('digitize.utils.db.get_all_documents_paginated') as mock_get_all_docs, \
          patch('digitize.utils.db.get_all_document_ids') as mock_get_doc_ids, \
-         patch('digitize.utils.db.get_status_manager') as mock_get_status_mgr:
+         patch('digitize.utils.db.get_status_manager') as mock_get_status_mgr, \
+         patch('digitize.utils.db.is_import_export_in_progress', new_callable=AsyncMock) as mock_import_export:
         
         # Set default return values
         mock_create_job.return_value = None
@@ -201,6 +202,8 @@ def mock_db_operations():
         mock_status_mgr.update_job_progress = Mock()
         mock_get_status_mgr.return_value = mock_status_mgr
         
+        mock_import_export.return_value = False  # no import/export in progress by default
+
         yield {
             'create_job': mock_create_job,
             'get_job': mock_get_job,
@@ -209,7 +212,8 @@ def mock_db_operations():
             'get_document': mock_get_document,
             'get_all_documents_paginated': mock_get_all_docs,
             'get_all_document_ids': mock_get_doc_ids,
-            'get_status_manager': mock_get_status_mgr
+            'get_status_manager': mock_get_status_mgr,
+            'is_import_export_in_progress': mock_import_export,
         }
 
 
@@ -320,5 +324,61 @@ def mock_db_job():
     }
     mock_job.updated_at = datetime(2024, 1, 1, 1, 0, 0, tzinfo=timezone.utc)
     return mock_job
+
+@pytest.fixture
+def mock_conversion_task():
+    """
+    Create a mock ConversionTask object for testing.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    task = Mock()
+    task.task_id = "task-abc-123"
+    task.job_id = "test-job-123"
+    task.doc_id = "doc-1"
+    task.operation = "digitization"
+    task.cached_file = "/var/cache/staging/test-job-123/sample.pdf"
+    task.output_format = "json"
+    task.page_count = 10
+    task.is_large = False
+    task.status = "queued"
+    task.result_path = None
+    task.error = None
+    task.queued_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    task.started_at = None
+    task.completed_at = None
+    return task
+
+
+@pytest.fixture
+def mock_large_conversion_task(mock_conversion_task):
+    """A large (weight=2) conversion task."""
+    mock_conversion_task.task_id = "task-large-456"
+    mock_conversion_task.is_large = True
+    mock_conversion_task.page_count = 600
+    mock_conversion_task.operation = "ingestion"
+    return mock_conversion_task
+
+
+@pytest.fixture
+def mock_conversion_task_completed(mock_conversion_task):
+    """A completed conversion task with a result path."""
+    from datetime import datetime, timezone
+
+    mock_conversion_task.status = "completed"
+    mock_conversion_task.result_path = "/var/cache/digitized/doc-1/output.json"
+    mock_conversion_task.started_at = datetime(2024, 1, 1, 0, 0, 5, tzinfo=timezone.utc)
+    mock_conversion_task.completed_at = datetime(2024, 1, 1, 0, 0, 15, tzinfo=timezone.utc)
+    return mock_conversion_task
+
+
+@pytest.fixture
+def mock_conversion_task_failed(mock_conversion_task):
+    """A failed conversion task."""
+    mock_conversion_task.status = "failed"
+    mock_conversion_task.error = "Conversion error: out of memory"
+    return mock_conversion_task
+
 
 # Made with Bob
