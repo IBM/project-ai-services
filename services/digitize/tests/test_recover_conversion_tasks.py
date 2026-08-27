@@ -3,10 +3,8 @@ Unit tests for recover_conversion_tasks — utils/recovery.py.
 
 Verifies that:
   - running → failed (with chunk dir cleanup)
-  - queued tasks with missing file → failed
-  - queued tasks with file present → kept (status unchanged)
-  - pending tasks with missing file → failed
-  - pending tasks with file present → kept
+  - queued → failed unconditionally (pipeline task is gone after restart)
+  - pending → failed unconditionally (same reason)
   - The function returns an accurate count of recovered (status-changed) tasks
 """
 
@@ -69,11 +67,11 @@ class TestRecoverConversionTasks:
 
         assert not chunk_dir.exists()  # shutil.rmtree was called
 
-    def test_queued_task_with_missing_file_marked_failed(self, tmp_path):
+    def test_queued_task_marked_failed(self, tmp_path):
+        """queued → failed unconditionally; the pipeline task is gone after restart."""
         from digitize.utils.recovery import recover_conversion_tasks
 
-        missing = str(tmp_path / "gone.pdf")
-        queued = _make_task("t-queued-gone", "queued", missing)
+        queued = _make_task("t-queued", "queued", str(tmp_path / "file.pdf"))
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
             mock_mgr.get_conversion_tasks.return_value = [queued]
@@ -82,34 +80,16 @@ class TestRecoverConversionTasks:
             count = recover_conversion_tasks()
 
         mock_mgr.update_task_status.assert_any_call(
-            "t-queued-gone", "failed",
-            error="Cached input file lost during restart",
+            "t-queued", "failed",
+            error="Service restarted before conversion could complete",
         )
         assert count == 1
 
-    def test_queued_task_with_present_file_kept(self, tmp_path):
+    def test_pending_task_marked_failed(self, tmp_path):
+        """pending → failed unconditionally; the pipeline task is gone after restart."""
         from digitize.utils.recovery import recover_conversion_tasks
 
-        present = str(tmp_path / "here.pdf")
-        Path(present).write_bytes(b"%PDF-1.4")
-        queued = _make_task("t-queued-ok", "queued", present)
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.return_value = [queued]
-            mock_mgr.update_task_status = Mock()
-
-            count = recover_conversion_tasks()
-
-        # update_task_status must NOT be called for this task
-        for c in mock_mgr.update_task_status.call_args_list:
-            assert c.args[0] != "t-queued-ok"
-        assert count == 0
-
-    def test_pending_task_with_missing_file_marked_failed(self, tmp_path):
-        from digitize.utils.recovery import recover_conversion_tasks
-
-        missing = str(tmp_path / "lost_pending.pdf")
-        pending = _make_task("t-pending-gone", "pending", missing)
+        pending = _make_task("t-pending", "pending", str(tmp_path / "file.pdf"))
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
             mock_mgr.get_conversion_tasks.return_value = [pending]
@@ -118,47 +98,26 @@ class TestRecoverConversionTasks:
             count = recover_conversion_tasks()
 
         mock_mgr.update_task_status.assert_any_call(
-            "t-pending-gone", "failed",
-            error="Cached input file lost during restart",
+            "t-pending", "failed",
+            error="Service restarted before conversion could complete",
         )
         assert count == 1
-
-    def test_pending_task_with_present_file_kept(self, tmp_path):
-        from digitize.utils.recovery import recover_conversion_tasks
-
-        present = str(tmp_path / "pending_ok.pdf")
-        Path(present).write_bytes(b"%PDF-1.4")
-        pending = _make_task("t-pending-ok", "pending", present)
-
-        with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.return_value = [pending]
-            mock_mgr.update_task_status = Mock()
-
-            count = recover_conversion_tasks()
-
-        for c in mock_mgr.update_task_status.call_args_list:
-            assert c.args[0] != "t-pending-ok"
-        assert count == 0
 
     def test_mixed_recovery_counts_correctly(self, tmp_path):
-        """Combined scenario: 1 running + 1 queued-missing + 1 queued-ok → count=2."""
+        """1 running + 1 queued + 1 pending → all three failed → count=3."""
         from digitize.utils.recovery import recover_conversion_tasks
 
-        present = str(tmp_path / "ok.pdf")
-        Path(present).write_bytes(b"%PDF-1.4")
-        missing = str(tmp_path / "gone.pdf")
-
-        running = _make_task("t-r", "running", present)
-        q_gone = _make_task("t-q-gone", "queued", missing)
-        q_ok = _make_task("t-q-ok", "queued", present)
+        running = _make_task("t-r",  "running", str(tmp_path / "run.pdf"))
+        queued  = _make_task("t-q",  "queued",  str(tmp_path / "q.pdf"))
+        pending = _make_task("t-p",  "pending", str(tmp_path / "p.pdf"))
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.return_value = [running, q_gone, q_ok]
+            mock_mgr.get_conversion_tasks.return_value = [running, queued, pending]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
 
-        assert count == 2  # running + queued-missing
+        assert count == 3
 
     def test_returns_zero_when_nothing_to_recover(self, tmp_path):
         from digitize.utils.recovery import recover_conversion_tasks

@@ -1598,7 +1598,6 @@ class DatabaseManager:
                 )
                 for t in tasks
             ])
-            session.flush()
             logger.debug(
                 f"Batch-inserted {len(tasks)} conversion task(s) "
                 f"(job_id={tasks[0]['job_id']!r})"

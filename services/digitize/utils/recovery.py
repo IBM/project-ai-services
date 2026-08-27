@@ -207,9 +207,16 @@ def recover_conversion_tasks() -> int:
     """
     On startup, sweep the ``conversion_tasks`` table.
 
+    All three active statuses are failed unconditionally:
+
     - ``running``  → ``failed``  (process died mid-conversion; chunk state unknown)
-    - ``queued``   → keep if cached file present; else ``failed``
-    - ``pending``  → keep if cached file present; else ``failed``
+    - ``queued``   → ``failed``  (pipeline task that polled this row is gone)
+    - ``pending``  → ``failed``  (same — no pipeline task will ever promote or consume it)
+
+    The pipeline tasks (``_run_ingest`` / ``_run_digitize``) are fire-and-forget
+    asyncio tasks created by the previous process.  They are not restarted on
+    startup, so any task they were responsible for polling will never reach the
+    job-level status update even if the dispatcher re-runs it.
 
     Returns:
         Number of tasks that were recovered (status changed).
@@ -240,20 +247,17 @@ def recover_conversion_tasks() -> int:
                 logger.warning(f"Recovery: task {task.task_id} running→failed")
                 recovered += 1
             else:
-                # queued / pending — keep only if the cached file is still present
-                if not Path(task.cached_file).exists():
-                    db_manager.update_task_status(
-                        task.task_id, "failed",
-                        error="Cached input file lost during restart",
-                    )
-                    logger.warning(
-                        f"Recovery: task {task.task_id} {task.status}→failed (file lost)"
-                    )
-                    recovered += 1
-                else:
-                    logger.info(
-                        f"Recovery: task {task.task_id} stays {task.status} (file intact)"
-                    )
+                # queued / pending — the pipeline task that would have polled this
+                # row is gone and will not be restarted.  Fail unconditionally so
+                # the job surfaces a clean terminal state rather than hanging forever.
+                db_manager.update_task_status(
+                    task.task_id, "failed",
+                    error="Service restarted before conversion could complete",
+                )
+                logger.warning(
+                    f"Recovery: task {task.task_id} {task.status}→failed"
+                )
+                recovered += 1
 
     except Exception as exc:
         logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
