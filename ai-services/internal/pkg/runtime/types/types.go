@@ -72,3 +72,11 @@ type CRDResource struct {
 	Name   string
 	Labels map[string]string
 }
+
+// HTTPProxyResponse carries the result of an HTTP request executed on the
+// worker node and returned to the control plane via the gRPC stream.
+type HTTPProxyResponse struct {
+	StatusCode int
+	Headers    map[string]string
+	Body       []byte
+}

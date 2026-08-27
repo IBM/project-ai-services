@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/go-resty/resty/v2"
 
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -868,4 +872,117 @@ func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _
 	logger.Errorf("unsupported method called!")
 
 	return "", fmt.Errorf("unsupported method")
+}
+
+// ─── HTTP proxy tunnel ────────────────────────────────────────────────────────
+
+// HTTPProxy makes an HTTP request to targetURL from the worker node and returns
+// the response to the control plane. The targetURL hostname may be a Podman
+// pod name — it is resolved to the pod's infra-container IP via the Podman
+// socket before the request is made.
+//
+// TODO: pod IP resolution works for rootful Podman where the pod network bridge
+// is visible on the host. For rootless Podman the resolved IP lives inside a
+// private network namespace and is unreachable from the host process; use a
+// Caddy-proxied URL or a hostPort mapping in that case.
+func (pc *PodmanClient) HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error) {
+	resolvedURL, err := pc.resolvePodNameInURL(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("HTTPProxy: resolve pod IP: %w", err)
+	}
+
+	client := resty.New()
+
+	req := client.R().SetContext(ctx)
+	for k, v := range headers {
+		req.SetHeader(k, v)
+	}
+	if len(body) > 0 {
+		req.SetBody(body)
+	}
+
+	resp, err := req.Execute(method, resolvedURL)
+	if err != nil {
+		return nil, fmt.Errorf("HTTPProxy: execute request: %w", err)
+	}
+
+	respHeaders := make(map[string]string, len(resp.Header()))
+	for k := range resp.Header() {
+		respHeaders[k] = resp.Header().Get(k)
+	}
+
+	return &types.HTTPProxyResponse{
+		StatusCode: resp.StatusCode(),
+		Headers:    respHeaders,
+		Body:       resp.Body(),
+	}, nil
+}
+
+// resolvePodNameInURL rewrites the hostname in rawURL from a Podman pod name
+// to the pod's infra-container IP address. If the hostname is already an IP
+// or localhost it is returned unchanged.
+func (pc *PodmanClient) resolvePodNameInURL(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse URL %q: %w", rawURL, err)
+	}
+
+	host := u.Hostname() // strips port if present
+
+	// Already an IP or localhost — nothing to do.
+	if host == "localhost" || net.ParseIP(host) != nil {
+		return rawURL, nil
+	}
+
+	// Treat the hostname as a pod name and resolve it to the pod's IP.
+	podIP, err := pc.podNameToIP(host)
+	if err != nil {
+		return "", fmt.Errorf("resolve pod %q to IP: %w", host, err)
+	}
+
+	// Rebuild the URL with the IP in place of the pod name.
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(podIP, port)
+	} else {
+		u.Host = podIP
+	}
+
+	return u.String(), nil
+}
+
+// podNameToIP inspects the named pod and returns its infra-container IP address.
+func (pc *PodmanClient) podNameToIP(podName string) (string, error) {
+	podReport, err := pods.Inspect(pc.Context, podName, nil)
+	if err != nil {
+		return "", fmt.Errorf("inspect pod %q: %w", podName, err)
+	}
+
+	infraID := podReport.InfraContainerID
+	if infraID == "" {
+		return "", fmt.Errorf("pod %q has no infra container", podName)
+	}
+
+	ctr, err := containers.Inspect(pc.Context, infraID, nil)
+	if err != nil {
+		return "", fmt.Errorf("inspect infra container of pod %q: %w", podName, err)
+	}
+
+	if ctr.NetworkSettings == nil {
+		return "", fmt.Errorf("pod %q infra container has no network settings", podName)
+	}
+
+	ip := ctr.NetworkSettings.IPAddress
+	if ip == "" {
+		// Fall back to the first network if the top-level IPAddress is empty
+		// (common in rootless Podman with named networks).
+		for _, n := range ctr.NetworkSettings.Networks {
+			if n.IPAddress != "" {
+				return n.IPAddress, nil
+			}
+		}
+
+		return "", fmt.Errorf("pod %q: no IP address found in network settings", podName)
+	}
+
+	return ip, nil
 }

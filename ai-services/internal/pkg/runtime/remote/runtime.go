@@ -296,6 +296,31 @@ func (r *RemoteRuntime) ExecInContainerWithCmd(ctx context.Context, podName, con
 	return output, nil
 }
 
+// ─── HTTP proxy tunnel ────────────────────────────────────────────────────────
+
+// HTTPProxy tunnels an HTTP request to the worker via the gRPC stream.
+// The worker executes the request locally (inside the Podman network) and
+// returns the status, headers, and body as a single CommandResult.
+func (r *RemoteRuntime) HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_HTTP_PROXY,
+		payload.HTTPProxy{
+			Method:    method,
+			TargetURL: targetURL,
+			Headers:   headers,
+			Body:      body,
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	var result types.HTTPProxyResponse
+	if err := unmarshalData(res, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 // ─── Network operations ───────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([]types.Route, error) {

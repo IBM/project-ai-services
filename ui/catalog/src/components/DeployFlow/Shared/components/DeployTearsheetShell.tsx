@@ -4,6 +4,7 @@ import {
   ProgressStep,
   InlineLoading,
   ActionableNotification,
+  InlineNotification,
 } from "@carbon/react";
 import styles from "../DeployFlow.shared.module.scss";
 
@@ -121,9 +122,13 @@ export const DeployTearsheetShell = ({
               <InlineLoading description="Loading deploy options..." />
             </div>
           ) : error ? (
-            <div className={styles.errorContainer}>
-              <p>Error: {error}</p>
-            </div>
+            <InlineNotification
+              kind="error"
+              title="Failed to load deploy options."
+              subtitle="Cancel and reopen to try again."
+              lowContrast
+              hideCloseButton
+            />
           ) : (
             children
           )}

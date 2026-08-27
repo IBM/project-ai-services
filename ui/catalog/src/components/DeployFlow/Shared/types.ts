@@ -25,6 +25,7 @@ export interface BaseStepProps {
   onEditingChange?: (isEditing: boolean) => void;
   onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
   showNameError?: boolean;
+  onComponentError?: (hasError: boolean) => void;
 }
 
 export interface ResourceItem {

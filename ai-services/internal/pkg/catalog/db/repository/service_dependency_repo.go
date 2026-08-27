@@ -158,22 +158,6 @@ func (r *serviceDependencyRepo) GetServicesByDependency(ctx context.Context, dep
 	return serviceIDs, nil
 }
 
-// RemoveAllDependenciesForService removes all dependencies for a specific service.
-// This is useful when deleting a service or resetting its dependencies.
-func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error {
-	query := `
-		DELETE FROM service_dependencies
-		WHERE service_id = $1
-	`
-
-	_, err := r.pool.Exec(ctx, query, serviceID)
-	if err != nil {
-		return fmt.Errorf("failed to remove all dependencies for service: %w", err)
-	}
-
-	return nil
-}
-
 // GetServiceCountByDependency returns, for each connector ID in dependencyIDs, the count of
 // services that reference it with the given dependencyType. A single GROUP BY query is issued
 // regardless of how many IDs are supplied. IDs with zero dependents are absent from the map.
@@ -211,6 +195,22 @@ func (r *serviceDependencyRepo) GetServiceCountByDependency(ctx context.Context,
 	}
 
 	return counts, nil
+}
+
+// RemoveAllDependenciesForService removes all dependencies for a specific service.
+// This is useful when deleting a service or resetting its dependencies.
+func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error {
+	query := `
+		DELETE FROM service_dependencies
+		WHERE service_id = $1
+	`
+
+	_, err := r.pool.Exec(ctx, query, serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to remove all dependencies for service: %w", err)
+	}
+
+	return nil
 }
 
 // GetLinkedServiceEndpoints joins service_dependencies → services → applications for all

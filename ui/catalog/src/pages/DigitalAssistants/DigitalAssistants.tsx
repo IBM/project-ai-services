@@ -101,7 +101,7 @@ const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
   // Get deploy options with automatic cache management
-  const { deployOptions: deployOptionsData } = useDeployOptions();
+  const { deployOptions: deployOptionsData } = useDeployOptions(true);
   const catalogId = deployOptionsData?.id;
 
   // Get architecture data from store for dynamic title and subtitle
