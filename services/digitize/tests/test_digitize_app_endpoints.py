@@ -58,8 +58,9 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
 
     # Stub out pipeline background tasks so TestClient doesn't execute them.
-    monkeypatch.setattr(jobs_router, "_run_digitize", Mock())
-    monkeypatch.setattr(jobs_router, "_run_ingest", Mock())
+    # Must be AsyncMock — asyncio.create_task() requires a coroutine.
+    monkeypatch.setattr(jobs_router, "_run_digitize", AsyncMock())
+    monkeypatch.setattr(jobs_router, "_run_ingest", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))

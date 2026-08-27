@@ -41,11 +41,7 @@ class TestRecoverConversionTasks:
         running = _make_task("t-run", "running", cached)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [running],
-                "queued": [],
-                "pending": [],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [running]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
@@ -66,11 +62,7 @@ class TestRecoverConversionTasks:
         running = _make_task("t-run-chunks", "running", cached)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [running],
-                "queued": [],
-                "pending": [],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [running]
             mock_mgr.update_task_status = Mock()
 
             recover_conversion_tasks()
@@ -84,11 +76,7 @@ class TestRecoverConversionTasks:
         queued = _make_task("t-queued-gone", "queued", missing)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [],
-                "queued": [queued],
-                "pending": [],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [queued]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
@@ -107,11 +95,7 @@ class TestRecoverConversionTasks:
         queued = _make_task("t-queued-ok", "queued", present)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [],
-                "queued": [queued],
-                "pending": [],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [queued]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
@@ -128,11 +112,7 @@ class TestRecoverConversionTasks:
         pending = _make_task("t-pending-gone", "pending", missing)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [],
-                "queued": [],
-                "pending": [pending],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [pending]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
@@ -151,11 +131,7 @@ class TestRecoverConversionTasks:
         pending = _make_task("t-pending-ok", "pending", present)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [],
-                "queued": [],
-                "pending": [pending],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [pending]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
@@ -177,11 +153,7 @@ class TestRecoverConversionTasks:
         q_ok = _make_task("t-q-ok", "queued", present)
 
         with patch(_DB_MANAGER_PATH) as mock_mgr:
-            mock_mgr.get_conversion_tasks.side_effect = lambda status: {
-                "running": [running],
-                "queued": [q_gone, q_ok],
-                "pending": [],
-            }[status]
+            mock_mgr.get_conversion_tasks.return_value = [running, q_gone, q_ok]
             mock_mgr.update_task_status = Mock()
 
             count = recover_conversion_tasks()
