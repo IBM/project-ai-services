@@ -72,6 +72,34 @@ jobs:
           fi
           echo "✅ Swagger comments and documentation are up to date!"
 
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'ai-services/go.mod'
+          cache-dependency-path: 'ai-services/go.sum'
+
+      - name: Run unit tests with coverage
+        working-directory: ai-services
+        run: |
+          go test \
+            -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+            -v \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            $(go list ./... | grep -v '/tests/e2e')
+
+      - name: Print coverage summary
+        working-directory: ai-services
+        run: go tool cover -func=coverage.out
+
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
