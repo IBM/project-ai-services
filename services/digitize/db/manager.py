@@ -6,7 +6,7 @@ Provides CRUD operations with proper error handling and transaction management.
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Dict, Any, cast
+from typing import List, Optional, Dict, Any, Union, cast
 from sqlalchemy import select, update, delete, func, or_, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
@@ -1677,13 +1677,19 @@ class DatabaseManager:
             return []
 
     @staticmethod
-    def get_conversion_tasks(status: str) -> List[ConversionTask]:
-        """Return all ConversionTask rows with the given status."""
+    def get_conversion_tasks(
+        status: Union[str, List[str]],
+    ) -> List[ConversionTask]:
+        """Return all ConversionTask rows whose status matches *status*.
+
+        *status* may be a single value or a list of values.
+        """
         try:
+            statuses = status if isinstance(status, list) else [status]
             with get_db_session() as session:
                 stmt = (
                     select(ConversionTask)
-                    .where(ConversionTask.status == status)
+                    .where(ConversionTask.status.in_(statuses))
                     .order_by(ConversionTask.queued_at)
                 )
                 tasks = list(session.scalars(stmt).all())

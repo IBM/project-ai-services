@@ -219,58 +219,41 @@ def recover_conversion_tasks() -> int:
     recovered = 0
 
     try:
-        # 1. running → failed
-        running_tasks = db_manager.get_conversion_tasks(status="running")
-        for task in running_tasks:
-            # Best-effort: clean chunk directories left over from the crashed run
-            try:
-                chunk_dir = Path(task.cached_file).parent / "chunks"
-                if chunk_dir.exists():
-                    shutil.rmtree(chunk_dir)
-            except Exception as clean_err:
-                logger.warning(
-                    f"Could not clean chunk dir for task {task.task_id}: {clean_err}"
-                )
-            db_manager.update_task_status(
-                task.task_id, "failed",
-                error="Service restarted during conversion",
-            )
-            logger.warning(f"Recovery: task {task.task_id} running→failed")
-            recovered += 1
-
-        # 2. queued — verify cached file
-        queued_tasks = db_manager.get_conversion_tasks(status="queued")
-        for task in queued_tasks:
-            if not Path(task.cached_file).exists():
+        tasks = db_manager.get_conversion_tasks(
+            status=["running", "queued", "pending"]
+        )
+        for task in tasks:
+            if task.status == "running":
+                # Best-effort: clean chunk directories left over from the crashed run
+                try:
+                    chunk_dir = Path(task.cached_file).parent / "chunks"
+                    if chunk_dir.exists():
+                        shutil.rmtree(chunk_dir)
+                except Exception as clean_err:
+                    logger.warning(
+                        f"Could not clean chunk dir for task {task.task_id}: {clean_err}"
+                    )
                 db_manager.update_task_status(
                     task.task_id, "failed",
-                    error="Cached input file lost during restart",
+                    error="Service restarted during conversion",
                 )
-                logger.warning(
-                    f"Recovery: task {task.task_id} queued→failed (file lost)"
-                )
+                logger.warning(f"Recovery: task {task.task_id} running→failed")
                 recovered += 1
             else:
-                logger.info(
-                    f"Recovery: task {task.task_id} remains queued (file intact)"
-                )
-
-        # 3. pending — verify cached file
-        pending_tasks = db_manager.get_conversion_tasks(status="pending")
-        for task in pending_tasks:
-            if not Path(task.cached_file).exists():
-                db_manager.update_task_status(
-                    task.task_id, "failed",
-                    error="Cached input file lost during restart",
-                )
-                logger.warning(
-                    f"Recovery: task {task.task_id} pending→failed (file lost)"
-                )
-                recovered += 1
-            else:
-                logger.info(
-                    f"Recovery: task {task.task_id} stays pending (file intact)"
-                )
+                # queued / pending — keep only if the cached file is still present
+                if not Path(task.cached_file).exists():
+                    db_manager.update_task_status(
+                        task.task_id, "failed",
+                        error="Cached input file lost during restart",
+                    )
+                    logger.warning(
+                        f"Recovery: task {task.task_id} {task.status}→failed (file lost)"
+                    )
+                    recovered += 1
+                else:
+                    logger.info(
+                        f"Recovery: task {task.task_id} stays {task.status} (file intact)"
+                    )
 
     except Exception as exc:
         logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
