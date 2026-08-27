@@ -2,12 +2,32 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
+
+// LinkedServiceEndpoint holds the information needed to call a downstream service
+// (e.g. Digitize) during credential propagation: the service's reachable URL and
+// the application it belongs to.
+type LinkedServiceEndpoint struct {
+	// ServiceID is the DB UUID of the linked service.
+	ServiceID uuid.UUID
+	// ApplicationID is the DB UUID of the application that owns the service.
+	ApplicationID uuid.UUID
+	// ApplicationName is the display name of the application.
+	ApplicationName string
+	// ApplicationCatalogID is the catalog_id of the owning application (e.g. "rag").
+	ApplicationCatalogID string
+	// ApplicationDeploymentType is the deployment_type of the owning application
+	// ("architectures" or "services"), used to resolve the display name from catalog metadata.
+	ApplicationDeploymentType string
+	// URL is the first api-type endpoint URL for this service (empty when none registered).
+	URL string
+}
 
 // ServiceDependencyRepository defines the interface for service dependency data operations.
 type ServiceDependencyRepository interface {
@@ -19,8 +39,18 @@ type ServiceDependencyRepository interface {
 	GetDependenciesByServiceID(ctx context.Context, serviceID uuid.UUID) ([]models.ServiceDependency, error)
 	// GetServicesByDependency retrieves all services that depend on a specific entity (service or component).
 	GetServicesByDependency(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]uuid.UUID, error)
+	// GetServiceCountByDependency returns the number of services that depend on each ID in
+	// dependencyIDs with the given dependencyType, in a single query.
+	// IDs with zero dependents are absent from the returned map.
+	GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error)
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
+	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
+	// all rows matching dependencyID + dependencyType, returning the application context and
+	// the first api-type endpoint URL for each linked service.
+	// Used by the credential propagation and sync-status fetch flows to resolve downstream
+	// service base URLs in one query rather than N individual lookups.
+	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -142,6 +172,112 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 	}
 
 	return nil
+}
+
+// GetServiceCountByDependency returns, for each connector ID in dependencyIDs, the count of
+// services that reference it with the given dependencyType. A single GROUP BY query is issued
+// regardless of how many IDs are supplied. IDs with zero dependents are absent from the map.
+// Returns an empty (non-nil) map when dependencyIDs is empty.
+func (r *serviceDependencyRepo) GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(dependencyIDs))
+	if len(dependencyIDs) == 0 {
+		return counts, nil
+	}
+
+	query := `
+		SELECT dependency_id, COUNT(*) AS service_count
+		FROM service_dependencies
+		WHERE dependency_id = ANY($1) AND dependency_type = $2
+		GROUP BY dependency_id
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyIDs, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count services by dependency: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var depID uuid.UUID
+		var count int
+		if err := rows.Scan(&depID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan service count: %w", err)
+		}
+		counts[depID] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating service counts: %w", err)
+	}
+
+	return counts, nil
+}
+
+// GetLinkedServiceEndpoints joins service_dependencies → services → applications for all
+// rows where dependency_id = dependencyID AND dependency_type = dependencyType, returning
+// the application identity and the first "api"-typed endpoint URL per linked service.
+// A single query is issued regardless of how many services are linked.
+func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceEndpoint, error) {
+	query := `
+		SELECT sd.service_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
+		FROM service_dependencies sd
+		INNER JOIN services     s ON s.id = sd.service_id
+		INNER JOIN applications a ON a.id = s.app_id
+		WHERE sd.dependency_id   = $1
+		  AND sd.dependency_type = $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyID, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query linked service endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var results []LinkedServiceEndpoint
+	for rows.Next() {
+		var (
+			ep            LinkedServiceEndpoint
+			endpointsJSON []byte
+		)
+
+		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &ep.ApplicationCatalogID, &ep.ApplicationDeploymentType, &endpointsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan linked service endpoint row: %w", err)
+		}
+
+		ep.URL = extractAPIEndpointURL(endpointsJSON)
+		results = append(results, ep)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating linked service endpoints: %w", err)
+	}
+
+	return results, nil
+}
+
+// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "api".
+// Both Podman and OpenShift deployers register the Digitize backend URL with type "api".
+// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
+func extractAPIEndpointURL(endpointsJSON []byte) string {
+	if len(endpointsJSON) == 0 {
+		return ""
+	}
+
+	var endpoints []map[string]any
+	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+		return ""
+	}
+
+	for _, ep := range endpoints {
+		if t, ok := ep["type"].(string); ok && t == "api" {
+			if u, ok := ep["url"].(string); ok {
+				return u
+			}
+		}
+	}
+
+	return ""
 }
 
 // Made with Bob

@@ -19,9 +19,6 @@ import (
 const (
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
-
-	// endpointTypeAPI is the endpoint type key used to locate the Digitize API URL.
-	endpointTypeAPI = "api"
 )
 
 // ValidationError re-exported so callers use the same type as for application errors.
@@ -41,7 +38,6 @@ type DigitizeClientInterface interface {
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
-	appRepo         dbrepo.ApplicationRepository
 	serviceRepo     dbrepo.ServiceRepository
 	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
@@ -58,7 +54,6 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
@@ -68,7 +63,6 @@ func NewDatasourceService(
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
-		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
 		svcDepRepo:      svcDepRepo,
 		validator:       validator,
@@ -191,31 +185,19 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 }
 
 // ConnectDatasourceToApplication links a datasource connector to every eligible service
-// (AcceptsDatasource == true, catalog_id == "digitize") in the given application.
+// (AcceptsDatasource == true) in the given application.
 //
 // Flow:
-//  1. Load the application and its services from the DB.
-//  2. Load the connector (with credentials) and decrypt sensitive metadata fields.
-//  3. For each service whose catalog entry has AcceptsDatasource set, locate the API
-//     endpoint stored in the services table, POST the connector payload to Digitize,
-//     and record a service_dependency row (type: connector).
+//  1. Load the connector (with credentials) and decrypt sensitive metadata fields.
+//  2. Fetch all services for the application, filtering to those whose catalog entry
+//     has AcceptsDatasource set and which have a live API endpoint registered.
+//  3. For each eligible service POST the connector payload to Digitize and record
+//     a service_dependency row (type: connector).
 //
-// At least one eligible, running service with an API endpoint is required; the call
-// returns 422 if none are found.
+// At least one eligible service with an API endpoint is required; the call returns
+// 422 if none are found.
 func (s *DatasourceService) ConnectDatasourceToApplication(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.ConnectDatasourceResponse, error) {
-	// Phase 1: load application + services.
-	app, err := s.appRepo.GetByID(ctx, applicationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
-	}
-
-	// Phase 2: load connector with credentials and decrypt sensitive fields.
+	// Phase 1: load connector with credentials and decrypt sensitive fields.
 	connector, err := s.loadConnector(ctx, datasourceID)
 	if err != nil {
 		return nil, err
@@ -226,33 +208,29 @@ func (s *DatasourceService) ConnectDatasourceToApplication(ctx context.Context, 
 		return nil, err
 	}
 
-	// Phase 3: propagate to each eligible Digitize service.
-	services, err := s.serviceRepo.GetByAppID(ctx, applicationID)
+	// Phase 2: resolve eligible services for this application via a single JOIN query
+	// (services → applications), filtering by catalog AcceptsDatasource in-memory.
+	linkedServices, err := s.eligibleServicesForApp(ctx, applicationID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load services for application: %w", err)
+		return nil, err
 	}
 
-	var connectedServiceID uuid.UUID
-
-	connectedCount := 0
-
-	for _, svc := range services {
-		connected, propagateErr := s.propagateToService(ctx, svc, connector, connectionDetails, datasourceID)
-		if propagateErr != nil {
-			return nil, propagateErr
-		}
-
-		if connected {
-			connectedServiceID = svc.ID
-			connectedCount++
-		}
-	}
-
-	if connectedCount == 0 {
+	if len(linkedServices) == 0 {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: "no eligible running service with an API endpoint found in application",
 		}
+	}
+
+	// Phase 3: propagate to each eligible service.
+	var connectedServiceID uuid.UUID
+
+	for _, svc := range linkedServices {
+		if err := s.sendToService(ctx, svc, connector, connectionDetails, datasourceID); err != nil {
+			return nil, err
+		}
+
+		connectedServiceID = svc.ServiceID
 	}
 
 	return &apimodels.ConnectDatasourceResponse{
@@ -260,6 +238,37 @@ func (s *DatasourceService) ConnectDatasourceToApplication(ctx context.Context, 
 		DatasourceID:  datasourceID.String(),
 		ConnectorID:   connectedServiceID.String(),
 	}, nil
+}
+
+// eligibleServicesForApp returns the subset of services in applicationID whose catalog
+// entry has AcceptsDatasource == true and which have a registered api-type endpoint.
+// It uses GetServiceEndpointsByAppID — a single JOIN query across services → applications —
+// so endpoint URLs are resolved at the DB level (same pattern as GetLinkedServiceEndpoints
+// in the service-dependency repo used by the AIS_1634 read path).
+func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceEndpoint, error) {
+	all, err := s.serviceRepo.GetServiceEndpointsByAppID(ctx, applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load services for application: %w", err)
+	}
+
+	var eligible []dbrepo.LinkedServiceEndpoint
+
+	for _, ep := range all {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(ep.ApplicationCatalogID)
+		if loadErr != nil || !catalogSvc.AcceptsDatasource {
+			continue
+		}
+
+		if ep.URL == "" {
+			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", ep.ServiceID, ep.ApplicationCatalogID)
+
+			continue
+		}
+
+		eligible = append(eligible, ep)
+	}
+
+	return eligible, nil
 }
 
 // loadConnector fetches the connector by ID (with credentials). Returns a typed ValidationError on 404.
@@ -290,26 +299,19 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 	return decryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
-// propagateToService sends the connector payload to a single service when it accepts a datasource
-// and has a live API endpoint. Returns true when the call succeeded, false when the service is
-// skipped (not eligible or no endpoint). Returns a non-nil error only on a downstream failure.
-func (s *DatasourceService) propagateToService(
+// sendToService POSTs the connector payload to a single Digitize service and records the
+// service_dependency row. Returns a *ValidationError on downstream failure.
+func (s *DatasourceService) sendToService(
 	ctx context.Context,
-	svc dbmodels.Service,
+	svc dbrepo.LinkedServiceEndpoint,
 	connector *dbmodels.Connector,
 	connectionDetails map[string]any,
 	datasourceID uuid.UUID,
-) (bool, error) {
-	catalogSvc, loadErr := s.catalogProvider.LoadService(svc.CatalogID)
-	if loadErr != nil || !catalogSvc.AcceptsDatasource {
-		return false, nil
-	}
+) error {
+	if svc.URL == "" {
+		logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ApplicationCatalogID)
 
-	apiURL := extractAPIEndpoint(svc.Endpoints)
-	if apiURL == "" {
-		logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ID, svc.CatalogID)
-
-		return false, nil
+		return nil
 	}
 
 	connectReq := apimodels.ConnectDatasourceRequest{
@@ -319,39 +321,25 @@ func (s *DatasourceService) propagateToService(
 		ConnectionDetails: connectionDetails,
 	}
 
-	if err := s.digitizeClient.Connect(ctx, apiURL, connectReq); err != nil {
-		return false, &ValidationError{
+	if err := s.digitizeClient.Connect(ctx, svc.URL, connectReq); err != nil {
+		return &ValidationError{
 			Code:    http.StatusBadGateway,
-			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.CatalogID, err),
+			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.ApplicationCatalogID, err),
 		}
 	}
 
 	// Record the connector dependency so it survives restarts.
 	dep := &dbmodels.ServiceDependency{
-		ServiceID:      svc.ID,
+		ServiceID:      svc.ServiceID,
 		DependencyID:   datasourceID,
 		DependencyType: dbmodels.DependencyTypeConnector,
 	}
 
 	if depErr := s.svcDepRepo.AddDependency(ctx, dep); depErr != nil {
-		logger.ErrorfCtx(ctx, "failed to record connector dependency for service %s: %v", svc.ID, depErr)
+		logger.ErrorfCtx(ctx, "failed to record connector dependency for service %s: %v", svc.ServiceID, depErr)
 	}
 
-	return true, nil
-}
-
-// extractAPIEndpoint returns the first "api" endpoint URL from a service's stored endpoint list,
-// or empty string when none is found.
-func extractAPIEndpoint(endpoints []map[string]any) string {
-	for _, ep := range endpoints {
-		if t, ok := ep["type"].(string); ok && t == endpointTypeAPI {
-			if url, ok := ep["url"].(string); ok && url != "" {
-				return url
-			}
-		}
-	}
-
-	return ""
+	return nil
 }
 
 // decryptSensitiveFields returns a copy of params where every key listed in

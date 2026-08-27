@@ -16,7 +16,6 @@ import (
 // so that a missing or empty key causes a fast failure before the server accepts any requests.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
@@ -30,7 +29,6 @@ func NewDatasourceService(
 
 	return datasourceservice.NewDatasourceService(
 		connectorRepo,
-		appRepo,
 		serviceRepo,
 		svcDepRepo,
 		validator,
