@@ -7,7 +7,7 @@ requiring an actual PostgreSQL database connection.
 
 import sys
 import types
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -184,7 +184,8 @@ def mock_db_operations():
          patch('digitize.utils.db.get_document') as mock_get_document, \
          patch('digitize.utils.db.get_all_documents_paginated') as mock_get_all_docs, \
          patch('digitize.utils.db.get_all_document_ids') as mock_get_doc_ids, \
-         patch('digitize.utils.db.get_status_manager') as mock_get_status_mgr:
+         patch('digitize.utils.db.get_status_manager') as mock_get_status_mgr, \
+         patch('digitize.utils.db.is_import_export_in_progress', new_callable=AsyncMock) as mock_import_export:
         
         # Set default return values
         mock_create_job.return_value = None
@@ -201,6 +202,8 @@ def mock_db_operations():
         mock_status_mgr.update_job_progress = Mock()
         mock_get_status_mgr.return_value = mock_status_mgr
         
+        mock_import_export.return_value = False  # no import/export in progress by default
+
         yield {
             'create_job': mock_create_job,
             'get_job': mock_get_job,
@@ -209,7 +212,8 @@ def mock_db_operations():
             'get_document': mock_get_document,
             'get_all_documents_paginated': mock_get_all_docs,
             'get_all_document_ids': mock_get_doc_ids,
-            'get_status_manager': mock_get_status_mgr
+            'get_status_manager': mock_get_status_mgr,
+            'is_import_export_in_progress': mock_import_export,
         }
 
 

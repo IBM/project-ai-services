@@ -330,13 +330,18 @@ class TestDispatchLoop:
             _set_semaphore_available(mod, original_available)
 
         # second_needed=2 (large ING) → budget_for_first = max(0, 1-2) = 0
-        # first_needed=1  (normal DIG) → budget_for_second = max(0, 1-1) = 0
-        # Both queues receive budget=0 — neither dispatches.
+        #   → DIG receives budget=0, _try_claim_if_fits("digitization", 0) → None, no dispatch
+        # first_needed=1  (normal DIG) → first_reservation=0 (only >1 triggers reservation)
+        #   → budget_for_second = max(0, available_after_first - 0) = max(0, 1-0) = 1
+        #   → ING receives budget=1, _try_claim_if_fits("ingestion", 1) → None
+        #     (large ING needs weight=2 > budget=1, so claim_head returns None inside the helper)
+        # Neither queue dispatches; the budget calculation is correct.
         assert ("digitization", 0) in calls, (
             "DIG normal must NOT be dispatched when large ING is waiting for 2 slots"
         )
-        assert ("ingestion", 0) in calls, (
-            "ING budget_for_second must also be 0 (first_needed=1, available=1)"
+        assert ("ingestion", 1) in calls, (
+            "ING receives budget=1 (no first_reservation for normal DIG head); "
+            "_try_claim_if_fits rejects it internally because weight=2 > budget=1"
         )
 
     def test_promote_pending_called_each_tick(self):

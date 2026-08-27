@@ -336,18 +336,12 @@ class TestPromotePending:
             Mock(task_id="tp2", cached_file="/tmp/b.pdf"),
         ]
 
-        call_count = [0]
-
-        def _scalar_side_effect(stmt):
-            """First scalar call = queued count (3). Execute calls need different mock."""
-            call_count[0] += 1
-            return 3  # queued_count
-
-        session.scalar.side_effect = _scalar_side_effect
-        # First execute = candidates SELECT; second execute = UPDATE
+        session.scalar.return_value = 3  # queued_count
+        # execute call order: advisory lock, SELECT candidates, UPDATE
         session.execute.side_effect = [
+            Mock(),                                        # pg_advisory_xact_lock
             Mock(all=Mock(return_value=candidate_rows)),   # SELECT candidates
-            Mock(rowcount=2),                               # UPDATE
+            Mock(rowcount=2),                              # UPDATE
         ]
 
         promoted = DatabaseManager.promote_pending("ingestion", quota=5)
@@ -357,11 +351,13 @@ class TestPromotePending:
         from digitize.db.manager import DatabaseManager
 
         session.scalar.return_value = 10  # already at quota
+        # advisory lock fires, but SELECT candidates and UPDATE must not
+        session.execute.side_effect = [Mock()]  # pg_advisory_xact_lock only
 
         promoted = DatabaseManager.promote_pending("ingestion", quota=10)
         assert promoted == 0
-        # No SELECT candidates or UPDATE should be issued
-        session.execute.assert_not_called()
+        # Only the advisory-lock execute should have been issued — no SELECT or UPDATE
+        assert session.execute.call_count == 1
 
     def test_returns_zero_on_db_error(self, session):
         from sqlalchemy.exc import SQLAlchemyError
