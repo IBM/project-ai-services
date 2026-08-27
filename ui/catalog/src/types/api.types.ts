@@ -406,10 +406,10 @@ export interface WorkerApiResponse {
   name: string;
   status: WorkerStatus;
   runtime_type: WorkerRuntimeType;
-  last_heartbeat: string;
+  last_heartbeat?: string;
   registered_at: string;
   updated_at: string;
-  metadata: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface WorkerListResponse {

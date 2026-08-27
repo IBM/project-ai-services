@@ -1,3 +1,5 @@
+import { api } from "@/api/axios";
+import { WORKERS_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type { WorkerApiResponse, WorkerListResponse } from "@/types/api.types";
 import type { WorkerResourceRow } from "@/components/WorkerResourcesTable/types";
 
@@ -18,16 +20,15 @@ export async function fetchWorkerResources(
   page = 1,
   pageSize = 20,
 ): Promise<WorkerListResponse> {
-  const { default: mockData } =
-    await import("@/pages/WorkerResources/worker-resources-mock-data.json");
-
-  const allItems = mockData.data as WorkerApiResponse[];
+  const response = await api.get<WorkerApiResponse[]>(
+    WORKERS_ENDPOINTS.LIST_WORKERS,
+  );
+  const allItems = response.data;
   const start = (page - 1) * pageSize;
   const end = start + pageSize;
-  const pageItems = allItems.slice(start, end);
 
   return {
-    data: pageItems,
+    data: allItems.slice(start, end),
     total: allItems.length,
     page,
     page_size: pageSize,
@@ -35,7 +36,8 @@ export async function fetchWorkerResources(
 }
 
 export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
-  const { default: mockData } =
-    await import("@/pages/WorkerResources/worker-resources-mock-data.json");
-  return mockData.data as WorkerApiResponse[];
+  const response = await api.get<WorkerApiResponse[]>(
+    WORKERS_ENDPOINTS.LIST_WORKERS,
+  );
+  return response.data;
 }

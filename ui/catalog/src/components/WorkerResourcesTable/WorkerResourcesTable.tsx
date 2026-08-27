@@ -41,7 +41,7 @@ import {
   fetchWorkerResources,
   fetchAllWorkerResources,
   transformWorkerToRow,
-} from "@/api/workers.api";
+} from "@/api/workerResources.api";
 import styles from "./WorkerResourcesTable.module.scss";
 
 interface RenderCellProps {
