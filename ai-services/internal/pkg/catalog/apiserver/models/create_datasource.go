@@ -21,11 +21,17 @@ type CreateDatasourceRequest struct {
 
 // ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
 type ConnectDatasourceRequest struct {
-	ConnectorID      string         `json:"connector_id"`
-	ConnectorName    string         `json:"connector_name"`
-	Type             string         `json:"type"`
-	AllowedExtensions []string      `json:"allowed_extensions,omitempty"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
 	ConnectionDetails map[string]any `json:"connection_details"`
+}
+
+// ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.
+type ConnectDatasourcesRequest struct {
+	// DatasourceIDs is the list of datasource connector UUIDs to connect.
+	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
 }
 
 // CreateDatasourceResponse is the response body returned after a successful datasource creation.
@@ -33,11 +39,17 @@ type CreateDatasourceResponse struct {
 	ID string `json:"id"`
 }
 
-// ConnectDatasourceResponse is the response body returned after a successful datasource connection.
-type ConnectDatasourceResponse struct {
-	ApplicationID string `json:"application_id"`
-	DatasourceID  string `json:"datasource_id"`
-	ConnectorID   string `json:"connector_id"`
+// DatasourceConnectionItem is the per-datasource result within a ConnectDatasourcesResponse.
+type DatasourceConnectionItem struct {
+	DatasourceID string `json:"datasource_id"`
+	ConnectorID  string `json:"connector_id,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// ConnectDatasourcesResponse is the response body returned after connecting datasources to an application.
+type ConnectDatasourcesResponse struct {
+	ApplicationID string                     `json:"application_id"`
+	Connections   []DatasourceConnectionItem `json:"connections"`
 }
 
 // DatasourceProviderInfo is the provider sub-object embedded in datasource API responses.

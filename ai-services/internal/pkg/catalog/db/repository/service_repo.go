@@ -178,7 +178,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 // GetLinkedServiceEndpoints so the connect-datasource flow can work with the same type.
 func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceEndpoint, error) {
 	query := `
-		SELECT s.id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
+		SELECT s.id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM services     s
 		INNER JOIN applications a ON a.id = s.app_id
 		WHERE s.app_id = $1
@@ -198,7 +198,7 @@ func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid
 			endpointsJSON []byte
 		)
 
-		if err := rows.Scan(&ep.ServiceID, &ep.ApplicationID, &ep.ApplicationName, &ep.ApplicationCatalogID, &ep.ApplicationDeploymentType, &endpointsJSON); err != nil {
+		if err := rows.Scan(&ep.ServiceID, &ep.ServiceCatalogID, &ep.ApplicationID, &ep.ApplicationName, &ep.ApplicationCatalogID, &ep.ApplicationDeploymentType, &endpointsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan service endpoint row: %w", err)
 		}
 

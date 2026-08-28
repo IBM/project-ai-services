@@ -274,32 +274,18 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	return result, nil
 }
 
-// ConnectDatasourceToApplication links a datasource connector to every eligible service
-// (AcceptsDatasource == true) in the given application.
+// ConnectDatasourcesToApplication links one or more datasource connectors to every eligible
+// service (AcceptsDatasource == true) in the given application.
 //
-// Flow:
-//  1. Load the connector (with credentials) and decrypt sensitive metadata fields.
-//  2. Fetch all services for the application, filtering to those whose catalog entry
-//     has AcceptsDatasource set and which have a live API endpoint registered.
-//  3. For each eligible service POST the connector payload to Digitize and record
-//     a service_dependency row (type: connector).
+// Each datasource is processed independently — a failure for one does not abort the others.
+// Results are returned per datasource. At least one eligible service must exist; the call
+// returns 422 if none are found.
 //
-// At least one eligible service with an API endpoint is required; the call returns
-// 422 if none are found.
-func (s *DatasourceService) ConnectDatasourceToApplication(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.ConnectDatasourceResponse, error) {
-	// Phase 1: load connector with credentials and decrypt sensitive fields.
-	connector, err := s.loadConnector(ctx, datasourceID)
-	if err != nil {
-		return nil, err
-	}
-
-	connectionDetails, err := s.decryptedConnectionDetails(ctx, connector)
-	if err != nil {
-		return nil, err
-	}
-
-	// Phase 2: resolve eligible services for this application via a single JOIN query
-	// (services → applications), filtering by catalog AcceptsDatasource in-memory.
+// This method is the single reusable core for both:
+//   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
+//   - the app-creation flow where datasources are pre-attached at deploy time.
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+	// Resolve eligible services once — shared across all datasources.
 	linkedServices, err := s.eligibleServicesForApp(ctx, applicationID)
 	if err != nil {
 		return nil, err
@@ -312,22 +298,51 @@ func (s *DatasourceService) ConnectDatasourceToApplication(ctx context.Context, 
 		}
 	}
 
-	// Phase 3: propagate to each eligible service.
+	connections := make([]apimodels.DatasourceConnectionItem, 0, len(datasourceIDs))
+
+	for _, datasourceID := range datasourceIDs {
+		connection := apimodels.DatasourceConnectionItem{DatasourceID: datasourceID.String()}
+
+		connectedServiceID, connectErr := s.connectOneDatasource(ctx, datasourceID, linkedServices)
+		if connectErr != nil {
+			connection.Error = connectErr.Error()
+		} else {
+			connection.ConnectorID = connectedServiceID.String()
+		}
+
+		connections = append(connections, connection)
+	}
+
+	return &apimodels.ConnectDatasourcesResponse{
+		ApplicationID: applicationID.String(),
+		Connections:   connections,
+	}, nil
+}
+
+// connectOneDatasource loads, decrypts, and propagates a single datasource connector
+// to all eligible services. Returns the last connected service ID on success.
+func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceEndpoint) (uuid.UUID, error) {
+	connector, err := s.loadConnector(ctx, datasourceID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	connectionDetails, err := s.decryptedConnectionDetails(ctx, connector)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
 	var connectedServiceID uuid.UUID
 
 	for _, svc := range linkedServices {
 		if err := s.sendToService(ctx, svc, connector, connectionDetails, datasourceID); err != nil {
-			return nil, err
+			return uuid.Nil, err
 		}
 
 		connectedServiceID = svc.ServiceID
 	}
 
-	return &apimodels.ConnectDatasourceResponse{
-		ApplicationID: applicationID.String(),
-		DatasourceID:  datasourceID.String(),
-		ConnectorID:   connectedServiceID.String(),
-	}, nil
+	return connectedServiceID, nil
 }
 
 // eligibleServicesForApp returns the subset of services in applicationID whose catalog
@@ -344,13 +359,13 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 	var eligible []dbrepo.LinkedServiceEndpoint
 
 	for _, ep := range all {
-		catalogSvc, loadErr := s.catalogProvider.LoadService(ep.ApplicationCatalogID)
+		catalogSvc, loadErr := s.catalogProvider.LoadService(ep.ServiceCatalogID)
 		if loadErr != nil || !catalogSvc.AcceptsDatasource {
 			continue
 		}
 
 		if ep.URL == "" {
-			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", ep.ServiceID, ep.ApplicationCatalogID)
+			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", ep.ServiceID, ep.ServiceCatalogID)
 
 			continue
 		}
@@ -404,22 +419,35 @@ func (s *DatasourceService) sendToService(
 	datasourceID uuid.UUID,
 ) error {
 	if svc.URL == "" {
-		logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ApplicationCatalogID)
+		logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ServiceCatalogID)
 
 		return nil
 	}
 
+	// Extract allowed_extensions from connection_details — stored there during CreateDatasource.
+	var allowedExtensions []string
+	if raw, ok := connectionDetails["allowed_extensions"]; ok {
+		if exts, ok := raw.([]any); ok {
+			for _, e := range exts {
+				if s, ok := e.(string); ok {
+					allowedExtensions = append(allowedExtensions, s)
+				}
+			}
+		}
+	}
+
 	connectReq := apimodels.ConnectDatasourceRequest{
-		ConnectorID:       connector.ID.String(),
-		ConnectorName:     connector.Name,
+		ID:                connector.ID.String(),
+		Name:              connector.Name,
 		Type:              connector.Provider,
+		AllowedExtensions: allowedExtensions,
 		ConnectionDetails: connectionDetails,
 	}
 
 	if err := s.digitizeClient.Connect(ctx, svc.URL, connectReq); err != nil {
 		return &ValidationError{
 			Code:    http.StatusBadGateway,
-			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.ApplicationCatalogID, err),
+			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.ServiceCatalogID, err),
 		}
 	}
 

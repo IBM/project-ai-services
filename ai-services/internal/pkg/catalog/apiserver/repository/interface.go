@@ -13,8 +13,8 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
-	// ConnectDatasourceToApplication links a datasource connector to each eligible service in a running application.
-	ConnectDatasourceToApplication(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.ConnectDatasourceResponse, error)
+	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
 	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
 	// Sensitive credential fields are never included in any returned item.
 	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
