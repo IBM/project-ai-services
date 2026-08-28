@@ -73,6 +73,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 		IsArchitecture:  isArchitecture,
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
+		WorkerName:      req.WorkerName,
 	}
 
 	// Process each service from request

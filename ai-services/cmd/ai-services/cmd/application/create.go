@@ -29,6 +29,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 const (
@@ -46,6 +47,7 @@ var (
 	rawArgParams []string
 	argParams    map[string]string
 	legacyCreate bool
+	workerName   string
 
 	// podman flags.
 	skipModelDownload     bool
@@ -171,6 +173,11 @@ func initCreateCommonFlags() {
 
 	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
+
+	createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, workerconstants.LocalWorkerName,
+		"Name of a connected remote worker to deploy to.\n"+
+			fmt.Sprintf("Defaults to %q (local deployment).\n", workerconstants.LocalWorkerName)+
+			"Example: --worker node-1\n")
 
 	createCmd.Flags().StringSliceVar(
 		&rawArgParams,
@@ -647,10 +654,11 @@ func buildArchitecturePayload(ctx context.Context, provider *catalog.CatalogProv
 	}
 
 	return &apiModels.CreateApplicationRequest{
-		CatalogID: archID,
-		Name:      appName,
-		Services:  services,
-		Version:   arch.Version,
+		CatalogID:  archID,
+		Name:       appName,
+		Services:   services,
+		Version:    arch.Version,
+		WorkerName: workerName,
 	}, nil
 }
 
@@ -674,10 +682,11 @@ func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiMo
 	}
 
 	return &apiModels.CreateApplicationRequest{
-		CatalogID: serviceID,
-		Name:      appName,
-		Services:  []apiModels.Service{svc},
-		Version:   svc.Version,
+		CatalogID:  serviceID,
+		Name:       appName,
+		Services:   []apiModels.Service{svc},
+		Version:    svc.Version,
+		WorkerName: workerName,
 	}, nil
 }
 

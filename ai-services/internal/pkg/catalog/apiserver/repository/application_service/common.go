@@ -25,6 +25,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -621,6 +622,17 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
 func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
+	// Default to local worker when none specified.
+	if req.WorkerName == "" {
+		req.WorkerName = workerconstants.LocalWorkerName
+	}
+
+	// Phase 0: verify the worker is ready before touching the database,
+	// so callers get an immediate 400 error.
+	if err := s.DeploymentExecutor.ValidateWorker(ctx, req.WorkerName); err != nil {
+		return nil, &ValidationError{Code: http.StatusBadRequest, Message: err.Error()}
+	}
+
 	// Phase 1: check for duplicate name
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {

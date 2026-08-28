@@ -84,7 +84,7 @@ enum CommandType {
   COMMAND_TYPE_DELETE_PVCS        = 21;
   COMMAND_TYPE_GET_SYSTEM_INFO    = 22;
   COMMAND_TYPE_RUNTIME_TYPE              = 23;
-  COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER   = 24;
+  COMMAND_TYPE_EXEC_IN_CONTAINER         = 24;
 
   // Caddy proxy management on the worker node.
   // A single command covers all route operations; the op is encoded in the payload.
@@ -94,4 +94,6 @@ enum CommandType {
   // The control plane sends an HTTP request; the worker executes it locally
   // against a pod endpoint and returns the response.
   COMMAND_TYPE_HTTP_PROXY                = 26;
+
+  COMMAND_TYPE_DOWNLOAD_MODEL            = 27;
 }
