@@ -189,7 +189,7 @@ class S3ConnectorConfig(BaseModel):
 
     @field_validator("allowed_extensions")
     @classmethod
-    def _check_extensions(cls, v: list[str]) -> list[str]:
+    def _normalise_extensions(cls, v: list[str]) -> list[str]:
         """Normalise extensions to lowercase with a leading dot.
 
         Entries that already have a leading dot are kept as-is;
@@ -276,7 +276,7 @@ class SSHConnectorConfig(BaseModel):
 
     @field_validator("allowed_extensions")
     @classmethod
-    def _check_extensions(cls, v: list[str]) -> list[str]:
+    def _normalise_extensions(cls, v: list[str]) -> list[str]:
         """Normalise extensions to lowercase with a leading dot.
 
         Entries that already have a leading dot are kept as-is;
