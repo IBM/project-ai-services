@@ -361,7 +361,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
 @app.post(
     "/v1/chat/completions",
     response_model=ChatCompletionResponse,
-    tags=["chat"],
+    tags=["chat", "MCP"],
     summary="Chat with RAG",
     description="""Generate chat completions grounded in retrieved documents using RAG (Retrieval-Augmented Generation).
 
