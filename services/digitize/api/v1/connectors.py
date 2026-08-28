@@ -124,13 +124,24 @@ async def create_connector(body: ConnectorCreateRequest):
             media_type="application/json",
         )
 
-    except IntegrityError:
-        # id or name already exists
-        logger.error(f"Connector {connector_id!r} or name {body.name!r} already exists")
-        APIError.raise_error(
-            ErrorCode.RESOURCE_LOCKED,
-            f"Connector {connector_id!r} or name {body.name!r} already exists",
+    except IntegrityError as exc:
+        # Distinguish duplicate id vs duplicate name.
+        # - Duplicate id: the DB layer uses ON CONFLICT DO NOTHING and raises a
+        #   plain IntegrityError whose orig message contains "already exists".
+        # - Duplicate name: PostgreSQL raises a real UniqueViolation (pgcode 23505)
+        #   whose orig.diag.constraint_name references the name unique index.
+        orig = exc.orig
+        name_conflict = (
+            hasattr(orig, "pgcode")
+            and orig.pgcode == "23505"
+            and "name" in (getattr(getattr(orig, "diag", None), "constraint_name", "") or "")
         )
+        if name_conflict:
+            msg = f"Connector name {body.name!r} already exists"
+        else:
+            msg = f"Connector id {connector_id!r} already exists"
+        logger.error(msg)
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
     except RuntimeError as exc:
         # encryption key not found
         logger.error(f"Encryption key error: {exc}")

@@ -1233,7 +1233,7 @@ def insert_connector(
     """
     Insert a new connector row on first-time POST /v1/connectors.
 
-    Raises IntegrityError if the id already exists (maps to 409).
+    Raises IntegrityError if the id or name already exists (maps to 409).
     """
     db_manager.insert_connector(
         connector_id=connector_id,
