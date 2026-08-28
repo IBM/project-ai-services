@@ -184,6 +184,10 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
         },
     )
 
+    # db_ops connector stubs — return None by default (no pre-existing connector)
+    monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_id", Mock(return_value=None))
+    monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_name", Mock(return_value=None))
+
     # Scheduler stubs — prevent RuntimeError from uninitialised _scheduler
     import digitize.connectors.scheduler as scheduler_module
     monkeypatch.setattr(scheduler_module, "register_connector_job", AsyncMock())
@@ -223,12 +227,13 @@ class TestPostConnector:
         assert response.status_code == 409
 
     def test_scheduler_not_called_on_duplicate(self, connector_test_client, monkeypatch):
-        """Scheduler job must NOT be registered when the DB insert fails (duplicate)."""
+        """Scheduler job must NOT be registered when a duplicate is detected by pre-check."""
         import digitize.connectors.scheduler as scheduler_module
 
+        # Simulate pre-check finding an existing connector with the same id.
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.insert_connector",
-            Mock(side_effect=IntegrityError(None, None, Exception("dup"))),
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
+            Mock(return_value=_make_connector()),
         )
         scheduler_spy = AsyncMock()
         monkeypatch.setattr(scheduler_module, "register_connector_job", scheduler_spy)
