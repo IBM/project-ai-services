@@ -16,8 +16,8 @@ Coverage:
   - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
   - POST   /v1/connectors/{id}/syncs/{sync_seq}/stop      (204 signalled, 409 stale seq, 409 not running, 404)
   - GET    /v1/documents — excludes connector-sourced docs
-  - GET    /v1/documents/{doc_id} — 404 for connector-sourced
-  - DELETE /v1/documents/{doc_id} — 404 for connector-sourced
+  - GET    /v1/documents/{doc_id} — 405 for connector-sourced
+  - DELETE /v1/documents/{doc_id} — 405 for connector-sourced
 """
 
 from datetime import datetime, timezone
@@ -651,14 +651,14 @@ class TestDocumentListConnectorFilter:
         connector_test_client.get("/v1/documents")
         assert captured.get("exclude_connector_sourced") is True
 
-    def test_get_doc_returns_404_for_connector_sourced(self, connector_test_client, monkeypatch):
+    def test_get_doc_returns_405_for_connector_sourced(self, connector_test_client, monkeypatch):
         """is_connector_sourced_document is imported inside the handler — patch the source."""
         monkeypatch.setattr(
             "digitize.utils.db.is_connector_sourced_document",
             Mock(return_value=True),
         )
         response = connector_test_client.get("/v1/documents/some-connector-doc-id")
-        assert response.status_code == 404
+        assert response.status_code == 405
 
     def test_get_doc_returns_data_for_user_submitted(self, connector_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
@@ -681,13 +681,13 @@ class TestDocumentListConnectorFilter:
         response = connector_test_client.get("/v1/documents/doc-001")
         assert response.status_code == 200
 
-    def test_delete_doc_returns_404_for_connector_sourced(self, connector_test_client, monkeypatch):
+    def test_delete_doc_returns_405_for_connector_sourced(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
             "digitize.utils.db.is_connector_sourced_document",
             Mock(return_value=True),
         )
         response = connector_test_client.delete("/v1/documents/connector-owned-doc")
-        assert response.status_code == 404
+        assert response.status_code == 405
 
 # ===========================================================================
 # dispatch_sync  (core logic — no HTTP)
