@@ -48,7 +48,7 @@ from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
     finalize_sync_log_and_update_connector,
-    get_active_connector,
+    get_connector_by_id,
     get_connector_sync_status,
     get_sync_log_status,
     get_job,
@@ -122,7 +122,7 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         responsible for acquiring the sync lock beforehand via
         ``try_acquire_sync_lock()``.
     """
-    config = get_active_connector(connector_id)
+    config = get_connector_by_id(connector_id)
     if config is None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
         _fail_tick(sync_seq, connector_id, RuntimeError(f"Connector {connector_id!r} not found"))

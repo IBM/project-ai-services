@@ -884,6 +884,32 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_connector_by_name(name: str) -> "Optional[Connector]":
+        """
+        Fetch a single connector by name, eagerly loaded and expunged.
+
+        Returns None if not found.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Connector).where(Connector.name == name)
+                connector = session.scalars(stmt).one_or_none()
+                if connector is None:
+                    return None
+                _ = (
+                    connector.id, connector.name, connector.type,
+                    connector.connection_details, connector.allowed_extensions,
+                    connector.sync_interval_seconds, connector.attached_at,
+                    connector.last_sync_at, connector.sync_status,
+                    connector.error, connector.total_files,
+                )
+                session.expunge(connector)
+                return connector
+        except SQLAlchemyError as e:
+            logger.error(f"DB error fetching connector by name {name!r}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
     def get_connector_sync_status(connector_id: str) -> Optional[str]:
         """
         Return the current sync_status string for a connector.

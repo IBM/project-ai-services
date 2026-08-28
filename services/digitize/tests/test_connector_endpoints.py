@@ -257,7 +257,7 @@ class TestPostConnector:
 class TestPutConnector:
     def test_returns_200_on_success(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
@@ -269,7 +269,7 @@ class TestPutConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -285,7 +285,7 @@ class TestPutConnector:
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
         """PUT with only name must not touch connection_details."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         upsert_mock = Mock()
@@ -300,7 +300,7 @@ class TestPutConnector:
 
     def test_returns_409_on_name_conflict(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -315,7 +315,7 @@ class TestPutConnector:
 
     def test_returns_409_when_delete_pending(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)),
         )
         response = connector_test_client.put(
@@ -351,7 +351,7 @@ class TestDeleteConnector:
         """Case B: not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         def _consume_coro(coro):
@@ -366,7 +366,7 @@ class TestDeleteConnector:
         """Case A: syncing → mark DELETE_PENDING, return 204; no teardown task created."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
@@ -377,7 +377,7 @@ class TestDeleteConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
@@ -486,7 +486,7 @@ class TestListConnectors:
 class TestGetConnector:
     def test_returns_200_with_detail(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
@@ -502,7 +502,7 @@ class TestGetConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
@@ -516,7 +516,7 @@ class TestGetConnector:
             "private_key": "ENCRYPTED_PRIVATE_KEY",
         }
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=c),
         )
         monkeypatch.setattr(
@@ -538,7 +538,7 @@ class TestSyncLog:
     def test_returns_paginated_history(self, connector_test_client, monkeypatch):
         logs = [_make_sync_log(seq=3), _make_sync_log(seq=2)]
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -557,7 +557,7 @@ class TestSyncLog:
 
     def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(
@@ -568,7 +568,7 @@ class TestSyncLog:
     def test_limit_capped_at_200(self, connector_test_client, monkeypatch):
         """limit > 200 must be rejected by FastAPI's Query validation."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -585,7 +585,7 @@ class TestGetSync:
     def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
         log = _make_sync_log(seq=3)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -603,7 +603,7 @@ class TestGetSync:
 
     def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -617,7 +617,7 @@ class TestGetSync:
 
     def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(
@@ -706,7 +706,7 @@ class TestDispatchSync:
         from digitize.api.v1.connectors import dispatch_sync
 
         task_mock = Mock(side_effect=lambda coro: coro.close())
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=None), \
@@ -725,7 +725,7 @@ class TestDispatchSync:
         from digitize.api.v1.connectors import dispatch_sync
 
         task_mock = Mock()
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=3), \
@@ -742,7 +742,7 @@ class TestDispatchSync:
     def test_raises_sync_not_found_when_connector_missing(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncNotFound
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=None):
             with pytest.raises(SyncNotFound):
                 self._run(dispatch_sync(CONNECTOR_ID))
@@ -750,7 +750,7 @@ class TestDispatchSync:
     def test_raises_sync_locked_when_delete_pending(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncLocked
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)):
             with pytest.raises(SyncLocked):
                 self._run(dispatch_sync(CONNECTOR_ID))
@@ -758,7 +758,7 @@ class TestDispatchSync:
     def test_raises_sync_locked_when_cancel_pending(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncLocked
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=5), \
@@ -840,7 +840,7 @@ class TestStopSync:
     ):
         """Correct sync_seq + mark_sync_cancel_pending True → 204."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         monkeypatch.setattr(
@@ -861,7 +861,7 @@ class TestStopSync:
     ):
         """sync_seq older than the active one → 409 without calling mark_sync_cancel_pending."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -884,7 +884,7 @@ class TestStopSync:
     ):
         """get_active_sync_seq returns None (not syncing) → 409."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -900,7 +900,7 @@ class TestStopSync:
         self, connector_test_client, monkeypatch
     ):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.post(
@@ -922,7 +922,7 @@ class TestPutConnectorTriggersSync:
         from digitize.connectors.models import ConnectorUpdateRequest
 
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
@@ -950,7 +950,7 @@ class TestPutConnectorTriggersSync:
         from digitize.connectors.models import ConnectorUpdateRequest
 
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())

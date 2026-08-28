@@ -1264,13 +1264,22 @@ def upsert_connector(
     )
 
 
-def get_active_connector(connector_id: str) -> Optional[Connector]:
+def get_connector_by_id(connector_id: str) -> Optional[Connector]:
     """
     Fetch a single connector by id.
 
     Returns the ORM object or None if not found.
     """
     return db_manager.get_connector_by_id(connector_id)
+
+
+def get_connector_by_name(name: str) -> Optional[Connector]:
+    """
+    Fetch a single connector by name.
+
+    Returns the ORM object or None if not found.
+    """
+    return db_manager.get_connector_by_name(name)
 
 
 def get_connector_sync_status(connector_id: str) -> Optional[str]:
