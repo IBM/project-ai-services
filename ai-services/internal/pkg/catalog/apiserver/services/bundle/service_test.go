@@ -74,7 +74,7 @@ func (m *mockServiceRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ models.
 func (m *mockServiceRepo) UpdateEndpoints(_ context.Context, _ uuid.UUID, _ []map[string]any) error {
 	panic("unexpected")
 }
-func (m *mockServiceRepo) GetServiceEndpointsByAppID(_ context.Context, _ uuid.UUID) ([]repository.LinkedServiceEndpoint, error) {
+func (m *mockServiceRepo) GetServiceEndpointsByAppID(_ context.Context, _ uuid.UUID) ([]repository.LinkedServiceRow, error) {
 	panic("unexpected")
 }
 func (m *mockServiceRepo) ExistsByCatalogID(ctx context.Context, catalogID string) (bool, error) {

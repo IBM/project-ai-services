@@ -23,7 +23,7 @@ type ServiceRepository interface {
 	// GetServiceEndpointsByAppID returns a LinkedServiceEndpoint row for every service
 	// belonging to appID, including the application context and the first api-type URL.
 	// Used by the connect-datasource flow to resolve service endpoints in one query.
-	GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceEndpoint, error)
+	GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceRow, error)
 	// Update updates a service in the database.
 	Update(ctx context.Context, service *models.Service) error
 	// UpdateStatus updates only the status and message of a service.
@@ -176,7 +176,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 // joining services → applications in a single query to obtain the application context
 // and the first api-type endpoint URL. This mirrors the shape used by
 // GetLinkedServiceEndpoints so the connect-datasource flow can work with the same type.
-func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceEndpoint, error) {
+func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceRow, error) {
 	query := `
 		SELECT s.id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM services     s
@@ -191,19 +191,15 @@ func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid
 	}
 	defer rows.Close()
 
-	var results []LinkedServiceEndpoint
+	var results []LinkedServiceRow
 	for rows.Next() {
-		var (
-			ep            LinkedServiceEndpoint
-			endpointsJSON []byte
-		)
+		var row LinkedServiceRow
 
-		if err := rows.Scan(&ep.ServiceID, &ep.ServiceCatalogID, &ep.ApplicationID, &ep.ApplicationName, &ep.ApplicationCatalogID, &ep.ApplicationDeploymentType, &endpointsJSON); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType); err != nil {
 			return nil, fmt.Errorf("failed to scan service endpoint row: %w", err)
 		}
 
-		ep.URL = extractAPIEndpointURL(endpointsJSON)
-		results = append(results, ep)
+		results = append(results, row)
 	}
 
 	if err := rows.Err(); err != nil {

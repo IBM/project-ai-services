@@ -476,7 +476,7 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 
 // connectOneDatasource loads, decrypts, and propagates a single datasource connector
 // to all eligible services. Returns the last connected service ID on success.
-func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceEndpoint) (uuid.UUID, error) {
+func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) (uuid.UUID, error) {
 	connector, err := s.loadConnector(ctx, datasourceID)
 	if err != nil {
 		return uuid.Nil, err
@@ -505,13 +505,13 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 // It uses GetServiceEndpointsByAppID — a single JOIN query across services → applications —
 // so endpoint URLs are resolved at the DB level (same pattern as GetLinkedServiceEndpoints
 // in the service-dependency repo used by the AIS_1634 read path).
-func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceEndpoint, error) {
+func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceRow, error) {
 	all, err := s.serviceRepo.GetServiceEndpointsByAppID(ctx, applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load services for application: %w", err)
 	}
 
-	var eligible []dbrepo.LinkedServiceEndpoint
+	var eligible []dbrepo.LinkedServiceRow
 
 	for _, ep := range all {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(ep.ServiceCatalogID)
@@ -568,7 +568,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 // service_dependency row. Returns a *ValidationError on downstream failure.
 func (s *DatasourceService) sendToService(
 	ctx context.Context,
-	svc dbrepo.LinkedServiceEndpoint,
+	svc dbrepo.LinkedServiceRow,
 	connector *dbmodels.Connector,
 	connectionDetails map[string]any,
 	datasourceID uuid.UUID,
@@ -651,7 +651,8 @@ func decryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	}
 
 	return result, nil
-}  
+}
+
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
 // using catalogclient.DigitizeClient (resty-based) and returns the sync_status, last_sync_at,
 // and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
