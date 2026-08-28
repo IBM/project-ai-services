@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.287
+  image: icr.io/ai-services-cicd/ai-services:v0.0.288
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
