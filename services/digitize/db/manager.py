@@ -1971,7 +1971,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 filters = [
-                    ConversionTask.status == "queued",
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
                     ConversionTask.operation == operation,
                     ConversionTask.connector_id == connector_id
                     if connector_id is not None
@@ -2008,7 +2008,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 filters = [
-                    ConversionTask.status == "queued",
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
                     ConversionTask.operation == operation,
                     ConversionTask.connector_id == connector_id
                     if connector_id is not None
@@ -2138,7 +2138,7 @@ class DatabaseManager:
                 stmt = (
                     select(ConversionTask.connector_id)
                     .where(
-                        ConversionTask.status == "queued",
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == "ingestion",
                         ConversionTask.connector_id.is_not(None),
                     )
@@ -2169,7 +2169,7 @@ class DatabaseManager:
                     session.execute(
                         delete(ConversionTask).where(
                             ConversionTask.connector_id == connector_id,
-                            ConversionTask.status == "queued",
+                            ConversionTask.status == ConversionTaskStatus.QUEUED,
                         )
                     ),
                 )
