@@ -169,9 +169,9 @@ class TestS3ConnectorConfig:
         cfg = _make_config(endpoint_url="")
         assert cfg.endpoint_url == ""
 
-    def test_allowed_extensions_without_dot_raises(self):
-        with pytest.raises(ValueError, match="'.'"):
-            _make_config(allowed_extensions=["pdf", ".docx"])
+    def test_allowed_extensions_without_dot_normalised(self):
+        cfg = _make_config(allowed_extensions=["pdf", ".docx"])
+        assert cfg.allowed_extensions == [".pdf", ".docx"]
 
     def test_allowed_extensions_valid(self):
         cfg = _make_config(allowed_extensions=[".PDF", ".docx"])
@@ -560,9 +560,9 @@ class TestSSHConnectorConfig:
         with pytest.raises(ValueError, match="PRIVATE KEY"):
             _make_sftp_config(private_key="not a pem string")
 
-    def test_allowed_extensions_without_dot_raises(self):
-        with pytest.raises(ValueError, match="'.'"):
-            _make_sftp_config(allowed_extensions=["pdf"])
+    def test_allowed_extensions_without_dot_normalised(self):
+        cfg = _make_sftp_config(allowed_extensions=["pdf"])
+        assert cfg.allowed_extensions == [".pdf"]
 
     def test_allowed_extensions_normalised_to_lowercase(self):
         cfg = _make_sftp_config(allowed_extensions=[".PDF", ".DOCX"])

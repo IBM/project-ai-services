@@ -190,19 +190,12 @@ class S3ConnectorConfig(BaseModel):
     @field_validator("allowed_extensions")
     @classmethod
     def _check_extensions(cls, v: list[str]) -> list[str]:
-        """Reject extension values that are missing the leading dot.
+        """Normalise extensions to lowercase with a leading dot.
 
-        ``os.path.splitext`` always returns extensions with a leading dot
-        (e.g. ``'.pdf'``).  An entry like ``'pdf'`` would silently match
-        nothing during listing — fail early with a clear message instead.
+        Entries that already have a leading dot are kept as-is;
+        entries without one (e.g. ``'pdf'``) have it prepended automatically.
         """
-        bad = [e for e in v if not e.startswith(".")]
-        if bad:
-            raise ValueError(
-                f"Each allowed_extension must start with '.', got: {bad!r}. "
-                f"Use '.pdf' not 'pdf'."
-            )
-        return [e.lower() for e in v]
+        return [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
 
     @model_validator(mode="after")
     def _check_credentials(self) -> "S3ConnectorConfig":
@@ -284,13 +277,12 @@ class SSHConnectorConfig(BaseModel):
     @field_validator("allowed_extensions")
     @classmethod
     def _check_extensions(cls, v: list[str]) -> list[str]:
-        bad = [e for e in v if not e.startswith(".")]
-        if bad:
-            raise ValueError(
-                f"Each allowed_extension must start with '.', got: {bad!r}. "
-                f"Use '.pdf' not 'pdf'."
-            )
-        return [e.lower() for e in v]
+        """Normalise extensions to lowercase with a leading dot.
+
+        Entries that already have a leading dot are kept as-is;
+        entries without one (e.g. ``'pdf'``) have it prepended automatically.
+        """
+        return [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
 
     @field_validator("remote_path")
     @classmethod
