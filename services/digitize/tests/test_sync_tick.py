@@ -501,7 +501,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             # must not raise despite close() failing
@@ -521,7 +521,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=1))
@@ -704,7 +704,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=11))  # must not raise

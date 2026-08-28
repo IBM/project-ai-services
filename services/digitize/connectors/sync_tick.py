@@ -157,16 +157,24 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             connector_id, scanned_files, known_checksums, all_checksums
         )
 
+        total_files = len(scanned_files)
+
         update_sync_log(
             connector_id,
             sync_seq,
-            total_files=len(scanned_files),
+            total_files=total_files,
             new_files=len(ingest_list),
             removed_files=len(orphan_checksums),
         )
-        update_connector_total_files(connector_id, len(scanned_files))
 
-        await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
+        invalid_count = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
+
+        if invalid_count > 0:
+            total_files -= invalid_count
+            update_connector_total_files(connector_id, total_files)
+            update_sync_log(connector_id, sync_seq, total_files=total_files)
+        else:
+            update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
@@ -283,7 +291,7 @@ async def _process_new_files(
     connector_name: str,
     scanner,
     ingest_list: list[tuple[str, str]],
-) -> None:
+) -> int:
     """Download and ingest *ingest_list* in batches of up to 10 files.
 
     Each batch of up to 10 files is downloaded into a single staging directory,
@@ -293,9 +301,17 @@ async def _process_new_files(
 
     Raises ``RuntimeError`` after processing all batches if any batch failed,
     so the caller can mark the connector as OUT_OF_SYNC.
+
+    Returns
+    -------
+    int
+        Number of files rejected by ``validate_document_file`` across all
+        batches.  The caller subtracts this from the total_files count so that
+        unsupported files are not included in the connector's reported total.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
+    invalid_file_count = 0
 
     for batch_number, batch_offset in enumerate(range(0, len(ingest_list), _BATCH_SIZE), start=1):
         batch = ingest_list[batch_offset : batch_offset + _BATCH_SIZE]
@@ -336,6 +352,7 @@ async def _process_new_files(
                         f"{connector_id!r}; skipping file: {val_exc}"
                     )
                     (batch_dir / filename).unlink(missing_ok=True)
+                    invalid_file_count += 1
                     continue
                 filename_to_checksum[filename] = checksum
 
@@ -402,6 +419,8 @@ async def _process_new_files(
             f"One or more documents failed to sync. See more details in digitize jobs "
             f"Connector-{connector_name}-{sync_seq}-*"
         )
+
+    return invalid_file_count
 
 
 # ---------------------------------------------------------------------------
