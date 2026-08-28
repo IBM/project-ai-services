@@ -1,6 +1,7 @@
 package openshift
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -12,7 +13,7 @@ import (
 )
 
 // Info displays detailed information about an application.
-func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
+func (o *OpenshiftApplication) Info(ctx context.Context, opts types.InfoOptions) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}
@@ -20,7 +21,7 @@ func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", opts.Name)}
 	}
 
-	pods, err := o.runtime.ListPods(listFilters)
+	pods, err := o.runtime.ListPods(ctx, listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -45,7 +46,7 @@ func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
 	// Step3: Read and print the info.md file
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
-	if err := helpers.PrintInfo(tp, o.runtime, opts.Name, appTemplate); err != nil {
+	if err := helpers.PrintInfo(ctx, tp, o.runtime, opts.Name, appTemplate); err != nil {
 		// not failing if overall info command, if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 

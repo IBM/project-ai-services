@@ -10,6 +10,8 @@ export type {
 export { default as SolutionCard } from "./SolutionCard";
 export type { SolutionCardProps } from "./SolutionCard";
 export { default as DeployedServicesTable } from "./DeployedServicesTable";
+export { default as DataSourceConnectorsTable } from "./DataSourceConnectorsTable";
+export type { DataSourceConnectorsTableProps } from "./DataSourceConnectorsTable";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,

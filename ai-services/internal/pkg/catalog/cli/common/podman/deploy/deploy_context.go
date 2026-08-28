@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -81,18 +82,33 @@ func (d *DeployContext) PrepareValues(argParams map[string]string) error {
 }
 
 // CheckStatus checks if the catalog is already deployed.
-func (d *DeployContext) CheckStatus() (bool, []string, error) {
+func (d *DeployContext) CheckStatus(ctx context.Context) (bool, []string, error) {
 	catalogSecrets, err := collectSecretNames(d.TemplateProvider, d.argParams)
 	if err != nil {
 		return false, nil, err
 	}
 
-	existingResources, err := helpers.CheckExistingResourcesForApplication(context.Background(), d.Runtime, catalogconstants.CatalogAppName, catalogSecrets)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(ctx, d.Runtime, catalogconstants.CatalogAppName, catalogSecrets)
 	if err != nil {
 		return false, nil, err
 	}
 
-	return len(existingResources) == len(d.templates), existingResources, nil
+	catalogResourceCount := len(d.templates)
+
+	// Checking if 'catalog-caddy-cert-secret' optional secret is present or not
+	exists, err := d.Runtime.SecretExists(ctx, catalogconstants.CatalogCertSecretName)
+	if err != nil {
+		return false, nil, err
+	}
+	if exists {
+		existingResources = append(existingResources, catalogconstants.CatalogCertSecretName)
+	} else {
+		// When 'catalog-caddy-cert-secret' secret not created, decrement catalogResourceCount by one,
+		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
+		catalogResourceCount--
+	}
+
+	return len(existingResources) == catalogResourceCount, existingResources, nil
 }
 
 // GetCaddyPodName extracts the Caddy pod name from templates.
@@ -106,7 +122,7 @@ func (d *DeployContext) ExtractRouteInfos() ([]caddy.TemplateRouteInfo, error) {
 }
 
 // ExecutePodLayers executes all pod template layers.
-func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context,
+func (d *DeployContext) ExecutePodLayers(ctx context.Context, baseDir string, caddyCtx *caddy.Context,
 	existingResources []string) error {
 	logger.Debugln("executing catalog service resources...")
 
@@ -114,7 +130,7 @@ func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(d.appMetadata.PodTemplateExecutions), layer)
 		logger.Infoln("-------")
 
-		if err := d.executeLayer(layer, baseDir, caddyCtx, i, existingResources); err != nil {
+		if err := d.executeLayer(ctx, layer, baseDir, caddyCtx, i, existingResources); err != nil {
 			return err
 		}
 
@@ -125,7 +141,7 @@ func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context
 }
 
 // executeLayer executes a single layer of pod templates.
-func (d *DeployContext) executeLayer(layer []string, baseDir string, caddyCtx *caddy.Context,
+func (d *DeployContext) executeLayer(ctx context.Context, layer []string, baseDir string, caddyCtx *caddy.Context,
 	layerIndex int, existingResources []string) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(layer))
@@ -135,7 +151,7 @@ func (d *DeployContext) executeLayer(layer []string, baseDir string, caddyCtx *c
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := d.executePodTemplate(t, baseDir, caddyCtx, existingResources); err != nil {
+			if err := d.executePodTemplate(ctx, t, baseDir, caddyCtx, existingResources); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -159,7 +175,7 @@ func (d *DeployContext) executeLayer(layer []string, baseDir string, caddyCtx *c
 }
 
 // executePodTemplate executes a single pod template.
-func (d *DeployContext) executePodTemplate(podTemplateName string,
+func (d *DeployContext) executePodTemplate(ctx context.Context, podTemplateName string,
 	baseDir string, caddyCtx *caddy.Context, existingResources []string) error {
 	logger.Infof("Processing template: %s\n", catalogconstants.CatalogAppTemplate)
 
@@ -197,11 +213,18 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 		return fmt.Errorf("failed to render pod template: %w", err)
 	}
 
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", podTemplateName)
+
+		return nil
+	}
+
 	// Deploy the pod with readiness checks
 	reader := bytes.NewReader(rendered.Bytes())
 	podDeployOptions := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(*podSpec))
 
-	if err := clipodman.DeployPodAndReadinessCheck(context.Background(), d.Runtime, podSpec, podTemplateName, reader, podDeployOptions); err != nil {
+	if err := clipodman.DeployPodAndReadinessCheck(ctx, d.Runtime, podSpec, podTemplateName, reader, podDeployOptions); err != nil {
 		return fmt.Errorf("failed to deploy pod: %w", err)
 	}
 

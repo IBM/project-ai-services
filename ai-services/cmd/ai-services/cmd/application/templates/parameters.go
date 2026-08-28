@@ -35,7 +35,7 @@ func NewParametersCmd() *cobra.Command {
 			}
 
 			// Create catalog provider
-			provider, err := catalog.NewCatalogProvider()
+			provider, err := catalog.NewCatalogProvider(nil)
 			if err != nil {
 				return fmt.Errorf("failed to create catalog provider: %w", err)
 			}
@@ -43,13 +43,13 @@ func NewParametersCmd() *cobra.Command {
 			// Try to load as architecture first
 			arch, err := provider.LoadArchitecture(templateID)
 			if err == nil {
-				return displayArchitectureParameters(provider, templateID, arch.Services)
+				return displayArchitectureParameters(cmd.Context(), provider, templateID, arch.Services)
 			}
 
 			// Try to load as service
 			service, err := provider.LoadService(templateID)
 			if err == nil {
-				return displayServiceParameters(provider, templateID, service.Dependencies)
+				return displayServiceParameters(cmd.Context(), provider, templateID, service.Dependencies)
 			}
 
 			return fmt.Errorf("template '%s' not found as service or architecture", templateID)
@@ -63,21 +63,21 @@ func NewParametersCmd() *cobra.Command {
 }
 
 // displayServiceParameters displays all parameters for a specific service.
-func displayServiceParameters(provider *catalog.CatalogProvider, serviceID string, dependencies []catalogTypes.DependencyReference) error {
+func displayServiceParameters(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, dependencies []catalogTypes.DependencyReference) error {
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := provider.GetServiceParams(context.Background(), serviceID)
+	schema, err := provider.GetServiceParams(ctx, serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
 
 	// Display component parameters
-	return displayComponentsParameters(provider, dependencies, nil)
+	return displayComponentsParameters(ctx, provider, dependencies, nil)
 }
 
 // displayArchitectureParameters displays all parameters for all services in an architecture.
-func displayArchitectureParameters(provider *catalog.CatalogProvider, archID string, services []catalogTypes.ServiceReference) error {
+func displayArchitectureParameters(ctx context.Context, provider *catalog.CatalogProvider, archID string, services []catalogTypes.ServiceReference) error {
 	logger.Infof("Supported Parameters for '%s':", archID)
 
 	// Track displayed components to avoid duplicates
@@ -85,7 +85,7 @@ func displayArchitectureParameters(provider *catalog.CatalogProvider, archID str
 
 	// Display parameters for each service in the architecture
 	for _, svcRef := range services {
-		if err := displayServiceInArchitecture(provider, svcRef.ID, displayedComponents); err != nil {
+		if err := displayServiceInArchitecture(ctx, provider, svcRef.ID, displayedComponents); err != nil {
 			continue
 		}
 	}
@@ -94,7 +94,7 @@ func displayArchitectureParameters(provider *catalog.CatalogProvider, archID str
 }
 
 // displayServiceInArchitecture displays parameters for a single service within an architecture.
-func displayServiceInArchitecture(provider *catalog.CatalogProvider, serviceID string, displayedComponents map[string]bool) error {
+func displayServiceInArchitecture(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, displayedComponents map[string]bool) error {
 	// Load the service to get its dependencies
 	service, err := provider.LoadService(serviceID)
 	if err != nil {
@@ -102,18 +102,18 @@ func displayServiceInArchitecture(provider *catalog.CatalogProvider, serviceID s
 	}
 
 	// Display service parameters
-	schema, err := provider.GetServiceParams(context.Background(), serviceID)
+	schema, err := provider.GetServiceParams(ctx, serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
 
 	// Display component parameters for this service
-	return displayComponentsParameters(provider, service.Dependencies, displayedComponents)
+	return displayComponentsParameters(ctx, provider, service.Dependencies, displayedComponents)
 }
 
 // displayComponentsParameters displays parameters for components based on dependencies.
 // If displayedComponents map is provided, it will track and skip duplicates.
-func displayComponentsParameters(provider *catalog.CatalogProvider, dependencies []catalogTypes.DependencyReference, displayedComponents map[string]bool) error {
+func displayComponentsParameters(ctx context.Context, provider *catalog.CatalogProvider, dependencies []catalogTypes.DependencyReference, displayedComponents map[string]bool) error {
 	if len(dependencies) == 0 {
 		return nil
 	}
@@ -137,7 +137,7 @@ func displayComponentsParameters(provider *catalog.CatalogProvider, dependencies
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := provider.GetComponentProviderParams(context.Background(), comp.ComponentType, comp.ID)
+				schema, err := provider.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID)
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}

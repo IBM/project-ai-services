@@ -1,23 +1,31 @@
 """
-Database repository layer for Job, Document, and Connector operations.
+Database repository layer for Job, Document, Connector, and ConversionTask operations.
 
 Provides CRUD operations with proper error handling and transaction management.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, cast
+from pathlib import Path
+from typing import List, Optional, Dict, Any, Union, cast
 from sqlalchemy import select, update, delete, func, or_, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
-from digitize.db.models import Job, Document, DocumentChecksum, Connector, ConnectorDocumentChecksum, ConnectorSyncLog
+from digitize.db.models import (
+    Job, Document, DocumentChecksum,
+    Connector, ConnectorDocumentChecksum, ConnectorSyncLog,
+    ConversionTask, ConversionTaskStatus,
+)
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 logger = get_logger("db_repository")
+
+# Sentinel used by update_connector to distinguish "not supplied" from explicit None.
+_UNSET: object = object()
 
 
 class DatabaseManager:
@@ -69,7 +77,6 @@ class DatabaseManager:
                 )
                 session.add(job)
                 session.flush()  # Ensure job is persisted before returning
-                logger.info(f"Created job in database: {job_id}")
                 return job
         except IntegrityError as e:
             logger.error(f"Job {job_id} already exists in database: {e}")
@@ -103,7 +110,6 @@ class DatabaseManager:
                          job.stats, job.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(job)
-                    logger.debug(f"Retrieved job from database: {job_id}")
                 else:
                     logger.debug(f"Job not found in database: {job_id}")
                 return job
@@ -158,7 +164,6 @@ class DatabaseManager:
                 # Expunge all jobs from session to prevent DetachedInstanceError
                 for job in jobs:
                     session.expunge(job)
-                logger.debug(f"Retrieved {len(jobs)} jobs from database (total: {total})")
                 return jobs, total
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving jobs: {e}", exc_info=True)
@@ -208,7 +213,6 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
-                    logger.debug(f"Updated job in database: {job_id}")
                     return True
                 else:
                     logger.warning(f"Job not found for update: {job_id}")
@@ -296,7 +300,6 @@ class DatabaseManager:
                 )
                 session.add(document)
                 session.flush()
-                logger.info(f"Created document in database: {doc_id}")
                 return document
         except IntegrityError as e:
             logger.error(f"Document {doc_id} already exists or invalid job_id: {e}")
@@ -521,7 +524,6 @@ class DatabaseManager:
                          doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
-                logger.debug(f"Retrieved {len(documents)} documents for job {job_id}")
                 return documents
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving documents for job {job_id}: {e}", exc_info=True)
@@ -571,7 +573,6 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
-                    logger.debug(f"Updated document in database: {doc_id}")
                     return True
                 else:
                     logger.warning(f"Document not found for update: {doc_id}")
@@ -668,81 +669,87 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
     @staticmethod
-    def delete_all_documents() -> Dict[str, Any]:
+    def delete_user_documents() -> Dict[str, Any]:
         """
-        Delete all documents from the database.
-        
+        Delete only user-submitted documents (those NOT in connector_document_checksum).
+
+        Connector-sourced documents and their checksum rows are left untouched.
+
         Returns:
-            Dictionary with deletion statistics:
+            Dictionary with:
             - deleted_count: Number of documents deleted
-            - success: Whether operation completed successfully
+            - doc_ids: List of deleted doc_id strings
+            - success: Whether the operation completed successfully
         """
         try:
             with get_db_session() as session:
-                # Wipe the checksum registry so previously-seen hashes are no longer
-                # blocked after a full reset.
-                session.execute(delete(DocumentChecksum))
-                stmt = delete(Document)
-                result = cast(CursorResult, session.execute(stmt))
-                deleted_count = result.rowcount
+                # Collect user-submitted doc IDs first (excludes connector-sourced).
+                user_doc_ids_stmt = (
+                    select(Document.doc_id)
+                    .where(
+                        ~select(ConnectorDocumentChecksum.doc_id)
+                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
+                        .exists()
+                    )
+                )
+                doc_ids = list(session.scalars(user_doc_ids_stmt).all())
 
-                logger.info(f"Deleted all documents from database: {deleted_count} documents")
-                return {
-                    "deleted_count": deleted_count,
-                    "success": True
-                }
+                if not doc_ids:
+                    return {"deleted_count": 0, "doc_ids": [], "success": True}
+
+                # Remove checksum registry rows for these docs so hashes can be
+                # re-registered if the same file is ingested again.
+                session.execute(
+                    delete(DocumentChecksum).where(DocumentChecksum.doc_id.in_(doc_ids))
+                )
+
+                # Remove already_exists shadow docs that reference any of these docs.
+                session.execute(
+                    delete(Document).where(
+                        Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)
+                    )
+                )
+
+                result = cast(
+                    CursorResult,
+                    session.execute(delete(Document).where(Document.doc_id.in_(doc_ids))),
+                )
+                deleted_count = result.rowcount
+                logger.info(f"Deleted {deleted_count} user-submitted documents from database")
+                return {"deleted_count": deleted_count, "doc_ids": doc_ids, "success": True}
         except SQLAlchemyError as e:
-            logger.error(f"Database error deleting all documents: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
+            logger.error(f"Database error deleting user documents: {e}", exc_info=True)
+            return {"deleted_count": 0, "doc_ids": [], "success": False, "error": str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error deleting all documents: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
-    
+            logger.error(f"Unexpected error deleting user documents: {e}", exc_info=True)
+            return {"deleted_count": 0, "doc_ids": [], "success": False, "error": str(e)}
+
     @staticmethod
-    def delete_all_jobs() -> Dict[str, Any]:
+    def delete_user_jobs() -> Dict[str, Any]:
         """
-        Delete all jobs from the database.
-        
+        Delete only user-submitted jobs — those whose job_name does NOT start
+        with the connector-job prefix ``"Connector-"``.
+
         Returns:
-            Dictionary with deletion statistics:
+            Dictionary with:
             - deleted_count: Number of jobs deleted
-            - success: Whether operation completed successfully
+            - success: Whether the operation completed successfully
         """
         try:
             with get_db_session() as session:
-                stmt = delete(Job)
+                stmt = delete(Job).where(
+                    ~Job.job_name.like("Connector-%")
+                )
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
-                
-                logger.info(f"Deleted all jobs from database: {deleted_count} jobs")
-                return {
-                    "deleted_count": deleted_count,
-                    "success": True
-                }
+                logger.info(f"Deleted {deleted_count} user-submitted jobs from database")
+                return {"deleted_count": deleted_count, "success": True}
         except SQLAlchemyError as e:
-            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
+            logger.error(f"Database error deleting user jobs: {e}", exc_info=True)
+            return {"deleted_count": 0, "success": False, "error": str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
-            return {
-                "deleted_count": 0,
-                "success": False,
-                "error": str(e)
-            }
-
-
+            logger.error(f"Unexpected error deleting user jobs: {e}", exc_info=True)
+            return {"deleted_count": 0, "success": False, "error": str(e)}
 
     # ========================================================================
     # Connector CRUD
@@ -801,13 +808,14 @@ class DatabaseManager:
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
         total_files: Optional[int] = None,
-        error: Optional[str] = None,
+        error: "Optional[str]" = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """
         Partial update of an existing connector.
 
-        Only non-None kwargs are written; connection_details is merged at the
-        key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Only non-``_UNSET`` kwargs are written; connection_details is merged at
+        the key level using the PostgreSQL ``||`` JSONB concatenation operator.
+        Pass ``error=None`` explicitly to clear a previously set error to NULL.
 
         Raises FileNotFoundError if no connector with the given id exists.
         """
@@ -820,7 +828,7 @@ class DatabaseManager:
                     values["allowed_extensions"] = allowed_extensions
                 if total_files is not None:
                     values["total_files"] = total_files
-                if error is not None:
+                if error is not _UNSET:
                     values["error"] = error
                 if connection_details is not None:
                     stmt = (
@@ -867,12 +875,38 @@ class DatabaseManager:
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
                     connector.last_sync_at, connector.sync_status,
-                    connector.last_sync_error, connector.total_files,
+                    connector.error, connector.total_files,
                 )
                 session.expunge(connector)
                 return connector
         except SQLAlchemyError as e:
             logger.error(f"DB error fetching connector {connector_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def get_connector_by_name(name: str) -> "Optional[Connector]":
+        """
+        Fetch a single connector by name, eagerly loaded and expunged.
+
+        Returns None if not found.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Connector).where(Connector.name == name)
+                connector = session.scalars(stmt).one_or_none()
+                if connector is None:
+                    return None
+                _ = (
+                    connector.id, connector.name, connector.type,
+                    connector.connection_details, connector.allowed_extensions,
+                    connector.sync_interval_seconds, connector.attached_at,
+                    connector.last_sync_at, connector.sync_status,
+                    connector.error, connector.total_files,
+                )
+                session.expunge(connector)
+                return connector
+        except SQLAlchemyError as e:
+            logger.error(f"DB error fetching connector by name {name!r}: {e}", exc_info=True)
             return None
 
     @staticmethod
@@ -914,7 +948,7 @@ class DatabaseManager:
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
                         c.attached_at, c.last_sync_at, c.sync_status,
-                        c.last_sync_error, c.total_files,
+                        c.error, c.total_files,
                     )
                     session.expunge(c)
                 logger.debug(f"Listed {len(connectors)} connector(s)")
@@ -950,9 +984,7 @@ class DatabaseManager:
 
     @staticmethod
     def find_connector_doc_by_checksum(checksum: str) -> Optional[str]:
-        """
-        Return the doc_id if any connector has registered this checksum, else None.
-        """
+        """Return the doc_id if any connector has registered this checksum, else None."""
         try:
             with get_db_session() as session:
                 stmt = (
@@ -1278,12 +1310,16 @@ class DatabaseManager:
         connector_id: str,
         status: str,
         last_sync_at: Optional[datetime] = None,
+        error: Optional[str] = None,
     ) -> None:
         """
-        Update last_sync_at and sync_status on the connector row after a sync run.
+        Update last_sync_at, sync_status, and error on the connector row after a sync run.
 
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
+
+        ``error`` is written when provided (failure/cancel paths); it is cleared
+        to NULL on a successful completion so a past error does not persist.
         """
         try:
             with get_db_session() as session:
@@ -1292,13 +1328,18 @@ class DatabaseManager:
                     if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
                     else status
                 )
+                values: Dict[str, Any] = {
+                    "last_sync_at": last_sync_at or datetime.now(timezone.utc),
+                    "sync_status": connector_sync_status,
+                }
+                if status == SyncLogStatus.COMPLETED:
+                    values["error"] = None
+                elif error is not None:
+                    values["error"] = error
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(
-                        last_sync_at=last_sync_at or datetime.now(timezone.utc),
-                        sync_status=connector_sync_status,
-                    )
+                    .values(**values)
                 )
         except SQLAlchemyError as e:
             logger.error(
@@ -1493,6 +1534,499 @@ class DatabaseManager:
             logger.error(f"DB error in merge_document_metadata({doc_id}): {e}", exc_info=True)
             return False
 
+    # ------------------------------------------------------------------
+    # ConversionTask operations
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_conversion_task(
+        task_id: str,
+        job_id: str,
+        doc_id: str,
+        operation: str,
+        cached_file: str,
+        output_format: str,
+        page_count: int,
+        is_large: bool,
+        status: ConversionTaskStatus = ConversionTaskStatus.QUEUED,
+    ) -> Optional[ConversionTask]:
+        """
+        Insert a single conversion_tasks row.
+
+        Args:
+            task_id:       Unique task identifier.
+            job_id:        Parent job identifier.
+            doc_id:        Document identifier (informational).
+            operation:     'ingestion' | 'digitization'.
+            cached_file:   Absolute path to the staged input file.
+            output_format: 'json' | 'md' | 'txt'.
+            page_count:    Document page count (0 for DOCX).
+            is_large:      True when page_count >= heavy_doc_page_threshold.
+            status:        Initial status — QUEUED or PENDING.
+
+        Returns:
+            The created ConversionTask or None on failure.
+        """
+        try:
+            with get_db_session() as session:
+                task = ConversionTask(
+                    task_id=task_id,
+                    job_id=job_id,
+                    doc_id=doc_id,
+                    operation=operation,
+                    cached_file=cached_file,
+                    output_format=output_format,
+                    page_count=page_count,
+                    is_large=is_large,
+                    status=status,
+                    queued_at=datetime.now(timezone.utc),
+                )
+                session.add(task)
+                session.flush()
+                logger.debug(f"Created conversion task {task_id} (status={status})")
+                return task
+        except IntegrityError as e:
+            logger.error(f"ConversionTask {task_id} already exists: {e}")
+            return None
+        except SQLAlchemyError as e:
+            logger.error(f"DB error creating conversion task {task_id}: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error creating conversion task {task_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def create_conversion_tasks_batch(tasks: list[dict]) -> None:
+        """
+        Insert multiple conversion_tasks rows in a single transaction.
+
+        All rows are inserted atomically — if any row fails the entire
+        batch is rolled back and no tasks are created.  Use this instead
+        of repeated ``create_conversion_task`` calls when enqueueing a
+        multi-file job to reduce DB round-trips to one.
+
+        Args:
+            tasks: Sequence of dicts, each with the same keys accepted by
+                   ``create_conversion_task`` (task_id, job_id, doc_id,
+                   operation, cached_file, output_format, page_count,
+                   is_large, status).
+
+        Raises:
+            SQLAlchemyError: propagated on failure so the caller can treat
+                the entire enqueue as failed (no partial inserts).
+        """
+        if not tasks:
+            return
+        now = datetime.now(timezone.utc)
+        with get_db_session() as session:
+            session.add_all([
+                ConversionTask(
+                    task_id=t["task_id"],
+                    job_id=t["job_id"],
+                    doc_id=t["doc_id"],
+                    operation=t["operation"],
+                    cached_file=t["cached_file"],
+                    output_format=t["output_format"],
+                    page_count=t["page_count"],
+                    is_large=t["is_large"],
+                    status=t["status"],
+                    queued_at=now,
+                )
+                for t in tasks
+            ])
+            logger.debug(
+                f"Batch-inserted {len(tasks)} conversion task(s) "
+                f"(job_id={tasks[0]['job_id']!r})"
+            )
+
+    @staticmethod
+    def _load_and_expunge_task(task: ConversionTask, session) -> None:
+        """
+        Eagerly load all columns of ``task`` then detach it from ``session``.
+
+        SQLAlchemy lazy-loads attributes after a session closes, which raises
+        ``DetachedInstanceError``.  Accessing every column as a tuple forces
+        the ORM to populate them while the session is still open; ``expunge``
+        then removes the object from the identity map so callers can use it
+        freely after the ``with get_db_session()`` block exits.
+        """
+        _ = (task.task_id, task.job_id, task.doc_id, task.operation,
+             task.cached_file, task.output_format, task.page_count,
+             task.is_large, task.status, task.result_path, task.error,
+             task.queued_at, task.started_at, task.completed_at)
+        session.expunge(task)
+
+    @staticmethod
+    def get_conversion_task(task_id: str) -> Optional[ConversionTask]:
+        """Return the ConversionTask with the given task_id, or None."""
+        try:
+            with get_db_session() as session:
+                stmt = select(ConversionTask).where(ConversionTask.task_id == task_id)
+                task = session.scalar(stmt)
+                if task:
+                    DatabaseManager._load_and_expunge_task(task, session)
+                return task
+        except SQLAlchemyError as e:
+            logger.error(f"DB error retrieving task {task_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def get_conversion_task_by_job_id(job_id: str) -> Optional[ConversionTask]:
+        """
+        Return the single ConversionTask for a digitization job.
+
+        Used by the digitize pipeline to poll task status.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask)
+                    .where(ConversionTask.job_id == job_id)
+                    .order_by(ConversionTask.queued_at)
+                    .limit(1)
+                )
+                task = session.scalar(stmt)
+                if task:
+                    DatabaseManager._load_and_expunge_task(task, session)
+                return task
+        except SQLAlchemyError as e:
+            logger.error(f"DB error retrieving task for job {job_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def get_conversion_tasks_by_job_id(job_id: str) -> List[ConversionTask]:
+        """Return all ConversionTask rows for a job, ordered by queued_at."""
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask)
+                    .where(ConversionTask.job_id == job_id)
+                    .order_by(ConversionTask.queued_at)
+                )
+                tasks = list(session.scalars(stmt).all())
+                for t in tasks:
+                    DatabaseManager._load_and_expunge_task(t, session)
+                return tasks
+        except SQLAlchemyError as e:
+            logger.error(f"DB error retrieving tasks for job {job_id}: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def get_conversion_tasks(
+        status: Union[str, List[str]],
+    ) -> List[ConversionTask]:
+        """Return all ConversionTask rows whose status matches *status*.
+
+        *status* may be a single value or a list of values.
+        """
+        try:
+            statuses = status if isinstance(status, list) else [status]
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask)
+                    .where(ConversionTask.status.in_(statuses))
+                    .order_by(ConversionTask.queued_at)
+                )
+                tasks = list(session.scalars(stmt).all())
+                for t in tasks:
+                    DatabaseManager._load_and_expunge_task(t, session)
+                return tasks
+        except SQLAlchemyError as e:
+            logger.error(f"DB error retrieving tasks (status={status}): {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def get_queued_count(operation: str) -> int:
+        """Return the number of tasks currently in 'queued' status for ``operation``."""
+        try:
+            with get_db_session() as session:
+                stmt = select(func.count()).where(
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
+                    ConversionTask.operation == operation,
+                )
+                return session.scalar(stmt) or 0
+        except SQLAlchemyError as e:
+            logger.error(f"DB error counting queued tasks for {operation}: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def get_queued_counts() -> Dict[str, int]:
+        """
+        Return the number of 'queued' tasks for both operation types in a single query.
+
+        Non-locking read — used for logging/metrics only.
+        For admission decisions use check_quota_atomic() instead.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.operation, func.count())
+                    .where(ConversionTask.status == ConversionTaskStatus.QUEUED)
+                    .group_by(ConversionTask.operation)
+                )
+                rows = session.execute(stmt).all()
+                counts: Dict[str, int] = {"ingestion": 0, "digitization": 0}
+                for op, cnt in rows:
+                    counts[op] = cnt
+                return counts
+        except SQLAlchemyError as e:
+            logger.error(f"DB error counting queued tasks: {e}", exc_info=True)
+            return {"ingestion": 0, "digitization": 0}
+
+    @staticmethod
+    def check_quota_atomic(operation: str, quota: int) -> tuple[bool, int]:
+        """
+        Atomically check whether at least one free queue slot exists for
+        ``operation`` by counting tasks with ``status='queued'`` under a
+        session-level advisory lock to prevent concurrent over-admission races.
+
+        The quota guards the **queue** (``queued`` status only).  Running tasks
+        have already left the queue and freed their slot — a new submission may
+        legitimately take that freed slot.  The semaphore is the hard
+        execution-time resource limit managed exclusively by the dispatcher;
+        it is never consulted at admission time.
+
+        Because PostgreSQL does not support SELECT FOR UPDATE with aggregate
+        functions, we serialise concurrent POST /v1/jobs calls via a
+        session-level advisory lock keyed on the operation string hash so that
+        two concurrent requests cannot both read ``queued=9 < 10`` and both
+        proceed.
+
+        Args:
+            operation: ``"ingestion"`` or ``"digitization"``.
+            quota:     Maximum allowed queued tasks for this operation.
+
+        Returns:
+            Tuple of (quota_ok: bool, current_queued_count: int).
+            quota_ok is True when ``current_queued_count < quota``.
+        """
+        from sqlalchemy import text
+
+        # Numeric key for the advisory lock: hash operation string to an int32
+        lock_key = hash(operation) & 0x7FFFFFFF
+
+        try:
+            with get_db_session() as session:
+                # Acquire a session-level advisory lock so concurrent requests
+                # for the same operation type are serialised through this block.
+                session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+
+                queued = session.scalar(
+                    select(func.count()).where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == operation,
+                    )
+                ) or 0
+
+                return queued < quota, queued
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in check_quota_atomic({operation}, {quota}): {e}",
+                exc_info=True,
+            )
+            # Fail-open: return 0 so the gate passes if we can't count.
+            # The dispatcher's semaphore is the hard execution-time limit.
+            return True, 0
+
+    @staticmethod
+    def update_task_status(
+        task_id: str,
+        status: str,
+        result_path: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> bool:
+        """
+        Update the status (and optional result/error) of a ConversionTask.
+
+        Args:
+            task_id:     Task identifier.
+            status:      New status string.
+            result_path: Path to the output file (set on completion).
+            error:       Error message (set on failure).
+
+        Returns:
+            True on success, False otherwise.
+        """
+        try:
+            with get_db_session() as session:
+                now = datetime.now(timezone.utc)
+                updates: Dict[str, Any] = {
+                    "status": status,
+                }
+                if status == ConversionTaskStatus.RUNNING:
+                    updates["started_at"] = now
+                if status in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
+                    updates["completed_at"] = now
+                if result_path is not None:
+                    updates["result_path"] = result_path
+                if error is not None:
+                    updates["error"] = error
+
+                stmt = (
+                    update(ConversionTask)
+                    .where(ConversionTask.task_id == task_id)
+                    .values(**updates)
+                )
+                result = cast(CursorResult, session.execute(stmt))
+                return result.rowcount > 0
+        except SQLAlchemyError as e:
+            logger.error(f"DB error updating task {task_id}: {e}", exc_info=True)
+            return False
+
+    @staticmethod
+    def peek_head(operation: str) -> Optional[ConversionTask]:
+        """
+        Return the oldest 'queued' task for ``operation`` without locking.
+
+        Used by the dispatcher to inspect the head weight before attempting
+        an atomic claim.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask)
+                    .where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == operation,
+                    )
+                    .order_by(ConversionTask.queued_at)
+                    .limit(1)
+                )
+                task = session.scalar(stmt)
+                if task:
+                    DatabaseManager._load_and_expunge_task(task, session)
+                return task
+        except SQLAlchemyError as e:
+            logger.error(f"DB error peeking head for {operation}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def claim_head(operation: str) -> Optional[ConversionTask]:
+        """
+        Atomically promote the oldest 'queued' task for ``operation`` to 'running'.
+
+        Uses SELECT … FOR UPDATE SKIP LOCKED so concurrent callers never
+        claim the same task.
+
+        Returns:
+            The claimed ConversionTask (status already set to 'running'), or None
+            if no task was available.
+        """
+        try:
+            with get_db_session() as session:
+                # Subquery: find the head task_id under a row-level lock
+                subq = (
+                    select(ConversionTask.task_id)
+                    .where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == operation,
+                    )
+                    .order_by(ConversionTask.queued_at)
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                    .scalar_subquery()
+                )
+                now = datetime.now(timezone.utc)
+                stmt = (
+                    update(ConversionTask)
+                    .where(ConversionTask.task_id == subq)
+                    .values(
+                        status=ConversionTaskStatus.RUNNING,
+                        started_at=now,
+                    )
+                    .returning(ConversionTask)
+                )
+                result = session.execute(stmt)
+                row = result.fetchone()
+                if row is None:
+                    return None
+                # row[0] is the ORM object returned by RETURNING *
+                task = row[0]
+                DatabaseManager._load_and_expunge_task(task, session)
+                return task
+        except SQLAlchemyError as e:
+            logger.error(f"DB error claiming head for {operation}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def promote_pending(operation: str, quota: int) -> int:
+        """
+        Promote as many 'pending' tasks as will fit under ``quota`` for ``operation``.
+
+        This keeps the 'queued' count ≤ quota while draining the pending backlog
+        in first-submitted-first-promoted order.
+
+        All three statements (count queued, select candidates, update status) run
+        inside a single transaction under the same session-level advisory lock used
+        by ``check_quota_atomic``.  This prevents two concurrent callers — e.g. the
+        dispatcher's promote tick and a concurrent admission check — from both
+        reading a stale queued_count and over-promoting beyond the quota.
+
+        The lock key is identical to ``check_quota_atomic`` (``hash(operation) &
+        0x7FFFFFFF``) so that admission and promotion on the same operation type are
+        mutually serialised even across different connections.
+
+        Returns:
+            Number of tasks promoted.
+        """
+        from sqlalchemy import text
+
+        # Same key as check_quota_atomic — serialises admission and promotion
+        # for the same operation type across all connections.
+        lock_key = hash(operation) & 0x7FFFFFFF
+
+        try:
+            with get_db_session() as session:
+                # Hold the advisory lock for the entire count → select → update
+                # sequence so no concurrent caller can interleave.
+                session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+
+                # Count currently queued tasks for this operation.
+                queued_count = session.scalar(
+                    select(func.count()).where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == operation,
+                    )
+                ) or 0
+
+                headroom = max(0, quota - queued_count)
+                if headroom == 0:
+                    return 0
+
+                # Fetch the oldest pending tasks that fit under the quota.
+                candidates = session.execute(
+                    select(ConversionTask.task_id, ConversionTask.cached_file)
+                    .where(
+                        ConversionTask.status == ConversionTaskStatus.PENDING,
+                        ConversionTask.operation == operation,
+                    )
+                    .order_by(ConversionTask.queued_at)
+                    .limit(headroom)
+                ).all()
+
+                if not candidates:
+                    return 0
+
+                candidate_ids = [row.task_id for row in candidates]
+                now = datetime.now(timezone.utc)
+                stmt = (
+                    update(ConversionTask)
+                    .where(ConversionTask.task_id.in_(candidate_ids))
+                    .values(status=ConversionTaskStatus.QUEUED, queued_at=now)
+                )
+                result = cast(CursorResult, session.execute(stmt))
+                promoted = result.rowcount
+                if promoted:
+                    logger.debug(f"Promoted {promoted} pending → queued for {operation}")
+                    for row in candidates:
+                        logger.debug(
+                            f"  [{operation}] queued: {Path(row.cached_file).name} (task_id={row.task_id})"
+                        )
+                return promoted
+        except SQLAlchemyError as e:
+            logger.error(f"DB error promoting pending tasks for {operation}: {e}", exc_info=True)
+            return 0
+
 
     @staticmethod
     def reset_syncing_connectors(
@@ -1504,8 +2038,8 @@ class DatabaseManager:
         Called on startup to unlock connectors that were mid-tick when the
         service crashed.  Returns the list of connector IDs that were reset.
 
-        Also stamps ``last_sync_error`` and ``error`` on every affected row so
-        that callers can see the crash reason without joining to sync-log rows.
+        Also stamps ``error`` on every affected row so that callers can see the
+        crash reason without joining to sync-log rows.
         """
         try:
             with get_db_session() as session:
@@ -1514,7 +2048,6 @@ class DatabaseManager:
                     .where(Connector.sync_status == ConnectorStatus.SYNCING)
                     .values(
                         sync_status=ConnectorStatus.OUT_OF_SYNC,
-                        last_sync_error=error,
                         error=error,
                     )
                     .returning(Connector.id)

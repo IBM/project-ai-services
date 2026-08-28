@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/migrations"

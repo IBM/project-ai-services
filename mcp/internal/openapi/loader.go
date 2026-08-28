@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,14 +18,15 @@ import (
 )
 
 // LoadDescription loads an OpenAPI description from a file path or URL,
-// dereferencing all $ref fields inline.
-func LoadDescription(ref string) (*highV3.Document, error) {
+// dereferencing all $ref fields inline. tlsSkipVerify disables TLS
+// certificate verification when loading from an HTTPS URL.
+func LoadDescription(ref string, tlsSkipVerify bool) (*highV3.Document, error) {
 	var data []byte
 	var err error
 
 	// Load from URL or file
 	if isURL(ref) {
-		data, err = loadFromURL(ref)
+		data, err = loadFromURL(ref, tlsSkipVerify)
 	} else {
 		data, err = loadFromFile(ref)
 	}
@@ -81,14 +83,22 @@ func isURL(str string) bool {
 }
 
 // loadFromURL loads content from a URL
-func loadFromURL(urlStr string) ([]byte, error) {
+func loadFromURL(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 	// Validate URL scheme to prevent SSRF attacks
 	if err := validateURL(urlStr); err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
+	client := http.DefaultClient
+	if tlsSkipVerify {
+		// #nosec G402 - verification is skipped only when the user passes --tls-skip-verify
+		client = &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}}
+	}
+
 	// #nosec G107 - URL is validated above to only allow http/https schemes
-	resp, err := http.Get(urlStr)
+	resp, err := client.Get(urlStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch URL %s: %w", urlStr, err)
 	}

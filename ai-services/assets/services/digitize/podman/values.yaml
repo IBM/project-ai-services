@@ -1,7 +1,9 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.45
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.50
   log_level: "INFO"
   database: "digitize_metadata"
+  # @generate:password length=32, special=false
+  dbEncryptionKey: ""
 
 digitizeUi:
   image: icr.io/ai-services-cicd/digitize-ui:v0.0.31

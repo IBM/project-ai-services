@@ -851,6 +851,353 @@ const docTemplate = `{
                 }
             }
         },
+        "/catalog/bundles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a paginated list of all registered bundles ordered by created_at DESC.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "List all bundles",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid pagination parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uploads a .tar.gz archive and creates a new bundle. id, type, and version are read from metadata.yaml inside the archive.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Create a new catalog bundle",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": ".tar.gz archive containing the catalog item assets",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing file, wrong content-type, exceeds size limit, or metadata.yaml malformed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden — admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict — bundle with same catalog_id already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity — validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/catalog/bundles/validate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validates a .tar.gz archive without writing a DB row or reloading CatalogProvider.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Validate a bundle without storing it",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": ".tar.gz archive to validate",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/catalog/bundles/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the status and metadata for a specific bundle.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Get a bundle by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Internal bundle UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Replaces the bundle identified by id with a new archive. catalog_id and catalog_type are resolved from the DB record.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Replace an existing bundle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Internal bundle UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Replacement .tar.gz archive",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "catalog_id or catalog_type mismatch, or validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Marks the bundle deleting, removes the on-disk directory, reloads CatalogProvider, and removes the DB row.",
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Delete a bundle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Internal bundle UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/components/{component_type}/providers/{provider_id}/params": {
             "get": {
                 "security": [
@@ -924,7 +1271,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.",
                 "produces": [
                     "application/json"
                 ],
@@ -936,7 +1283,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
-                        "name": "connector_type",
+                        "name": "type",
                         "in": "query"
                     }
                 ],
@@ -1012,6 +1359,267 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Connector type or provider not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a paginated list of datasource connectors with optional filters by status and provider.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "List datasource connectors",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status: 'connected' or 'offline'",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider ID (e.g. 'object_storage', 'file_system')",
+                        "name": "provider",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validates the request, tests the connection, encrypts credentials, and persists a new datasource connector. Returns 422 if the connection test fails.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Create datasource connector",
+                "parameters": [
+                    {
+                        "description": "Datasource creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Datasource created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or validation errors",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider not found in catalog",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Datasource name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Connection test failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Get a single datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource detail",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a datasource connector by ID. Returns 409 Conflict if the connector is still linked to one or more applications.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Delete datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource connector ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Datasource deleted"
+                    },
+                    "400": {
+                        "description": "Invalid connector ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Datasource is connected to one or more applications",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -1280,7 +1888,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker"
                             }
                         }
                     },
@@ -1299,7 +1907,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (` + "`" + `worker start --token \u003ctoken\u003e` + "`" + `).",
+                "description": "Pre-registers a worker by name, creates a pending DB row, and returns a single-use bootstrap token.\nThe operator passes this token when starting the worker daemon (` + "`" + `worker join --token \u003ctoken\u003e` + "`" + `).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1422,6 +2030,50 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
+            "type": "object",
+            "properties": {
+                "application_id": {
+                    "description": "ApplicationID is the UUID of the application that owns this service.",
+                    "type": "string"
+                },
+                "application_name": {
+                    "description": "ApplicationName is the human-readable display name of the owning application.",
+                    "type": "string"
+                },
+                "err_msg": {
+                    "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
+                "last_sync_at": {
+                    "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
+                    "type": "string"
+                },
+                "service": {
+                    "description": "Service contains the catalog identity (id + resolved name) of the owning application.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
+                        }
+                    ]
+                },
+                "sync_status": {
+                    "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
@@ -1454,6 +2106,149 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "params",
+                "provider_id"
+            ],
+            "properties": {
+                "name": {
+                    "description": "Name is the unique human-readable label for this connector.\nMust be 3–100 characters; only letters, digits, hyphens (-), and underscores (_) are\nallowed. Duplicate-name detection is case-insensitive (\"My-DB\" and \"my-db\" conflict).",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 3
+                },
+                "params": {
+                    "description": "Params holds the provider-specific configuration. Sensitive fields (format: \"password\"\nin the JSON schema) are encrypted at rest; all other fields are stored in plain text.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider_id": {
+                    "description": "ProviderID identifies the provider implementation (e.g. \"object_storage\", \"file_system\").",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "connected_services": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "CreatedAt is the creation timestamp.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the datasource connector.",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Message contains a human-readable description of the current status (may be empty).",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "Metadata holds the non-sensitive configuration fields.\nSensitive fields (e.g. secret_access_key, private_key) are always stripped.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "description": "Name is the unique human-readable label.",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider contains the provider ID and its resolved display name.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo"
+                        }
+                    ]
+                },
+                "services": {
+                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each service's Digitize pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
+                    }
+                },
+                "status": {
+                    "description": "Status is the current connectivity status (\"connected\" or \"offline\").",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is always \"datasource\".",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "UpdatedAt is the last-update timestamp.",
                     "type": "string"
                 }
             }
@@ -1499,61 +2294,74 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.Worker": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleListResponse": {
             "type": "object",
             "properties": {
+                "bundles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleResponse": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
+                "catalog_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
-                },
-                "last_heartbeat": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
                 },
-                "registered_at": {
-                    "type": "string"
-                },
-                "runtime_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType"
+                "size_bytes": {
+                    "type": "integer"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus"
+                    "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerRuntimeType": {
-            "type": "string",
-            "enum": [
-                "unknown",
-                "podman",
-                "openshift"
-            ],
-            "x-enum-varnames": [
-                "WorkerRuntimeTypeUnknown",
-                "WorkerRuntimeTypePodman",
-                "WorkerRuntimeTypeOpenShift"
-            ]
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_db_models.WorkerStatus": {
-            "type": "string",
-            "enum": [
-                "pending",
-                "ready",
-                "disconnected"
-            ],
-            "x-enum-varnames": [
-                "WorkerStatusPending",
-                "WorkerStatusReady",
-                "WorkerStatusDisconnected"
-            ]
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_services_bundle.BundleValidationResult": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
+                "catalog_type": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
@@ -1984,6 +2792,12 @@ const docTemplate = `{
                 "healthy": {
                     "type": "boolean"
                 },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "pod_id": {
                     "type": "string"
                 },
@@ -2171,6 +2985,36 @@ const docTemplate = `{
                 "Removing",
                 "Dead"
             ]
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "last_heartbeat": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registered_at": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
             "type": "object",

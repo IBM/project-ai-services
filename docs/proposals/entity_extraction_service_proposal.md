@@ -1273,3 +1273,660 @@ Adapted from the digitize/summarize pattern for PostgreSQL:
 4**Sync request auditing:** optional persistence of sync extraction requests/results for compliance use cases.
 5**Batch multi-file jobs:** one job spanning many files against one schema, with per-document status tracking (digitize-style `documents[]` sub-resources).
 6**Confidence scoring:** per-field extraction confidence via logprobs or a secondary verification pass, surfaced alongside the extraction.
+
+
+
+======================================================================================================================================================================
+# Entity Extraction Service — Addendum: Batch Multi-File Extraction
+
+## A1. Overview
+
+This addendum extends the `POST /v1/extract/jobs` endpoint to accept multiple files in a single submission. A batch job processes N files against one schema, tracks per-file status independently, and supports partial success — files that fail (context limit, validation failure, bad encoding) do not block successful extractions from completing and being retrieved.
+
+The batch capability reuses the existing extraction pipeline (tokenize → guard → extract → validate) and concurrency model, adding a `documents` sub-resource table and per-file lifecycle tracking on top of the current single-file job infrastructure.
+
+### A1.1 Design Decisions
+
+| Decision | Choice                         | Rationale |
+|:---|:-------------------------------|:---|
+| Job model | One parent job, N sub-tasks    | Single job ID for tracking; per-file status via `extract_documents` table |
+| Schema scope | One schema per batch           | Covers primary use case (N invoices, one schema); simplifies validation and budgeting |
+| Partial failure | `completed_with_errors` status | Users retrieve successful results without resubmitting the batch |
+| Intra-batch processing | Semi-parallel (with a cap)     | Avoids multiplying vLLM pressure; text-only files process in seconds |
+| Deletion of active batch | Blocked entirely               | Consistent with single-file behavior; no partial cancellation in v1 |
+| Idempotency | Not implemented                | Failed uploads create no job; client retries from scratch |
+
+---
+
+## A2. Endpoint Changes
+
+### A2.1 POST /v1/extract/jobs — Batch Submission
+
+The existing endpoint is extended to accept multiple files. Single-file submissions continue to work unchanged.
+
+**Content-Type:** `multipart/form-data`
+
+**Form parameters:**
+
+| Parameter | Type | Required | Description                                                                                                |
+|:---|:---|:---|:-----------------------------------------------------------------------------------------------------------|
+| `files` | file[] | Yes | One or more `.txt` or `.md` files. Max `MAX_FILES_PER_JOB` files. There should be no duplicate in file names. |
+| `schema_id` | string | Yes | ID of a registered schema. Applied to all files in the batch.                                              |
+| `job_name` | string | No | Optional human-readable label for the batch.                                                               |
+
+**Validation rules (request thread):**
+
+1. At least one file is present (else `400`).
+2. File count ≤ `MAX_FILES_PER_JOB` (else `400` with count and limit).
+3. Each file passes `validate_text_upload` — extension check (`.txt`/`.md`), UTF-8 decode, null byte scan, control character ratio, PDF magic byte rejection. On failure, `415` identifying the failing filename and index.
+4. Validate that all files are unique, reject with 400 if any duplicate is present.
+5. `schema_id` exists (else `404`).
+6. `job_limiter` has capacity (else `429`).
+
+All file validations run before any job is created. If any file fails, the entire request is rejected — no partial acceptance at submission time.
+
+**Processing flow (request thread):**
+
+1. Validate all files and parameters.
+2. Acquire `extract_limiter` slot (non-blocking; `429` on failure).
+3. Generate `job_id` (UUID).
+4. Stage all files to `/var/cache/extract/staging/{job_id}/`.
+5. Insert one row into `extract_jobs` with `status='accepted'`, `file_count=N`, `is_batch=true`.
+6. Insert N rows into `extract_documents` with `status='pending'`.
+7. Launch background processing via `asyncio.create_task`.
+8. Return `202 Accepted`.
+
+**Sample request:**
+
+```bash
+curl -X POST http://localhost:9500/v1/extract/jobs \
+  -F "files=@invoice_001.txt" \
+  -F "files=@invoice_002.txt" \
+  -F "files=@invoice_003.md" \
+  -F "schema_id=9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02" \
+  -F "job_name=Q3 invoice batch"
+```
+
+**Sample response (202):**
+
+```json
+{
+    "job_id": "b6d1f0aa-2c34-4e19-8f0d-91a7c55e3b77",
+    "file_count": 3
+}
+```
+
+**Response codes:**
+
+| Status | Description                                                                    |
+|:---|:-------------------------------------------------------------------------------|
+| 202 Accepted | Batch job created.                                                             |
+| 400 Bad Request | No files, too many files, or missing `schema_id`.                              |
+| 404 Not Found | Unknown `schema_id`.                                                           |
+| 413 Payload Too Large | Total no of files exceeds `MAX_FILES_PER_JOB`.                                 |
+| 400 Bad Request | Duplicate files or missing parameters                                          | 
+| 415 Unsupported Media Type | One or more files failed content validation. Error identifies failing file(s). |
+| 429 Too Many Requests | Job concurrency at capacity.                                                   |
+| 500 Internal Server Error | Unexpected failure.                                                            |
+
+**Sample error (415):**
+
+```json
+{
+    "error": {
+        "code": "INVALID_FILE_CONTENT",
+        "message": "One or more files failed content validation.",
+        "status": 415,
+        "details": [
+                {
+                    "index": 1,
+                    "filename": "invoice_002.txt",
+                    "reason": "File contains null bytes and appears to be binary."
+                }
+            ]
+    }
+}
+```
+
+---
+
+### A2.2 Background Worker — Batch Processing
+
+The worker processes files **sequentially** within a batch. Each file independently traverses the full pipeline.
+
+**Per-file pipeline stages:**
+
+| Stage | Action | Failure error code | Retried? |
+|:---|:---|:---|:---|
+| `reading` | UTF-8 decode of staged file | `FILE_READ_ERROR` | No |
+| `tokenizing` | `/tokenize` call, context-window guard | `CONTEXT_LIMIT_EXCEEDED` | No |
+| `extracting` | vLLM `/v1/chat/completions` call | `EXTRACTION_ERROR` | Yes — if `finish_reason=length`, increase `max_tokens` from remaining budget and retry |
+| `validating` | `jsonschema` validation against strict schema | `EXTRACTION_VALIDATION_FAILED` or `REQUIRED_FIELDS_ABSENT` | Yes — one bounded retry with validation errors appended to prompt |
+| `writing` | Write result JSON to disk | `RESULT_WRITE_ERROR` | No |
+
+A failure at any stage marks that document as `failed` with the corresponding error code and detail, then the worker moves to the next file. One file's failure does not affect any other file.
+
+**Worker pseudocode:**
+
+```
+acquire extract_limiter slot
+update job → status='in_progress'
+
+for each document in batch (sequential):
+    acquire parallel_file_limiter slot
+    
+    update document → status='in_progress', phase='reading'
+
+    try:
+        text = read staged file (UTF-8)
+
+        phase='tokenizing'
+        input_tokens = /tokenize(text)
+        run context-window guard (fail document if exceeded)
+        
+        acquire concurrency_limiter slot
+        
+        phase='extracting'
+        call vLLM with guided_json(relaxed_schema)
+        if finish_reason == 'length':
+            recalculate max_tokens from remaining budget
+            retry vLLM call
+            if still 'length': fail document with OUTPUT_BUDGET_EXCEEDED
+
+        phase='validating'
+        validate output against strict schema
+        if validation fails:
+            retry with validation errors appended
+            if still fails: fail document with error details
+        release concurrency_limiter slot
+        write result to /var/cache/extract/results/{job_id}/{doc_id}_result.json
+        update document → status='completed'
+
+    except Exception:
+        update document → status='failed', error=<details>
+
+    release parallel_file_limiter slot
+    update job progress counters
+
+determine final job status:
+    all completed     → 'completed'
+    all failed        → 'failed'
+    mixed             → 'completed_with_errors'
+
+update job → final status, completed_at=now()
+cleanup staging directory
+release job_limiter slot
+```
+
+**Concurrency model:**
+
+The `extract_limiter` (configurable) is currently set at 8 , and `parallel_file_limiter` is capped to 4 (configurable), meaning we can have 8 requests (job or sync) at a time processing 4 parallel files max at a time from each job. Each job can have upto MAX_FILES_PER_JOB files but only 4 files will be processed at a given time.
+Each active batch job holds one `job_limiter` slot for its entire lifetime. Within the batch, each file briefly acquires one `concurrency_limiter` slot for its vLLM call(s), then releases it before moving to the next file.
+`job_limiter`*`parallel_file_limiter` = 0.5 * MODEL_BATCH_SIZE
+
+| Semaphore               | Held by                                   | Duration                                 | Purpose                                                              |
+|:------------------------|:------------------------------------------|:-----------------------------------------|:---------------------------------------------------------------------|
+| `extract_limiter`       | Any incoming extract request (sync/async) | Entire request lifetime                  | Caps concurrent requests across sync + async                         |
+| `parallel_file_limiter` | Per-file extraction                       | Duration of the complete file processing | Caps total number of files being processed parallely in a single job |
+| `concurrency_limiter`   | Per-file extraction                       | Duration of vLLM call(s) only            | Caps total concurrent vLLM connections across sync + async           |
+
+
+---
+
+### A2.3 GET /v1/extract/jobs/{job_id} — Batch Job Details
+
+Extended to include batch progress counters and per-document summary.
+
+**Sample response (200, in progress):**
+
+```json
+{
+    "job_id": "b6d1f0aa-2c34-4e19-8f0d-91a7c55e3b77",
+    "job_name": "Q3 invoice batch",
+    "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
+    "status": "in_progress",
+    "file_count": 20,
+    "files_completed": 12,
+    "files_failed": 1,
+    "files_pending": 7,
+    "documents": [
+        {
+            "doc_id": "a1b2c3d4-...",
+            "filename": "invoice_001.txt",
+            "status": "completed",
+            "error": ""
+        },
+        {
+            "doc_id": "e5f6g7h8-...",
+            "filename": "invoice_002.txt",
+            "status": "failed",
+            "error": "Input does not fit in the model context window."
+        },
+        {
+            "doc_id": "i9j0k1l2-...",
+            "filename": "invoice_003.txt",
+            "status": "in_progress",
+            "error": ""
+        },
+        {
+            "doc_id": "m3n4o5p6-...",
+            "filename": "invoice_004.txt",
+            "status": "pending",
+            "error": ""
+        }
+    ],
+    "submitted_at": "2026-07-07T10:15:00Z",
+    "completed_at": null,
+    "error": null
+}
+```
+
+**Sample response (200, completed with errors):**
+
+```json
+{
+    "job_id": "b6d1f0aa-2c34-4e19-8f0d-91a7c55e3b77",
+    "job_name": "Q3 invoice batch",
+    "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
+    "status": "completed_with_errors",
+    "is_batch": true,
+    "file_count": 3,
+    "files_completed": 2,
+    "files_failed": 1,
+    "files_pending": 0,
+    "documents": [
+        {
+            "doc_id": "a1b2c3d4-...",
+            "filename": "invoice_001.txt",
+            "status": "completed",
+            "error": ""
+        },
+        {
+            "doc_id": "e5f6g7h8-...",
+            "filename": "invoice_002.txt",
+            "status": "failed",
+            "error": "Required fields absent after retry: invoice_number, vendor_name"
+        },
+        {
+            "doc_id": "i9j0k1l2-...",
+            "filename": "invoice_003.txt",
+            "status": "completed",
+            "error": ""
+        }
+    ],
+    "submitted_at": "2026-07-07T10:15:00Z",
+    "completed_at": "2026-07-07T10:22:18Z",
+    "error": "1 of 3 files failed extraction."
+}
+```
+
+---
+
+### A2.4 GET /v1/extract/jobs/{job_id}/results/{doc_id} — Per-Document Result
+
+The response format is identical to the existing single-file result (Section 5.10 of the base proposal).
+
+| Status | Description |
+|:---|:---|
+| 200 OK | Extraction result for this document. |
+| 202 Accepted | Document still processing. |
+| 404 Not Found | No job or document with this ID. |
+| 410 Gone | Document failed extraction. Error details available on the job resource via `GET /v1/extract/jobs/{job_id}`. |
+| 500 Internal Server Error | Failure reading result file. |
+
+**Sample response (200):**
+
+```json
+{
+    "data": {
+        "extraction": {
+            "invoice_number": "INV-3377",
+            "vendor_name": "Northwind Traders",
+            "total_amount": 8420.00,
+            "currency": "USD"
+        },
+        "schema_id": "9f1c2a4e-77aa-4c3b-9d20-3f4b1a6c8e02",
+        "source": {
+            "input_type": "file",
+            "document_name": "invoice_001.txt",
+            "input_words": 842,
+            "input_tokens": 1150
+        }
+    },
+    "status": "completed",
+    "meta": {
+        "model": "ibm-granite/granite-3.3-8b-instruct",
+        "processing_time_ms": 3200,
+        "validation_attempts": 1,
+        "timing_in_secs": {
+            "extracting": 2.8,
+            "validating": 0.1
+        }
+    },
+    "usage": {
+        "input_tokens": 2680,
+        "output_tokens": 96,
+        "total_tokens": 2776
+    }
+}
+```
+
+### A2.5 GET /v1/extract/jobs/{job_id}/results/{doc_id}/download — Download Result File
+
+Returns the result JSON as a downloadable file in .json format.
+
+| Status | Description |
+|:---|:---|
+| 200 OK | File download (`Content-Disposition: attachment`). |
+| 404 Not Found | No job, document, or result file with this ID. |
+| 410 Gone | Document failed extraction. |
+
+---
+
+### A2.6 Existing Single-File Result Endpoint
+
+`GET /v1/extract/jobs/{job_id}/result` will now be invalid.
+
+### A2.7 DELETE /v1/extract/jobs/{job_id}
+
+Behavior unchanged from the base proposal: deletion is blocked while the job is `accepted` or `in_progress`. When permitted, deletes the parent job row (which cascades to all `extract_documents` rows via `ON DELETE CASCADE`), all per-document result files under `results/{job_id}/`, and any remaining staging files.
+
+### A2.8 DELETE /v1/extract/jobs (Bulk Delete)
+
+Behavior unchanged: blocked if any job is active. Deletes all job rows, document rows, result files, and staging directories.
+
+---
+
+## A3. Database Changes
+
+### A3.1 extract_jobs Table — Additions
+
+Two new columns on the existing `extract_jobs` table:
+
+| Column | Type | Description |
+|:---|:---|:---|
+| `file_count` | INTEGER NOT NULL DEFAULT 1 | Number of files in the job. |
+
+The `status` check constraint is updated to include the new terminal state:
+
+```sql
+CONSTRAINT chk_extract_job_status CHECK (
+    status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')
+)
+```
+
+### A3.2 extract_documents Table (New)
+
+```sql
+CREATE TABLE IF NOT EXISTS extract_documents (
+    doc_id          VARCHAR(255) PRIMARY KEY,
+    job_id          VARCHAR(255) NOT NULL REFERENCES extract_jobs(job_id) ON DELETE CASCADE,
+    filename        VARCHAR(500) NOT NULL,
+    source_type     VARCHAR(10)  NOT NULL,
+    status          VARCHAR(50)  NOT NULL DEFAULT 'pending',
+    phase           VARCHAR(50),
+    error           TEXT,
+    error_code      VARCHAR(100),
+    word_count      INTEGER,
+    input_tokens    INTEGER,
+    metadata        JSONB,
+    started_at      TIMESTAMP WITH TIME ZONE,
+    completed_at    TIMESTAMP WITH TIME ZONE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_doc_status      CHECK (status IN ('pending','in_progress','completed','failed')),
+    CONSTRAINT chk_doc_source_type CHECK (source_type IN ('txt','md'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_id
+    ON extract_documents(job_id);
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_status
+    ON extract_documents(job_id, status);
+```
+
+`ON DELETE CASCADE` on `job_id` ensures deleting a job row automatically removes all its document rows.
+
+### A3.3 extract_documents metadata JSONB shape
+
+Per-document metadata mirrors the single-file job metadata structure:
+
+```json
+{
+    "phase": "reading | tokenizing | extracting | validating | writing",
+    "token_diagnostics": {
+        "input_tokens": 1150,
+        "schema_tokens": 118,
+        "examples_tokens": 74,
+        "custom_prompt_tokens": 0,
+        "prompt_overhead_tokens": 150,
+        "reserved_output_tokens": 512,
+        "max_tokens_adjusted": false
+    },
+    "timing_in_secs": {
+        "reading": 0.01,
+        "extracting": 2.8,
+        "validating": 0.1
+    },
+    "validation": {
+        "attempts": 2,
+        "last_errors": ["'invoice_number' is a required property"],
+        "last_raw_output": "{ ... }"
+    }
+}
+```
+
+### A3.4 init_schema.sql Additions
+
+```sql
+-- Batch columns on extract_jobs
+ALTER TABLE extract_jobs ADD COLUMN IF NOT EXISTS file_count INTEGER NOT NULL DEFAULT 1;
+
+-- Update status constraint to include completed_with_errors
+ALTER TABLE extract_jobs DROP CONSTRAINT IF EXISTS chk_extract_job_status;
+ALTER TABLE extract_jobs ADD CONSTRAINT chk_extract_job_status CHECK (
+    status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')
+);
+
+-- Documents table
+CREATE TABLE IF NOT EXISTS extract_documents (
+    doc_id          VARCHAR(255) PRIMARY KEY,
+    job_id          VARCHAR(255) NOT NULL REFERENCES extract_jobs(job_id) ON DELETE CASCADE,
+    filename        VARCHAR(500) NOT NULL,
+    source_type     VARCHAR(10)  NOT NULL,
+    status          VARCHAR(50)  NOT NULL DEFAULT 'pending',
+    phase           VARCHAR(50),
+    error           TEXT,
+    error_code      VARCHAR(100),
+    word_count      INTEGER,
+    input_tokens    INTEGER,
+    metadata        JSONB,
+    started_at      TIMESTAMP WITH TIME ZONE,
+    completed_at    TIMESTAMP WITH TIME ZONE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_doc_status      CHECK (status IN ('pending','in_progress','completed','failed')),
+    CONSTRAINT chk_doc_source_type CHECK (source_type IN ('txt','md'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_id
+    ON extract_documents(job_id);
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_status
+    ON extract_documents(job_id, status);
+
+-- updated_at trigger for documents (reuses existing function)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_extract_documents_updated_at') THEN
+        CREATE TRIGGER update_extract_documents_updated_at BEFORE UPDATE ON extract_documents
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
+
+-- Permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON extract_documents TO extract_user;
+```
+
+### A3.5 Single-File Backward Compatibility
+
+Single-file submissions (`POST /v1/extract/jobs` with one file) continue to work unchanged:
+
+- `is_batch` is set to `FALSE`, `file_count` to `1`.
+- One `extract_documents` row is created.
+- Job status resolves to `completed` or `failed` (never `completed_with_errors`).
+- `GET /v1/extract/jobs/{job_id}/result` (the existing single-file result endpoint) continues to work by reading the sole document's result.
+
+---
+
+## A4. Storage Layout
+
+```
+/var/cache/extract/
+├── staging/
+│   └── {job_id}/
+│       ├── invoice_001.txt
+│       ├── invoice_002.txt
+│       └── invoice_003.md
+└── results/
+    └── {job_id}/
+        ├── {doc_id_1}_result.json
+        ├── {doc_id_2}_result.json
+        └── {doc_id_3}_result.json
+```
+
+Results are stored per-job (`results/{job_id}/`) rather than flat, avoiding filename collisions and simplifying cleanup — `rm -rf results/{job_id}/` removes all results for a batch in one operation.
+
+### A4.1 Lifecycle of Storage Artifacts
+
+| Artifact | Created at | Deleted at |
+|:---|:---|:---|
+| Staging files (`staging/{job_id}/*`) | Submission (request thread) | Worker cleanup after all files processed |
+| Staging directory (`staging/{job_id}/`) | Submission | Worker cleanup after all files processed |
+| Per-document result (`results/{job_id}/{doc_id}_result.json`) | Worker writes on per-file success | Job delete or bulk delete |
+| Results directory (`results/{job_id}/`) | First successful file | Job delete or bulk delete |
+
+---
+
+## A5. Configuration
+
+| Variable | Description | Default                       |
+|:---|:---|:------------------------------|
+| `MAX_FILES_PER_JOB` | Maximum number of files per batch submission | `64` or 2*vLLM MAX_BATCH_SIZE |
+
+
+---
+
+## A6. Recovery Strategy — Batch Extensions
+
+The base proposal's boot-time zombie scan (Section 12) is extended for batch jobs:
+
+1. **Zombie jobs:** any `extract_jobs` row with `status IN ('accepted', 'in_progress')` is marked `failed` with `error='System restarted during processing'`.
+2. **Zombie documents:** any `extract_documents` row with `status IN ('pending', 'in_progress')` whose parent job is being marked failed is also marked `failed` with the same error.
+3. **Preserve completed work:** documents that completed before the crash retain their `completed` status and their result files remain on disk and retrievable. The parent job is still marked `failed` (not `completed_with_errors`) since the batch did not run to completion — but per-document results for successfully processed files are accessible.
+4. **Progress reconciliation:** for zombie batch jobs, the `files_completed` and `files_failed` counters on the job details response are derived from actual document statuses, so they reflect the true state post-recovery.
+5. **Staging cleanup:** `staging/{job_id}/` is deleted for each zombie job. Result files are preserved.
+
+---
+
+## A7. Test Cases
+
+| Test Case | Input | Expected Result |
+|:---|:---|:---|
+| Single file submission (backward compat) | 1 `.txt` file | 202; `is_batch=false`, `file_count=1`; existing result endpoint works |
+| Batch submission | 3 `.txt` files | 202; `is_batch=true`, `file_count=3` |
+| Exceed MAX_FILES_PER_JOB | 25 files (limit 20) | 400 with count and limit in error |
+| One invalid file in batch | 2 valid `.txt` + 1 binary `.txt` | 415 identifying failing file index and name; no job created |
+| No files | `schema_id` only | 400 |
+| Mixed extensions | 2 `.txt` + 1 `.md` | 202; all processed |
+| Batch all succeed | 5 valid `.txt` files | Job `completed`, `files_completed=5`, `files_failed=0` |
+| Batch partial failure (context) | 3 files, one exceeds context | Job `completed_with_errors`; 2 results retrievable; 1 failed with `CONTEXT_LIMIT_EXCEEDED` and token diagnostics |
+| Batch partial failure (validation) | 3 files, one fails validation after retry | Job `completed_with_errors`; failed doc shows `REQUIRED_FIELDS_ABSENT` or `EXTRACTION_VALIDATION_FAILED` |
+| Batch all fail | 3 files, all exceed context | Job `failed`, `files_failed=3` |
+| Per-document result retrieval | Completed `doc_id` | 200 with extraction result |
+| Per-document result download | Completed `doc_id` | 200 with file download |
+| Result for failed document | Failed `doc_id` | 410 Gone with pointer to job resource |
+| Result for in-progress document | Processing `doc_id` | 202 Accepted |
+| Single-file result endpoint on batch | Call `/result` (no `doc_id`) on batch job | 400 directing user to per-document URLs |
+| Job progress polling | Poll during batch processing | `files_completed`/`files_failed`/`files_pending` update incrementally; `current_file` and `current_phase` reflect active document |
+| finish_reason=length retry per file | File whose output hits max_tokens | Document retries with increased budget; metadata shows `max_tokens_adjusted=true` |
+| Delete active batch | In-progress batch | 409 blocked |
+| Delete completed batch | All files done | 204; all result files, staging, job row, document rows removed |
+| Bulk delete with batch jobs | Mix of single-file and batch jobs, all terminal | 204; everything cleaned |
+| Recovery after crash mid-batch | Kill container after 5 of 10 files complete | 5 completed docs retain `completed` status and results; 5 pending/in-progress marked `failed`; job → `failed`; staging cleaned |
+| Inferred schema + batch | Register via examples, submit 10 files | Per-file failures surface specific absent required fields |
+
+---
+
+## A8. Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant API as Extract API (FastAPI :9500)
+    participant PG as PostgreSQL
+    participant FS as /var/cache/extract
+    participant Worker as Background Worker
+    participant vLLM as vLLM Endpoint
+
+    User->>API: POST /v1/extract/jobs (files[], schema_id)
+    API->>PG: Validate schema_id exists
+    Note over API: Validate all files: count, size,<br/>extension, content (UTF-8, null bytes,<br/>control chars, PDF magic)
+    API->>FS: Stage all files to staging/{job_id}/
+    API->>PG: INSERT extract_jobs (status: accepted, file_count: N, is_batch: true)
+    API->>PG: INSERT N extract_documents (status: pending)
+    API->>Worker: BackgroundTask(job_id)
+    API-->>User: 202 Accepted {job_id, file_count}
+
+    activate Worker
+    Worker->>PG: job status=in_progress
+
+    loop For each document (sequential)
+        Worker->>PG: doc status=in_progress, phase=reading
+        Worker->>FS: Read staged file (UTF-8)
+
+        Worker->>PG: phase=tokenizing
+        Worker->>vLLM: POST /tokenize
+        vLLM-->>Worker: input_tokens
+
+        alt Context budget exceeded
+            Worker->>PG: doc status=failed (CONTEXT_LIMIT_EXCEEDED + diagnostics)
+        else Budget OK
+            Worker->>PG: phase=extracting
+            Worker->>vLLM: POST /v1/chat/completions (guided_json, max_tokens)
+            vLLM-->>Worker: Extraction JSON
+
+            alt finish_reason == length
+                Note over Worker: Recalculate max_tokens<br/>from remaining budget
+                Worker->>vLLM: Retry with increased max_tokens
+                vLLM-->>Worker: Extraction JSON (retry)
+            end
+
+            Worker->>PG: phase=validating
+            Worker->>Worker: jsonschema validation
+
+            alt Validation failed
+                Worker->>vLLM: Retry with errors appended
+                vLLM-->>Worker: Corrected JSON
+                Worker->>Worker: Re-validate
+            end
+
+            alt Final validation passed
+                Worker->>FS: Write results/{job_id}/{doc_id}_result.json
+                Worker->>PG: doc status=completed
+            else Final validation failed
+                Worker->>PG: doc status=failed + error details
+            end
+        end
+
+        Worker->>PG: Update job progress counters
+    end
+
+    Worker->>Worker: Determine final job status
+    Note over Worker: all completed → completed<br/>all failed → failed<br/>mixed → completed_with_errors
+
+    Worker->>PG: job → final status, completed_at
+    Worker->>FS: Delete staging/{job_id}/
+    deactivate Worker
+```

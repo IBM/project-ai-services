@@ -18,6 +18,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+const (
+	caddyFileIndent   = 10
+	certContentIndent = 4
+)
+
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
 func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
 	// Create deployment context without argParams for status check
@@ -28,7 +33,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 
 	// Collect and hash password
 	// If secret exist passwordHash will be empty
-	passwordHash, err := catalogUtils.CollectAndHashPassword(deployCtx.Runtime)
+	passwordHash, err := catalogUtils.CollectAndHashPassword(ctx, deployCtx.Runtime)
 	if err != nil {
 		return err
 	}
@@ -39,11 +44,11 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 	}
 
 	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 		return err
 	}
 
-	return handlePostDeployment(caddyCtx, deployCtx)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -65,7 +70,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	logger.Debugln("checking for existing resources...")
 
 	// Check existing deployment status
-	isDeployed, existingResources, err := deployCtx.CheckStatus()
+	isDeployed, existingResources, err := deployCtx.CheckStatus(ctx)
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
@@ -74,7 +79,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	if !isDeployed {
 		// Prepare deployment with domain suffix computation and create Caddy context
-		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort, opts.WorkerGatewayPort)
+		err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort, opts.WorkerGatewayPort)
 		if err != nil {
 			s.Fail("failed to load param values")
 
@@ -82,7 +87,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		}
 
 		// Execute pod templates
-		if err := deployCtx.ExecutePodLayers(opts.BaseDir, caddyCtx, existingResources); err != nil {
+		if err := deployCtx.ExecutePodLayers(ctx, opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
 			return nil, err
@@ -94,7 +99,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		s.Stop("Catalog service already deployed")
 		logger.Infof("Existing resources: %v\n", existingResources)
 		// Validate domain, HTTPS port, base directory, and certificates haven't changed
-		if err := validateReconfigureParameters(deployCtx.Runtime, &opts, caddyCtx.GetDomainSuffix()); err != nil {
+		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx); err != nil {
 			s.Fail("validation failed during reconfigure")
 
 			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
@@ -105,7 +110,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -115,19 +120,19 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 	}
 
 	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := caddy.RegisterCatalogRoutes(deployCtx.Runtime, caddyCtx, routeInfos)
+	routeDomains, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
 	// Get Caddy HTTPS port for next steps display
-	httpsPort, err := caddyCtx.GetHTTPSPort(deployCtx.Runtime)
+	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
 	}
 
 	// Print next steps with proxy route information
-	if err := helpers.PrintNextStepsWithProxy(deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -136,14 +141,15 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 }
 
 // loadCatalogParamValues prepares all necessary data for deployment including domain suffix computation.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort, workerGatewayPort int) error {
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, httpsPort, workerGatewayPort)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
+	// Fill caddy config
 
 	// Prepare values with configure-specific configuration
 	err = deployCtx.PrepareValues(argParams)
@@ -155,7 +161,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (map[string]string, error) {
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int) (map[string]string, error) {
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
@@ -194,6 +200,21 @@ func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (m
 	}
 	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
 
+	// Caddy configuration
+	caddyFileContent, err := caddy.GetCaddyFileContent()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate caddy file: %w", err)
+	}
+	var sslCertContent, sslKeyContent string
+	if sslCertPath != "" && sslKeyPath != "" {
+		certbyte, keyBytes, _, err := utils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load ssl certs: %w", err)
+		}
+		sslCertContent = string(certbyte)
+		sslKeyContent = string(keyBytes)
+	}
+
 	// Set configure-specific values
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
@@ -203,6 +224,9 @@ func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (m
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
+	argParams[configure.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, caddyFileIndent)
+	argParams[configure.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, certContentIndent)
+	argParams[configure.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, certContentIndent)
 
 	return argParams, nil
 }
@@ -211,8 +235,7 @@ func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (m
 // This function:
 // 1. Gets the Caddy pod name from deployment context templates
 // 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
-// 3. Creates Caddy context with pod name and domain suffix
-// 4. Generates and writes Caddyfile.
+// 3. Creates Caddy context with pod name and domain suffix.
 func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
@@ -223,7 +246,7 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 	}
 
 	// Compute domain configuration (cert domain extraction + domain suffix resolution)
-	domainSuffix, err := caddy.ComputeDomainConfig(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
 	if err != nil {
 		s.Fail("failed to calculate domain")
 
@@ -234,13 +257,6 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 
 	// Create Caddy context with pod name and domain suffix (NO template dependencies)
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
-
-	// Generate and write Caddyfile before deploying
-	if err := caddy.GenerateCaddyfile(opts.BaseDir); err != nil {
-		s.Fail("failed to generate Caddyfile")
-
-		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
-	}
 
 	return caddyCtx, nil
 }

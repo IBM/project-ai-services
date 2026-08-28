@@ -3,6 +3,7 @@ package utils
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -415,11 +416,11 @@ func checkParamsInValues(param string, values map[string]any) bool {
 }
 
 // GetExistingCustomResource checks if a single instance resource exists and return the object.
-func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
+func GetExistingCustomResource(ctx context.Context, client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk)
 
-	if err := client.Client.List(client.Ctx, list); err != nil {
+	if err := client.Client.List(ctx, list); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil
 		}
@@ -530,8 +531,13 @@ func GetModelsPath() string {
 // ValidateBaseDir validates that the base directory exists or can be created.
 // It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {
+	// Fall back to the default when the flag was not set.
+	if baseDir == "" {
+		return constants.DefaultBaseDir, nil
+	}
+
 	// Resolve relative paths to absolute paths to prevent Podman from mounting
-	//the wrong (or empty) host directory.
+	// the wrong (or empty) host directory.
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve absolute path: %w", err)
@@ -637,6 +643,19 @@ func ExtractTarGz(srcFile, destDir string) error {
 	}
 
 	return nil
+}
+
+// IsOSMetadataFile reports whether name is an OS-generated metadata file
+// (macOS AppleDouble/.DS_Store, Windows Thumbs.db/desktop.ini) that should be
+// skipped when validating or extracting archive entries.
+func IsOSMetadataFile(name string) bool {
+	base := filepath.Base(name)
+
+	if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+		return true
+	}
+
+	return strings.EqualFold(base, "Thumbs.db") || strings.EqualFold(base, "desktop.ini")
 }
 
 // extractTarEntry extracts a single tar entry.
@@ -748,4 +767,30 @@ func DirStats(dir string) (totalBytes int64, fileCount int) {
 	})
 
 	return totalBytes, fileCount
+}
+
+// ConvertRawJsontoMap unmarshals a raw JSON message into a map[string]any.
+func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON: %w", err)
+	}
+
+	return result, nil
+}
+
+// IndentString adds indentation (leading spaces) to every line of the input string.
+func IndentString(s string, spaces int) string {
+	if s == "" {
+		return ""
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			lines[i] = prefix + line
+		}
+	}
+
+	return prefix + strings.Join(lines, "\n")
 }

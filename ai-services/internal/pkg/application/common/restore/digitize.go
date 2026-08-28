@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -179,7 +180,7 @@ func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
 }
 
 // CallImportAPI calls the digitize service Import API with the metadata payload.
-func (c *DigitizeRestoreClient) CallImportAPI(payload map[string]interface{}) error {
+func (c *DigitizeRestoreClient) CallImportAPI(ctx context.Context, payload map[string]interface{}) error {
 	logger.Infoln("Calling digitize Import API...")
 
 	// Prepare response container
@@ -188,6 +189,7 @@ func (c *DigitizeRestoreClient) CallImportAPI(payload map[string]interface{}) er
 	// Make the API call using the reusable HTTP client
 	logger.Infoln("Sending import request to: /v1/import")
 	resp, err := c.client.R().
+		SetContext(ctx).
 		SetBody(payload).
 		SetResult(&importResponse).
 		Post("/v1/import")

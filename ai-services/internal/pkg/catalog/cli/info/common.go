@@ -13,7 +13,7 @@ import (
 func Run(ctx context.Context, runtimeType types.RuntimeType) error {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
-		return podman.DisplayCatalogInfo()
+		return podman.DisplayCatalogInfo(ctx)
 	case types.RuntimeTypeOpenShift:
 		return openshift.DisplayCatalogInfo(ctx)
 	default:

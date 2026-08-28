@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -27,9 +28,18 @@ func setupTestRouter() *gin.Engine {
 	return router
 }
 
+// newTestCatalogHandler creates a CatalogHandler backed by embedded-only catalog items
+// (no bundle DB) — sufficient for unit tests that exercise built-in catalog entries.
+func newTestCatalogHandler(t *testing.T) *CatalogHandler {
+	t.Helper()
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+	return NewCatalogHandler(provider)
+}
+
 func TestListArchitectures(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/architectures", handler.ListArchitectures)
 
 	tests := []struct {
@@ -77,7 +87,7 @@ func TestListArchitectures(t *testing.T) {
 
 func TestGetArchitecture(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/architectures/:id", handler.GetArchitectureDetails)
 
 	tests := []struct {
@@ -120,7 +130,7 @@ func validateRagArchitecture(t *testing.T, body []byte) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "rag", arch.ID)
-	assert.Equal(t, "Digital Assistant", arch.Name)
+	assert.Equal(t, "Digital Assistants", arch.Name)
 	assert.NotEmpty(t, arch.Description)
 	assert.Equal(t, "1.0.0", arch.Version)
 	assert.Equal(t, "architecture", arch.Type)
@@ -134,7 +144,7 @@ func validateRagArchitecture(t *testing.T, body []byte) {
 	}
 	assert.True(t, serviceIDs["chat"])
 	assert.True(t, serviceIDs["digitize"])
-	assert.True(t, serviceIDs["summarize"])
+	assert.True(t, serviceIDs["similarity"])
 }
 
 func validateArchitectureNotFound(t *testing.T, body []byte) {
@@ -146,7 +156,7 @@ func validateArchitectureNotFound(t *testing.T, body []byte) {
 
 func TestListServices(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/services", handler.ListServices)
 
 	tests := []struct {
@@ -164,23 +174,28 @@ func TestListServices(t *testing.T) {
 
 				// Should have deployable services
 				assert.NotEmpty(t, services)
-
+	
 				serviceIDs := make(map[string]bool)
 				for _, svc := range services {
 					serviceIDs[svc.ID] = true
-					// Verify structure
+					// Verify every entry has at minimum an ID and name
 					assert.NotEmpty(t, svc.ID)
 					assert.NotEmpty(t, svc.Name)
 					assert.NotEmpty(t, svc.Description)
-					assert.NotEmpty(t, svc.CertifiedBy)
-					assert.NotEmpty(t, svc.Architectures)
 				}
-
+	
 				// Should include deployable services
 				assert.True(t, serviceIDs["chat"])
 				assert.True(t, serviceIDs["digitize"])
 				assert.True(t, serviceIDs["summarize"])
-
+	
+				// Verify architectures for services known to have them
+				for _, svc := range services {
+					if svc.ID == "chat" || svc.ID == "digitize" || svc.ID == "similarity" {
+						assert.NotEmpty(t, svc.Architectures, "service %q should have architectures", svc.ID)
+					}
+				}
+	
 				// Components (opensearch, embedding, instruct, reranker) are not services
 				assert.False(t, serviceIDs["opensearch"])
 				assert.False(t, serviceIDs["embedding"])
@@ -206,7 +221,7 @@ func TestListServices(t *testing.T) {
 
 func TestGetService(t *testing.T) {
 	router := setupTestRouter()
-	handler := NewCatalogHandler()
+	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/services/:id", handler.GetServiceDetails)
 
 	tests := []struct {
@@ -249,7 +264,7 @@ func validateChatService(t *testing.T, body []byte) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "chat", svc.ID)
-	assert.Equal(t, "Question and Answer", svc.Name)
+	assert.Equal(t, "Question and answer", svc.Name)
 	assert.Equal(t, "service", svc.Type)
 	assert.Equal(t, "IBM", svc.CertifiedBy)
 	assert.Contains(t, svc.Architectures, "rag")

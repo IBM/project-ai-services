@@ -49,6 +49,7 @@
 }
 
 .formSection {
+  margin-top: $spacing-05;
   margin-bottom: $spacing-07;
 }
 
@@ -319,9 +320,60 @@
   }
 }
 
+.serviceConfigFieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-06;
+  width: 100%;
+
+  // Credentials block spans both columns.
+  // Negative margin cancels the grid row-gap so spacing matches Services.
+  .fullWidth:has(> h4) {
+    grid-column: 1 / -1;
+    margin-top: -$spacing-06;
+  }
+
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-02 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: $field-02 !important;
+    }
+  }
+
+  > div:has(.systemPromptTextArea) {
+    grid-column: 1 / -1;
+  }
+}
+
+.readonlyField {
+  :global {
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: transparent !important;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
 @include breakpoint-down(lg) {
   .formField {
     max-width: 100%;
+  }
+
+  .serviceConfigFieldRow {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -122,7 +122,7 @@ func TestNewAggregator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			aggregator, err := NewAggregator(tt.intf, tt.endpoint, auth, tt.globalQuery, tt.globalHeaders)
+			aggregator, err := NewAggregator(tt.intf, tt.endpoint, auth, tt.globalQuery, tt.globalHeaders, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewAggregator() error = %v, wantErr %v", err, tt.wantErr)
@@ -161,7 +161,7 @@ func TestAggregator_GetTools(t *testing.T) {
 	intf := createMockInterface()
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}
@@ -254,7 +254,7 @@ func TestAggregator_HandleToolCall(t *testing.T) {
 	intf := createMockInterface()
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}
@@ -320,7 +320,7 @@ func TestAggregator_GetFriendlyName(t *testing.T) {
 	intf := createMockInterface()
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}
@@ -337,7 +337,7 @@ func TestAggregator_GetName(t *testing.T) {
 	intf := createMockInterface()
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}
@@ -354,7 +354,7 @@ func TestAggregator_GetTags(t *testing.T) {
 	intf := createMockInterface()
 	auth := &mockAuthenticator{token: "test-token", authType: "test"}
 
-	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil)
+	aggregator, err := NewAggregator(intf, "https://api.example.com", auth, nil, nil, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}
@@ -448,7 +448,7 @@ func TestAggregator_Integration(t *testing.T) {
 
 	aggregator, err := NewAggregator(intf, "https://api.example.com", auth,
 		map[string]string{"version": "2023-10-01"},
-		map[string]string{"User-Agent": "test-client"})
+		map[string]string{"User-Agent": "test-client"}, false)
 	if err != nil {
 		t.Fatalf("NewAggregator() error = %v", err)
 	}

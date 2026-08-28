@@ -34,9 +34,11 @@ from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
+import asyncio
+
 from digitize.db.connection import check_db_connection, close_db_connections
 import digitize.utils.jobs as dg_util
-from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state
+from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state, recover_conversion_tasks
 
 logger = get_logger("digitize_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -99,6 +101,22 @@ def _init_database():
         raise RuntimeError(f"Database connection required but failed: {exc}")
 
 
+def _shutdown(dispatcher_task: asyncio.Task) -> None:
+    """Cancel the dispatcher and release sync resources on application shutdown.
+
+    Cancels ``dispatcher_task`` (caller must await it to absorb CancelledError),
+    closes DB connections, and stops the stderr monitor.
+    """
+    dispatcher_task.cancel()
+    logger.info("Application shutting down...")
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as exc:
+        logger.error(f"Error closing database connections: {exc}", exc_info=True)
+    stderr_monitor.stop()
+
+
 def _recover_zombie_jobs():
     """Recover orphan / zombie jobs left over from a previous app server run."""
     try:
@@ -110,17 +128,16 @@ def _recover_zombie_jobs():
     except Exception as exc:
         logger.error(f"Error during zombie job recovery: {exc}", exc_info=True)
 
-
-def _shutdown():
-    """Release resources on application shutdown."""
-    logger.info("Application shutting down...")
+def _recover_conversion_tasks():
+    """Recover stale conversion tasks left over from a previous app server run."""
     try:
-        close_db_connections()
-        logger.info("Database connections closed")
+        ct_count = recover_conversion_tasks()
+        if ct_count > 0:
+            logger.info(
+                f"Recovered {ct_count} stale conversion task(s) from previous run"
+            )
     except Exception as exc:
-        logger.error(f"Error closing database connections: {exc}", exc_info=True)
-
-    stderr_monitor.stop()
+        logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
 
 
 # ------------------------------------------------------------------ #
@@ -160,21 +177,38 @@ async def _connector_scheduler_lifespan():
             # Re-register all existing connectors (fire_immediately=False so we
             # don't trigger a duplicate tick for connectors that are already
             # up-to-date after crash recovery).
+            # If a connector is in status 'delete pending', trigger the delete
+            # procedure again and do not register a job.
             try:
+                import asyncio
+                from digitize.connectors.models import ConnectorStatus
+                from digitize.api.v1.connectors import _run_teardown
+
                 connectors = list_connectors()
+                registered_count = 0
                 for connector in connectors:
+                    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+                        logger.info(
+                            f"Connector crash recovery: found connector {connector.id!r} "
+                            "in 'delete pending' status. Re-triggering delete procedure."
+                        )
+                        asyncio.create_task(_run_teardown(connector.id))
+                        continue
+
                     await scheduler_module.register_connector_job(
                         connector.id,
                         connector.sync_interval_seconds,
                         fire_immediately=False,
                     )
-                if connectors:
+                    registered_count += 1
+
+                if registered_count:
                     logger.info(
-                        f"Re-registered {len(connectors)} connector job(s) with scheduler"
+                        f"Re-registered {registered_count} connector job(s) with scheduler"
                     )
             except Exception as exc:
                 logger.error(
-                    f"Error re-registering connector jobs: {exc}", exc_info=True
+                    f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
                 )
 
             await sched.start_in_background()
@@ -210,12 +244,24 @@ async def lifespan(app: FastAPI):
     # Orphan / zombie job recovery on startup.
     _recover_zombie_jobs()
 
+    # Stale conversion task recovery on startup.
+    _recover_conversion_tasks()
+
+    # Start conversion dispatcher.
+    from digitize.workers.conversion_dispatcher import dispatch_loop
+    dispatcher_task = asyncio.create_task(dispatch_loop())
+    logger.info("✅ Conversion dispatcher started")
+
     # Connector scheduler.
     async with _connector_scheduler_lifespan():
         yield
 
-    # Shutdown.
-    _shutdown()
+    # Shutdown — cancel dispatcher, close DB connections, stop monitor.
+    _shutdown(dispatcher_task)
+    try:
+        await dispatcher_task
+    except asyncio.CancelledError:
+        pass
 
 
 
@@ -241,7 +287,7 @@ tags_metadata = [
     },
     {
         "name": "connectors",
-        "description": "Data-source connector lifecycle management (SFTP, S3)",
+        "description": "Data-source connector lifecycle management (file_system, object_storage)",
     },
 ]
 
@@ -276,6 +322,11 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """Middleware to extract or generate a unique Request ID for tracing.
+
+    Sets the request ID in thread-local or task-local context and appends it to
+    the outgoing response headers.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     set_request_id(request_id)
     response = await call_next(request)
@@ -305,6 +356,11 @@ def swagger_root():
     response_description="Service health status",
 )
 async def health_check():
+    """Perform a basic health check.
+
+    Returns:
+        dict: A dictionary indicating the service is running and healthy.
+    """
     return {"status": "ok"}
 
 

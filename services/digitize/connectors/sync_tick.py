@@ -37,27 +37,28 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from common.misc_utils import cleanup_staging_directory, get_logger
+from pydantic import ValidationError
+
+from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
 from digitize.utils.db import (
     add_connector_checksum_entry,
     finalize_sync_log_and_update_connector,
-    get_active_connector,
+    get_connector_by_id,
     get_connector_sync_status,
     get_sync_log_status,
     get_job,
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    remove_connector_checksum_entry,
     update_connector_total_files,
     update_sync_log,
 )
-from digitize.utils.jobs import generate_uuid, initialize_job_state
+from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
 
 logger = get_logger("sync_tick")
 
@@ -121,14 +122,16 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         responsible for acquiring the sync lock beforehand via
         ``try_acquire_sync_lock()``.
     """
-    config = get_active_connector(connector_id)
+    config = get_connector_by_id(connector_id)
     if config is None:
         logger.error(f"Connector {connector_id!r} not found; tick aborted")
+        _fail_tick(sync_seq, connector_id, RuntimeError(f"Connector {connector_id!r} not found"))
         return
 
-    scanner = build_scanner(config)
-
+    scanner = None
     try:
+        scanner = build_scanner(config)
+
         # Phase boundary: check for interrupt signals before any remote I/O starts.
         interrupt = _check_interrupt_call(connector_id, sync_seq)
         if interrupt:
@@ -136,7 +139,15 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
                 f"Connector {connector_id!r} interrupted (type={interrupt.value})"
             )
 
-        await asyncio.to_thread(scanner.connect)
+        try:
+            await asyncio.to_thread(scanner.connect)
+        except ConnectionError as conn_exc:
+            logger.error(
+                f"Connector {connector_id!r} failed to connect — treating as credential error: {conn_exc}"
+            )
+            _fail_tick(sync_seq, connector_id, conn_exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG.value)
+            return
+
         scanned_files: list[tuple[str, str]] = await asyncio.to_thread(scanner.scan)
 
         known_checksums: set[str] = set(list_connector_checksums(connector_id))
@@ -146,20 +157,27 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             connector_id, scanned_files, known_checksums, all_checksums
         )
 
+        total_files = len(scanned_files)
+
         update_sync_log(
             connector_id,
             sync_seq,
-            total_files=len(scanned_files),
+            total_files=total_files,
             new_files=len(ingest_list),
             removed_files=len(orphan_checksums),
         )
-        update_connector_total_files(connector_id, len(scanned_files))
 
-        await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
+        invalid_count = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
+
+        update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
-        _complete_tick(sync_seq, connector_id)
+        if invalid_count > 0:
+            validation_error_msg = f"{invalid_count} file(s) failed due to validation failure"
+            _fail_tick(sync_seq, connector_id, RuntimeError(validation_error_msg), error_msg=validation_error_msg)
+        else:
+            _complete_tick(sync_seq, connector_id)
 
     except asyncio.CancelledError as ce:
         logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
@@ -171,10 +189,19 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         logger.error(
             f"Tick failed for connector {connector_id!r}: {exc}", exc_info=True
         )
-        _fail_tick(sync_seq, connector_id, exc)
+        if isinstance(exc, ValidationError):
+            _fail_tick(sync_seq, connector_id, exc, error_msg=ConnectorError.CREDENTIAL_ERROR_MSG.value)
+        else:
+            _fail_tick(sync_seq, connector_id, exc)
 
     finally:
-        await asyncio.to_thread(scanner.close)
+        if scanner is not None:
+            try:
+                await asyncio.to_thread(scanner.close)
+            except Exception as close_exc:
+                logger.warning(
+                    f"scanner.close() failed for connector {connector_id!r}: {close_exc}"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +290,7 @@ async def _process_new_files(
     connector_name: str,
     scanner,
     ingest_list: list[tuple[str, str]],
-) -> None:
+) -> int:
     """Download and ingest *ingest_list* in batches of up to 10 files.
 
     Each batch of up to 10 files is downloaded into a single staging directory,
@@ -273,9 +300,17 @@ async def _process_new_files(
 
     Raises ``RuntimeError`` after processing all batches if any batch failed,
     so the caller can mark the connector as OUT_OF_SYNC.
+
+    Returns
+    -------
+    int
+        Number of files rejected by ``validate_document_file`` across all
+        batches.  If non-zero the caller closes the sync log as FAILED with
+        a message indicating how many files failed validation.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
+    invalid_file_count = 0
 
     for batch_number, batch_offset in enumerate(range(0, len(ingest_list), _BATCH_SIZE), start=1):
         batch = ingest_list[batch_offset : batch_offset + _BATCH_SIZE]
@@ -292,8 +327,8 @@ async def _process_new_files(
         batch_dir = staging_base / batch_dir_name
         batch_dir.mkdir(parents=True, exist_ok=True)
 
-        # checksum → filename for post-ingest checksum registration
-        checksum_to_filename: dict[str, str] = {}
+        # filename → checksum, built during download phase
+        filename_to_checksum: dict[str, str] = {}
 
         try:
             for remote_path, checksum in batch:
@@ -307,7 +342,18 @@ async def _process_new_files(
                         f"{connector_id!r}; skipping file"
                     )
                     continue
-                checksum_to_filename[checksum] = filename
+                try:
+                    file_bytes = (batch_dir / filename).read_bytes()
+                    validate_document_file(filename, file_bytes)
+                except ValueError as val_exc:
+                    logger.warning(
+                        f"Invalid file {remote_path!r} in connector "
+                        f"{connector_id!r}; skipping file: {val_exc}"
+                    )
+                    (batch_dir / filename).unlink(missing_ok=True)
+                    invalid_file_count += 1
+                    continue
+                filename_to_checksum[filename] = checksum
 
             # Cancellation checkpoint: bail after each batch of downloads.
             interrupt = _check_interrupt_call(connector_id, sync_seq)
@@ -316,7 +362,10 @@ async def _process_new_files(
                     f"Connector {connector_id!r} interrupted (type={interrupt.value})"
                 )
 
-            filenames = list(checksum_to_filename.values())
+            if not filename_to_checksum:
+                continue
+
+            filenames = list(filename_to_checksum.keys())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
             doc_id_dict = initialize_job_state(
                 job_id=job_id,
@@ -326,18 +375,36 @@ async def _process_new_files(
                 job_name=job_name,
             )
 
-            for checksum, filename in checksum_to_filename.items():
-                add_connector_checksum_entry(connector_id, checksum, doc_id_dict[filename])
+            # doc_id → checksum: built from doc_id_dict (filename→doc_id) + filename_to_checksum
+            doc_id_to_checksum: dict[str, str] = {
+                doc_id: filename_to_checksum[filename]
+                for filename, doc_id in doc_id_dict.items()
+                if filename in filename_to_checksum
+            }
 
             await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
             await _wait_for_job(job_id, connector_id, sync_seq)
 
+            job_stats = get_job_document_stats(job_id)
+            for doc in job_stats["completed_docs"]:
+                checksum = doc_id_to_checksum.get(doc["id"])
+                if checksum is not None:
+                    add_connector_checksum_entry(connector_id, checksum, doc["id"])
+
+            if job_stats["failed_count"] > 0:
+                logger.warning(
+                    f"Batch {batch_number} for connector {connector_id!r}: "
+                    f"{job_stats['failed_count']} of {job_stats['total_docs']} "
+                    f"document(s) failed ingestion"
+                )
+                batch_failed = True
+
         except asyncio.CancelledError:
             raise
 
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 f"Failed to ingest batch {batch_number} for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
@@ -348,9 +415,11 @@ async def _process_new_files(
 
     if batch_failed:
         raise RuntimeError(
-            f"One or more batches failed to ingest for connector {connector_id!r}; "
-            "connector marked as out of sync"
+            f"One or more documents failed to sync. See more details in digitize jobs "
+            f"Connector-{connector_name}-{sync_seq}-*"
         )
+
+    return invalid_file_count
 
 
 # ---------------------------------------------------------------------------
@@ -359,20 +428,19 @@ async def _process_new_files(
 
 async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None:
     """Remove orphaned checksum rows and delete documents that lose their last owner."""
-    from digitize.api.v1.connectors import _best_effort_delete_document
+    from digitize.api.v1.connectors import _remove_checksums
 
-    for checksum in orphan_checksums:
-        try:
-            remaining, doc_id = remove_connector_checksum_entry(connector_id, checksum)
-            if remaining == 0 and doc_id:
-                await asyncio.to_thread(_best_effort_delete_document, doc_id)
-        except Exception as exc:
-            logger.error(
-                f"Error removing orphan checksum {checksum!r} "
-                f"for connector {connector_id!r}: {exc}",
-                exc_info=True,
-            )
-            raise
+    checksum_removal_failures, doc_deletion_failures = await asyncio.to_thread(
+        _remove_checksums, connector_id, orphan_checksums
+    )
+    if checksum_removal_failures:
+        raise RuntimeError(
+            f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
+        )
+    if doc_deletion_failures:
+        raise RuntimeError(
+            f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -444,13 +512,13 @@ def _cancel_tick(sync_seq: int, connector_id: str) -> None:
         )
 
 
-def _fail_tick(sync_seq: int, connector_id: str, exc: Exception) -> None:
+def _fail_tick(sync_seq: int, connector_id: str, exc: Exception, error_msg: Optional[str] = None) -> None:
     try:
         finalize_sync_log_and_update_connector(
             connector_id=connector_id,
             seq=sync_seq,
             status=SyncLogStatus.FAILED,
-            error=str(exc),
+            error=error_msg if error_msg is not None else str(exc),
         )
     except Exception as close_exc:
         logger.error(

@@ -1,0 +1,74 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/breakpoint" as *;
+
+.tableContent {
+  padding: spacing.$spacing-07;
+
+  :global(.cds--data-table) {
+    width: 100%;
+
+    // Name column - compact (sized to content)
+    :global(th:nth-child(1)),
+    :global(td:nth-child(1)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Status column - compact
+    :global(th:nth-child(2)),
+    :global(td:nth-child(2)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Type column - compact
+    :global(th:nth-child(3)),
+    :global(td:nth-child(3)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Services column - compact
+    :global(th:nth-child(4)),
+    :global(td:nth-child(4)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Actions column - right-aligned, shrinks to icon
+    :global(th:last-child),
+    :global(td:last-child) {
+      width: auto;
+      white-space: nowrap;
+      text-align: right;
+    }
+  }
+}
+
+// Skeleton loading — uniform column widths
+:global(.cds--skeleton) {
+  :global(.cds--data-table) {
+    :global(th),
+    :global(td) {
+      width: auto !important;
+      white-space: nowrap !important;
+    }
+  }
+}
+
+.noDataContent {
+  padding: spacing.$spacing-07;
+}
+
+.tableColumn {
+  margin: 0;
+}
+
+// Action overflow menu items
+
+.actionMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}

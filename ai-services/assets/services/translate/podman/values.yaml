@@ -1,6 +1,6 @@
 translate:
   port: ""
-  image: icr.io/ai-services-cicd/translate-service:v0.0.2
+  image: icr.io/ai-services-cicd/translate-service:v0.0.5
   log_level: "INFO"
   database: "translate_metadata"
 

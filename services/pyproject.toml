@@ -1,0 +1,5 @@
+[tool.ruff.lint]
+select = ["D103", "D400"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["D103", "D400"]

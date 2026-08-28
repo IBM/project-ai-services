@@ -1,6 +1,7 @@
 package spyrepolicy
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -33,7 +34,7 @@ func (r *SpyrePolicyRule) Description() string {
 }
 
 // Verify performs a direct check without polling.
-func (r *SpyrePolicyRule) Verify() error {
+func (r *SpyrePolicyRule) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
@@ -46,7 +47,7 @@ func (r *SpyrePolicyRule) Verify() error {
 		Kind:    spyreKind,
 	})
 
-	if err := client.Client.Get(client.Ctx, types.NamespacedName{Name: spyreName}, obj); err != nil {
+	if err := client.Client.Get(ctx, types.NamespacedName{Name: spyreName}, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("SpyreClusterPolicy %s not found", spyreName)
 		}

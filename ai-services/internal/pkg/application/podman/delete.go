@@ -14,11 +14,11 @@ import (
 )
 
 // Delete removes an application and its associated resources.
-func (p *PodmanApplication) Delete(_ context.Context, opts appTypes.DeleteOptions) error {
+func (p *PodmanApplication) Delete(ctx context.Context, opts appTypes.DeleteOptions) error {
 	appDir := filepath.Join(utils.GetApplicationsPath(), filepath.Base(opts.Name))
 	appExists := utils.FileExists(appDir)
 
-	pods, err := p.runtime.ListPods(map[string][]string{
+	pods, err := p.runtime.ListPods(ctx, map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func (p *PodmanApplication) Delete(_ context.Context, opts appTypes.DeleteOption
 
 	logger.Infoln("Proceeding with deletion...")
 
-	if err := p.podsDeletion(pods); err != nil {
+	if err := p.podsDeletion(ctx, pods); err != nil {
 		return err
 	}
 
@@ -92,13 +92,13 @@ func (p *PodmanApplication) deleteConfirmation(appName string, podsExists, appEx
 	return confirmDelete, nil
 }
 
-func (p *PodmanApplication) podsDeletion(pods []types.Pod) error {
+func (p *PodmanApplication) podsDeletion(ctx context.Context, pods []types.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {
 		logger.Infof("Deleting pod: %s\n", pod.Name)
 
-		if err := p.runtime.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
+		if err := p.runtime.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
 
 			continue

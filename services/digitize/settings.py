@@ -8,6 +8,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from common.settings import Settings as CommonSettings
 
+
 class DigitizeConfig(BaseSettings):
     """Digitize service configuration."""
 
@@ -18,11 +19,6 @@ class DigitizeConfig(BaseSettings):
             default=300,
             ge=1,
             description="Sync interval in seconds applied to all connectors at attach time",
-        )
-
-        encryption_key_path: str = Field(
-            default="/run/secrets/connector_encryption_key",
-            description="Path to the AES-256-GCM key file (32 raw bytes) used to encrypt connector secrets at rest",
         )
 
         model_config = SettingsConfigDict(env_prefix="CONNECTOR_")
@@ -55,17 +51,36 @@ class DigitizeConfig(BaseSettings):
         description="Page count threshold for heavy document classification",
     )
 
-    # API concurrency limits
-    digitization_concurrency_limit: int = Field(
-        default=2,
+    # Conversion queue quotas (max tasks in 'queued' status per operation type)
+    ingestion_queue_quota: int = Field(
+        default=10,
         ge=1,
-        description="Concurrency limit for digitization API",
+        description="Max queued ingestion tasks (multi-file jobs)",
     )
 
-    ingestion_concurrency_limit: int = Field(
-        default=1,
+    digitization_queue_quota: int = Field(
+        default=5,
         ge=1,
-        description="Concurrency limit for ingestion API",
+        description="Max queued digitization tasks (1 file per job)",
+    )
+
+    # Dispatcher poll interval in seconds
+    conversion_poll_interval: float = Field(
+        default=2.0,
+        gt=0.0,
+        description="Dispatcher poll interval (seconds)",
+    )
+
+    # Maximum wall-clock time (seconds) the digitize pipeline will wait for the
+    # dispatcher to start and then complete a single conversion task.  If the
+    # dispatcher stalls (e.g. worker crash, semaphore leak) the job is failed
+    # rather than hanging the pipeline thread indefinitely.
+    # Default: 10800 s (3 h) — accommodates large, multi-hundred-page PDFs while
+    # still guaranteeing eventual termination.
+    conversion_timeout_s: float = Field(
+        default=10800.0,
+        gt=0.0,
+        description="Max seconds to wait for a single conversion task to complete",
     )
 
     # Chunking parameters

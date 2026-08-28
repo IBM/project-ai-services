@@ -1,2 +1,9 @@
-// example of a constant that can be used across the application
-export const APP_NAME = "catalog-ui";
+export const COMPONENT_TYPES = {
+  LLM: "llm",
+  RERANKER: "reranker",
+  EMBEDDING: "embedding",
+  VECTOR_STORE: "vector_store",
+} as const;
+
+export type ComponentType =
+  (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];

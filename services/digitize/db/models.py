@@ -4,10 +4,12 @@ SQLAlchemy ORM models for digitize metadata storage.
 These models map to the PostgreSQL schema defined in init_schema.sql.
 """
 
+import enum
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import (
+    Boolean,
     Integer,
     String,
     Text,
@@ -203,7 +205,6 @@ class Connector(Base):
     )
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
-    last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -216,7 +217,7 @@ class Connector(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("type IN ('ssh', 's3')", name="chk_connector_type"),
+        CheckConstraint("type IN ('file_system', 'object_storage')", name="chk_connector_type"),
     )
 
     def __repr__(self) -> str:
@@ -282,5 +283,96 @@ class ConnectorSyncLog(Base):
 
     def __repr__(self) -> str:
         return f"<ConnectorSyncLog(connector_id='{self.connector_id}', seq={self.seq})>"
+
+
+class ConversionTaskStatus(str, enum.Enum):
+    """Lifecycle statuses for a ConversionTask row."""
+    PENDING   = "pending"    # over-quota; waiting for queue headroom
+    QUEUED    = "queued"     # admitted to queue; waiting for semaphore slot
+    RUNNING   = "running"    # semaphore slot acquired
+    COMPLETED = "completed"  # conversion finished successfully
+    FAILED    = "failed"     # conversion failed or timed out
+
+
+class ConversionTask(Base):
+    """
+    Conversion task model representing a single Docling conversion work item.
+
+    Maps to the 'conversion_tasks' table in PostgreSQL.
+    Each task is linked to a job and drives the dispatcher-based conversion queue.
+    """
+    __tablename__ = "conversion_tasks"
+
+    # Primary key
+    task_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    # Link back to the digitize job that owns this task
+    job_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("jobs.job_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Digitize document id; informational only
+    doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Operation type — 'ingestion' | 'digitization'
+    operation: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Input — absolute path written at enqueue time
+    cached_file: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Output format
+    output_format: Mapped[str] = mapped_column(String(10), nullable=False)
+
+    # Page count; may be 0 for DOCX
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # True when page_count >= heavy_doc_page_threshold
+    is_large: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Lifecycle status — use ConversionTaskStatus values; stored as VARCHAR in DB
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Written on completion
+    result_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Error message on failure
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Constraints and indexes
+    __table_args__ = (
+        CheckConstraint(
+            "operation IN ('ingestion', 'digitization')",
+            name="chk_ct_operation",
+        ),
+        CheckConstraint(
+            "output_format IN ('json', 'md', 'txt')",
+            name="chk_ct_output_format",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'queued', 'running', 'completed', 'failed')",
+            name="chk_ct_status",
+        ),
+        # Supports dispatcher's pick query (ORDER BY queued_at per status+operation)
+        Index("idx_ct_status_op_queued", "status", "operation", "queued_at"),
+        # Supports get_conversion_task_by_job_id — called by pipeline pollers
+        Index("idx_ct_job_id", "job_id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ConversionTask(task_id='{self.task_id}', "
+            f"status='{self.status}', operation='{self.operation}')>"
+        )
 
 # Made with Bob

@@ -11,9 +11,7 @@ import (
 )
 
 // Uninstall removes the catalog service and cleans up resources.
-func Uninstall(opts cliutils.UninstallOptions) error {
-	ctx := context.Background()
-
+func Uninstall(ctx context.Context, opts cliutils.UninstallOptions) error {
 	// Remove catalog service based on runtime
 	switch opts.Runtime {
 	case types.RuntimeTypePodman:

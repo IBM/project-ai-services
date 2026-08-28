@@ -18,6 +18,7 @@ spec:
         ai-services.io/service: {{ .Release.Name }}
         ai-services.io/template: {{ .Values.templateID }}
         ai-services.io/component: digitize-api
+        ai-services.io/component-type: api
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
@@ -71,6 +72,11 @@ spec:
                 secretKeyRef:
                   name: "digitize-db-secret"
                   key: password
+            - name: DB_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "digitize-db-encryption-secret"
+                  key: db-encryption-key
             - name: DB_POOL_SIZE
               value: "5"
             - name: DB_MAX_OVERFLOW

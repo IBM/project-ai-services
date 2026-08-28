@@ -6,7 +6,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // RuntimeFactory creates runtime instances based on configuration.
@@ -21,9 +23,23 @@ func NewRuntimeFactory(runtimeType types.RuntimeType) *RuntimeFactory {
 	}
 }
 
-// Create creates a runtime instance based on the factory configuration.
+// Create creates a local runtime instance based on the factory configuration.
 func (f *RuntimeFactory) Create(namespace string) (Runtime, error) {
 	return CreateRuntime(f.runtimeType, namespace)
+}
+
+// CreateRemote returns a RemoteRuntime that forwards calls to the named worker
+// over the gRPC CommandStream. The worker's runtime type is looked up from the
+// registry (stored there at Register time) and used only for Type() reporting —
+// the gRPC protocol itself is runtime-agnostic.
+// Returns an error if the worker is not currently connected.
+func (f *RuntimeFactory) CreateRemote(workerName string, reg stream.WorkerRegistry) (Runtime, error) {
+	rtStr, ok := reg.WorkerRuntimeType(workerName)
+	if !ok {
+		return nil, fmt.Errorf("worker %s is not connected", workerName)
+	}
+
+	return remote.New(workerName, types.RuntimeType(rtStr), reg), nil
 }
 
 // GetRuntimeType returns the configured runtime type.

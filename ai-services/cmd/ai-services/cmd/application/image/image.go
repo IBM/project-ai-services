@@ -25,13 +25,13 @@ var ImageCmd = &cobra.Command{
 }
 
 // getCatalogImages is a helper that creates a catalog provider and collects images.
-func getCatalogImages(templateID string) ([]string, error) {
-	provider, err := catalog.NewCatalogProvider()
+func getCatalogImages(ctx context.Context, templateID string) ([]string, error) {
+	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	images, err := provider.GetCatalogImages(context.Background(), templateID)
+	images, err := provider.GetCatalogImages(ctx, templateID)
 	if err != nil {
 		return nil, err
 	}

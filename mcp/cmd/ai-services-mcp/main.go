@@ -26,6 +26,7 @@ var (
 	configOutput    bool
 	httpMode        bool
 	port            int
+	tlsSkipVerify   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -49,6 +50,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&configOutput, "config", "C", false, "Output MCP client-compatible configuration instead of starting server")
 	rootCmd.Flags().BoolVarP(&httpMode, "http", "S", false, "Use HTTP transport instead of stdio")
 	rootCmd.Flags().IntVarP(&port, "port", "p", 3000, "Port number for HTTP server (used with --http)")
+	rootCmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification for the description fetch and API requests (insecure; for self-signed or internal-CA endpoints)")
 
 	if err := rootCmd.MarkFlagRequired("description"); err != nil {
 		panic(err)
@@ -93,7 +95,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load and parse OpenAPI description
-	doc, err := openapi.LoadDescription(description)
+	doc, err := openapi.LoadDescription(description, tlsSkipVerify)
 	if err != nil {
 		return fmt.Errorf("failed to load OpenAPI description: %w", err)
 	}
@@ -102,7 +104,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	intf := openapi.NewInterface(doc)
 
 	// Create tool aggregator
-	aggregator, err := tool.NewAggregator(intf, endpoint, auth, globalQuery, globalHeaders)
+	aggregator, err := tool.NewAggregator(intf, endpoint, auth, globalQuery, globalHeaders, tlsSkipVerify)
 	if err != nil {
 		return fmt.Errorf("failed to create tool aggregator: %w", err)
 	}
@@ -318,6 +320,10 @@ Flags:
                               not authenticate incoming requests.
   -p, --port           <port> Port number for HTTP server (default: 3000).
                               Only used with --http flag.
+  --tls-skip-verify           Skip TLS certificate verification when fetching
+                              the OpenAPI description and when calling the
+                              service endpoint. Insecure; only for endpoints
+                              with self-signed or internal-CA certificates.
   -C, --config                Instead of starting an MCP server, output an
                               MCP client-compatible configuration.
   --help                      Show this usage information.

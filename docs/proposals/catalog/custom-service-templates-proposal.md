@@ -361,7 +361,7 @@ Custom catalog assets are delivered by creating a bundle from a `.tar.gz` archiv
 | Independent bundles | Each created bundle exists separately; multiple bundles for different `catalog_id` values are all active simultaneously |
 | Authenticated | Uses the existing JWT `BearerAuth` middleware; only admin-role tokens are accepted |
 | Consistent across runtimes | Same API endpoint works for Podman and OpenShift; only the storage backend differs |
-| Bounded size | Configurable `MAX_BUNDLE_SIZE` (default 50 MB); enforced at the HTTP layer before extraction |
+| Bounded size | `MAX_BUNDLE_SIZE` 20 MB compressed (enforced at the HTTP layer before extraction); 50 MB uncompressed per-file limit enforced during extraction |
 
 ---
 
@@ -407,7 +407,7 @@ Authorization: Bearer <admin-jwt>
 
 Form fields:
   file  (required)  — .tar.gz archive containing the catalog item assets;
-                      max 50 MB compressed.
+                      max 20 MB compressed; 50 MB uncompressed limit enforced during extraction.
                       id, type, and version are read from metadata.yaml inside the archive.
 ```
 
@@ -459,6 +459,8 @@ Use `PUT` to replace an existing bundle identified by its internal record ID (`b
 
 Like `POST`, `PUT` performs validation directly from the uploaded archive before any state transition. The server validates archive structure, parses root and runtime metadata, checks `values.yaml` and schema/metadata consistency, parses template files, verifies service labels and annotations, reads `steps.md`, and scans relevant files line-by-line before proceeding with the replacement.
 
+**Running-instance guard.** After archive validation and before marking the row `processing`, the server queries the database to check whether any service or component is currently deployed using this catalog entry. For service bundles the check queries the `services` table by `catalog_id`. For component bundles the `catalog_id` (`<component_type>--<provider>`) is split to query the `components` table by `type` and `provider`. If any running instance is found the replacement is rejected with `409 Conflict` before any status transition occurs. The same guard is reused by `DELETE`.
+
 Returns `404` if no bundle with that `bundle_id` exists.
 
 ```
@@ -487,20 +489,23 @@ curl -X PUT https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2M8V
 
 | Status | Meaning |
 |---|---|
-| `200 OK` | Archive validated, existing bundle marked `processing`, replacement extracted into a staging directory, current final directory replaced by renaming the staging directory into place, bundle marked `active`, catalog reloaded, and old bundle directory removed at the end when different — all synchronously. The response body contains the updated bundle record with `status: active`. |
+| `200 OK` | Archive validated, no running instances found, existing bundle marked `processing`, replacement extracted into a staging directory, current final directory replaced by renaming the staging directory into place, bundle marked `active`, catalog reloaded, and old bundle directory removed at the end when different — all synchronously. The response body contains the updated bundle record with `status: active`. |
 | `400 Bad Request` | Missing `file` field; archive top-level directory does not match the resolved `id`; wrong content-type; or archive exceeds size limit. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
 | `404 Not Found` | No bundle with the given `bundle_id` exists. Use `POST` to create a new bundle first. |
+| `409 Conflict` | One or more services or components are currently running that were deployed from this bundle's `catalog_id`. The replacement is rejected before any status transition. Stop or delete the running instances first, then retry. |
 | `422 Unprocessable Entity` | Validation of the archive's `metadata.yaml` failed; or `id`, `type`, or `component_type` (for components) differs from the existing record. The replacement is rejected before any status transition. |
 
-The `200` response returns the updated bundle record with `status: active`, `version`, `name`, and `size_bytes` populated from the newly activated bundle. The existing row is first moved to `processing`, then the replacement is extracted into a staging directory (`<catalog_id>-<version>-new`), the current final directory is removed, and the staging directory is renamed into place before the row is updated in-place to `active`. The old on-disk directory is deleted only at the very end when it differs from the new final path. This keeps the replace flow simple and avoids stale files even when replacing a bundle with the same `catalog_id` and `version`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error message is stored in the `error` column.
+The `200` response returns the updated bundle record with `status: active`, `version`, `name`, and `size_bytes` populated from the newly activated bundle. The server first checks that no running service or component references this bundle (→ `409` if any exist), then marks the existing row `processing`, extracts the replacement into a staging directory (`<catalog_id>-<version>-new`), removes the current final directory, renames the staging directory into place, and updates the row in-place to `active`. The old on-disk directory is deleted only at the very end when it differs from the new final path. This keeps the replace flow simple and avoids stale files even when replacing a bundle with the same `catalog_id` and `version`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error message is stored in the `error` column.
 
 ---
 
 #### 6.2.3 Delete bundle — `DELETE /api/v1/catalog/bundles/:bundle_id`
 
 Permanently removes a bundle: marks the row `deleting`, deletes the on-disk directory (`<catalog_type>/<catalog_id>-<version>/`) from the bundle volume, triggers a `CatalogProvider.Reload()` so the item is no longer served, and then removes the DB row. Any application that was deployed using this bundle's `catalog_id` is **not** affected — existing deployed resources are independent of the catalog once launched.
+
+**Running-instance guard.** Before marking the row `deleting`, the server queries the database to check whether any service or component is currently deployed using this catalog entry. For service bundles the check queries the `services` table by `catalog_id`. For component bundles the `catalog_id` (`<component_type>--<provider>`) is split to query the `components` table by `type` and `provider`. If any running instance is found the deletion is rejected with `409 Conflict` before any status transition occurs. Stop or delete the running instances first, then retry. This reuses the same guard as `PUT`.
 
 ```
 DELETE /api/v1/catalog/bundles/:bundle_id
@@ -521,12 +526,13 @@ curl -X DELETE https://catalog-api.<domain>/api/v1/catalog/bundles/bnd_01JW4X9K2
 
 | Status | Meaning |
 |---|---|
-| `204 No Content` | Bundle marked `deleting`, on-disk directory removed, `CatalogProvider` reloaded, and DB row deleted. |
+| `204 No Content` | No running instances found, bundle marked `deleting`, on-disk directory removed, `CatalogProvider` reloaded, and DB row deleted. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Token does not carry admin role. |
 | `404 Not Found` | No bundle with the given `bundle_id` exists. |
+| `409 Conflict` | One or more services or components are currently running that were deployed from this bundle's `catalog_id`. The deletion is rejected before any status transition. Stop or delete the running instances first, then retry. |
 
-> Deletion is **synchronous** — the row is marked `deleting`, then the directory removal, `CatalogProvider.Reload()`, and DB delete happen in-process before the `204` is returned. There is no async processing step and no polling needed. If any of those steps fails before the final DB delete, the row is marked `failed`.
+> Deletion is **synchronous** — the running-instance guard is checked first; if it passes, the row is marked `deleting`, then the directory removal, `CatalogProvider.Reload()`, and DB delete happen in-process before the `204` is returned. There is no async processing step and no polling needed. If any step fails after the status transition, the row is marked `failed`.
 
 ---
 
@@ -537,6 +543,17 @@ Each bundle record carries `catalog_type` and `catalog_id` (derived from the arc
 The `name` field is the human-readable display label from `metadata.yaml` `name:` field (e.g. `"My Custom LLM Provider"`). Omitted from the response if blank.
 
 The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it is **not** stored in the DB. For components, `catalog_id` uses `--` as separator (e.g. `llm--my-provider`), giving a directory name of `llm--my-provider-1.0.0`.
+
+**Query parameters:**
+
+| Parameter   | Type    | Default | Constraints      | Description                          |
+|-------------|---------|---------|------------------|--------------------------------------|
+| `page`      | integer | `1`     | ≥ 1              | Page number (1-indexed)              |
+| `page_size` | integer | `20`    | 1 – 100          | Number of items per page             |
+
+Results are ordered by `created_at DESC`. Omitting either parameter applies the default.
+
+**Response (200 OK):**
 
 ```json
 {
@@ -565,9 +582,25 @@ The on-disk directory is derived at runtime as `<catalog_id>-<version>` — it i
       "version":      "1.0.0",
       "created_by":  "admin"
     }
-  ]
+  ],
+  "pagination": {
+    "page":        1,
+    "page_size":   20,
+    "total_items": 2,
+    "total_pages": 1,
+    "has_next":    false,
+    "has_prev":    false
+  }
 }
 ```
+
+**Error responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400`  | `page` < 1 or `page_size` outside 1–100 |
+| `401`  | Unauthorized |
+| `500`  | Internal server error |
 
 ---
 
@@ -628,7 +661,7 @@ Extracted on-disk as `component/llm--my-provider-1.0.0/` — directory is `<cata
 - Paths containing `..` or absolute paths are rejected immediately (path-traversal guard).
 - The archive must contain exactly one top-level directory; multiple items per archive are not supported.
 - The top-level directory name is **not validated** — it is stripped and discarded. Identity comes from `metadata.yaml` alone.
-- Total uncompressed size must not exceed 200 MB.
+- Total uncompressed size must not exceed 50 MB (enforced per-file via `maxExtractedFileSize`).
 - `meta.CatalogID()` must not match any built-in item already present in `assets.CatalogFS` — if it does, validation returns `422` and the extracted directory is deleted.
 - All `metadata.yaml` files must pass validation for the declared `type` before the bundle is marked `active`.
 - Validation is performed directly from the archive and covers archive structure, root and runtime metadata parsing, `values.yaml` and schema/metadata consistency checks, template parsing, service label checks, annotation checks, `steps.md` inspection, and line-by-line scanning of relevant files.
@@ -677,27 +710,30 @@ flowchart TD
     LOOKUP["Look up bundle_id in catalog_bundles → 404 if missing"]
     PEEK["Peek root metadata.yaml<br/>validate meta.CatalogID() + meta.CatalogType() unchanged<br/>→ 422 on mismatch"]
     VALIDATE["Validate directly from uploaded archive<br/>• archive structure + path checks<br/>• root/runtime metadata parsing<br/>• values.yaml + schema consistency<br/>• template parsing, labels, annotations<br/>• steps.md + line-by-line file scanning<br/>→ 422 if invalid<br/>(no extraction to disk)"]
+    GUARDCHECK["checkNoRunningInstances<br/>• service bundle: SELECT EXISTS FROM services WHERE catalog_id = ?<br/>• component bundle: SELECT EXISTS FROM components WHERE type = ? AND provider = ?<br/>→ 409 Conflict if any running instance found"]
     MARKPROC["Mark existing row processing<br/>clear prior error"]
-    EXTRACT["extractAndMeasure: extract to staging dir &lt;catalog_id&gt;-&lt;version&gt;-new<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 200 MB size guard"]
+    EXTRACT["extractAndMeasure: extract to staging dir &lt;catalog_id&gt;-&lt;version&gt;-new<br/>• top-level dir stripped (wrapped or flat archive)<br/>• path-traversal guard + 50 MB uncompressed size guard"]
     SWAP["Remove current final dir if present<br/>rename staging dir into final &lt;catalog_id&gt;-&lt;version&gt;/ path"]
     DBUPDATE["UPDATE existing row in-place<br/>status=active, version, name, size_bytes<br/>single UPDATE — no unique index conflict"]
     RELOAD["CatalogProvider.Reload()"]
     RMOLDDIR["Delete old directory at the end when different"]
     RESP["200 OK<br/>updated bundle record, status: active<br/>Location: /api/v1/catalog/bundles/:bundle_id"]
-    FAIL["Return 422 before state transition;<br/>or clean staging/new dir and mark DB row failed if a later step fails"]
+    FAIL["Return 409/422 before state transition;<br/>or clean staging/new dir and mark DB row failed if a later step fails"]
 
     REQ --> AUTH --> LOOKUP --> PEEK
     PEEK -->|"match"| VALIDATE
     PEEK -->|"mismatch"| FAIL
     VALIDATE -->|"invalid"| FAIL
-    VALIDATE -->|"valid"| MARKPROC --> EXTRACT --> SWAP --> DBUPDATE --> RELOAD --> RMOLDDIR --> RESP
+    VALIDATE -->|"valid"| GUARDCHECK
+    GUARDCHECK -->|"instances running"| FAIL
+    GUARDCHECK -->|"none running"| MARKPROC --> EXTRACT --> SWAP --> DBUPDATE --> RELOAD --> RMOLDDIR --> RESP
 ```
 
 **Key implementation notes:**
 
 - **Validation from archive first.** All three entry points (`POST`, `PUT`, and the validate API) validate directly from the uploaded archive before any extraction to disk. This ensures fast failure with no disk overhead for invalid bundles. Validation covers archive structure, root and runtime `metadata.yaml` parsing, `values.yaml` and schema/metadata consistency checks, template file parsing, label checks, annotation checks, `steps.md` inspection, and line-by-line scanning of relevant files. The `validateBundleStructureFromArchive` function reads the tar.gz stream and checks that `metadata.yaml` exists in the archive root (supporting both wrapped and flat archive layouts).
 - **POST is fully synchronous.** Returns `201 Created` only after archive validation, metadata checks, conflict check, extraction, DB insert as `processing`, `CatalogProvider.Reload()`, and final activation all succeed. Response is re-fetched from DB — `status`, `size_bytes`, and `created_at` are authoritative.
-- **PUT is fully synchronous.** Validates archive and immutable fields, marks the existing row `processing`, extracts the replacement into a staging directory, removes the current final directory, renames the staging directory into the final bundle path, UPDATEs the existing row in-place back to `active` (`version`, `name`, `size_bytes` — single statement), reloads `CatalogProvider`, and only then removes the old directory when it differs before returning `200 OK` with the updated bundle record. No unique index conflict is possible since only one row ever exists for this `(catalog_type, catalog_id)`. The staging step avoids stale files even when replacing a bundle with the same `catalog_id` and `version`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error is returned.
+- **PUT is fully synchronous.** Validates archive and immutable fields, then runs the **running-instance guard** (`checkNoRunningInstances`): for a service bundle it checks `SELECT EXISTS(SELECT 1 FROM services WHERE catalog_id = ?)`, for a component bundle it splits `catalog_id` on `--` and checks `SELECT EXISTS(SELECT 1 FROM components WHERE type = ? AND provider = ?)` — rejecting with `409 Conflict` if any match is found (no state transition occurs). When the guard passes it marks the existing row `processing`, extracts the replacement into a staging directory, removes the current final directory, renames the staging directory into the final bundle path, UPDATEs the existing row in-place back to `active` (`version`, `name`, `size_bytes` — single statement), reloads `CatalogProvider`, and only then removes the old directory when it differs before returning `200 OK`. No unique index conflict is possible since only one row ever exists for this `(catalog_type, catalog_id)`. If extraction, rename, activation, reload, or final cleanup fails after the status transition, the row is marked `failed` and the error is returned. The same guard is designed to be reused by `DELETE` in the future.
 - `id` (bundle UUID) is **generated by the DB** via `gen_random_uuid()` — the server never supplies it.
 - `id`, `type`, `version` (and `component_type` for components) are **never form fields** — all are read from `metadata.yaml` inside the archive by `peekMetadata()`. The **archive top-level directory name is never validated** — it is stripped blindly.
 - `peekMetadata()` infers the top-level directory from the first entry containing a `/` solely to locate `<topDir>/metadata.yaml`. The directory name itself is not compared against any metadata field.
@@ -1017,12 +1053,21 @@ type BundleServiceInterface interface {
     // (status=active, version, name, size_bytes — single statement),
     // reloads catalog, deletes old on-disk directory when different, and returns 200.
     // On failure after the status transition: DB row is marked failed and error is returned.
-    ReplaceBundle(ctx context.Context, existing *BundleRecord, file io.Reader, userID string) (*BundleResponse, error)
+    ReplaceBundle(ctx context.Context, existing *BundleResponse, file io.Reader, userID string) (*BundleResponse, error)
 
-    GetByBundleID(ctx context.Context, bundleID string) (*BundleRecord, error)
+    // GetBundleByID returns the full BundleResponse for a specific bundle by its UUID string.
+    // Returns (nil, nil) when not found.
     GetBundleByID(ctx context.Context, bundleID string) (*BundleResponse, error)
-    DeleteBundle(ctx context.Context, existing *BundleRecord) error
-    ListBundles(ctx context.Context) (*BundleListResponse, error)
+
+    // DeleteBundle — synchronous DELETE.
+    // Checks for running instances (→ 409 if any), marks row deleting, removes the on-disk
+    // directory, reloads CatalogProvider, then deletes the DB row.
+    // Accepts *BundleResponse (same shape returned by GetBundleByID) — no intermediate
+    // BundleRecord construction in the handler.
+    // On failure after the status transition: DB row is marked failed and error is returned.
+    DeleteBundle(ctx context.Context, existing *BundleResponse) error
+
+    ListBundles(ctx context.Context, req BundleListRequest) (*BundleListResponse, error)
 }
 ```
 

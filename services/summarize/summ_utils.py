@@ -15,6 +15,7 @@ logger = get_logger("summarize")
 _pdf_lock = threading.Lock()
 
 def get_llm_max_model_len() -> int:
+    """Retrieve the maximum model context length for the LLM from endpoint configs."""
     return resolve_model_max_len(
         settings.common.llm.endpoint,
         settings.common.llm.model,
@@ -23,11 +24,13 @@ def get_llm_max_model_len() -> int:
     )
 
 def get_minimum_output_tokens() -> int:
+    """Compute the minimum number of output tokens based on the minimum summary words setting."""
     return int(
         settings.summarize.minimum_summary_words / settings.common.llm.token_to_word_ratio_en
     )
 
 def get_max_allowed_input_tokens() -> int:
+    """Compute the maximum allowed input tokens after reserving prompt overhead and output tokens."""
     return (
         get_llm_max_model_len()
         - settings.summarize.summarization_prompt_token_count
@@ -35,6 +38,7 @@ def get_max_allowed_input_tokens() -> int:
     )
 
 def get_max_input_words() -> int:
+    """Calculate the maximum input word limit for summarization based on LLM limits."""
     return int(
         (
             get_llm_max_model_len()
@@ -47,6 +51,7 @@ def get_max_input_words() -> int:
 MAX_INPUT_WORDS = get_max_input_words()
 
 def word_count(text: str) -> int:
+    """Count the total number of words in a text string."""
     return len(text.split())
 
 
@@ -233,6 +238,7 @@ def compute_target_and_max_tokens(
     return target_word_count, min_words, max_words, max_tokens
 
 def extract_text_from_pdf(content: bytes) -> str:
+    """Extract plain text from binary PDF data using pypdfium2."""
     with _pdf_lock:
         pdf = pdfium.PdfDocument(content)
         text_parts = []
@@ -259,6 +265,7 @@ def build_success_response(
     input_tokens: int,
     output_tokens: int,
 ):
+    """Construct a structured dictionary response for a successful summarization request."""
     return {
         "data": {
             "summary": summary,
@@ -363,6 +370,11 @@ class SummarizeSuccessResponse(BaseModel):
     }
 
 def validate_summary_length(summary_length) -> Optional[int]:
+    """Validate and normalize the summary length parameter.
+
+    Raises:
+        SummarizeException: If the length is not a valid integer or is out of bounds.
+    """
     if summary_length:
         try:
             summary_length = int(summary_length)

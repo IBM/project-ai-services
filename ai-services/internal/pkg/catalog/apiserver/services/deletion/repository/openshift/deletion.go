@@ -68,7 +68,7 @@ func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID
 	// Delete namespace of the application
 	if !keepData && len(errorMessages) == 0 {
 		logger.InfofCtx(ctx, "Deleting '%s' namespace.", s.ns)
-		if err := s.rt.DeleteNamespace(s.ns); err != nil {
+		if err := s.rt.DeleteNamespace(ctx, s.ns); err != nil {
 			errMsg := fmt.Sprintf("failed to delete '%s' namespace: %v", s.ns, err)
 			logger.ErrorlnCtx(ctx, errMsg)
 			errorMessages = append(errorMessages, errMsg)
@@ -176,7 +176,7 @@ func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns 
 		Kind:    "ServingRuntimeList",
 	})
 
-	response, err := s.rt.ListCRD(list, map[string][]string{
+	response, err := s.rt.ListCRD(ctx, list, map[string][]string{
 		"label": {constants.PrerequisiteLabelKey},
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ func (s *OpenshiftDeletion) deleteVolume(ctx context.Context, appID uuid.UUID, r
 	templateLabel := fmt.Sprintf("%s=%s", constants.ApplicationTemplateKey, resourceID)
 	logger.InfofCtx(ctx, "Deleting PVC with '%s' label, from %s namespace", templateLabel, s.ns)
 
-	if err := s.rt.DeletePVCs(templateLabel); err != nil {
+	if err := s.rt.DeletePVCs(ctx, templateLabel); err != nil {
 		errMsg := fmt.Sprintf("failed to delete PVC with label '%s' for app '%s': %s", templateLabel, appID.String(), err.Error())
 		logger.ErrorlnCtx(ctx, errMsg)
 
