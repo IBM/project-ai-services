@@ -225,7 +225,7 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 // are linked.
 func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error) {
 	query := `
-		SELECT sd.service_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
+		SELECT sd.service_id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM service_dependencies sd
 		INNER JOIN services     s ON s.id = sd.service_id
 		INNER JOIN applications a ON a.id = s.app_id
@@ -243,7 +243,7 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	for rows.Next() {
 		var row LinkedServiceRow
 
-		if err := rows.Scan(&row.ServiceID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan linked service row: %w", err)
 		}
 

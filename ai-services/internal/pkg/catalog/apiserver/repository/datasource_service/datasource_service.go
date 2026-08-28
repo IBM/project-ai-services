@@ -519,6 +519,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 			continue
 		}
 
+		ep.URL = extractAPIEndpointURL(ep.EndpointsJSON)
 		if ep.URL == "" {
 			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", ep.ServiceID, ep.ServiceCatalogID)
 
