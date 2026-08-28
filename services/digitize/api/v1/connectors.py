@@ -74,6 +74,10 @@ async def create_connector(body: ConnectorCreateRequest):
 
     Validates connector settings, encrypts credentials, persists the new connector
     configuration in the database, and schedules the background worker.
+
+    The DB insert is performed first so that a duplicate id/name is detected
+    (IntegrityError → 409) before any scheduler state is created.  The
+    scheduler job is only registered once the row is safely committed.
     """
     connector_id = body.id or str(uuid.uuid4())
     try:
@@ -81,8 +85,19 @@ async def create_connector(body: ConnectorCreateRequest):
 
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
-        # Register the connector with the scheduler so it starts ticking
-        # immediately (fire_immediately=True for the first-ever sync).
+        # Persist the connector row first — this validates uniqueness.
+        # If a duplicate id or name exists an IntegrityError is raised here
+        # and we return 409 before touching the scheduler.
+        db_ops.insert_connector(
+            connector_id=connector_id,
+            name=body.name,
+            connector_type=body.type,
+            connection_details=encrypted_details,
+            allowed_extensions=body.allowed_extensions,
+            sync_interval_seconds=sync_interval,
+        )
+
+        # Row committed — now it is safe to register the scheduler job.
         try:
             import digitize.connectors.scheduler as _sched
             await _sched.register_connector_job(
@@ -97,15 +112,6 @@ async def create_connector(body: ConnectorCreateRequest):
                 f"Failed to register scheduler job for connector {connector_id!r} "
                 f"during connector creation: {sched_exc}"
             ) from sched_exc
-
-        db_ops.insert_connector(
-            connector_id=connector_id,
-            name=body.name,
-            connector_type=body.type,
-            connection_details=encrypted_details,
-            allowed_extensions=body.allowed_extensions,
-            sync_interval_seconds=sync_interval,
-        )
 
         logger.info(
             f"Connector {connector_id!r} ({body.name!r}) attached "

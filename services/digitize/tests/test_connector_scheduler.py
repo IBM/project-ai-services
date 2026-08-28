@@ -99,6 +99,24 @@ class TestRegisterConnectorJob:
         finally:
             sched_mod._scheduler = original
 
+    @pytest.mark.asyncio
+    async def test_uses_replace_conflict_policy(self):
+        """add_schedule must always use ConflictPolicy.replace to handle duplicates."""
+        from apscheduler import ConflictPolicy
+
+        mock_sched = AsyncMock()
+        import digitize.connectors.scheduler as sched_mod
+        original = sched_mod._scheduler
+        sched_mod._scheduler = mock_sched
+        try:
+            from digitize.connectors.scheduler import register_connector_job
+            await register_connector_job("conn-C", 300, fire_immediately=False)
+
+            _, kwargs = mock_sched.add_schedule.await_args
+            assert kwargs["conflict_policy"] == ConflictPolicy.replace
+        finally:
+            sched_mod._scheduler = original
+
 
 # ===========================================================================
 # scheduler.remove_connector_job

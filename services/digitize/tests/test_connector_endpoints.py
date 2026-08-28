@@ -222,6 +222,21 @@ class TestPostConnector:
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 409
 
+    def test_scheduler_not_called_on_duplicate(self, connector_test_client, monkeypatch):
+        """Scheduler job must NOT be registered when the DB insert fails (duplicate)."""
+        import digitize.connectors.scheduler as scheduler_module
+
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.insert_connector",
+            Mock(side_effect=IntegrityError(None, None, Exception("dup"))),
+        )
+        scheduler_spy = AsyncMock()
+        monkeypatch.setattr(scheduler_module, "register_connector_job", scheduler_spy)
+
+        connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
+
+        scheduler_spy.assert_not_called()
+
     def test_s3_connector_returns_202(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=S3_PAYLOAD)
