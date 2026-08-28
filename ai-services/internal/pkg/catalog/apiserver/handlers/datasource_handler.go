@@ -165,8 +165,6 @@ func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-
-
 // ListDatasources godoc
 //
 //	@Summary		List datasource connectors
@@ -233,14 +231,14 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string									true	"Application ID (UUID)"
-//	@Param			request	body		models.ConnectDatasourcesRequest		true	"List of datasource IDs to connect"
-//	@Success		200		{object}	models.ConnectDatasourcesResponse		"Datasources connected"
-//	@Failure		400		{object}	ErrorResponse							"Invalid request body"
-//	@Failure		401		{object}	ErrorResponse							"Unauthorized"
-//	@Failure		404		{object}	ErrorResponse							"Application or datasource not found"
-//	@Failure		422		{object}	ErrorResponse							"No eligible running service found"
-//	@Failure		500		{object}	ErrorResponse							"Internal Server Error"
+//	@Param			id		path		string								true	"Application ID (UUID)"
+//	@Param			request	body		models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
+//	@Success		200		{object}	models.ConnectDatasourcesResponse	"Datasources connected"
+//	@Failure		400		{object}	ErrorResponse						"Invalid request body"
+//	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
+//	@Failure		422		{object}	ErrorResponse						"No eligible running service found"
+//	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
 //	@Router			/applications/{id}/datasources [put]
 func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	applicationID, err := uuid.Parse(c.Param("id"))
@@ -294,6 +292,5 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 
 	c.JSON(http.StatusOK, resp)
 }
-
 
 // Made with Bob

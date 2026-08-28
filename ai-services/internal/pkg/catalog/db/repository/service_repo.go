@@ -195,7 +195,7 @@ func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid
 	for rows.Next() {
 		var row LinkedServiceRow
 
-		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan service endpoint row: %w", err)
 		}
 

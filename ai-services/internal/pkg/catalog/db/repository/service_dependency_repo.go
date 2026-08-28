@@ -17,7 +17,7 @@ import (
 type LinkedServiceRow struct {
 	// ServiceID is the DB UUID of the linked service.
 	ServiceID uuid.UUID
-  // ServiceCatalogID is the catalog_id of the service itself (e.g. "digitize").
+	// ServiceCatalogID is the catalog_id of the service itself (e.g. "digitize").
 	ServiceCatalogID string
 	// ApplicationID is the DB UUID of the application that owns the service.
 	ApplicationID uuid.UUID
