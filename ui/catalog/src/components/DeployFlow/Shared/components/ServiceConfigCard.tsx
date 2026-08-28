@@ -8,21 +8,21 @@ import {
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
-import styles from "../DigitalAssistantDeployFlow.module.scss";
-import type { ServiceConfig } from "../types";
-import type { ServiceConfigField } from "../types/StepTwo.types";
-import { getDisplayName } from "../../Shared/utils/displayHelpers";
-import { DynamicSchemaFields } from "../../Shared/components/DynamicSchemaFields";
+import styles from "../DeployFlow.shared.module.scss";
+import type { ServiceConfig, ServiceConfigField } from "../types";
+import { getDisplayName } from "../utils/displayHelpers";
+import { DynamicSchemaFields } from "./DynamicSchemaFields";
 import type {
   DeployOptionsComponent as Component,
   ProviderSchema,
   JSONSchema,
+  LLMOption,
 } from "@/types/api.types";
 import { parseSchema, validateField } from "@/utils/schemaParser";
-import { useDeployStore } from "@/store/deploy.store";
-import { shouldShowParam } from "@/utils/paramFilter";
+import { shouldShowParam } from "../utils/paramFilter";
+import type { ComponentType } from "@/constants";
 
-interface ServiceConfigCardProps {
+export interface ServiceConfigCardProps {
   serviceId: string;
   serviceName: string;
   config: ServiceConfig;
@@ -31,8 +31,16 @@ interface ServiceConfigCardProps {
   isEditing: boolean;
   currentConfig: ServiceConfig | null;
   providerParamsByType: Record<string, Record<string, ProviderSchema>>;
-  llmComponent: Component | null;
-  rerankerComponent: Component | null;
+  /** The LLM or reranker component for this service. Null when the service has neither. */
+  inferenceComponent: Component | null;
+  /** Service-level schema passed from the parent — no store access inside this component. */
+  serviceSchema: JSONSchema | null;
+  /**
+   * Model→provider mapping used to auto-select a compatible inference backend
+   * when the user picks an LLM model. Both flows supply this; DA derives it from
+   * providerParamsByType, Services fetches it via useServiceDeployOptions.
+   */
+  llmModelsWithProviders: LLMOption[];
   onEdit: () => void;
   onApply: () => void;
   onCancel: () => void;
@@ -48,24 +56,25 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
   isEditing,
   currentConfig,
   providerParamsByType,
-  llmComponent,
-  rerankerComponent,
+  inferenceComponent,
+  serviceSchema,
+  llmModelsWithProviders,
   onEdit,
   onApply,
   onCancel,
   onUpdateConfig,
 }) => {
+  // Which component type is the inference component for this service.
+  // Null when the service has no LLM or reranker.
+  const inferenceComponentType: ComponentType | null = inferenceComponent
+    ? (inferenceComponent.type as ComponentType)
+    : null;
+
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>(
     {},
   );
   const [hasValidationError, setHasValidationError] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-  // Read service-level schema from store — written eagerly by useDeployOptions.
-  const serviceSchema = useDeployStore((state) => {
-    const cached = state.serviceParams[serviceId];
-    return cached ? cached.data : null;
-  });
 
   // Helper function to get model description from provider schema
   const getModelDescription = (
@@ -118,24 +127,18 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       strengths?: string;
     } = {};
 
-    // Split by ** markers to find section titles
     const parts = description.split(/\*\*(.*?)\*\*/g);
 
-    // First part (index 0) is the introduction text before any ** markers
     if (parts[0] && parts[0].trim()) {
       sections.introduction = parts[0].trim();
     }
 
-    // Process the rest of the parts (section titles and content)
     for (let i = 1; i < parts.length; i += 2) {
-      const title = parts[i].trim().replace(/:$/, ""); // Remove trailing colon
+      const title = parts[i].trim().replace(/:$/, "");
       let content = parts[i + 1]?.trim() || "";
-
-      // Remove leading colon and whitespace from content
       content = content.replace(/^:\s*/, "");
 
       if (title && content) {
-        // Map section titles to keys
         if (title.toLowerCase().includes("use case")) {
           sections.useCases = content;
         } else if (title.toLowerCase().includes("language")) {
@@ -169,12 +172,13 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
     const errors: Record<string, string> = {};
 
-    // Validate provider credential fields (only when an inference backend is selected)
-    if (currentConfig.inferenceBackend) {
-      // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-      const componentType = llmComponent ? "llm" : "reranker";
-      const paramsMap = providerParamsByType[componentType] || {};
-      const providerSchema = paramsMap[currentConfig.inferenceBackend];
+    // Validate provider credential fields when an inference component is selected.
+    const currentInferenceProviderId = inferenceComponentType
+      ? currentConfig.components?.[inferenceComponentType]?.providerId
+      : undefined;
+    if (currentInferenceProviderId && inferenceComponentType) {
+      const paramsMap = providerParamsByType[inferenceComponentType] || {};
+      const providerSchema = paramsMap[currentInferenceProviderId];
 
       if (providerSchema?.properties) {
         const providerFields = parseSchema(providerSchema);
@@ -202,7 +206,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     return errors;
   };
 
-  // Handle Apply with validation
   const handleApplyWithValidation = () => {
     const errors = buildFieldErrors();
 
@@ -214,52 +217,82 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
     setFieldErrors({});
     setHasValidationError(false);
+    setShowPasswords({});
     onApply();
   };
 
-  // Compute available inference backend options based on selected model compatibility
+  // Compute available inference backend options based on selected model compatibility.
+  // Uses llmModelsWithProviders (the model→provider map) to find which providers
+  // support the currently selected model — consistent with handleLlmModelChange.
   const inferenceBackendField = useMemo(() => {
-    const component = llmComponent || rerankerComponent;
-    if (!component) return null;
+    if (!inferenceComponent || !inferenceComponentType) return null;
 
-    // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-    const componentType = llmComponent ? "llm" : "reranker";
     const selectedModel =
-      currentConfig?.components?.[componentType]?.params?.model;
-    const paramsMap = providerParamsByType[componentType] || {};
+      currentConfig?.components?.[inferenceComponentType]?.params?.model;
 
-    // Filter providers compatible with the selected model
-    const inferenceBackendOptions = component.providers
-      .filter((provider) => {
-        if (!selectedModel) return true;
+    // When no model is selected show all providers; otherwise filter to only
+    // those that carry the selected model in llmModelsWithProviders.
+    const supportingProviderIds = selectedModel
+      ? new Set(
+          llmModelsWithProviders
+            .filter((opt) => opt.id === selectedModel)
+            .map((opt) => opt.providerId),
+        )
+      : null;
 
-        const providerSchema = paramsMap[provider.id];
-        if (!providerSchema || !providerSchema.properties) return false;
-
-        const properties = providerSchema.properties as Record<
-          string,
-          { default?: unknown }
-        >;
-        const providerDefaultModel = properties.model?.default;
-
-        return providerDefaultModel === selectedModel;
-      })
+    const inferenceBackendOptions = inferenceComponent.providers
+      .filter((provider) =>
+        supportingProviderIds ? supportingProviderIds.has(provider.id) : true,
+      )
       .map((provider) => ({
         id: provider.id,
         text: provider.name,
       }));
 
     return {
-      key: "inferenceBackend" as keyof ServiceConfig,
       label: "Inference backend",
       options: inferenceBackendOptions,
     };
   }, [
-    llmComponent,
-    rerankerComponent,
+    inferenceComponent,
+    inferenceComponentType,
     currentConfig?.components,
-    providerParamsByType,
+    llmModelsWithProviders,
   ]);
+
+  /**
+   * Handle LLM model selection — auto-select a compatible inference backend.
+   * Keeps the current backend if it supports the newly selected model;
+   * otherwise switches to the first compatible backend. Matches the pattern
+   * already in Services/StepTwo (lines 701–728).
+   */
+  // Only called for isModelFirst LLM fields (Services flow).
+  // Auto-selects a compatible inference backend provider for the chosen model.
+  const handleLlmModelChange = (fieldKey: string, newModelId: string) => {
+    const supportingProviders = llmModelsWithProviders
+      .filter((option) => option.id === newModelId)
+      .map((option) => option.providerId);
+
+    const currentProviderId =
+      currentConfig?.components?.[fieldKey]?.providerId || "";
+    const isCurrentProviderCompatible =
+      supportingProviders.includes(currentProviderId);
+
+    const newProviderId = isCurrentProviderCompatible
+      ? currentProviderId
+      : (supportingProviders[0] ?? "");
+
+    onUpdateConfig({
+      components: {
+        ...currentConfig?.components,
+        [fieldKey]: {
+          providerId: newProviderId,
+          params: { model: newModelId },
+        },
+      },
+    });
+  };
+
   return (
     <ProductiveCard
       title={serviceName}
@@ -286,6 +319,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             size="sm"
             onClick={() => {
               setHasValidationError(false);
+              setShowPasswords({});
               onCancel();
             }}
           >
@@ -307,13 +341,14 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           {fields.map((field) => {
             let value: string | undefined;
 
-            // Determine field value based on field type
             if (field.globalValue !== undefined) {
               value = field.globalValue;
             } else if (field.key === "version") {
               value = config.version;
-            } else if (field.key === "inferenceBackend") {
-              value = config.inferenceBackend;
+            } else if (field.isModelFirst) {
+              value = config.components?.[field.key]?.params?.model as
+                | string
+                | undefined;
             } else if (config.components && config.components[field.key]) {
               value = config.components[field.key].providerId;
             }
@@ -334,14 +369,35 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             );
           })}
 
+          {/* Inference backend row — shown when an isModelFirst inference component is selected */}
+          {inferenceComponent &&
+            inferenceComponentType &&
+            (() => {
+              const providerId =
+                config.components?.[inferenceComponentType]?.providerId;
+              if (!providerId) return null;
+              const provider = inferenceComponent.providers.find(
+                (p) => p.id === providerId,
+              );
+              if (!provider) return null;
+              return (
+                <div
+                  key="inferenceBackend-readonly"
+                  className={styles.serviceConfigItem}
+                >
+                  <span className={styles.serviceConfigItemLabel}>
+                    Inference backend
+                  </span>
+                  <span className={styles.serviceConfigItemValue}>
+                    {provider.name}
+                  </span>
+                </div>
+              );
+            })()}
+
           {/* Render component configuration parameters */}
           {fields.map((field) => {
-            if (
-              field.key === "version" ||
-              field.readonly ||
-              field.key === "inferenceBackend"
-            )
-              return null;
+            if (field.key === "version" || field.readonly) return null;
 
             const componentConfig = config.components?.[field.key];
             if (!componentConfig?.params) return null;
@@ -409,21 +465,22 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           })}
 
           {/* Render inference backend service-level parameters */}
-          {config.inferenceBackend &&
+          {inferenceComponentType &&
+            config.components?.[inferenceComponentType]?.providerId &&
             config.params &&
             Object.keys(config.params).length > 0 &&
             (() => {
-              // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-              const componentType = llmComponent ? "llm" : "reranker";
-              const paramsMap = providerParamsByType[componentType] || {};
-              const schema = paramsMap[config.inferenceBackend];
+              const inferenceProviderId =
+                config.components![inferenceComponentType].providerId;
+              const paramsMap =
+                providerParamsByType[inferenceComponentType] || {};
+              const schema = paramsMap[inferenceProviderId];
 
               if (!schema?.properties) return null;
 
-              // Filter out params that are already shown in service-level schema fields
               const serviceFieldKeys = new Set(serviceFields.map((f) => f.key));
-
               const excludeKeys = new Set(["model", ...serviceFieldKeys]);
+
               return Object.entries(config.params)
                 .filter(([key, value]) =>
                   shouldShowParam(key, value, schema, excludeKeys),
@@ -484,10 +541,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           {/* Render service-level schema fields (only non-UI-only fields with non-default values) */}
           {serviceFields
             .filter((field) => {
-              // Skip UI-only fields in view mode
               if (field.uiOnly) return false;
-
-              // Only show controlled fields if they differ from default
               if (field.controlledBy) {
                 const currentValue = config.params?.[field.key];
                 const hasValue =
@@ -496,8 +550,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   hasValue && currentValue !== field.defaultValue;
                 return isDifferentFromDefault;
               }
-
-              // Show other fields if they have a value
               return config.params?.[field.key] !== undefined;
             })
             .map((field) => {
@@ -553,107 +605,115 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       ) : (
         <>
           <div className={styles.serviceConfigFieldRow}>
-            {fields
-              .filter((f) => f.key !== "inferenceBackend")
-              .map((field, index) => {
-                let fieldValue: string | undefined;
+            {fields.map((field, index) => {
+              let fieldValue: string | undefined;
 
-                // Determine field value for editing mode
-                if (field.globalValue !== undefined) {
-                  fieldValue = field.globalValue;
-                } else if (field.key === "version") {
-                  fieldValue = currentConfig?.version;
-                } else if (
-                  currentConfig?.components &&
-                  currentConfig.components[field.key]
-                ) {
-                  fieldValue = currentConfig.components[field.key].providerId;
-                }
+              if (field.globalValue !== undefined) {
+                fieldValue = field.globalValue;
+              } else if (field.key === "version") {
+                fieldValue = currentConfig?.version;
+              } else if (field.isModelFirst) {
+                fieldValue = currentConfig?.components?.[field.key]?.params
+                  ?.model as string | undefined;
+              } else if (
+                currentConfig?.components &&
+                currentConfig.components[field.key]
+              ) {
+                fieldValue = currentConfig.components[field.key].providerId;
+              }
 
-                const selectedItem =
-                  field.options.find((opt) => opt.id === fieldValue) || null;
+              const selectedItem =
+                field.options.find(
+                  (opt: { id: string; text: string }) => opt.id === fieldValue,
+                ) || null;
 
-                return (
-                  <Fragment key={`${field.key}-${index}`}>
-                    <div className={field.readonly ? styles.readonlyField : ""}>
-                      {field.readonly ? (
-                        <TextInput
-                          id={`${serviceName}-${field.key}`}
-                          labelText={field.label}
-                          value={selectedItem?.text || ""}
-                          readOnly
-                        />
-                      ) : (
-                        <Dropdown
-                          id={`${serviceName}-${field.key}`}
-                          titleText={field.label}
-                          label={`Select ${field.label.toLowerCase()}`}
-                          invalid={!selectedItem}
-                          invalidText={`Provide a valid ${field.label}`}
-                          items={field.options}
-                          itemToString={(item) => (item ? item.text : "")}
-                          selectedItem={selectedItem}
-                          onChange={({ selectedItem }) => {
-                            if (field.key === "version") {
-                              onUpdateConfig({
-                                version: selectedItem?.id || "",
-                              });
-                            } else {
-                              const providerId = selectedItem?.id || "";
-
-                              // Extract default model from provider schema
-                              const paramsMap =
-                                providerParamsByType[field.key] || {};
-                              const cachedParams = paramsMap[providerId];
-                              const modelParam: Record<string, unknown> = {};
-
-                              if (
-                                cachedParams &&
-                                typeof cachedParams === "object" &&
-                                "properties" in cachedParams &&
-                                cachedParams.properties &&
-                                typeof cachedParams.properties === "object"
-                              ) {
-                                const properties =
-                                  cachedParams.properties as Record<
-                                    string,
-                                    { default?: unknown }
-                                  >;
-                                if (properties.model?.default) {
-                                  modelParam.model = properties.model.default;
-                                }
-                              }
-
-                              onUpdateConfig({
-                                components: {
-                                  ...currentConfig?.components,
-                                  [field.key]: {
-                                    providerId,
-                                    params: modelParam,
+              return (
+                <Fragment key={`${field.key}-${index}`}>
+                  <div className={field.readonly ? styles.readonlyField : ""}>
+                    {field.readonly ? (
+                      <TextInput
+                        id={`${serviceName}-${field.key}`}
+                        labelText={field.label}
+                        value={selectedItem?.text || ""}
+                        readOnly
+                      />
+                    ) : (
+                      <Dropdown
+                        id={`${serviceName}-${field.key}`}
+                        titleText={field.label}
+                        label={`Select ${field.label.toLowerCase()}`}
+                        invalid={!selectedItem}
+                        invalidText={`Provide a valid ${field.label}`}
+                        items={field.options}
+                        itemToString={(item) => (item ? item.text : "")}
+                        selectedItem={selectedItem}
+                        onChange={({ selectedItem }) => {
+                          if (field.key === "version") {
+                            onUpdateConfig({
+                              version: selectedItem?.id || "",
+                            });
+                          } else if (
+                            field.isModelFirst &&
+                            inferenceComponentType &&
+                            String(field.key) === inferenceComponentType
+                          ) {
+                            // Inference component (LLM or reranker): model-first, auto-resolve provider
+                            handleLlmModelChange(
+                              field.key,
+                              selectedItem?.id || "",
+                            );
+                          } else if (field.isModelFirst) {
+                            // Other model-first fields: write model directly into params
+                            onUpdateConfig({
+                              components: {
+                                ...currentConfig?.components,
+                                [field.key]: {
+                                  providerId:
+                                    currentConfig?.components?.[field.key]
+                                      ?.providerId ?? "",
+                                  params: {
+                                    ...currentConfig?.components?.[field.key]
+                                      ?.params,
+                                    model: selectedItem?.id || "",
                                   },
                                 },
-                              });
-                            }
-                          }}
-                        />
-                      )}
-                    </div>
-                    {index === 0 && <div />}
-                  </Fragment>
-                );
-              })}
+                              },
+                            });
+                          } else {
+                            // DA and provider-first fields: write providerId directly
+                            onUpdateConfig({
+                              components: {
+                                ...currentConfig?.components,
+                                [field.key]: {
+                                  providerId: selectedItem?.id || "",
+                                  params:
+                                    currentConfig?.components?.[field.key]
+                                      ?.params ?? {},
+                                },
+                              },
+                            });
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
+                  {index === 0 && <div />}
+                </Fragment>
+              );
+            })}
 
             {/* Render inference backend dropdown and parameters */}
             {inferenceBackendField &&
+              inferenceComponentType &&
               (() => {
-                const fieldValue = currentConfig?.inferenceBackend;
+                const fieldValue = inferenceComponentType
+                  ? currentConfig?.components?.[inferenceComponentType]
+                      ?.providerId
+                  : undefined;
                 const selectedItem =
                   inferenceBackendField.options.find(
                     (opt) => opt.id === fieldValue,
                   ) || null;
-
-                // Dynamically determine component type based on which component exists
-                const componentType = llmComponent ? "llm" : "reranker";
 
                 return (
                   <Fragment key="inferenceBackend">
@@ -668,7 +728,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
                         onChange={({ selectedItem }) => {
-                          // Get service-level param keys to preserve (dynamic, backend-driven)
                           const serviceFieldKeys = new Set(
                             serviceFields.map((f) => f.key),
                           );
@@ -686,15 +745,26 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                           }
 
                           onUpdateConfig({
-                            inferenceBackend: selectedItem?.id || "",
-                            params: preservedParams, // Keep service-level, clear provider params
+                            components: {
+                              ...currentConfig?.components,
+                              [inferenceComponentType!]: {
+                                providerId: selectedItem?.id || "",
+                                params:
+                                  currentConfig?.components?.[
+                                    inferenceComponentType!
+                                  ]?.params ?? {},
+                              },
+                            },
+                            params: preservedParams,
                           });
                         }}
                       />
                     </div>
                     {(() => {
                       const providerSchema =
-                        providerParamsByType[componentType]?.[fieldValue || ""];
+                        providerParamsByType[inferenceComponentType!]?.[
+                          fieldValue || ""
+                        ];
                       const hasCredentialFields =
                         providerSchema?.properties &&
                         Object.keys(providerSchema.properties).filter(
@@ -713,49 +783,43 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                                 : "Inference credentials"}
                             </h4>
                             <DynamicSchemaFields
-                              componentType={componentType}
+                              componentType={inferenceComponentType!}
                               providerId={fieldValue || ""}
                               values={currentConfig?.params || {}}
                               onChange={(params) => {
-                                // Clear validation error when user makes changes
                                 setHasValidationError(false);
                                 setFieldErrors({});
-                                // Get provider schema keys to know which params belong to provider
                                 const providerSchema =
-                                  providerParamsByType[componentType]?.[
-                                    fieldValue || ""
-                                  ];
+                                  providerParamsByType[
+                                    inferenceComponentType!
+                                  ]?.[fieldValue || ""];
                                 const providerKeys = new Set(
                                   providerSchema?.properties
                                     ? Object.keys(providerSchema.properties)
                                     : [],
                                 );
 
-                                // Preserve service-level params, update only provider params
                                 const mergedParams: Record<string, unknown> =
                                   {};
                                 Object.entries(
                                   currentConfig?.params || {},
                                 ).forEach(([key, value]) => {
-                                  // Keep service-level params (not in provider schema)
                                   if (!providerKeys.has(key)) {
                                     mergedParams[key] = value;
                                   }
                                 });
-                                // Add/update provider params from DynamicSchemaFields
                                 Object.entries(params).forEach(
                                   ([key, value]) => {
                                     mergedParams[key] = value;
                                   },
                                 );
 
-                                onUpdateConfig({
-                                  params: mergedParams,
-                                });
+                                onUpdateConfig({ params: mergedParams });
                               }}
                               providerParamsMap={
-                                (providerParamsByType[componentType] ||
-                                  {}) as Record<string, JSONSchema>
+                                (providerParamsByType[
+                                  inferenceComponentType!
+                                ] || {}) as Record<string, JSONSchema>
                               }
                               hasValidationError={hasValidationError}
                               fieldErrors={fieldErrors}
@@ -776,39 +840,29 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   providerId={serviceId}
                   values={currentConfig?.params || {}}
                   onChange={(params) => {
-                    // Clear validation error when user makes changes
                     setHasValidationError(false);
                     setFieldErrors({});
-                    // Get service schema keys to know which params belong to service
-                    const serviceSchemaTyped = serviceSchema;
                     const serviceKeys = new Set(
-                      serviceSchemaTyped?.properties
-                        ? Object.keys(serviceSchemaTyped.properties)
+                      serviceSchema?.properties
+                        ? Object.keys(serviceSchema.properties)
                         : [],
                     );
 
-                    // Preserve provider params, update only service-level params
                     const mergedParams: Record<string, unknown> = {};
                     Object.entries(currentConfig?.params || {}).forEach(
                       ([key, value]) => {
-                        // Keep provider params (not in service schema)
                         if (!serviceKeys.has(key)) {
                           mergedParams[key] = value;
                         }
                       },
                     );
-                    // Add/update service params from DynamicSchemaFields
                     Object.entries(params).forEach(([key, value]) => {
                       mergedParams[key] = value;
                     });
 
-                    onUpdateConfig({
-                      params: mergedParams,
-                    });
+                    onUpdateConfig({ params: mergedParams });
                   }}
-                  providerParamsMap={{
-                    [serviceId]: serviceSchema,
-                  }}
+                  providerParamsMap={{ [serviceId]: serviceSchema }}
                   hasValidationError={hasValidationError}
                   fieldErrors={fieldErrors}
                 />
@@ -816,19 +870,20 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             )}
 
             {/* Model Description Accordion - In edit mode */}
-            {(llmComponent || rerankerComponent) &&
+            {inferenceComponent &&
+              inferenceComponentType &&
               (() => {
-                // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-                const componentType = llmComponent ? "llm" : "reranker";
                 const providerId =
-                  currentConfig?.components?.[componentType]?.providerId;
-                const modelId = currentConfig?.components?.[componentType]
-                  ?.params?.model as string | undefined;
+                  currentConfig?.components?.[inferenceComponentType]
+                    ?.providerId;
+                const modelId = currentConfig?.components?.[
+                  inferenceComponentType
+                ]?.params?.model as string | undefined;
 
                 if (!modelId || !providerId) return null;
 
                 const modelDescription = getModelDescription(
-                  componentType,
+                  inferenceComponentType,
                   providerId,
                   modelId,
                 );
@@ -853,7 +908,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     <Accordion>
                       <AccordionItem title="What is this model good at?">
                         <div className={styles.modelDescriptionContent}>
-                          {/* Introduction - Full width at top */}
                           {sections.introduction && (
                             <div className={styles.modelDescriptionFullWidth}>
                               <p className={styles.modelDescriptionText}>
@@ -862,7 +916,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                             </div>
                           )}
 
-                          {/* Use Cases - Full width (if exists separately) */}
                           {sections.useCases && (
                             <div className={styles.modelDescriptionFullWidth}>
                               <p className={styles.modelDescriptionText}>
@@ -871,7 +924,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                             </div>
                           )}
 
-                          {/* Strengths and Languages - Side by side */}
                           {(sections.strengths || sections.languages) && (
                             <div className={styles.modelDescriptionRow}>
                               {sections.strengths && (

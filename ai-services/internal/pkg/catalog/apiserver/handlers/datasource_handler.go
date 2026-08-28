@@ -83,6 +83,148 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetDatasource godoc
+//
+//	@Summary		Get a single datasource connector
+//	@Description	Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string							true	"Datasource UUID"
+//	@Success		200	{object}	models.GetDatasourceResponse	"Datasource detail"
+//	@Failure		400	{object}	ErrorResponse					"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse					"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse					"Internal Server Error"
+//	@Router			/datasources/{id} [get]
+func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetDatasource(c.Request.Context(), id)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// DeleteDatasource godoc
+//
+//	@Summary		Delete datasource connector
+//	@Description	Deletes a datasource connector by ID. Returns 409 Conflict if the connector is still linked to one or more applications.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Datasource connector ID (UUID)"
+//	@Success		204	"Datasource deleted"
+//	@Failure		400	{object}	ErrorResponse	"Invalid connector ID format"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Datasource not found"
+//	@Failure		409	{object}	ErrorResponse	"Datasource is connected to one or more applications"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/datasources/{id} [delete]
+func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid datasource ID format"})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DeleteDatasource(c.Request.Context(), id); err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to delete datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+
+
+// ListDatasources godoc
+//
+//	@Summary		List datasource connectors
+//	@Description	Returns a paginated list of datasource connectors with optional filters by status and provider.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
+//	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
+//	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
+//	@Success		200			{object}	models.DatasourceListResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/datasources [get]
+func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	status := c.Query("status")
+	if status != "" &&
+		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusConnected &&
+		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusOffline {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("status must be '%s' or '%s'", dbmodels.ConnectorStatusConnected, dbmodels.ConnectorStatusOffline),
+		})
+
+		return
+	}
+
+	req := models.ListDatasourcesRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Status:   status,
+		Provider: c.Query("provider"),
+	}
+
+	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)
+	if err != nil {
+		logger.ErrorfCtx(c.Request.Context(), "failed to list datasources: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to list datasources",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // ConnectDatasourcesToApplication godoc
 //
 //	@Summary		Connect datasources to application
@@ -153,62 +295,5 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// ListDatasources godoc
-//
-//	@Summary		List datasource connectors
-//	@Description	Returns a paginated list of datasource connectors with optional filters by status and provider.
-//	@Tags			Datasources
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
-//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
-//	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
-//	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
-//	@Success		200			{object}	models.DatasourceListResponse
-//	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
-//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
-//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
-//	@Router			/datasources [get]
-func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-
-	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-
-		return
-	}
-
-	status := c.Query("status")
-	if status != "" &&
-		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusConnected &&
-		dbmodels.ConnectorStatus(status) != dbmodels.ConnectorStatusOffline {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("status must be '%s' or '%s'", dbmodels.ConnectorStatusConnected, dbmodels.ConnectorStatusOffline),
-		})
-
-		return
-	}
-
-	req := models.ListDatasourcesRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Status:   status,
-		Provider: c.Query("provider"),
-	}
-
-	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)
-	if err != nil {
-		logger.ErrorfCtx(c.Request.Context(), "failed to list datasources: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: "Failed to list datasources",
-		})
-
-		return
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
 
 // Made with Bob

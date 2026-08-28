@@ -2,12 +2,15 @@ package datasourceservice
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -154,6 +157,102 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	return &apimodels.CreateDatasourceResponse{ID: connector.ID.String()}, nil
 }
 
+// GetDatasource retrieves a single datasource connector by UUID, returns its non-sensitive
+// metadata, and enriches it with a list of connected services sourced from service_dependencies,
+// each augmented with live sync state from the service's Digitize pod.
+//
+// Flow:
+//  1. Fetch the connector (without credentials) — return 404 if absent.
+//  2. Resolve the sensitive fields for this provider so they can be stripped from metadata.
+//  3. Query service_dependencies for all services linked to this connector.
+//  4. For each linked service, call GET /v1/connectors/{id} on its Digitize pod to obtain
+//     sync_status and last_sync_at. Failures degrade gracefully to sync_status="unknown".
+func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error) {
+	// Step 1: fetch connector including metadata so non-sensitive fields can be returned.
+	// Sensitive fields are identified from the provider schema and stripped before the response
+	// is built; they are never forwarded to the caller.
+	connector, err := s.connectorRepo.GetByID(ctx, id, true)
+	if err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return nil, &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: "datasource not found",
+			}
+		}
+
+		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
+	}
+
+	// Step 2: resolve provider display name and load schema to derive sensitive fields for stripping.
+	providerName := connector.Provider
+	if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
+		providerName = catalogConn.Name
+	}
+
+	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+	}
+
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
+	}
+
+	sensitiveFields := sensitiveFieldsFromSchema(schema)
+
+	// Steps 3–4: fetch linked services and enrich each with live Digitize sync state.
+	services, err := s.buildConnectedServices(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build connected services for datasource %s: %w", id, err)
+	}
+
+	return &apimodels.GetDatasourceResponse{
+		ID:   connector.ID.String(),
+		Name: connector.Name,
+		Type: connector.Type,
+		Provider: apimodels.DatasourceProviderInfo{
+			ID:   connector.Provider,
+			Name: providerName,
+		},
+		Status:    string(connector.Status),
+		Message:   connector.Message,
+		Metadata:  catalogutils.StripSensitiveFields(connector.Metadata, sensitiveFields),
+		Services:  services,
+		CreatedAt: connector.CreatedAt,
+		UpdatedAt: connector.UpdatedAt,
+	}, nil
+}
+
+// DeleteDatasource removes a datasource connector by ID.
+// Returns 404 if not found, 409 if the connector is still linked to one or more services.
+//
+// The existence check, in-use check, and DELETE all run inside a single serializable
+// transaction (owned by the repository layer) so a concurrent link cannot slip between
+// the guard and the delete.
+func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) error {
+	linkedCount, err := s.connectorRepo.DeleteIfUnlinked(ctx, id, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
+			return &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: fmt.Sprintf("datasource %q not found", id),
+			}
+		}
+
+		if errors.Is(err, dbrepo.ErrConnectorInUse) {
+			return &ValidationError{
+				Code:    http.StatusConflict,
+				Message: fmt.Sprintf("datasource is connected to %d application(s) and cannot be deleted", linkedCount),
+			}
+		}
+
+		return fmt.Errorf("failed to delete datasource: %w", err)
+	}
+
+	return nil
+}
+
 // ListDatasources returns a paginated list of datasource connectors, optionally filtered
 // by status and provider. Pagination mirrors the application and bundle list patterns:
 // uses repository.ConnectorFilters with Limit/Offset derived from Page/PageSize.
@@ -235,6 +334,62 @@ func (s *DatasourceService) connectorToResponse(c *dbmodels.Connector, connected
 		CreatedAt:         c.CreatedAt.Format(catalogconstants.RFC3339WithTimezone),
 		UpdatedAt:         c.UpdatedAt.Format(catalogconstants.RFC3339WithTimezone),
 	}
+}
+
+// buildConnectedServices queries service_dependencies for all services linked to the given
+// connector and enriches each with live sync state from its Digitize pod.
+// GetLinkedServiceEndpoints issues a single JOIN query (service_dependencies → services →
+// applications) returning the raw DB columns. The "api"-typed endpoint URL is extracted
+// here from EndpointsJSON. A DB query failure is propagated to the caller.
+// Sync-state fetch failures per service are non-fatal: ErrMsg is set on the item so the
+// caller receives full context without the connector record being blocked.
+func (s *DatasourceService) buildConnectedServices(ctx context.Context, connectorID uuid.UUID) ([]apimodels.ConnectedServiceItem, error) {
+	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(
+		ctx,
+		connectorID,
+		dbmodels.DependencyTypeConnector,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query linked services: %w", err)
+	}
+
+	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedRows))
+	for _, row := range linkedRows {
+		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
+		syncStatus, lastSyncAt, syncErr := fetchDigitzeSyncState(ctx, connectorID, baseURL)
+		item := apimodels.ConnectedServiceItem{
+			ApplicationID:   row.ApplicationID.String(),
+			ApplicationName: row.ApplicationName,
+			Service:         s.resolveServiceInfo(row.ApplicationCatalogID, row.ApplicationDeploymentType),
+			SyncStatus:      syncStatus,
+			LastSyncAt:      lastSyncAt,
+		}
+		if syncErr != "" {
+			item.ErrMsg = syncErr
+		}
+		services = append(services, item)
+	}
+
+	return services, nil
+}
+
+// resolveServiceInfo builds a ConnectedServiceInfo by loading the display name from catalog
+// metadata for the given catalogID + deploymentType. Falls back gracefully: when the catalog
+// entry cannot be loaded the id is used as the name so the response is never blocked.
+func (s *DatasourceService) resolveServiceInfo(catalogID, deploymentType string) apimodels.ConnectedServiceInfo {
+	info := apimodels.ConnectedServiceInfo{ID: catalogID, Name: catalogID}
+
+	if deploymentType == string(dbmodels.DeploymentTypeArchitectures) {
+		if arch, err := s.catalogProvider.LoadArchitecture(catalogID); err == nil {
+			info.Name = arch.Name
+		}
+	} else {
+		if svc, err := s.catalogProvider.LoadService(catalogID); err == nil {
+			info.Name = svc.Name
+		}
+	}
+
+	return info
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in
@@ -496,6 +651,50 @@ func decryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 	}
 
 	return result, nil
+}  
+// fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
+// using catalogclient.DigitizeClient (resty-based) and returns the sync_status, last_sync_at,
+// and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
+// The caller embeds errMsg in the response item so users know why sync state is unavailable;
+// the connector record is always returned regardless of sync-state fetch outcome.
+func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
+	if baseURL == "" {
+		return "unknown", nil, "no api endpoint registered for this service"
+	}
+
+	state, err := catalogclient.NewDigitizeClient(baseURL).GetConnectorSync(ctx, connectorID.String())
+	if err != nil {
+		logger.WarningfCtx(ctx, "failed to fetch sync state for datasource %s from %s: %v", connectorID, baseURL, err)
+
+		return "unknown", nil, fmt.Sprintf("failed to fetch sync state: %v", err)
+	}
+
+	return state.SyncStatus, state.LastSyncAt, ""
+}
+
+// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
+// and returns the URL of the first entry whose "type" is "api".
+// Both Podman and OpenShift deployers register the service backend URL with type "api".
+// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
+func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
+	if len(endpointsJSON) == 0 {
+		return ""
+	}
+
+	var endpoints []map[string]any
+	if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+		return ""
+	}
+
+	for _, ep := range endpoints {
+		if t, ok := ep["type"].(string); ok && t == "api" {
+			if u, ok := ep["url"].(string); ok {
+				return u
+			}
+		}
+	}
+
+	return ""
 }
 
 // Made with Bob

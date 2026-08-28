@@ -765,3 +765,19 @@ func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
 
 	return result, nil
 }
+
+// IndentString adds indentation (leading spaces) to every line of the input string.
+func IndentString(s string, spaces int) string {
+	if s == "" {
+		return ""
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			lines[i] = prefix + line
+		}
+	}
+
+	return prefix + strings.Join(lines, "\n")
+}

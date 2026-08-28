@@ -1,4 +1,4 @@
-// Package utils provides helpers functions for encrypting and decrypting connector (datasource) credentials.
+// Package utils provides helper functions for connectors.
 package utils
 
 import (
@@ -84,4 +84,17 @@ func Decrypt(ciphertext string, secret string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// StripSensitiveFields returns a copy of metadata with all keys listed in sensitiveFields removed.
+// The original map is never mutated. A nil or empty metadata returns an empty map.
+func StripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bool) map[string]any {
+	result := make(map[string]any, len(metadata))
+	for k, v := range metadata {
+		if !sensitiveFields[k] {
+			result[k] = v
+		}
+	}
+
+	return result
 }
