@@ -169,16 +169,15 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
 
         invalid_count = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
-        if invalid_count > 0:
-            total_files -= invalid_count
-            update_connector_total_files(connector_id, total_files)
-            update_sync_log(connector_id, sync_seq, total_files=total_files)
-        else:
-            update_connector_total_files(connector_id, total_files)
+        update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
-        _complete_tick(sync_seq, connector_id)
+        if invalid_count > 0:
+            validation_error_msg = f"{invalid_count} file(s) failed due to validation failure"
+            _fail_tick(sync_seq, connector_id, RuntimeError(validation_error_msg), error_msg=validation_error_msg)
+        else:
+            _complete_tick(sync_seq, connector_id)
 
     except asyncio.CancelledError as ce:
         logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
@@ -306,8 +305,8 @@ async def _process_new_files(
     -------
     int
         Number of files rejected by ``validate_document_file`` across all
-        batches.  The caller subtracts this from the total_files count so that
-        unsupported files are not included in the connector's reported total.
+        batches.  If non-zero the caller closes the sync log as FAILED with
+        a message indicating how many files failed validation.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
