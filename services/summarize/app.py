@@ -954,6 +954,7 @@ async def process_summarization_job(job_id: str, level):
     ),
     response_description="Job created with job_id",
     tags=["jobs", "MCP"],
+    operation_id="create_summarization_job",
 )
 async def create_summarization_job(
     background_tasks: BackgroundTasks,
@@ -1166,6 +1167,7 @@ async def list_jobs(
     description="Retrieve detailed status and metadata of a specific summarization job.",
     response_description="Full job details including document info and metadata",
     tags=["jobs", "MCP"],
+    operation_id="get_summarization_job_details",
 )
 async def get_job_details(job_id: str):
     """Get detailed information about a specific job."""
@@ -1229,6 +1231,7 @@ async def get_job_details(job_id: str):
     ),
     response_description="Summarization result with usage statistics",
     tags=["jobs", "MCP"],
+    operation_id="get_summarization_job_result",
 )
 async def get_job_result(job_id: str):
     """Get the summarization result for a completed job."""
