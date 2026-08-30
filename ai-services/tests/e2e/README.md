@@ -120,7 +120,7 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `golden-dataset-validation` | RAG golden dataset validation against an existing application |
 | `digitization-tests` | Digitization API coverage against an existing or suite-created application |
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
-| `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
+| `summarization-tests` | Asynchronous and synchronous summarization API coverage, including input-validation failure paths and connectivity failure (requires `--template=summarize`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `failure-test` | **Umbrella label** — all negative-path tests across bootstrap, catalog, and similarity. **Skipped by default** unless `--run-failure-tests` is passed; use `--label-filter="failure-test"` to further narrow once unlocked |
 | `bootstrap-failure` | Bootstrap domain failure tests only (`bootstrap_failure_test.go`) — requires `--run-failure-tests` |
@@ -742,5 +742,7 @@ ai-services/tests/e2e/
    │   └─ setup.go
    ├─ similarity/                    # similarity API request/response helpers
    │   └─ similarity.go
+   ├─ summarization/                 # summarization API request/response helpers
+   │   └─ summarize.go
    └─ <other_test_files>             # add your `_test.go` files here (package `e2e`)
 ```
