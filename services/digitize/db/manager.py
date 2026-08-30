@@ -1324,9 +1324,9 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 connector_sync_status = (
-                    ConnectorStatus.OUT_OF_SYNC
-                    if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
-                    else status
+                    ConnectorStatus.UP_TO_DATE
+                    if status == SyncLogStatus.COMPLETED
+                    else ConnectorStatus.OUT_OF_SYNC
                 )
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),

@@ -545,7 +545,7 @@ class TestUpdateSyncLog:
         session.execute.side_effect = [log_result, conn_result]
         from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=2, status=ConnectorStatus.UP_TO_DATE)
+            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=2, status=SyncLogStatus.COMPLETED)
         assert session.execute.call_count == 2
 
     def test_optional_fields_omitted_when_none(self):
