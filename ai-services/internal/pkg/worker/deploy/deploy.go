@@ -26,6 +26,10 @@ import (
 )
 
 const (
+	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
+	// Setup. Exported so join.go can look up the pod's admin port after setup.
+	WorkerCaddyPodName = "ai-services--worker-caddy"
+
 	// workerApp is the app name passed to the template provider.
 	// Resolves to assets/worker/<runtime>/templates/.
 	workerApp = "worker"

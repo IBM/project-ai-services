@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,7 +20,7 @@ import (
 
 // LoadDescription loads an OpenAPI description from a file path or URL,
 // dereferencing all $ref fields inline. tlsSkipVerify disables TLS
-// certificate verification when loading from an HTTPS URL.
+// certificate verification when loading from an HTTPS URL
 func LoadDescription(ref string, tlsSkipVerify bool) (*highV3.Document, error) {
 	var data []byte
 	var err error
@@ -79,6 +80,7 @@ func LoadDescription(ref string, tlsSkipVerify bool) (*highV3.Document, error) {
 // isURL checks if a string is a valid URL
 func isURL(str string) bool {
 	u, err := url.Parse(str)
+
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
@@ -102,7 +104,11 @@ func loadFromURL(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch URL %s: %w", urlStr, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch URL %s: HTTP %d", urlStr, resp.StatusCode)

@@ -32,6 +32,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
@@ -96,6 +97,17 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("worker join: setup: %w", err)
 	}
 
+	// ── Step 1b: Build Caddy proxy router (Podman only) ──────────────────────
+	// Must happen after Setup so the Caddy pod is running and its admin port
+	// is discoverable. For OpenShift workers routes are managed natively.
+	var pr *workercaddy.ProxyRouter
+	if opts.RuntimeType == types.RuntimeTypePodman {
+		var err error
+		if pr, err = workercaddy.New(ctx, rt); err != nil {
+			return fmt.Errorf("worker join: init local Caddy manager: %w", err)
+		}
+	}
+
 	// ── Step 2: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 
@@ -114,7 +126,7 @@ func Run(ctx context.Context, opts Options) error {
 		workerconstants.MetaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
 	}
 
-	return runRegistrationLoop(ctx, rt, client, opts.Token, meta)
+	return runRegistrationLoop(ctx, rt, pr, client, opts.Token, meta)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -122,7 +134,7 @@ func Run(ctx context.Context, opts Options) error {
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, token string, meta map[string]string) error {
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string, meta map[string]string) error {
 	workerName, err := register(ctx, client, token, rt.Type(), meta)
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
@@ -130,7 +142,7 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, client workerp
 
 	logger.InfofCtx(ctx, "Worker %q registered with control plane.\n", workerName)
 
-	return runStreamLoop(ctx, rt, client, workerName)
+	return runStreamLoop(ctx, rt, pr, client, workerName)
 }
 
 // register calls the Register RPC once and returns the worker name bound by
@@ -156,7 +168,7 @@ func register(ctx context.Context, client workerpb.WorkerGatewayClient, token st
 // An Unauthenticated status from the gateway means the control plane restarted
 // and lost its in-memory registry; in that case the worker re-registers before
 // reconnecting.
-func runStreamLoop(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, workerName string) error {
+func runStreamLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, workerName string) error {
 	backoff := retryBase
 
 	for {
@@ -166,7 +178,7 @@ func runStreamLoop(ctx context.Context, rt runtime.Runtime, client workerpb.Work
 
 		logger.InfofCtx(ctx, "Opening CommandStream for worker %q...\n", workerName)
 
-		err := runStream(ctx, rt, client, workerName)
+		err := runStream(ctx, rt, pr, client, workerName)
 		if err == nil || ctx.Err() != nil {
 			// Clean exit or context cancelled — stop retrying.
 			return err
@@ -195,7 +207,7 @@ func runStreamLoop(ctx context.Context, rt runtime.Runtime, client workerpb.Work
 
 // runStream opens one CommandStream, sends heartbeats, and drains incoming
 // Commands until the stream is closed or an error occurs.
-func runStream(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGatewayClient, workerName string) error {
+func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, workerName string) error {
 	stream, err := client.CommandStream(ctx)
 	if err != nil {
 		return fmt.Errorf("open CommandStream: %w", err)
@@ -214,7 +226,7 @@ func runStream(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGa
 	recvErrCh := make(chan error, 1)
 
 	go func() {
-		recvErrCh <- recvLoop(ctx, rt, stream, workerName)
+		recvErrCh <- recvLoop(ctx, rt, pr, stream, workerName)
 	}()
 
 	ticker := time.NewTicker(heartbeatInterval)
@@ -239,7 +251,7 @@ func runStream(ctx context.Context, rt runtime.Runtime, client workerpb.WorkerGa
 // recvLoop reads Commands from the gateway stream, dispatches each one to the
 // local runtime, and sends the result back on the stream.
 // The loop exits when the stream is closed or returns an error.
-func recvLoop(ctx context.Context, rt runtime.Runtime, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
+func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
 	for {
 		cmd, err := stream.Recv()
 		if err != nil {
@@ -249,7 +261,7 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, stream grpc.BidiStreaming
 		logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
 			workerName, cmd.GetCommandId(), cmd.GetType())
 
-		result := dispatch.Dispatch(ctx, rt, cmd)
+		result := dispatch.Dispatch(ctx, rt, pr, cmd)
 		result.WorkerName = workerName
 
 		if err := stream.Send(result); err != nil {

@@ -36,8 +36,8 @@ logger = get_logger("scanner_factory")
 # Registry — maps connector type → (scanner class, config class)
 # ---------------------------------------------------------------------------
 _REGISTRY: dict[str, tuple[type[BaseScanner], type]] = {
-    "s3": (S3Scanner, S3ConnectorConfig),
-    "ssh": (SSHScanner, SSHConnectorConfig),
+    "object_storage": (S3Scanner, S3ConnectorConfig),
+    "file_system": (SSHScanner, SSHConnectorConfig),
 }
 
 
@@ -49,7 +49,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
     ----------
     connector_row:
         Any object (ORM model, dataclass, or dict) that exposes:
-          - ``.type``               → str  (e.g. ``"s3"``, ``"ssh"``)
+          - ``.type``               → str  (e.g. ``"object_storage"``, ``"file_system"``)
           - ``.connection_details`` → dict  (encrypted as stored in the DB)
           - ``.allowed_extensions`` → list[str]  (e.g. ``[".pdf", ".docx"]``)
 

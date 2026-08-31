@@ -83,6 +83,21 @@ func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	return dst
 }
 
+// MergeMaps returns a new map that starts with all keys from base, then overlays overrides.
+// Neither input map is modified.
+func MergeMaps(base, overrides map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	return merged
+}
+
 // JoinAndRemove joins the first `count` elements using `sep`,
 // returns the joined string, and removes those elements from the original slice.
 func JoinAndRemove(slice *[]string, count int, sep string) string {
@@ -645,6 +660,19 @@ func ExtractTarGz(srcFile, destDir string) error {
 	return nil
 }
 
+// IsOSMetadataFile reports whether name is an OS-generated metadata file
+// (macOS AppleDouble/.DS_Store, Windows Thumbs.db/desktop.ini) that should be
+// skipped when validating or extracting archive entries.
+func IsOSMetadataFile(name string) bool {
+	base := filepath.Base(name)
+
+	if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+		return true
+	}
+
+	return strings.EqualFold(base, "Thumbs.db") || strings.EqualFold(base, "desktop.ini")
+}
+
 // extractTarEntry extracts a single tar entry.
 func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	// Get the absolute path of the destination directory
@@ -764,4 +792,20 @@ func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
 	}
 
 	return result, nil
+}
+
+// IndentString adds indentation (leading spaces) to every line of the input string.
+func IndentString(s string, spaces int) string {
+	if s == "" {
+		return ""
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			lines[i] = prefix + line
+		}
+	}
+
+	return prefix + strings.Join(lines, "\n")
 }

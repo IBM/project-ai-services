@@ -126,7 +126,7 @@ def mock_db_manager():
     mock_manager.update_job = Mock(return_value=True)
     mock_manager.delete_job = Mock(return_value=True)
     mock_manager.get_active_jobs = Mock(return_value=[])
-    mock_manager.delete_all_jobs = Mock(return_value={"deleted_count": 0, "success": True})
+    mock_manager.delete_user_jobs = Mock(return_value={"deleted_count": 0, "success": True})
     
     # Mock document operations
     mock_manager.create_document = Mock(return_value=Mock(
@@ -148,7 +148,7 @@ def mock_db_manager():
     mock_manager.get_documents_by_job_id = Mock(return_value=[])
     mock_manager.update_document = Mock(return_value=True)
     mock_manager.delete_document = Mock(return_value=True)
-    mock_manager.delete_all_documents = Mock(return_value={"deleted_count": 0, "success": True})
+    mock_manager.delete_user_documents = Mock(return_value={"deleted_count": 0, "doc_ids": [], "success": True})
     
     with patch('digitize.db.manager.db_manager', mock_manager):
         with patch('digitize.utils.db.db_manager', mock_manager):

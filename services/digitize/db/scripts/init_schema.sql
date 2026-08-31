@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
-    CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
+    CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name

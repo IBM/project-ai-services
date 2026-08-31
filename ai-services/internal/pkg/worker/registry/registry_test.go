@@ -73,6 +73,15 @@ func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
 	return out, nil
 }
 
+func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Worker, error) {
+	w, ok := r.workers[name]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -380,5 +389,155 @@ func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
 	workers, _ := repo.GetAll(context.Background())
 	if workers[0].Status != models.WorkerStatusDisconnected {
 		t.Errorf("expected status %q, got %q", models.WorkerStatusDisconnected, workers[0].Status)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IsWorkerConnected tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestRegistry_IsWorkerConnected_NotInCache(t *testing.T) {
+	reg := New(nil)
+
+	if reg.IsWorkerConnected(context.Background(), "ghost") {
+		t.Error("expected false for worker not in cache")
+	}
+}
+
+func TestRegistry_IsWorkerConnected_CacheHitNoRepo(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+
+	if !reg.IsWorkerConnected(context.Background(), "worker-1") {
+		t.Error("expected true: worker is in cache and no repo to check")
+	}
+}
+
+func TestRegistry_IsWorkerConnected_CacheHitDBReady(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	if _, err := reg.Preregister(context.Background(), "worker-1"); err != nil {
+		t.Fatalf("Preregister: %v", err)
+	}
+
+	if _, err := reg.Register(context.Background(), "worker-1", "podman", nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// DB row has status=ready after Register.
+	if !reg.IsWorkerConnected(context.Background(), "worker-1") {
+		t.Error("expected true: in cache and DB status=ready")
+	}
+}
+
+func TestRegistry_IsWorkerConnected_CacheHitDBNotReady(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	if _, err := reg.Preregister(context.Background(), "worker-1"); err != nil {
+		t.Fatalf("Preregister: %v", err)
+	}
+
+	if _, err := reg.Register(context.Background(), "worker-1", "podman", nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Force DB status to disconnected.
+	w := repo.workers["worker-1"]
+	disc := models.WorkerStatusDisconnected
+	if err := repo.Update(context.Background(), w.ID, repository.WorkerUpdate{Status: &disc}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if reg.IsWorkerConnected(context.Background(), "worker-1") {
+		t.Error("expected false: DB status is disconnected")
+	}
+}
+
+func TestRegistry_IsWorkerConnected_DisconnectedRemovedFromCache(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+	reg.Disconnect(context.Background(), "worker-1")
+
+	if reg.IsWorkerConnected(context.Background(), "worker-1") {
+		t.Error("expected false: worker was disconnected")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// WorkerRuntimeType / WorkerMetadata / WorkerCommandChannel tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestRegistry_WorkerRuntimeType_Connected(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+
+	rt, ok := reg.WorkerRuntimeType("worker-1")
+	if !ok {
+		t.Fatal("expected ok=true for connected worker")
+	}
+	if rt != "podman" {
+		t.Errorf("expected runtime type %q, got %q", "podman", rt)
+	}
+}
+
+func TestRegistry_WorkerRuntimeType_NotConnected(t *testing.T) {
+	reg := New(nil)
+
+	_, ok := reg.WorkerRuntimeType("ghost")
+	if ok {
+		t.Error("expected ok=false for unknown worker")
+	}
+}
+
+func TestRegistry_WorkerMetadata_Connected(t *testing.T) {
+	reg := New(nil)
+	meta := map[string]string{"domainSuffix": "example.com", "httpsPort": "443"}
+	reg.Register(context.Background(), "worker-1", "podman", meta) //nolint:errcheck
+
+	got, ok := reg.WorkerMetadata("worker-1")
+	if !ok {
+		t.Fatal("expected ok=true for connected worker")
+	}
+	if got["domainSuffix"] != "example.com" {
+		t.Errorf("expected domainSuffix %q, got %q", "example.com", got["domainSuffix"])
+	}
+	if got["httpsPort"] != "443" {
+		t.Errorf("expected httpsPort %q, got %q", "443", got["httpsPort"])
+	}
+}
+
+func TestRegistry_WorkerMetadata_NotConnected(t *testing.T) {
+	reg := New(nil)
+
+	_, ok := reg.WorkerMetadata("ghost")
+	if ok {
+		t.Error("expected ok=false for unknown worker")
+	}
+}
+
+func TestRegistry_WorkerCommandChannel_Connected(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+
+	ch, ok := reg.WorkerCommandChannel("worker-1")
+	if !ok {
+		t.Fatal("expected ok=true for connected worker")
+	}
+	if ch == nil {
+		t.Error("expected non-nil command channel")
+	}
+}
+
+func TestRegistry_WorkerCommandChannel_NotConnected(t *testing.T) {
+	reg := New(nil)
+
+	ch, ok := reg.WorkerCommandChannel("ghost")
+	if ok {
+		t.Error("expected ok=false for unknown worker")
+	}
+	if ch != nil {
+		t.Error("expected nil channel for unknown worker")
 	}
 }

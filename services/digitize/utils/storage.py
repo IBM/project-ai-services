@@ -184,6 +184,30 @@ class StorageManager:
                 f"Content file not found (may have been deleted already): {content_file}"
             )
 
+    def delete_document_content_by_id(self, doc_id: str) -> None:
+        """
+        Delete all content files for *doc_id* regardless of output format.
+
+        Uses a glob match (``<doc_id>.*``) so the caller does not need to know
+        the output format upfront.  Logs a warning if no files are found.
+
+        Args:
+            doc_id: Unique document identifier.
+        """
+        digitized_dir = settings.digitize.digitized_docs_dir
+        matched = list(digitized_dir.glob(f"{doc_id}.*"))
+        if not matched:
+            logger.warning(
+                f"Content file for document {doc_id} not found (may have been deleted already)"
+            )
+            return
+        for path in matched:
+            try:
+                path.unlink()
+                logger.info(f"Deleted content file for document {doc_id}: {path.name}")
+            except Exception as exc:
+                raise Exception(f"Failed to delete content file {path}: {exc}") from exc
+
     def delete_all_contents(self) -> dict:
         """
         Delete all digitized content files from the cache directory.

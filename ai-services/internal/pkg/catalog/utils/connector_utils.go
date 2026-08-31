@@ -86,6 +86,40 @@ func Decrypt(ciphertext string, secret string) (string, error) {
 	return string(plaintext), nil
 }
 
+// DecryptSensitiveFields returns a copy of params where every key listed in sensitiveKeys
+// has its ciphertext value replaced with the corresponding plaintext.
+// Fields that are not in sensitiveKeys are copied as-is.
+func DecryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
+	if len(sensitiveKeys) == 0 || len(params) == 0 {
+		return params, nil
+	}
+
+	if encryptionKey == "" {
+		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
+	}
+
+	result := make(map[string]any, len(params))
+	for k, v := range params {
+		if sensitiveKeys[k] {
+			ciphertext, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("sensitive field %q must be a string", k)
+			}
+
+			plaintext, err := Decrypt(ciphertext, encryptionKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt field %q: %w", k, err)
+			}
+
+			result[k] = plaintext
+		} else {
+			result[k] = v
+		}
+	}
+
+	return result, nil
+}
+
 // StripSensitiveFields returns a copy of metadata with all keys listed in sensitiveFields removed.
 // The original map is never mutated. A nil or empty metadata returns an empty map.
 func StripSensitiveFields(metadata map[string]any, sensitiveFields map[string]bool) map[string]any {
