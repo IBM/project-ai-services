@@ -217,7 +217,7 @@ class Connector(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("type IN ('ssh', 's3')", name="chk_connector_type"),
+        CheckConstraint("type IN ('file_system', 'object_storage')", name="chk_connector_type"),
     )
 
     def __repr__(self) -> str:

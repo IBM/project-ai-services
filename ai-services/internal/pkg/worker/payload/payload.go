@@ -63,11 +63,46 @@ type ListRoutes struct {
 	LabelSelector string `json:"labelSelector"`
 }
 
+// ─── Caddy proxy management ───────────────────────────────────────────────────
+
+// ProxyRouteOp identifies the specific Caddy operation within a single
+// COMMAND_TYPE_PROXY_ROUTE command.
+type ProxyRouteOp string
+
+const (
+	ProxyRouteOpRegister    ProxyRouteOp = "register"
+	ProxyRouteOpUnregister  ProxyRouteOp = "unregister"
+	ProxyRouteOpGet         ProxyRouteOp = "get"
+	ProxyRouteOpHealthCheck ProxyRouteOp = "health_check"
+)
+
+// ProxyRoute is the unified payload for COMMAND_TYPE_PROXY_ROUTE.
+// Op selects the operation; the remaining fields are populated as needed by
+// each op (register uses all route fields; unregister/get use only ID;
+// health_check uses none).
+type ProxyRoute struct {
+	Op       ProxyRouteOp `json:"op"`
+	ID       string       `json:"id,omitempty"`
+	Domain   string       `json:"domain,omitempty"`
+	Upstream string       `json:"upstream,omitempty"`
+	Terminal bool         `json:"terminal,omitempty"`
+	Type     string       `json:"type,omitempty"`
+}
+
+// Route represents a Caddy reverse-proxy route on a worker node.
+type Route struct {
+	ID       string // unique route identifier used as @id in Caddy config
+	Domain   string // hostname to match (e.g. "service.example.com")
+	Upstream string // backend address (e.g. "10.88.0.5:8080")
+	Terminal bool   // stop route matching after this route
+	Type     string // endpoint type label (e.g. "ui", "api")
+}
+
 // ─── HTTP proxy ───────────────────────────────────────────────────────────────
 
 // HTTPProxy is the request payload for COMMAND_TYPE_HTTP_PROXY.
 // The control plane sends this; the worker executes the HTTP request locally
-// against a pod endpoint and returns a runtimetypes.HTTPProxyResponse.
+// against a pod endpoint and returns a types.HTTPProxyResponse.
 type HTTPProxy struct {
 	Method    string            `json:"method"`
 	TargetURL string            `json:"target_url"`

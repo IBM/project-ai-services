@@ -87,13 +87,11 @@ enum CommandType {
   COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER   = 24;
 
   // Caddy proxy management on the worker node.
-  COMMAND_TYPE_REGISTER_PROXY_ROUTE      = 25;
-  COMMAND_TYPE_UNREGISTER_PROXY_ROUTE    = 26;
-  COMMAND_TYPE_GET_PROXY_ROUTE           = 27;
-  COMMAND_TYPE_PROXY_HEALTH_CHECK        = 28;
+  // A single command covers all route operations; the op is encoded in the payload.
+  COMMAND_TYPE_PROXY_ROUTE               = 25;
 
   // HTTP proxy tunnel through the gRPC stream.
   // The control plane sends an HTTP request; the worker executes it locally
   // against a pod endpoint and returns the response.
-  COMMAND_TYPE_HTTP_PROXY                = 29;
+  COMMAND_TYPE_HTTP_PROXY                = 26;
 }

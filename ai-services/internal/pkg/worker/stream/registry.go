@@ -1,10 +1,9 @@
-package remote
+package stream
 
 import workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 
-// WorkerRegistry is the subset of worker/registry.Registry that RemoteRuntime
-// needs. Declaring it here keeps the runtime tree free of imports from the
-// worker domain and makes RemoteRuntime testable without a real registry.
+// WorkerRegistry is the interface both Sender and RemoteRuntime require.
+// *worker/registry.Registry satisfies it automatically.
 type WorkerRegistry interface {
 	// WaitForResult registers a result channel for commandID on workerName and
 	// returns it. The channel receives exactly one value when the worker replies.

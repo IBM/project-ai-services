@@ -645,6 +645,19 @@ func ExtractTarGz(srcFile, destDir string) error {
 	return nil
 }
 
+// IsOSMetadataFile reports whether name is an OS-generated metadata file
+// (macOS AppleDouble/.DS_Store, Windows Thumbs.db/desktop.ini) that should be
+// skipped when validating or extracting archive entries.
+func IsOSMetadataFile(name string) bool {
+	base := filepath.Base(name)
+
+	if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+		return true
+	}
+
+	return strings.EqualFold(base, "Thumbs.db") || strings.EqualFold(base, "desktop.ini")
+}
+
 // extractTarEntry extracts a single tar entry.
 func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	// Get the absolute path of the destination directory

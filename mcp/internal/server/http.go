@@ -20,6 +20,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	shutdownTimeout        = 10 * time.Second
+	defaultRateLimit       = 20.0
+	defaultRateLimitWindow = 60.0
+)
+
 type Logger interface {
 	Printf(format string, v ...interface{})
 }
@@ -56,11 +62,12 @@ func (r *RateLimiterManager) GetLimiter(clientID string) *rate.Limiter {
 		limiter = rate.NewLimiter(r.limit, r.burst)
 		r.limiters[clientID] = limiter
 	}
+
 	return limiter
 }
 
 func GetRateLimiterConfig() (rate.Limit, int, error) {
-	rateVal := float64(20) // set default to 20
+	rateVal := defaultRateLimit // set default to 20.
 	var err error
 	if rateValStr, ok := os.LookupEnv("RATE_LIMIT_REQUESTS"); ok {
 		rateVal, err = strconv.ParseFloat(rateValStr, 64)
@@ -69,7 +76,7 @@ func GetRateLimiterConfig() (rate.Limit, int, error) {
 		}
 	}
 
-	windowVal := float64(60) // set default to 60
+	windowVal := defaultRateLimitWindow // set default to 60.
 	if windowValStr, ok := os.LookupEnv("RATE_LIMIT_PER_SECONDS"); ok {
 		windowVal, err = strconv.ParseFloat(windowValStr, 64)
 		if err != nil {
@@ -155,7 +162,7 @@ func (s *HTTPServer) Start() error {
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
 		Handler:           s.loggingMiddleware(mux),
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: shutdownTimeout,
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -175,21 +182,22 @@ func (s *HTTPServer) Start() error {
 	<-sigChan
 	s.logger.Printf("Shutting down HTTP server...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		s.logger.Printf("HTTP server shutdown error: %v", err)
+
 		return err
 	}
 
 	s.logger.Printf("HTTP server shutdown complete")
+
 	return nil
 }
 
 func (s *HTTPServer) createToolHandler() mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-
 		if request.Extra != nil && request.Extra.Header != nil {
 			ctx = context.WithValue(ctx, "requestHeaders", request.Extra.Header)
 		}
@@ -218,6 +226,7 @@ func (s *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
+
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -239,6 +248,7 @@ func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		for _, dep := range buildInfo.Deps {
 			if dep.Path == "github.com/modelcontextprotocol/go-sdk" {
 				sdkVersion = dep.Version
+
 				break
 			}
 		}
@@ -267,6 +277,7 @@ func clientIP(r *http.Request) string {
 	if err != nil {
 		return r.RemoteAddr
 	}
+
 	return host
 }
 
@@ -294,6 +305,7 @@ func (s *HTTPServer) rateLimitMiddleware(next http.Handler) http.Handler {
 			}); err != nil {
 				log.Printf("Error encoding rate limit response: %v", err)
 			}
+
 			return
 		}
 		next.ServeHTTP(w, r)
