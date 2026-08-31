@@ -16,6 +16,7 @@ class JobStatus(str):
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
 
 
@@ -122,14 +123,17 @@ class SchemaDetailResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class JobCreatedResponse(BaseModel):
-    """Response body for POST /v1/extract/jobs (202 Accepted)."""
+    """Response body for POST /v1/extract/jobs (202 Accepted) — single or batch."""
     job_id: str
+    file_count: int = 1
 
 
-class DocumentInfo(BaseModel):
-    """Inline document info embedded in job detail responses."""
-    name: str
-    source_type: str
+class BatchDocumentItem(BaseModel):
+    """Per-document summary item in batch job detail responses."""
+    doc_id: str
+    filename: str
+    status: str
+    error: str = ""
 
 
 class JobDetailResponse(BaseModel):
@@ -141,7 +145,14 @@ class JobDetailResponse(BaseModel):
     job_name: Optional[str] = None
     schema_id: str
     status: str
-    document: DocumentInfo
+    # Single-file jobs: document is None. Batch jobs populate `documents`.
+    document: None = None
+    documents: Optional[List[BatchDocumentItem]] = None
+    # Batch progress counters (None for single-file jobs)
+    file_count: Optional[int] = None
+    files_completed: Optional[int] = None
+    files_failed: Optional[int] = None
+    files_pending: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     submitted_at: str
     completed_at: Optional[str] = None
@@ -155,7 +166,7 @@ class JobListItem(BaseModel):
     job_name: Optional[str] = None
     schema_id: str
     status: str
-    document_name: str
+    file_count: int = 1
     submitted_at: str
     completed_at: Optional[str] = None
 

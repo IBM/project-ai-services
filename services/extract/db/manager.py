@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from common.misc_utils import get_logger
 from extract.db.connection import get_db_session
-from extract.db.models import ExtractionSchema, ExtractJob
+from extract.db.models import ExtractionSchema, ExtractJob, ExtractDocument
 
 logger = get_logger("db_manager")
 
@@ -225,8 +225,7 @@ class DatabaseManager:
     def create_job(
         job_id: str,
         schema_id: str,
-        document_name: str,
-        source_type: str,
+        file_count: int,
         job_name: Optional[str] = None,
         submitted_at: Optional[datetime] = None,
     ) -> Optional[ExtractJob]:
@@ -238,14 +237,13 @@ class DatabaseManager:
                     job_name=job_name,
                     schema_id=schema_id,
                     status="accepted",
-                    document_name=document_name,
-                    source_type=source_type,
+                    file_count=file_count,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
                 )
                 session.add(row)
                 session.flush()
                 session.expunge(row)
-                logger.info(f"Created extract job: {job_id}")
+                logger.info(f"Created extract job: {job_id} (file_count={file_count})")
                 return row
         except IntegrityError as exc:
             logger.error(f"Job {job_id} already exists: {exc}")
@@ -266,9 +264,8 @@ class DatabaseManager:
                     _ = (
                         row.job_id, row.job_name, row.schema_id, row.status,
                         row.submitted_at, row.completed_at, row.error,
-                        row.document_name, row.source_type, row.document_word_count,
                         row.digitize_job_id, row.digitize_doc_id,
-                        row.job_metadata, row.updated_at,
+                        row.job_metadata, row.updated_at, row.file_count,
                     )
                     session.expunge(row)
                 return row
@@ -285,7 +282,6 @@ class DatabaseManager:
         metadata: Optional[Dict[str, Any]] = None,
         digitize_job_id: Optional[str] = None,
         digitize_doc_id: Optional[str] = None,
-        document_word_count: Optional[int] = None,
     ) -> bool:
         """
         Partial update for a job row.
@@ -306,8 +302,6 @@ class DatabaseManager:
                     updates["digitize_job_id"] = digitize_job_id
                 if digitize_doc_id is not None:
                     updates["digitize_doc_id"] = digitize_doc_id
-                if document_word_count is not None:
-                    updates["document_word_count"] = document_word_count
 
                 if metadata is not None:
                     # Deep-merge: fetch current value, update in Python, write back.
@@ -366,7 +360,8 @@ class DatabaseManager:
                 for row in rows:
                     _ = (
                         row.job_id, row.job_name, row.schema_id, row.status,
-                        row.document_name, row.submitted_at, row.completed_at,
+                        row.submitted_at, row.completed_at,
+                        row.file_count,
                     )
                     session.expunge(row)
                 return rows, total
@@ -441,6 +436,175 @@ class DatabaseManager:
         except SQLAlchemyError as exc:
             logger.error(f"DB error bulk-deleting jobs: {exc}", exc_info=True)
             return False
+
+    # ------------------------------------------------------------------
+    # Extract documents (per-file batch tracking)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_documents(
+        job_id: str,
+        documents: List[Dict[str, str]],
+    ) -> bool:
+        """
+        Bulk-insert document rows for a batch job.
+
+        *documents* is a list of dicts with keys: ``doc_id``, ``filename``,
+        ``source_type``.  All rows are created with ``status='pending'``.
+
+        Returns True on success, False on failure.
+        """
+        try:
+            with get_db_session() as session:
+                rows = [
+                    ExtractDocument(
+                        doc_id=d["doc_id"],
+                        job_id=job_id,
+                        filename=d["filename"],
+                        source_type=d["source_type"],
+                        status="pending",
+                        created_at=datetime.now(timezone.utc),
+                    )
+                    for d in documents
+                ]
+                session.add_all(rows)
+                session.flush()
+                logger.info(f"Created {len(rows)} document row(s) for job {job_id}")
+                return True
+        except SQLAlchemyError as exc:
+            logger.error(f"DB error creating documents for job {job_id}: {exc}", exc_info=True)
+            return False
+
+    @staticmethod
+    def get_documents_by_job(job_id: str) -> List[ExtractDocument]:
+        """Return all document rows for *job_id*, ordered by creation time."""
+        try:
+            with get_db_session() as session:
+                rows = list(session.scalars(
+                    select(ExtractDocument)
+                    .where(ExtractDocument.job_id == job_id)
+                    .order_by(ExtractDocument.created_at)
+                ).all())
+                for row in rows:
+                    _ = (
+                        row.doc_id, row.job_id, row.filename, row.source_type,
+                        row.status, row.error,
+                        row.word_count, row.input_tokens, row.doc_metadata,
+                        row.started_at, row.completed_at, row.created_at,
+                    )
+                    session.expunge(row)
+                return rows
+        except SQLAlchemyError as exc:
+            logger.error(f"DB error fetching documents for job {job_id}: {exc}", exc_info=True)
+            return []
+
+    @staticmethod
+    def get_document_by_id(doc_id: str) -> Optional[ExtractDocument]:
+        """Return a single document row or None."""
+        try:
+            with get_db_session() as session:
+                row = session.scalar(
+                    select(ExtractDocument).where(ExtractDocument.doc_id == doc_id)
+                )
+                if row:
+                    _ = (
+                        row.doc_id, row.job_id, row.filename, row.source_type,
+                        row.status, row.error,
+                        row.word_count, row.input_tokens, row.doc_metadata,
+                        row.started_at, row.completed_at, row.created_at,
+                    )
+                    session.expunge(row)
+                return row
+        except SQLAlchemyError as exc:
+            logger.error(f"DB error retrieving document {doc_id}: {exc}", exc_info=True)
+            return None
+
+    @staticmethod
+    def update_document(
+        doc_id: str,
+        status: Optional[str] = None,
+        error: Optional[str] = None,
+        word_count: Optional[int] = None,
+        input_tokens: Optional[int] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Partial update for a document row."""
+        try:
+            with get_db_session() as session:
+                updates: Dict[str, Any] = {}
+                if status is not None:
+                    updates["status"] = status
+                if error is not None:
+                    updates["error"] = error
+                if word_count is not None:
+                    updates["word_count"] = word_count
+                if input_tokens is not None:
+                    updates["input_tokens"] = input_tokens
+                if started_at is not None:
+                    updates["started_at"] = started_at
+                if completed_at is not None:
+                    updates["completed_at"] = completed_at
+
+                if metadata is not None:
+                    current_row = session.scalar(
+                        select(ExtractDocument).where(ExtractDocument.doc_id == doc_id)
+                    )
+                    current_meta = (current_row.doc_metadata or {}) if current_row else {}
+                    merged = _deep_merge(current_meta, metadata)
+                    updates["doc_metadata"] = merged
+
+                if not updates:
+                    return True
+
+                result = session.execute(
+                    update(ExtractDocument)
+                    .where(ExtractDocument.doc_id == doc_id)
+                    .values(**updates)
+                )
+                if result.rowcount > 0:
+                    logger.debug(f"Updated document {doc_id}: {list(updates.keys())}")
+                    return True
+                logger.warning(f"Document not found for update: {doc_id}")
+                return False
+        except SQLAlchemyError as exc:
+            logger.error(f"DB error updating document {doc_id}: {exc}", exc_info=True)
+            return False
+
+    @staticmethod
+    def fail_zombie_documents(job_id: str) -> int:
+        """
+        Mark all ``pending`` or ``in_progress`` document rows for *job_id*
+        as ``failed`` with the system-restart error message.
+
+        Called during zombie recovery.  Returns the number of rows updated.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(ExtractDocument)
+                    .where(
+                        ExtractDocument.job_id == job_id,
+                        ExtractDocument.status.in_(["pending", "in_progress"]),
+                    )
+                    .values(
+                        status="failed",
+                        error="System restarted during processing",
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                count = result.rowcount
+                if count:
+                    logger.warning(
+                        f"Marked {count} zombie document(s) as failed for job {job_id}"
+                    )
+                return count
+        except SQLAlchemyError as exc:
+            logger.error(
+                f"DB error failing zombie documents for job {job_id}: {exc}", exc_info=True
+            )
+            return 0
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -22,7 +22,7 @@ from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_l
 
 from extract.db.manager import db_repo
 from extract.models import (
-    DocumentInfo,
+    BatchDocumentItem,
     ExtractionRequest,
     ExtractionResponse,
     JobCreatedResponse,
@@ -45,7 +45,8 @@ from extract.utils.vllm import (
 from extract.utils.job import (
     delete_all_job_files,
     delete_job_files,
-    read_result_file,
+    read_doc_result_file,
+    stage_multiple_files,
     stage_uploaded_file,
     validate_file_extension,
 )
@@ -259,7 +260,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
 def _check_job_admission() -> None:
     """Raise 429 if the concurrency slot is exhausted."""
     from extract import state
-    if state.job_limiter.locked():
+    if state.extract_limiter.locked():
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
             "Job concurrency limit reached. Please try again later.",
@@ -299,46 +300,6 @@ def _resolve_schema(schema_id: str):
               f"No schema with id {schema_id!r}.")
     return row
 
-
-def _stage_and_persist(
-    job_id: str,
-    file: UploadFile,
-    schema_id: str,
-    filename: str,
-    source_type: str,
-    job_name: Optional[str],
-) -> None:
-    """Stage the uploaded file then write the DB record.
-
-    Cleans up the staging directory on any failure after staging so no
-    orphaned files are left on disk.
-
-    Raises:
-        ExtractException(500) on staging or database failure.
-    """
-    try:
-        stage_uploaded_file(job_id, file)
-    except IOError as exc:
-        logger.error(f"Failed to stage file for job {job_id}: {exc}")
-        raise ExtractException(500, "FILE_STAGING_ERROR", "Failed to save uploaded file.")
-
-    try:
-        row = db_repo.create_job(
-            job_id=job_id,
-            schema_id=schema_id,
-            document_name=filename,
-            source_type=source_type,
-            job_name=job_name,
-            submitted_at=datetime.now(timezone.utc),
-        )
-    except Exception as exc:
-        logger.error(f"Unexpected DB error creating job {job_id}: {exc}")
-        cleanup_staging_directory(job_id, settings.extract.staging_dir)
-        raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
-
-    if row is None:
-        cleanup_staging_directory(job_id, settings.extract.staging_dir)
-        raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +353,7 @@ async def _validate_file_content(file: UploadFile) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/extract/jobs — Submit an async extraction job
+# POST /v1/extract/jobs — Submit an async extraction job (single or batch)
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -403,127 +364,221 @@ async def _validate_file_content(file: UploadFile) -> None:
         202: {"description": "Job accepted"},
         400: http_error_responses[400],
         404: http_error_responses[404],
+        413: http_error_responses[413],
         415: http_error_responses[415],
         429: http_error_responses[429],
         500: http_error_responses[500],
     },
     summary="Create async extraction job",
     description=(
-        "Submit a `.txt` or `.md` file for asynchronous entity extraction "
+        "Submit one or more `.txt` or `.md` files for asynchronous entity extraction "
         "against a registered schema.  Returns immediately with a `job_id`.\n\n"
         "**Form parameters:**\n"
-        "- `file` (required): A single `.txt` or `.md` file\n"
+        "- `files` (required): One or more `.txt` or `.md` files (no duplicates)\n"
         "- `schema_id` (required): ID of a registered extraction schema\n"
         "- `job_name` (optional): Human-readable label for the job\n"
     ),
     tags=["jobs"],
 )
 async def create_extract_job(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     schema_id: str = Form(...),
     job_name: Optional[str] = Form(None),
 ) -> JobCreatedResponse:
-    """Validate, stage, record, and enqueue an async extraction job."""
+    """Validate, stage, record, and enqueue an async extraction job (single or batch)."""
     _check_job_admission()
-    filename, source_type = _validate_and_resolve_file(file)
-    await _validate_file_content(file)
+
+    # ------------------------------------------------------------------
+    # 1. File count validation
+    # ------------------------------------------------------------------
+    if not files:
+        raise ExtractException(400, "INVALID_REQUEST", "At least one file is required.")
+
+    if len(files) > settings.extract.max_files_per_job:
+        raise ExtractException(
+            413, "TOO_MANY_FILES",
+            f"Too many files: {len(files)} submitted, maximum is "
+            f"{settings.extract.max_files_per_job}.",
+            details={"submitted": len(files), "limit": settings.extract.max_files_per_job},
+        )
+
+    # ------------------------------------------------------------------
+    # 2. Per-file extension + content validation (all-or-nothing)
+    # ------------------------------------------------------------------
+    validated: list[tuple[str, str]] = []  # (filename, source_type)
+    content_errors: list[dict] = []
+
+    for idx, file in enumerate(files):
+        filename = (file.filename or "").lower()
+        is_valid, ext = validate_file_extension(filename)
+        if not is_valid:
+            raw_ext = os.path.splitext(filename)[1] or "unknown"
+            raise ExtractException(
+                415, "UNSUPPORTED_FILE_TYPE",
+                f"Only .txt and .md files are accepted. "
+                f"File at index {idx} ({filename!r}) has extension: {raw_ext}",
+            )
+        source_type = (ext or "").lstrip(".")
+        validated.append((filename, source_type))
+
+    # Duplicate filename check
+    filenames_seen: set[str] = set()
+    for idx, (filename, _) in enumerate(validated):
+        if filename in filenames_seen:
+            raise ExtractException(
+                400, "DUPLICATE_FILE",
+                f"Duplicate filename detected at index {idx}: {filename!r}. "
+                "All file names must be unique within a batch.",
+            )
+        filenames_seen.add(filename)
+
+    # Content validation — collect all failures before rejecting
+    for idx, file in enumerate(files):
+        try:
+            await _validate_file_content(file)
+        except ExtractException as exc:
+            content_errors.append({
+                "index": idx,
+                "filename": validated[idx][0],
+                "reason": exc.message,
+            })
+
+    if content_errors:
+        raise ExtractException(
+            415, "INVALID_FILE_CONTENT",
+            "One or more files failed content validation.",
+            details=content_errors,
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Schema lookup
+    # ------------------------------------------------------------------
     _resolve_schema(schema_id)
 
+    # ------------------------------------------------------------------
+    # 4. Stage all files, create job + document rows
+    # ------------------------------------------------------------------
     job_id = str(uuid.uuid4())
-    _stage_and_persist(job_id, file, schema_id, filename, source_type, job_name)
+    try:
+        stage_multiple_files(job_id, files)
+    except IOError as exc:
+        logger.error(f"Failed to stage files for job {job_id}: {exc}")
+        raise ExtractException(500, "FILE_STAGING_ERROR", "Failed to save uploaded files.")
 
-    asyncio.create_task(_process_extract_job(job_id))
-    logger.info(f"Accepted extraction job {job_id} (schema={schema_id}, file={filename!r})")
-    return JobCreatedResponse(job_id=job_id)
+    _success = False
+    try:
+        try:
+            row = db_repo.create_job(
+                job_id=job_id,
+                schema_id=schema_id,
+                job_name=job_name,
+                submitted_at=datetime.now(timezone.utc),
+                file_count=len(files),
+            )
+        except Exception as exc:
+            logger.error(f"Unexpected DB error creating job {job_id}: {exc}")
+            raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
+
+        if row is None:
+            raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
+
+        # Insert one document row per file
+        doc_entries = [
+            {
+                "doc_id": str(uuid.uuid4()),
+                "filename": filename,
+                "source_type": source_type,
+            }
+            for filename, source_type in validated
+        ]
+        ok = db_repo.create_documents(job_id, doc_entries)
+        if not ok:
+            db_repo.delete_job(job_id)
+            raise ExtractException(500, "DATABASE_ERROR", "Failed to create document records.")
+
+        _success = True
+        asyncio.create_task(_process_batch_job(job_id))
+        logger.info(
+            f"Accepted extraction job {job_id} (schema={schema_id}, "
+            f"files={len(files)}, job_name={job_name!r})"
+        )
+        return JobCreatedResponse(job_id=job_id, file_count=len(files))
+    finally:
+        if not _success:
+            cleanup_staging_directory(job_id, settings.extract.staging_dir)
 
 
-async def _process_extract_job(job_id: str) -> None:
-    """Background worker: tokenize → guard → extract → validate → persist.
+# ---------------------------------------------------------------------------
+# _process_file — per-file extraction pipeline (called from batch worker)
+# ---------------------------------------------------------------------------
+
+async def _process_file(
+    job_id: str,
+    doc_id: str,
+    staged_path,
+    schema_row,
+    llm_endpoint: str,
+    llm_model: str,
+    max_model_len: int,
+) -> None:
+    """Run the full extraction pipeline for one file.
+
+    Updates the document row in the DB at each stage transition.  Never
+    raises — failures are recorded on the document row so the batch can
+    continue with subsequent files.
     """
     from extract import state
 
-    async with state.job_limiter:
-        t_start = time.monotonic()
-        logger.info(f"Worker started for job {job_id}")
+    t_doc_start = time.monotonic()
 
-        # ------------------------------------------------------------------
-        # 1. Mark in_progress
-        # ------------------------------------------------------------------
-        db_repo.update_job(job_id=job_id, status="in_progress")
-
-        llm_model_dict = get_llm_endpoint()
-        llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
-        llm_model: str = llm_model_dict.get("llm_model", "")
-        max_model_len: int = llm_model_dict.get("max_model_len")
-
-        # Fetch the job row so we know the schema_id and document name.
-        job_row = db_repo.get_job_by_id(job_id)
-        if job_row is None:
-            logger.error(f"Job {job_id} not found in DB at worker start; aborting.")
-            return
-
-        # ------------------------------------------------------------------
-        # 2. Read staged file
-        # ------------------------------------------------------------------
-        job_dir = settings.extract.staging_dir / job_id
-        staged_files = list(job_dir.iterdir()) if job_dir.exists() else []
-        if not staged_files:
-            logger.error(f"No staged file found for job {job_id}")
-            db_repo.update_job(
-                job_id=job_id,
-                status="failed",
-                error="STAGED_FILE_MISSING",
-                completed_at=datetime.now(timezone.utc),
-            )
-            return
+    async with state.parallel_file_limiter:
+        db_repo.update_document(
+            doc_id=doc_id,
+            status="in_progress",
+            started_at=datetime.now(timezone.utc),
+        )
 
         try:
-            # --------------------------------------------------------------
-            # 1. Resolve schema
-            # --------------------------------------------------------------
-            try:
-                schema_row = _resolve_schema(job_row.schema_id)
-            except ExtractException as exc:
-                db_repo.update_job(
-                    job_id=job_id,
-                    status="failed",
-                    error=exc.code,
-                    completed_at=datetime.now(timezone.utc),
-                    metadata={"error_details": exc.details},
-                )
-                return
-
-            staged_path = staged_files[0]
+            # ── reading ───────────────────────────────────────────────
             try:
                 text = staged_path.read_bytes().decode("utf-8")
             except UnicodeDecodeError as exc:
-                logger.error(f"UTF-8 decode failed for job {job_id}: {exc}")
-                db_repo.update_job(
-                    job_id=job_id,
+                logger.error(f"UTF-8 decode failed for doc {doc_id}: {exc}")
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error="FILE_DECODE_ERROR",
+                    error="File could not be decoded as UTF-8.",
+                    completed_at=datetime.now(timezone.utc),
+                )
+                return
+            except Exception as exc:
+                logger.error(f"Read failed for doc {doc_id}: {exc}")
+                db_repo.update_document(
+                    doc_id=doc_id,
+                    status="failed",
+                    error=f"Failed to read staged file: {exc}",
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
 
             input_word_count = len(text.split())
 
-            # --------------------------------------------------------------
-            # 3. Tokenize + context-window guard
-            # --------------------------------------------------------------
+            # ── tokenizing ────────────────────────────────────────────
             try:
                 input_tokens: int = await asyncio.to_thread(
                     _tokenize, text, llm_endpoint
                 )
             except Exception as exc:
-                logger.error(f"Tokenization failed for job {job_id}: {exc}", exc_info=True)
-                db_repo.update_job(
-                    job_id=job_id,
+                logger.error(f"Tokenization failed for doc {doc_id}: {exc}", exc_info=True)
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error="TOKENIZATION_ERROR",
+                    error="Failed to tokenise the input text.",
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
+
+            db_repo.update_document(doc_id=doc_id, input_tokens=input_tokens, word_count=input_word_count)
 
             try:
                 reserved_output = check_extraction_budget(
@@ -534,20 +589,16 @@ async def _process_extract_job(job_id: str) -> None:
                     max_model_len=max_model_len,
                 )
             except ExtractException as exc:
-                db_repo.update_job(
-                    job_id=job_id,
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error=exc.code,
+                    error=exc.message,
                     completed_at=datetime.now(timezone.utc),
-                    metadata={"error_details": exc.details},
+                    metadata={"token_diagnostics": exc.details} if exc.details else None,
                 )
                 return
 
-            # --------------------------------------------------------------
-            # 4. phase=extracting — build prompt, call vLLM
-            # --------------------------------------------------------------
-            db_repo.update_job(job_id=job_id, metadata={"phase": "extracting"})
-
+            # ── extracting ────────────────────────────────────────────
             few_shot_block = render_few_shot_block(schema_row.examples)
             messages = build_messages(
                 normalized_schema=schema_row.json_schema,
@@ -560,42 +611,42 @@ async def _process_extract_job(job_id: str) -> None:
             try:
                 async with concurrency_limiter:
                     vllm_resp = await call_vllm_safe(
-                        messages, reserved_output, schema_row.json_schema, llm_endpoint, llm_model
+                        messages, reserved_output, schema_row.json_schema,
+                        llm_endpoint, llm_model,
                     )
             except ExtractException as exc:
-                db_repo.update_job(
-                    job_id=job_id,
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error=exc.code,
+                    error=exc.message,
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
 
             choices = vllm_resp.get("choices", [])
             if not choices:
-                db_repo.update_job(
-                    job_id=job_id,
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error="LLM_ERROR",
+                    error="vLLM returned an empty choices list.",
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
 
             choice = choices[0]
             finish_reason: str = choice.get("finish_reason", "")
+            max_tokens_adjusted = False
 
-            # --------------------------------------------------------------
-            # 5. finish_reason=length → retry once with 1.5× output_token_factor
-            # --------------------------------------------------------------
+            # finish_reason=length → retry once with boosted budget
             if finish_reason == "length":
                 boosted_reserved_output = compute_reserved_output(
                     schema_row.schema_tokens,
                     output_token_factor=1.5 * settings.extract.output_token_factor,
                 )
                 logger.warning(
-                    "finish_reason=length for job %s; retrying with boosted "
+                    "finish_reason=length for doc %s; retrying with boosted "
                     "reserved_output=%d (was %d)",
-                    job_id, boosted_reserved_output, reserved_output,
+                    doc_id, boosted_reserved_output, reserved_output,
                 )
                 try:
                     async with concurrency_limiter:
@@ -604,20 +655,20 @@ async def _process_extract_job(job_id: str) -> None:
                             llm_endpoint, llm_model,
                         )
                 except ExtractException as exc:
-                    db_repo.update_job(
-                        job_id=job_id,
+                    db_repo.update_document(
+                        doc_id=doc_id,
                         status="failed",
-                        error=exc.code,
+                        error=exc.message,
                         completed_at=datetime.now(timezone.utc),
                     )
                     return
 
                 choices = vllm_resp.get("choices", [])
                 if not choices:
-                    db_repo.update_job(
-                        job_id=job_id,
+                    db_repo.update_document(
+                        doc_id=doc_id,
                         status="failed",
-                        error="LLM_ERROR",
+                        error="vLLM returned an empty choices list.",
                         completed_at=datetime.now(timezone.utc),
                     )
                     return
@@ -625,14 +676,15 @@ async def _process_extract_job(job_id: str) -> None:
                 choice = choices[0]
                 finish_reason = choice.get("finish_reason", "")
                 if finish_reason == "length":
-                    db_repo.update_job(
-                        job_id=job_id,
+                    db_repo.update_document(
+                        doc_id=doc_id,
                         status="failed",
-                        error="OUTPUT_BUDGET_EXCEEDED",
+                        error="The model output was truncated even after retrying with increased budget.",
                         completed_at=datetime.now(timezone.utc),
                         metadata={
-                            "error_details": {
+                            "token_diagnostics": {
                                 "reserved_output_tokens": boosted_reserved_output,
+                                "max_tokens_adjusted": True,
                                 "finish_reason": "length",
                             }
                         },
@@ -640,6 +692,7 @@ async def _process_extract_job(job_id: str) -> None:
                     return
 
                 reserved_output = boosted_reserved_output
+                max_tokens_adjusted = True
 
             t_extract_secs = time.monotonic() - t_extract_start
 
@@ -648,11 +701,7 @@ async def _process_extract_job(job_id: str) -> None:
             total_prompt_tokens: int = usage.get("prompt_tokens", 0)
             total_completion_tokens: int = usage.get("completion_tokens", 0)
 
-            # --------------------------------------------------------------
-            # 6. phase=validating — validate + one bounded retry
-            # --------------------------------------------------------------
-            db_repo.update_job(job_id=job_id, metadata={"phase": "validating"})
-
+            # ── validating ────────────────────────────────────────────
             t_validate_start = time.monotonic()
             try:
                 parsed_output, validation_attempts, extra_pt, extra_ct = (
@@ -662,12 +711,12 @@ async def _process_extract_job(job_id: str) -> None:
                     )
                 )
             except ExtractException as exc:
-                db_repo.update_job(
-                    job_id=job_id,
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error=exc.code,
+                    error=exc.message,
                     completed_at=datetime.now(timezone.utc),
-                    metadata={"error_details": exc.details},
+                    metadata={"validation": {"last_errors": exc.details}} if exc.details else None,
                 )
                 return
 
@@ -675,18 +724,15 @@ async def _process_extract_job(job_id: str) -> None:
             total_prompt_tokens += extra_pt
             total_completion_tokens += extra_ct
 
-            # --------------------------------------------------------------
-            # 7. Write result file
-            # --------------------------------------------------------------
-            processing_time_ms = int((time.monotonic() - t_start) * 1000)
-
+            # ── writing ───────────────────────────────────────────────
+            processing_time_ms = int((time.monotonic() - t_doc_start) * 1000)
             result_payload = {
                 "data": {
                     "extraction": parsed_output,
-                    "schema_id": job_row.schema_id,
+                    "schema_id": schema_row.schema_id,
                     "source": {
                         "input_type": "file",
-                        "document_name": job_row.document_name,
+                        "document_name": staged_path.name,
                         "input_words": input_word_count,
                         "input_tokens": input_tokens,
                     },
@@ -708,35 +754,159 @@ async def _process_extract_job(job_id: str) -> None:
                 },
             }
 
-            result_path = settings.extract.results_dir / f"{job_id}_result.json"
+            result_dir = settings.extract.results_dir / job_id
+            result_path = result_dir / f"{doc_id}_result.json"
             try:
-                result_path.parent.mkdir(parents=True, exist_ok=True)
+                result_dir.mkdir(parents=True, exist_ok=True)
                 result_path.write_text(json.dumps(result_payload), encoding="utf-8")
             except Exception as exc:
-                logger.error(f"Failed to write result file for job {job_id}: {exc}", exc_info=True)
-                db_repo.update_job(
-                    job_id=job_id,
+                logger.error(
+                    f"Failed to write result for doc {doc_id} in job {job_id}: {exc}",
+                    exc_info=True,
+                )
+                db_repo.update_document(
+                    doc_id=doc_id,
                     status="failed",
-                    error="RESULT_WRITE_ERROR",
+                    error="Failed to write result file to disk.",
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
 
-            # --------------------------------------------------------------
-            # 8. Mark completed
-            # --------------------------------------------------------------
-            db_repo.update_job(
-                job_id=job_id,
+            db_repo.update_document(
+                doc_id=doc_id,
                 status="completed",
                 completed_at=datetime.now(timezone.utc),
+                metadata={
+                    "token_diagnostics": {
+                        "input_tokens": input_tokens,
+                        "schema_tokens": schema_row.schema_tokens,
+                        "reserved_output_tokens": reserved_output,
+                        "max_tokens_adjusted": max_tokens_adjusted,
+                    },
+                    "timing_in_secs": {
+                        "extracting": round(t_extract_secs, 3),
+                        "validating": round(t_validate_secs, 3),
+                    },
+                    "validation": {"attempts": validation_attempts},
+                },
             )
-            logger.info(f"Job {job_id} completed in {processing_time_ms} ms")
+            logger.info(f"Doc {doc_id} completed in {processing_time_ms} ms")
+
+        except Exception as exc:
+            logger.error(
+                f"Unexpected error processing doc {doc_id} in job {job_id}: {exc}",
+                exc_info=True,
+            )
+            db_repo.update_document(
+                doc_id=doc_id,
+                status="failed",
+                error=f"Unexpected error: {exc}",
+                completed_at=datetime.now(timezone.utc),
+            )
+
+
+# ---------------------------------------------------------------------------
+# _process_batch_job — batch background worker
+# ---------------------------------------------------------------------------
+
+async def _process_batch_job(job_id: str) -> None:
+    """Background worker: process each document in the batch sequentially."""
+    from extract import state
+
+    async with state.extract_limiter:
+        t_start = time.monotonic()
+        logger.info(f"Batch worker started for job {job_id}")
+
+        db_repo.update_job(job_id=job_id, status="in_progress")
+
+        llm_model_dict = get_llm_endpoint()
+        llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
+        llm_model: str = llm_model_dict.get("llm_model", "")
+        max_model_len: int = llm_model_dict.get("max_model_len", "")
+
+        job_row = db_repo.get_job_by_id(job_id)
+        if job_row is None:
+            logger.error(f"Job {job_id} not found in DB at worker start; aborting.")
+            return
+
+        try:
+            try:
+                schema_row = _resolve_schema(job_row.schema_id)
+            except ExtractException as exc:
+                db_repo.update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error=exc.code,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                return
+
+            doc_rows = db_repo.get_documents_by_job(job_id)
+            if not doc_rows:
+                logger.error(f"No document rows found for job {job_id}")
+                db_repo.update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error="NO_DOCUMENTS",
+                    completed_at=datetime.now(timezone.utc),
+                )
+                return
+
+            job_dir = settings.extract.staging_dir / job_id
+
+            # Process each document sequentially (files are short-lived tasks, the
+            # parallel_file_limiter inside _process_file limits true concurrency).
+            tasks = []
+            for doc_row in doc_rows:
+                staged_path = job_dir / doc_row.filename
+                tasks.append(
+                    _process_file(
+                        job_id=job_id,
+                        doc_id=doc_row.doc_id,
+                        staged_path=staged_path,
+                        schema_row=schema_row,
+                        llm_endpoint=llm_endpoint,
+                        llm_model=llm_model,
+                        max_model_len=max_model_len,
+                    )
+                )
+
+            # Run tasks with limited parallelism: gather in chunks of parallel_files_per_job
+            chunk_size = settings.extract.parallel_files_per_job
+            for i in range(0, len(tasks), chunk_size):
+                await asyncio.gather(*tasks[i:i + chunk_size])
+
+            # Determine final job status from document outcomes
+            final_docs = db_repo.get_documents_by_job(job_id)
+            n_completed = sum(1 for d in final_docs if d.status == "completed")
+            n_failed = sum(1 for d in final_docs if d.status == "failed")
+            total = len(final_docs)
+
+            if n_failed == 0:
+                final_status = "completed"
+                job_error = None
+            elif n_completed == 0:
+                final_status = "failed"
+                job_error = f"All {total} file(s) failed extraction."
+            else:
+                final_status = "completed_with_errors"
+                job_error = f"{n_failed} of {total} files failed extraction."
+
+            processing_time_ms = int((time.monotonic() - t_start) * 1000)
+            db_repo.update_job(
+                job_id=job_id,
+                status=final_status,
+                error=job_error,
+                completed_at=datetime.now(timezone.utc),
+            )
+            logger.info(
+                f"Batch job {job_id} {final_status} in {processing_time_ms} ms "
+                f"({n_completed}/{total} completed)"
+            )
 
         finally:
-            # ------------------------------------------------------------------
-            # 9. Delete staging directory  (job_limiter released by context manager)
-            # ------------------------------------------------------------------
             cleanup_staging_directory(job_id, settings.extract.staging_dir)
+
 
 
 # ---------------------------------------------------------------------------
@@ -758,7 +928,8 @@ async def _process_extract_job(job_id: str) -> None:
         "- `latest` (bool): Return only the most-recent job. Default: false\n"
         "- `limit` (int): Records per page (1–100). Default: 20\n"
         "- `offset` (int): Records to skip. Default: 0\n"
-        "- `status` (string): Filter by `accepted`, `in_progress`, `completed`, or `failed`\n"
+        "- `status` (string): Filter by `accepted`, `in_progress`, `completed`, "
+        "`completed_with_errors`, or `failed`\n"
         "- `schema_id` (string): Filter jobs by the schema they extract against\n"
     ),
     tags=["jobs"],
@@ -771,7 +942,7 @@ async def list_extract_jobs(
     schema_id: Optional[str] = Query(default=None, description="Filter by schema_id"),
 ) -> JobsListResponse:
     """Retrieve a list of extraction jobs with pagination and optional status/schema filtering."""
-    _VALID_STATUSES = {"accepted", "in_progress", "completed", "failed"}
+    _VALID_STATUSES = {"accepted", "in_progress", "completed", "completed_with_errors", "failed"}
     if status is not None and status not in _VALID_STATUSES:
         raise ExtractException(
             400, "INVALID_PARAMETER",
@@ -792,7 +963,7 @@ async def list_extract_jobs(
             job_name=row.job_name,
             schema_id=row.schema_id,
             status=row.status,
-            document_name=row.document_name,
+            file_count=row.file_count,
             submitted_at=fmt_dt(row.submitted_at) or "",
             completed_at=fmt_dt(row.completed_at) or "",
         )
@@ -820,9 +991,7 @@ async def list_extract_jobs(
     },
     summary="Get job details",
     description=(
-        "Retrieve the full status of a specific extraction job, including "
-        "the document block, current processing phase, error message, and "
-        "token diagnostics persisted in the job's `metadata` JSONB column."
+        "Retrieve the full status of a specific extraction job.\n\n"
     ),
     tags=["jobs"],
 )
@@ -832,86 +1001,115 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
     if row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
-    return JobDetailResponse(
-        job_id=row.job_id,
-        job_name=row.job_name,
-        schema_id=row.schema_id,
-        status=row.status,
-        document=DocumentInfo(
-            name=row.document_name,
-            source_type=row.source_type,
-        ),
-        metadata=row.job_metadata,
-        submitted_at=fmt_dt(row.submitted_at) or "",
-        completed_at=fmt_dt(row.completed_at) or "",
-        error=row.error,
-    )
+    doc_rows = db_repo.get_documents_by_job(job_id)
+
+    if doc_rows:
+        # Batch job — include per-document summary and progress counters
+        documents = [
+            BatchDocumentItem(
+                doc_id=d.doc_id,
+                filename=d.filename,
+                status=d.status,
+                error=d.error or "",
+            )
+            for d in doc_rows
+        ]
+        n_completed = sum(1 for d in doc_rows if d.status == "completed")
+        n_failed = sum(1 for d in doc_rows if d.status == "failed")
+        n_pending = sum(1 for d in doc_rows if d.status in ("pending", "in_progress"))
+
+        return JobDetailResponse(
+            job_id=row.job_id,
+            job_name=row.job_name,
+            schema_id=row.schema_id,
+            status=row.status,
+            documents=documents,
+            file_count=row.file_count,
+            files_completed=n_completed,
+            files_failed=n_failed,
+            files_pending=n_pending,
+            metadata=row.job_metadata,
+            submitted_at=fmt_dt(row.submitted_at) or "",
+            completed_at=fmt_dt(row.completed_at) or "",
+            error=row.error,
+        )
+    else:
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"No documents found for job {job_id!r}")
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/extract/jobs/{job_id}/result — Retrieve extraction result
+# GET /v1/extract/jobs/{job_id}/results/{doc_id} — Per-document result
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/jobs/{job_id}/result",
+    "/jobs/{job_id}/results/{doc_id}",
     response_model=JobResultResponse,
     responses={
-        200: {"description": "Extraction result"},
-        202: {"description": "Job still in progress"},
+        200: {"description": "Extraction result for this document"},
+        202: {"description": "Document still processing"},
         404: http_error_responses[404],
-        409: {"description": "Job failed — result unavailable; inspect the job resource"},
+        410: {"description": "Document failed extraction"},
         500: http_error_responses[500],
     },
-    summary="Get extraction result",
+    summary="Get per-document extraction result",
     description=(
-        "Retrieve the extraction result for a completed job.\n\n"
-        "- **202** while the job is `accepted` or `in_progress`.\n"
-        "- **409** if the job exists but `failed` — the body points at the job "
-        "resource so the caller can inspect the error and diagnostics rather "
-        "than receiving a generic 404 that conflates 'gone' with 'failed'.\n"
-        "- **404** if no job with this ID exists at all.\n"
-        "- **200** with the result payload once the job is `completed`."
+        "Retrieve the extraction result for a single document in a batch job.\n\n"
+        "- **202** while the document is `pending` or `in_progress`.\n"
+        "- **410** if the document failed — inspect the job resource for error details.\n"
+        "- **404** if the job or document does not exist.\n"
+        "- **200** with the result payload once the document is `completed`."
     ),
     tags=["jobs"],
 )
-async def get_extract_job_result(job_id: str):
-    """Retrieve the extraction results payload for a completed job."""
-    row = db_repo.get_job_by_id(job_id)
-    if row is None:
+async def get_document_result(job_id: str, doc_id: str):
+    """Retrieve the extraction result for one document in a batch job."""
+    # Verify parent job exists
+    job_row = db_repo.get_job_by_id(job_id)
+    if job_row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
-    if row.status in ("accepted", "in_progress"):
+    doc_row = db_repo.get_document_by_id(doc_id)
+    if doc_row is None or doc_row.job_id != job_id:
+        raise ExtractException(
+            404, "RESOURCE_NOT_FOUND",
+            f"Document {doc_id!r} not found in job {job_id!r}.",
+        )
+
+    if doc_row.status in ("pending", "in_progress"):
         return JSONResponse(
             status_code=202,
             content={
-                "message": "Job is still in progress.",
+                "message": "Document is still processing.",
                 "job_id": job_id,
-                "status": row.status,
+                "doc_id": doc_id,
+                "status": doc_row.status,
             },
         )
 
-    if row.status == "failed":
+    if doc_row.status == "failed":
         return JSONResponse(
-            status_code=409,
+            status_code=410,
             content={
                 "error": {
-                    "code": "JOB_FAILED",
+                    "code": "DOCUMENT_FAILED",
                     "message": (
-                        f"Job {job_id!r} failed and has no result. "
+                        f"Document {doc_id!r} failed extraction. "
                         f"Inspect GET /v1/extract/jobs/{job_id} for details."
                     ),
-                    "status": 409,
+                    "status": 410,
                     "job_id": job_id,
+                    "doc_id": doc_id,
                 }
             },
         )
 
-    # status == "completed" — read result file from disk
-    result_data = read_result_file(job_id)
+    # status == "completed"
+    result_data = read_doc_result_file(job_id, doc_id)
     if result_data is None:
-        logger.error(f"Result file missing for completed job {job_id}")
+        logger.error(f"Result file missing for completed doc {doc_id} in job {job_id}")
         raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR", "Result file not found for completed job."
+            500, "INTERNAL_SERVER_ERROR",
+            "Result file not found for completed document.",
         )
 
     return JobResultResponse(
@@ -919,6 +1117,79 @@ async def get_extract_job_result(job_id: str):
         status=result_data.get("status", "completed"),
         meta=result_data.get("meta", {}),
         usage=result_data.get("usage", {}),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/extract/jobs/{job_id}/results/{doc_id}/download — Download result
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/jobs/{job_id}/results/{doc_id}/download",
+    responses={
+        200: {"description": "Result JSON file download"},
+        404: http_error_responses[404],
+        410: {"description": "Document failed extraction"},
+        500: http_error_responses[500],
+    },
+    summary="Download per-document extraction result",
+    description=(
+        "Download the extraction result for a single document as a `.json` file.\n\n"
+        "- **410** if the document failed extraction.\n"
+        "- **404** if the job, document, or result file does not exist."
+    ),
+    tags=["jobs"],
+)
+async def download_document_result(job_id: str, doc_id: str):
+    """Download the extraction result JSON for one document in a batch job."""
+    job_row = db_repo.get_job_by_id(job_id)
+    if job_row is None:
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
+
+    doc_row = db_repo.get_document_by_id(doc_id)
+    if doc_row is None or doc_row.job_id != job_id:
+        raise ExtractException(
+            404, "RESOURCE_NOT_FOUND",
+            f"Document {doc_id!r} not found in job {job_id!r}.",
+        )
+
+    if doc_row.status == "failed":
+        return JSONResponse(
+            status_code=410,
+            content={
+                "error": {
+                    "code": "DOCUMENT_FAILED",
+                    "message": (
+                        f"Document {doc_id!r} failed extraction. "
+                        f"Inspect GET /v1/extract/jobs/{job_id} for details."
+                    ),
+                    "status": 410,
+                }
+            },
+        )
+
+    if doc_row.status != "completed":
+        raise ExtractException(
+            404, "RESOURCE_NOT_FOUND",
+            f"No result available for document {doc_id!r} (status={doc_row.status!r}).",
+        )
+
+    result_data = read_doc_result_file(job_id, doc_id)
+    if result_data is None:
+        raise ExtractException(
+            404, "RESOURCE_NOT_FOUND",
+            f"Result file not found for document {doc_id!r}.",
+        )
+
+    filename_stem = os.path.splitext(doc_row.filename)[0]
+    download_filename = f"{filename_stem}_result.json"
+
+    return Response(
+        content=json.dumps(result_data, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"',
+        },
     )
 
 
@@ -937,7 +1208,7 @@ async def get_extract_job_result(job_id: str):
     },
     summary="Delete extraction job",
     description=(
-        "Delete a job record and its result file.  "
+        "Delete a job record and its result file(s).  "
         "Returns **409 Conflict** if the job is `accepted` or `in_progress`."
     ),
     tags=["jobs"],
@@ -948,7 +1219,7 @@ async def delete_extract_job(job_id: str) -> Response:
     if row is None:
         raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
 
-    if row.status not in ("completed", "failed"):
+    if row.status not in ("completed", "completed_with_errors", "failed"):
         raise ExtractException(
             409, "RESOURCE_LOCKED",
             f"Cannot delete active job {job_id!r}. Current status: {row.status}.",

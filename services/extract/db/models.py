@@ -1,9 +1,10 @@
 """
 SQLAlchemy ORM models for extract service metadata storage.
 
-Two tables:
-  schemas      — immutable schema registry; no UPDATE grant in production.
-  extract_jobs — mutable async-job tracking with FK to schemas (RESTRICT).
+Three tables:
+  schemas           — immutable schema registry; no UPDATE grant in production.
+  extract_jobs      — mutable async-job tracking with FK to schemas (RESTRICT).
+  extract_documents — per-file document rows for batch jobs (FK to extract_jobs CASCADE).
 """
 
 from datetime import datetime, timezone
@@ -96,17 +97,15 @@ class ExtractJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Document info (one job = one document)
-    document_name: Mapped[str] = mapped_column(String(500), nullable=False)
-    source_type: Mapped[str] = mapped_column(String(10), nullable=False)  # 'txt' | 'pdf'
-    document_word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-
     # Digitize service pointers (PDF path only)
     digitize_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     digitize_doc_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Phase, token diagnostics, timings, validation debug info (JSONB)
     job_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+
+    # Batch fields
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -117,12 +116,8 @@ class ExtractJob(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('accepted', 'in_progress', 'completed', 'failed')",
+            "status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')",
             name="chk_extract_job_status",
-        ),
-        CheckConstraint(
-            "source_type IN ('txt', 'md')",
-            name="chk_extract_source_type",
         ),
         Index("idx_extract_jobs_submitted_at_status", "submitted_at", "status"),
         Index("idx_extract_jobs_schema_id", "schema_id"),
@@ -132,6 +127,67 @@ class ExtractJob(Base):
         return (
             f"<ExtractJob(job_id='{self.job_id}', status='{self.status}', "
             f"schema_id='{self.schema_id}')>"
+        )
+
+
+class ExtractDocument(Base):
+    """
+    Per-file document row for batch (and single-file) extraction jobs.
+
+    Each job has one or more document rows tracked in this table.
+    Deleting the parent job cascades to delete all document rows.
+    """
+
+    __tablename__ = "extract_documents"
+
+    doc_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("extract_jobs.job_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(10), nullable=False)  # 'txt' | 'md'
+
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    doc_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'in_progress', 'completed', 'failed')",
+            name="chk_doc_status",
+        ),
+        CheckConstraint(
+            "source_type IN ('txt', 'md')",
+            name="chk_doc_source_type",
+        ),
+        Index("idx_extract_documents_job_id", "job_id"),
+        Index("idx_extract_documents_job_status", "job_id", "status"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<ExtractDocument(doc_id='{self.doc_id}', job_id='{self.job_id}', "
+            f"filename='{self.filename}', status='{self.status}')>"
         )
 
 # Made with Bob

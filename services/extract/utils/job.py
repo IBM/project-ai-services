@@ -9,7 +9,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import UploadFile
 
@@ -67,27 +67,61 @@ def stage_uploaded_file(job_id: str, file: UploadFile) -> Path:
         raise IOError(f"Failed to stage file for job {job_id}: {exc}") from exc
 
 
-def read_result_file(job_id: str) -> Optional[Dict[str, Any]]:
-    """Read and parse the result JSON file for *job_id*.  Returns None if absent."""
-    path = settings.extract.results_dir / f"{job_id}_result.json"
+def stage_multiple_files(job_id: str, files: List[UploadFile]) -> List[Path]:
+    """
+    Write all uploaded files to the staging directory for *job_id*.
+
+    Returns the list of staged paths in the same order as *files*.
+    Raises IOError on any failure; staged files already written are removed.
+    """
+    job_dir = settings.extract.staging_dir / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    staged: List[Path] = []
+    try:
+        for file in files:
+            filename = file.filename or "uploaded_file"
+            staged_path = job_dir / filename
+            with open(staged_path, "wb") as fh:
+                shutil.copyfileobj(file.file, fh)
+            staged.append(staged_path)
+            logger.info(f"Staged file for job {job_id}: {staged_path}")
+        return staged
+    except Exception as exc:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise IOError(f"Failed to stage files for job {job_id}: {exc}") from exc
+
+
+def read_doc_result_file(job_id: str, doc_id: str) -> Optional[Dict[str, Any]]:
+    """Read and parse the per-document result JSON for a batch job.
+
+    Stored at ``{results_dir}/{job_id}/{doc_id}_result.json``.
+    Returns None if absent.
+    """
+    path = settings.extract.results_dir / job_id / f"{doc_id}_result.json"
     if not path.exists():
         return None
     try:
         with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)
     except Exception as exc:
-        logger.error(f"Failed to read result file for job {job_id}: {exc}")
+        logger.error(f"Failed to read doc result file for job {job_id} doc {doc_id}: {exc}")
         return None
 
 
 def delete_job_files(job_id: str) -> None:
-    """Delete the result file and staging directory for *job_id*."""
-    result_path = settings.extract.results_dir / f"{job_id}_result.json"
-    if result_path.exists():
+    """Delete result file(s) and staging directory for *job_id*.
+
+    Handles both single-file (flat result JSON) and batch (per-job results dir) layouts.
+    """
+
+    # Batch per-job results directory
+    job_results_dir = settings.extract.results_dir / job_id
+    if job_results_dir.exists():
         try:
-            result_path.unlink()
+            shutil.rmtree(job_results_dir, ignore_errors=True)
         except Exception as exc:
-            logger.error(f"Failed to delete result file for job {job_id}: {exc}")
+            logger.error(f"Failed to delete results dir for job {job_id}: {exc}")
 
     staging_path = settings.extract.staging_dir / job_id
     if staging_path.exists():
@@ -101,11 +135,19 @@ def delete_all_job_files() -> None:
     """Delete all result files and all staging directories."""
     results_dir = settings.extract.results_dir
     if results_dir.exists():
+        # Flat single-file results
         for f in results_dir.glob("*_result.json"):
             try:
                 f.unlink()
             except Exception as exc:
                 logger.error(f"Failed to delete result file {f.name}: {exc}")
+        # Per-job batch results directories
+        for d in results_dir.iterdir():
+            if d.is_dir():
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                except Exception as exc:
+                    logger.error(f"Failed to delete job results dir {d.name}: {exc}")
 
     staging_dir = settings.extract.staging_dir
     if staging_dir.exists():
@@ -125,6 +167,9 @@ def recover_zombie_jobs() -> int:
     """
     Mark any ``accepted`` or ``in_progress`` job as ``failed`` after a restart.
 
+    For batch jobs, also marks any ``pending`` or ``in_progress`` documents as
+    ``failed``.  Documents that already ``completed`` are preserved.
+
     Called once during FastAPI startup.  Returns the number of recovered jobs.
     """
     from extract.db.manager import db_repo
@@ -140,6 +185,10 @@ def recover_zombie_jobs() -> int:
         for job in zombies:
             job_id = job.job_id
             logger.warning(f"Zombie job found: {job_id} (status={job.status})")
+
+            # Mark any pending/in_progress document rows as failed.
+            db_repo.fail_zombie_documents(job_id)
+
             db_repo.update_job(
                 job_id=job_id,
                 status="failed",
