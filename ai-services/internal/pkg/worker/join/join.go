@@ -88,7 +88,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	// ── Step 1: Setup worker node ────────────────────────────────────────────
-	if err := workerdeploy.Setup(ctx, rt, opts.Setup); err != nil {
+	if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
 		return fmt.Errorf("worker join: setup: %w", err)
 	}
 

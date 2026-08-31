@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	ttemplate "text/template"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 
 	"github.com/project-ai-services/ai-services/assets"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
@@ -70,7 +73,7 @@ type Options struct {
 // template. Pods are only deployed if not already running — once up, their
 // configuration is considered immutable.
 // TODO: Need a way to implement certificate rotation in future.
-func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
+func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr string, token string) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
 	pods, err := rt.ListPods(ctx, map[string][]string{
@@ -80,7 +83,27 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
 		return fmt.Errorf("worker setup: list pods: %w", err)
 	}
 
-	if len(pods) > 0 {
+	workerPod, err := rt.ListPods(ctx, map[string][]string{
+		"label": {workerconstants.WorkerPodLabel},
+	})
+
+	if err != nil {
+		return fmt.Errorf("worker setup: list pods: %w", err)
+	}
+
+	existingResource := make([]string, 0, len(pods) + len(workerPod))
+	for _, i := range workerPod {
+		existingResource = append(existingResource, i.Name)
+	}
+	for _, i := range pods {
+		existingResource = append(existingResource, i.Name)
+	}
+
+	logger.InfofCtx(ctx, "existingResource: ", existingResource)
+
+
+
+	if len(pods) > 1 && len(workerPod) > 1 {
 		logger.InfolnCtx(ctx, "Worker node already set up — skipping deploy.")
 
 		return nil
@@ -90,7 +113,7 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options) error {
 		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, opts); err != nil {
+	if err := deployAll(ctx, rt, opts, existingResource, gatewayAddr, token); err != nil {
 		return err
 	}
 
@@ -127,7 +150,7 @@ func writeCaddyfile(baseDir string) error {
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingResources []string, gatewayAddr string, token string) error {
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
 	var appMetadata templates.AppMetadata
@@ -142,6 +165,8 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
 
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
 		"caddy.httpsPort": strconv.Itoa(opts.HTTPSPort),
+		"worker.token": token,
+		"worker.gatewayAddr.": gatewayAddr,
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
@@ -154,7 +179,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
 
 	for _, layer := range appMetadata.PodTemplateExecutions {
 		for _, tmplName := range layer {
-			if err := renderAndDeploy(ctx, rt, tmpls, tmplName, params); err != nil {
+			if err := renderAndDeploy(ctx, rt, tmpls, tmplName, params, existingResources); err != nil {
 				return err
 			}
 		}
@@ -166,7 +191,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options) error {
 // renderAndDeploy renders a single pod template and deploys it.
 // The rendered YAML is used both as the pod spec source and as the body for
 // CreatePod — rendered once, parsed once.
-func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*ttemplate.Template, tmplName string, params map[string]any) error {
+func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*ttemplate.Template, tmplName string, params map[string]any, existingResources []string) error {
 	tmpl, ok := tmpls[tmplName]
 	if !ok {
 		return fmt.Errorf("worker setup: template %q not found", tmplName)
@@ -180,6 +205,10 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 	var podSpec podmodels.PodSpec
 	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
 		return fmt.Errorf("worker setup: parse pod spec %s: %w", tmplName, err)
+	}
+	// Skipping deployment of existing resources
+	if slices.Contains(existingResources, podSpec.Name) {
+		logger.Infof("%s: Skipping resource deploy as '%s' it already exists", tmplName, podSpec.Name)
 	}
 
 	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))

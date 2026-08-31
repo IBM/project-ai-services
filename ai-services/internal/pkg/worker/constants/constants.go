@@ -8,7 +8,9 @@ const (
 	LocalWorkerName = "Local"
 
 	// WorkerProxyLabel is the pod label set by deploy.Setup; used by deploy (idempotency) and uninstall (lookup).
-	WorkerProxyLabel = "ai-services.io/component=worker-proxy"
+	WorkerProxyLabel = "ai-services.io/component=proxy"
+
+	WorkerPodLabel = "ai-services.io/component=worker"
 
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
