@@ -1,6 +1,7 @@
 package mustgather
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -17,6 +18,17 @@ var (
 	applicationName string
 )
 
+// gatherOptions carries options forwarded from the cobra command.
+type gatherOptions struct {
+	outputDir       string
+	applicationName string
+}
+
+// gatherer is the common interface implemented by every runtime-specific collector.
+type gatherer interface {
+	gather(ctx context.Context, opts gatherOptions) (string, error)
+}
+
 // MustGatherCmd returns the must-gather cobra command.
 func MustGatherCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -28,13 +40,19 @@ for support and troubleshooting purposes.
 Gathered data includes pod details, container logs, network and volume
 information. All sensitive values are automatically redacted.`,
 		Example: `  # Collect from all applications (podman)
-  ai-services must-gather --runtime podman
+		ai-services must-gather --runtime podman
 
-  # Collect from a specific application (podman)
-  ai-services must-gather --runtime podman --application rag
+		# Collect from a specific application (podman)
+		ai-services must-gather --runtime podman --application rag
 
-  # Write output to a custom directory
-  ai-services must-gather --runtime podman --output-dir /tmp/debug`,
+		# Write output to a custom directory
+		ai-services must-gather --runtime podman --output-dir /tmp/debug
+
+		# Collect from all applications (openshift)
+		ai-services must-gather --runtime openshift
+
+		# Collect from a specific application (openshift)
+		ai-services must-gather --runtime openshift --application rag`,
 		Args:              cobra.NoArgs,
 		PersistentPreRunE: mustGatherPreRun,
 		RunE:              mustGatherRun,
@@ -73,18 +91,17 @@ func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
 func mustGatherRun(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
 
-	rt := vars.RuntimeFactory.GetRuntimeType()
-	if rt != types.RuntimeTypePodman {
-		return fmt.Errorf("must-gather currently supports only the 'podman' runtime")
-	}
-
-	gatherer := newPodmanGatherer()
 	opts := gatherOptions{
 		outputDir:       outputDir,
 		applicationName: applicationName,
 	}
 
-	outDir, err := gatherer.gather(cmd.Context(), opts)
+	g, err := newGatherer(vars.RuntimeFactory.GetRuntimeType())
+	if err != nil {
+		return err
+	}
+
+	outDir, err := g.gather(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("must-gather failed: %w", err)
 	}
@@ -92,4 +109,16 @@ func mustGatherRun(cmd *cobra.Command, _ []string) error {
 	logger.Infof("Must-gather complete. Output saved to: %s\n", outDir)
 
 	return nil
+}
+
+// newGatherer returns the gatherer implementation for the given runtime type.
+func newGatherer(rt types.RuntimeType) (gatherer, error) {
+	switch rt {
+	case types.RuntimeTypePodman:
+		return newPodmanGatherer(), nil
+	case types.RuntimeTypeOpenShift:
+		return newOpenshiftGatherer(), nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime for must-gather: %s", rt)
+	}
 }
