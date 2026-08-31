@@ -131,7 +131,7 @@ tree-sitter-python==0.25.0
 tree-sitter-typescript==0.23.2
 typer==0.21.2
 types-requests==2.33.0.20260408
-typing_extensions==4.15.0
+typing_extensions==4.16.0
 typing-inspection==0.4.2
 tzdata==2025.3
 ujson==5.13.0
