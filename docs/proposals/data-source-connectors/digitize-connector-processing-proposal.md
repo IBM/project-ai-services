@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
+    sync_message            TEXT,
     CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
 );
 
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     finished_at      TIMESTAMPTZ,
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
+    completed_files  INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',
@@ -109,6 +111,7 @@ class Connector(Base):
     sync_status = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
     error = mapped_column(Text, nullable=True)   # ← teardown error / credential error / last sync error
     total_files = mapped_column(Integer, nullable=False, default=0)
+    sync_message = mapped_column(Text, nullable=True)  # ← real-time sync progress (e.g., "Processing x/y files")
 
     sync_logs = relationship("ConnectorSyncLog", back_populates="connector",
                              cascade="all, delete-orphan")
@@ -136,6 +139,7 @@ class ConnectorSyncLog(Base):
     finished_at = mapped_column(DateTime(timezone=True), nullable=True)
     total_files = mapped_column(Integer, nullable=False, default=0)
     new_files = mapped_column(Integer, nullable=False, default=0)
+    completed_files = mapped_column(Integer, nullable=False, default=0)
     removed_files = mapped_column(Integer, nullable=False, default=0)
     status = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
     error = mapped_column(Text, nullable=False, default="")
@@ -167,7 +171,7 @@ class ConnectorSyncLog(Base):
 Creates a connector, encrypts secrets at rest, persists configuration. Returns `202 Accepted` immediately. Before any write, two explicit duplicate-check SELECTs are performed (`get_connector_by_id`, `get_connector_by_name`), returning `409 Conflict` if either match. The scheduler job is registered (`fire_immediately=True`) before the DB insert so that a scheduler failure aborts the creation cleanly.
 
 #### Request Parameters
-- Common: `connector_id` (UUID, optional — auto-generated if omitted), `connector_name` (string, unique), `type` (`"file_system"` | `"object_storage"`), `allowed_extensions` (`array[string]`), `connection_details` (object).
+- Common: `id` (UUID v4 string, **required**), `name` (string, unique, **required**), `type` (`"file_system"` | `"object_storage"`, **required**), `allowed_extensions` (`array[string]`, **required**), `connection_details` (object, **required**).
 - `sync_interval_seconds`: Read from `CONNECTOR_SYNC_INTERVAL_SECONDS` env var (default `300`). Not settable per-request.
 - `file_system` `connection_details`: `host`, `username`, `remote_path`, `private_key`. Optional: `port` (default `22`).
 - `object_storage` `connection_details`: `endpoint_url` (full URL with scheme), `bucket_name`, `access_key_id`, `secret_access_key`. Optional: `prefix`, `delimiter`, `download_concurrency`, `verify_ssl`.
@@ -175,8 +179,8 @@ Creates a connector, encrypts secrets at rest, persists configuration. Returns `
 #### Example Payloads
 ```json
 {
-  "connector_id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
-  "connector_name": "prod-sftp-reports",
+  "id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+  "name": "prod-sftp-reports",
   "type": "file_system",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
@@ -190,8 +194,8 @@ Creates a connector, encrypts secrets at rest, persists configuration. Returns `
 
 ```json
 {
-  "connector_id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "connector_name": "prod-s3-rag-docs",
+  "id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+  "name": "prod-s3-rag-docs",
   "type": "object_storage",
   "allowed_extensions": [".pdf", ".docx"],
   "connection_details": {
@@ -278,8 +282,30 @@ _run_teardown(connector_id)  (connectors.py — used for BOTH Case A and Case B)
 
 ### 3.4 `GET /v1/connectors` & `GET /v1/connectors/{connector_id}`
 
-- `GET /v1/connectors`: Returns all connectors ordered by `attached_at` descending. Excludes secret fields. Includes `error` field (covers teardown errors, credential errors, and last-sync error messages).
-- `GET /v1/connectors/{id}`: Returns full connector detail including `connection_details` (secrets stripped), `allowed_extensions`, `sync_interval_seconds`, and file processing counters (`total_files`).
+- `GET /v1/connectors`: Returns a paginated list (`ConnectorListResponse`: `total`, `limit`, `offset`, `items`) of connectors ordered by `attached_at` descending (`limit` default 50, max 200, `offset` default 0). Excludes secret fields. Includes `error`, `total_files`, and `sync_message` fields.
+- `GET /v1/connectors/{id}`: Returns full connector detail (`ConnectorDetailResponse`) including `connection_details` (secrets stripped), `allowed_extensions`, `sync_interval_seconds`, `error`, `total_files`, and `sync_message`.
+
+**`GET /v1/connectors` Response shape — `ConnectorListResponse`:**
+```json
+{
+  "total": 1,
+  "limit": 50,
+  "offset": 0,
+  "items": [
+    {
+      "id": "c7f3a2d1-4e5b-4c6d-8f9a-0b1c2d3e4f5a",
+      "name": "prod-sftp-reports",
+      "type": "file_system",
+      "attached_at": "2025-01-15T10:00:00Z",
+      "last_sync_at": "2025-01-15T10:30:00Z",
+      "sync_status": "syncing",
+      "error": null,
+      "total_files": 15,
+      "sync_message": "Processing 3/10 files"
+    }
+  ]
+}
+```
 
 ---
 
@@ -296,10 +322,65 @@ Returns paginated execution history from `connector_sync_logs` (`limit` default 
 | `offset` | integer | `0` | Pagination offset. Ignored when `latest=true`. |
 | `latest` | boolean | `false` | When `true`, bypasses pagination and returns only the single most-recent sync log entry as a **plain object** (not a list). Returns `404` if no sync has ever run for the connector. |
 
-When `latest=true` the response shape is the same single-entry object as `GET /v1/connectors/{connector_id}/syncs/{sync_seq}` — not a list wrapper.
+When `latest=true` the response shape is the same single-entry object as `GET /v1/connectors/{connector_id}/syncs/{sync_seq}` — not a list wrapper. Returns `404` if no sync has ever run for the connector.
+
+**Response shapes:**
+
+*Default (paginated) — `SyncLogResponse`:*
+```json
+{
+  "total": 2,
+  "limit": 50,
+  "offset": 0,
+  "items": [
+    {
+      "seq": 2,
+      "started_at": "2025-01-16T08:00:00Z",
+      "finished_at": "2025-01-16T08:00:12Z",
+      "total_files": 18,
+      "new_files": 3,
+      "completed_files": 3,
+      "removed_files": 1,
+      "status": "completed",
+      "error": ""
+    }
+  ]
+}
+```
+
+*`latest=true` — `SyncLogDetailResponse` (plain object, not a list):*
+```json
+{
+  "seq": 2,
+  "started_at": "2025-01-16T08:00:00Z",
+  "finished_at": "2025-01-16T08:00:12Z",
+  "total_files": 18,
+  "new_files": 3,
+  "completed_files": 3,
+  "removed_files": 1,
+  "status": "completed",
+  "error": ""
+}
+```
+
+The Swagger UI 200 response schema is declared as `oneOf: [SyncLogResponse, SyncLogDetailResponse]` with named examples for `paginated`, `latest`, and `in_progress` states.
 
 #### `GET /v1/connectors/{connector_id}/syncs/{sync_seq}`
-Returns a single sync log entry identified by its sequence number. Returns `404` if the connector or the specific `sync_seq` does not exist.
+Returns a single `SyncLogDetailResponse` identified by its sequence number. Returns `404` if the connector or the specific `sync_seq` does not exist.
+
+**Response shape — `SyncLogDetailResponse`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `seq` | integer | Sync run sequence number (1-based, monotonically increasing per connector) |
+| `started_at` | string (ISO 8601) | When the tick started |
+| `finished_at` | string \| null | When the tick finished; `null` if still running |
+| `total_files` | integer | Total files seen on the source at scan time |
+| `new_files` | integer | Files newly queued for ingest this tick |
+| `completed_files` | integer | Documents that have successfully completed processing so far (updated in real time during ingest via `increment_completed_files`) |
+| `removed_files` | integer | Files removed (orphan checksums deleted) this tick |
+| `status` | string | One of `started`, `cancel pending`, `completed`, `failed`, `cancelled` |
+| `error` | string | Error message if the tick failed or was cancelled; empty string otherwise |
 
 #### `POST /v1/connectors/{connector_id}/syncs`
 Triggers an immediate manual sync tick. Implemented via the shared `dispatch_sync(connector_id)` helper (also used by the scheduler).
@@ -353,7 +434,7 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 
 #### Document APIs (`/v1/documents`)
 - Connector-sourced documents are **excluded** from `GET /v1/documents`, `GET /v1/documents/{doc_id}`, and `DELETE /v1/documents/{doc_id}` (returns `404`).
-- **Implementation (in place):** `is_connector_sourced_document(doc_id)` checks for presence in `connector_document_checksum`. `get_all_documents_paginated()` accepts `exclude_connector_sourced=True` which filters via `NOT EXISTS (SELECT 1 FROM connector_document_checksum WHERE doc_id = documents.doc_id)`.
+- **Implementation (in place):** `is_connector_sourced_document(doc_id)` checks for presence in `connector_document_checksum`. `get_all_documents_paginated()` accepts `exclude_connector_sourced=True` which joins with `jobs` and filters via `~Job.job_name.like("Connector-%")`. This ensures connector-sourced documents are excluded across all processing stages (accepted, digitized, in_progress, completed, etc.), even before checksum rows are inserted.
 
 #### Job APIs (`/v1/jobs`)
 - All jobs (user-submitted and connector-initiated) are visible in `GET /v1/jobs` and `GET /v1/jobs/{job_id}`.
@@ -374,6 +455,7 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 | `get_connector_by_id()` → `get_connector_by_id()` | Fetch single connector by id. Returns `None` if not found. |
 | `get_connector_by_name()` → `get_connector_by_name()` | Fetch single connector by name. Returns `None` if not found. |
 | `list_connectors()` → `get_all_connectors()` | All connectors ordered by `attached_at` desc. |
+| `list_connectors_paginated()` → `get_all_connectors_paginated()` | Paginated connectors ordered by `attached_at` desc. Returns `(items, total_count)`. |
 | `delete_active_connector()` → `delete_connector()` | Delete connector row (cascades to `connector_sync_logs`). Returns `bool`. |
 | `get_connector_sync_status()` → `get_connector_sync_status()` | Minimal `SELECT sync_status` query. Returns `None` if not found. |
 | `mark_connector_delete_pending()` → `mark_connector_delete_pending()` | Unconditional `UPDATE connectors SET sync_status='delete pending'`. Returns `True` if row found. |
@@ -389,7 +471,8 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 | `update_connector_total_files()` → `update_connector()` | Update `total_files` count on connector row. Called after `_process_new_files` returns, adjusted by `invalid_file_count`. |
 | `init_sync_log_and_update_connector()` → `insert_sync_log()` + `set_connector_sync_status_syncing()` | Insert new log row (seq = `COALESCE(MAX(seq),0)+1`) with `status='started'`; then set connector `sync_status='syncing'`. Returns `seq`. Two separate DB calls. |
 | `update_sync_log()` → `update_sync_log_progress()` | Write `total_files`, `new_files`, `removed_files` before I/O phase. Takes `connector_id` + `seq`. Returns `bool`. |
-| `finalize_sync_log_and_update_connector()` → `finalize_sync_log()` + `update_connector_after_sync()` | Finalize log row (status, finished_at, optional counts/error); then update connector `last_sync_at`, `sync_status`, and `error`. `CANCELLED`/`FAILED` map to `OUT_OF_SYNC`; `COMPLETED` clears `error` to `NULL`; `FAILED`/`CANCELLED` sets `error = f"Error from last sync: {error}"`. Two separate DB calls. |
+| `increment_completed_files()` → `increment_completed_files()` | Atomically increment `completed_files` by `count` (default 1) on a sync-log row using a SQL expression (`completed_files + count`), and update `sync_message="Processing x/y files"` on the `connectors` row. Returns `True` if the row was found and updated. Called by `_wait_for_job` on each poll cycle to track real-time ingest progress. |
+| `finalize_sync_log_and_update_connector()` → `finalize_sync_log()` + `update_connector_after_sync()` | Finalize log row (status, finished_at, optional counts/error); then update connector `last_sync_at`, `sync_status`, and `error`. `CANCELLED`/`FAILED` map to `OUT_OF_SYNC`; `COMPLETED` maps to `UP_TO_DATE`; `FAILED`/`CANCELLED` sets `error = f"Error from last sync: {error}"`. Two separate DB calls. |
 | `get_sync_log()` → `get_sync_log()` | Single sync-log row by `(connector_id, seq)`. |
 | `get_sync_log_status()` → `get_sync_log_status()` | Minimal `SELECT status` for `(connector_id, seq)`. Used by `_check_interrupt_call`. |
 | `list_sync_logs()` → `get_sync_logs()` + `count_sync_logs()` | Paginated log history. Returns `(items, total_count)`. |
@@ -514,17 +597,65 @@ class DatabaseManager:
 
     @staticmethod
     def update_connector_after_sync(connector_id, status, last_sync_at=None, error=None) -> None:
-        """CANCELLED/FAILED both map to OUT_OF_SYNC; COMPLETED clears error to NULL."""
+        """COMPLETED maps to UP_TO_DATE; CANCELLED/FAILED map to OUT_OF_SYNC."""
         connector_sync_status = (
-            ConnectorStatus.OUT_OF_SYNC
-            if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
-            else status
+            ConnectorStatus.UP_TO_DATE
+            if status == SyncLogStatus.COMPLETED
+            else ConnectorStatus.OUT_OF_SYNC
         )
         session.execute(
             update(Connector)
             .where(Connector.id == connector_id)
             .values(last_sync_at=last_sync_at, sync_status=connector_sync_status, error=error)
         )
+
+
+    @staticmethod
+    def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
+        """
+        Atomically increment completed_files by *count* on the identified sync-log row,
+        then write a "Processing x/y files" sync_message on the connector row.
+
+        Uses a SQL expression (completed_files + count) so concurrent calls do
+        not race against each other.  Returns True if the row was found and
+        updated, False otherwise.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
+                    .values(
+                        completed_files=ConnectorSyncLog.completed_files + count
+                    )
+                    .returning(
+                        ConnectorSyncLog.completed_files,
+                        ConnectorSyncLog.new_files,
+                    )
+                )
+                row = session.execute(stmt).one_or_none()
+                if row is None:
+                    logger.warning(
+                        f"Sync log connector={connector_id!r} seq={seq} not found for completed_files increment"
+                    )
+                    return False
+                completed, new_files = row
+                sync_message = f"Processing {completed}/{new_files} files"
+                session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(sync_message=sync_message)
+                )
+                return True
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in increment_completed_files(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return False
 ```
 
 ---
@@ -666,15 +797,16 @@ class ConnectorType(str, Enum):
   - Interrupt checkpoint **before** each batch starts.
   - Offload download to executor (`asyncio.to_thread(scanner.download_to, ...)`).
   - Files failing `verify_integrity` are **skipped** (warned), not fatal.
-  - Each downloaded file is validated via `validate_document_file(filename, file_bytes)` — files failing validation are removed from the staging dir and counted in `invalid_file_count`; they do not enter the ingest pipeline.
+  - Each downloaded file is validated via `validate_document_file(filename, file_bytes)` — files failing validation are removed from the staging dir and their **remote paths** appended to `invalid_files`; they do not enter the ingest pipeline.
   - Interrupt checkpoint **after** batch downloads complete.
   - Call `initialize_job_state()` with `job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"`.
   - Call `ingest(batch_dir, job_id, doc_id_dict)`, then `_wait_for_job(job_id, connector_id, sync_seq)`.
+  - **`_wait_for_job` — real-time `completed_files` & `sync_message` tracking:** on every poll that returns job data, `get_job_document_stats(job_id)` is called; any documents that newly moved into `completed` state since the previous poll are counted (`newly_completed = completed_count − prev_completed_count`) and `increment_completed_files(connector_id, sync_seq, count=newly_completed)` is called immediately. This keeps the sync-log's `completed_files` counter and connector's `sync_message` (`"Processing x/y files"`) up-to-date in real time rather than requiring a bulk update at the end.
   - After job completes: `get_job_document_stats(job_id)` is called; `add_connector_checksum_entry` is called **only for `completed_docs`** (not before ingest). If `failed_count > 0`, `batch_failed = True`.
   - `_wait_for_job()` polls every `_JOB_POLL_INTERVAL=10s` and calls `_check_interrupt_call` on each wake-up.
   - Cleanup staging directory in `finally`; batch exception sets `batch_failed=True`.
-  - Returns `invalid_file_count` to the caller.
-- **Phase 4a (total_files adjustment):** After `_process_new_files` returns, if `invalid_file_count > 0`, `total_files` is decremented and both `update_connector_total_files` and `update_sync_log(total_files=...)` are called again to reflect the adjusted count. If no invalid files, only `update_connector_total_files` is called.
+  - Returns `invalid_files` (a `list[str]` of rejected remote paths) to the caller.
+- **Phase 4a (total_files adjustment):** After `_process_new_files` returns, `update_connector_total_files` is called. If `invalid_files` is non-empty, the tick closes as `FAILED` with the error message `"Invalid file(s) detected from source - {files_str}"` (where `files_str` is the comma-joined list of rejected remote paths); the error is also emitted at `logger.error` level.
 - **After all batches:** if `batch_failed`, raises `RuntimeError` (message references the batch job names) → tick closes as `FAILED` → connector set to `OUT_OF_SYNC`.
 - **Phase 4b (Orphan Removal):** After Phase 4a completes. `_delete_orphans` offloads `_remove_checksums(connector_id, orphan_checksums)` via `asyncio.to_thread`. For each checksum in `orphan_checksums = known_checksums − scanned_checksums`: call `remove_connector_checksum_entry`; if `remaining == 0` call `_best_effort_delete_document(doc_id)`. `_delete_orphans` raises `RuntimeError` if any checksum removal or document deletion failures occur.
 - **Phase 5 (Finalize):** Call `finalize_sync_log_and_update_connector` with terminal status. `scanner.close()` in top-level `finally` regardless of outcome (guarded with `if scanner is not None` for the case where `build_scanner` itself raises).
@@ -766,19 +898,21 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             removed_files=len(orphan_checksums),
         )
 
-        invalid_count = await _process_new_files(
+        invalid_files = await _process_new_files(
             sync_seq, connector_id, config.name, scanner, ingest_list
         )
 
-        if invalid_count > 0:
-            total_files -= invalid_count
-            update_connector_total_files(connector_id, total_files)
-            update_sync_log(connector_id, sync_seq, total_files=total_files)
-        else:
-            update_connector_total_files(connector_id, total_files)
+        update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
-        _complete_tick(sync_seq, connector_id)
+
+        if invalid_files:
+            files_str = ", ".join(invalid_files)
+            validation_error_msg = f"Invalid file(s) detected from source - {files_str}"
+            logger.error(validation_error_msg)
+            _fail_tick(sync_seq, connector_id, RuntimeError(validation_error_msg), error_msg=validation_error_msg)
+        else:
+            _complete_tick(sync_seq, connector_id)
 
     except asyncio.CancelledError as ce:
         logger.info(f"Tick cancelled for connector {connector_id!r}: {ce}")
@@ -801,11 +935,50 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
 _BATCH_SIZE = 10
 _JOB_POLL_INTERVAL = 10  # seconds
 
-async def _process_new_files(sync_seq, connector_id, connector_name, scanner, ingest_list) -> int:
-    """Returns invalid_file_count (files rejected by validate_document_file)."""
+
+async def _wait_for_job(
+    job_id: str,
+    connector_id: str,
+    sync_seq: int,
+) -> None:
+    """Poll job_id until it reaches a terminal state.
+
+    On each poll that returns job data, any documents that have newly moved into
+    a completed state are counted and increment_completed_files is called
+    immediately so the sync log reflects real-time progress.
+
+    Raises asyncio.CancelledError if the connector is marked for deletion
+    or a stop-sync request is issued during the wait.
+    """
+    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.FAILED.value}
+    prev_completed_count = 0
+    while True:
+        await asyncio.sleep(_JOB_POLL_INTERVAL)
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt:
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted during job wait (type={interrupt.value})"
+            )
+        job_data = get_job(job_id)
+        status = (job_data or {}).get("status", "")
+
+        # Count any docs that newly reached 'completed' since the last poll.
+        job_stats = get_job_document_stats(job_id)
+        completed_count = len(job_stats["completed_docs"])
+        newly_completed = completed_count - prev_completed_count
+        if newly_completed > 0:
+            prev_completed_count = completed_count
+            increment_completed_files(connector_id, sync_seq, count=newly_completed)
+
+        if status in _TERMINAL:
+            break
+
+
+async def _process_new_files(sync_seq, connector_id, connector_name, scanner, ingest_list) -> list[str]:
+    """Returns invalid_files (remote paths of files rejected by validate_document_file)."""
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
-    invalid_file_count = 0
+    invalid_files: list[str] = []
 
     for batch_number, batch_offset in enumerate(range(0, len(ingest_list), _BATCH_SIZE), start=1):
         batch = ingest_list[batch_offset : batch_offset + _BATCH_SIZE]
@@ -832,7 +1005,7 @@ async def _process_new_files(sync_seq, connector_id, connector_name, scanner, in
                     validate_document_file(filename, (batch_dir / filename).read_bytes())
                 except ValueError:
                     (batch_dir / filename).unlink(missing_ok=True)
-                    invalid_file_count += 1
+                    invalid_files.append(remote_path)
                     continue  # skip — unsupported file type
                 filename_to_checksum[filename] = checksum
 
@@ -881,7 +1054,7 @@ async def _process_new_files(sync_seq, connector_id, connector_name, scanner, in
             f"Connector-{connector_name}-{sync_seq}-*"
         )
 
-    return invalid_file_count
+    return invalid_files
 
 
 async def _handle_interrupt(sync_seq, connector_id, interrupt_type) -> None:
