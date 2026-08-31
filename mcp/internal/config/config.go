@@ -67,5 +67,6 @@ func FormatMCPClientConfig(config *types.ConfigOutput) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return string(jsonBytes), nil
 }

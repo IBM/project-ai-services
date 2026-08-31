@@ -1,5 +1,5 @@
 summarize:
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.17
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.18
   log_level: "INFO"
   database: "summarize_metadata"
   resources:
@@ -16,7 +16,3 @@ postgres:
   # @generate:password
   password: ""
 
-llm:
-  model:
-    name: ""
-  apiKey: ""

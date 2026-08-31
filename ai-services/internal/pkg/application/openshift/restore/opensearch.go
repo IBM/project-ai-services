@@ -20,8 +20,9 @@ const (
 )
 
 // RestoreOpenSearch restores OpenSearch data for OpenShift runtime.
-func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) error {
-	logger.Infof("Restoring OpenSearch data for OpenShift application: %s\n", applicationID)
+// namespace is derived from the application UUID: "ai-services-<first 8 chars>".
+func RestoreOpenSearch(ctx context.Context, templateID, namespace, backupFile string) error {
+	logger.Infof("Restoring OpenSearch data for OpenShift application in namespace: %s\n", namespace)
 	logger.Infof("Backup file: %s\n", backupFile)
 	logger.Infoln("OpenSearch Import (Sidecar Pod Approach)")
 
@@ -38,8 +39,8 @@ func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) er
 	}
 	defer cleanup()
 
-	// Find OpenSearch pod
-	namespace, podName, err := common.FindOpenSearchPod(applicationID)
+	// Find OpenSearch pod using component templateID label
+	podName, err := common.FindOpenSearchPod(templateID, namespace)
 	if err != nil {
 		return err
 	}
@@ -48,7 +49,7 @@ func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) er
 	logger.Infof("OpenSearch Pod: %s\n", podName)
 
 	// Get OpenSearch service name
-	serviceName, err := common.GetOpenSearchService(applicationID, namespace)
+	serviceName, err := common.GetOpenSearchService(templateID, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch service: %w", err)
 	}

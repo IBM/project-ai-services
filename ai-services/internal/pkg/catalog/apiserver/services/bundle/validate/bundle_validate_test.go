@@ -4,11 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,13 +80,19 @@ func validChart() string {
 // PodmanBundleValidator
 // -----------------------------------------------------------------------
 
+// validPodmanTemplate returns a minimal valid podman *.yaml.tmpl that satisfies
+// the spec check (apiVersion, kind, metadata.name, ApplicationTemplateKey label).
+func validPodmanTemplate() string {
+	return fmt.Sprintf("apiVersion: v1\nkind: Pod\nmetadata:\n  name: svc\n  labels:\n    %s: \"{{ .TemplateID }}\"\nspec: {}\n", constants.ApplicationTemplateKey)
+}
+
 func TestPodmanValidator_ValidBundle(t *testing.T) {
 	archive := buildArchive(t, map[string]string{
 		"metadata.yaml":                  validRootMeta(),
 		"podman/metadata.yaml":           validPodmanMeta(),
 		"podman/values.yaml":             "key: value\n",
-		"podman/values.schema.json":      `{"type":"object"}`,
-		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
+		"podman/values.schema.json":      `{"$schema":"https://json-schema.org/draft-07/schema#","type":"object"}`,
+		"podman/templates/svc.yaml.tmpl": validPodmanTemplate(),
 	})
 	require.NoError(t, validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0"))
 }
@@ -102,8 +110,38 @@ func TestPodmanValidator_MetadataWithPodTemplateExecutions(t *testing.T) {
 		"metadata.yaml":                  validRootMeta(),
 		"podman/metadata.yaml":           meta,
 		"podman/values.yaml":             "key: value\n",
+		"podman/values.schema.json":      `{"$schema":"https://json-schema.org/draft-07/schema#","type":"object"}`,
+		"podman/templates/svc.yaml.tmpl": validPodmanTemplate(),
+	})
+	require.NoError(t, validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0"))
+}
+
+// -----------------------------------------------------------------------
+// Podman template pipeline (Go template parse/execute — Podman-specific)
+// -----------------------------------------------------------------------
+
+func TestPodmanValidator_TemplateSyntaxError(t *testing.T) {
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml":                  validRootMeta(),
+		"podman/metadata.yaml":           validPodmanMeta(),
+		"podman/values.yaml":             "key: value\n",
 		"podman/values.schema.json":      `{"type":"object"}`,
-		"podman/templates/svc.yaml.tmpl": "spec: {}\n",
+		"podman/templates/svc.yaml.tmpl": "apiVersion: v1\nkind: Pod\nmetadata:\n  name: {{ .Broken\n",
+	})
+	err := validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "template syntax error")
+}
+
+func TestPodmanValidator_TemplateWithValuesRendersValid(t *testing.T) {
+	// Template uses runtime expressions — those expand to "" under nil data,
+	// but the structural keys including the label are still present.
+	tmpl := fmt.Sprintf("apiVersion: v1\nkind: Pod\nmetadata:\n  name: {{ .AppName }}--svc\n  labels:\n    %s: \"{{ .TemplateID }}\"\nspec: {}\n", constants.ApplicationTemplateKey)
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml":                  validRootMeta(),
+		"podman/metadata.yaml":           validPodmanMeta(),
+		"podman/values.yaml":             "key: value\n",
+		"podman/values.schema.json":      `{"type":"object"}`,
+		"podman/templates/svc.yaml.tmpl": tmpl,
 	})
 	require.NoError(t, validate.NewPodmanBundleValidator().Validate(archive, "bundle", "1.0.0"))
 }
@@ -119,9 +157,22 @@ func TestOpenShiftValidator_ValidBundle(t *testing.T) {
 		"openshift/Chart.yaml":         validChart(),
 		"openshift/values.yaml":        "key: value\n",
 		"openshift/values.schema.json": `{"type":"object"}`,
-		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
+		"openshift/templates/svc.yaml": fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n  labels:\n    %s: {{ .Chart.Name }}\n", constants.ApplicationTemplateKey),
 	})
 	require.NoError(t, validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0"))
+}
+
+func TestOpenShiftValidator_TemplateMissingAIServicesLabel(t *testing.T) {
+	archive := buildArchive(t, map[string]string{
+		"metadata.yaml":                validRootMeta(),
+		"openshift/metadata.yaml":      validOpenShiftMeta(),
+		"openshift/Chart.yaml":         validChart(),
+		"openshift/values.yaml":        "key: value\n",
+		"openshift/values.schema.json": `{"type":"object"}`,
+		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
+	})
+	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, constants.ApplicationTemplateKey)
 }
 
 func TestOpenShiftValidator_NoOpenShiftDir_Skips(t *testing.T) {
@@ -155,7 +206,7 @@ func TestOpenShiftValidator_ChartVersionMismatch(t *testing.T) {
 		"openshift/Chart.yaml":         "apiVersion: v2\nname: svc\nversion: 2.0.0\ntype: application\n",
 		"openshift/values.yaml":        "key: value\n",
 		"openshift/values.schema.json": `{"type":"object"}`,
-		"openshift/templates/svc.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n",
+		"openshift/templates/svc.yaml": fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc\n  labels:\n    %s: {{ .Chart.Name }}\n", constants.ApplicationTemplateKey),
 	})
 	err := validate.NewOpenShiftBundleValidator().Validate(archive, "bundle", "1.0.0")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "version mismatch")

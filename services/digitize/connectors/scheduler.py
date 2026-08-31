@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from apscheduler import AsyncScheduler
+from apscheduler import AsyncScheduler, ConflictPolicy
 from apscheduler.triggers.interval import IntervalTrigger
 
 from common.misc_utils import get_logger
@@ -86,6 +86,7 @@ async def register_connector_job(
         trigger=IntervalTrigger(seconds=interval_seconds, start_time=start_time),
         args=[connector_id],
         id=connector_id,
+        conflict_policy=ConflictPolicy.replace,
     )
     logger.info(
         f"Registered scheduler job for connector {connector_id!r} "
