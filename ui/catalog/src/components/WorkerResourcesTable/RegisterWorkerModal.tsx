@@ -16,7 +16,6 @@ export interface RegisterWorkerModalProps {
   phase: RegisterPhase;
   workerName: string;
   token: string;
-  errorMessage: string;
   onWorkerNameChange: (value: string) => void;
   onGenerateToken: () => void;
   onClose: () => void;
@@ -27,7 +26,6 @@ const RegisterWorkerModal = ({
   phase,
   workerName,
   token,
-  errorMessage,
   onWorkerNameChange,
   onGenerateToken,
   onClose,
@@ -38,10 +36,10 @@ const RegisterWorkerModal = ({
   const runCommand = useMemo(() => {
     if (!isSuccess) return "";
     return [
-      "ai-services agent start \\",
-      `  --server <host>:${workerName} \\`,
-      `  --name ${workerName} \\`,
-      `  --token ${token}`,
+      "ai-services worker join \\",
+      "  --server <host>:<port> \\",
+      `  --name "${workerName}" \\`,
+      `  --token "${token}"`,
     ].join("\n");
   }, [isSuccess, workerName, token]);
 
@@ -51,6 +49,7 @@ const RegisterWorkerModal = ({
       size="sm"
       modalHeading="Register worker resource"
       passiveModal
+      preventCloseOnClickOutside
       onRequestClose={() => {
         if (!isLoading) onClose();
       }}
@@ -83,9 +82,6 @@ const RegisterWorkerModal = ({
               <Button kind="tertiary" size="md" onClick={onGenerateToken}>
                 Generate token
               </Button>
-            )}
-            {phase === "error" && (
-              <p className={styles.errorText}>{errorMessage}</p>
             )}
           </div>
         )}

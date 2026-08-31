@@ -26,11 +26,22 @@ const WorkerResources = () => {
     }
   }, [state.workerName]);
 
+  const registerError = state.registerErrorMessage
+    ? {
+        message: state.registerErrorMessage,
+        onRetry: () => dispatch({ type: "OPEN_MODAL" }),
+      }
+    : null;
+
   return (
     <>
       <PageHeader title="Worker Resources" />
       <WorkerResourcesTable
         onRegister={() => dispatch({ type: "OPEN_MODAL" })}
+        registerError={registerError}
+        onRegisterErrorDismiss={() =>
+          dispatch({ type: "CLEAR_REGISTER_ERROR" })
+        }
         refreshTrigger={state.refreshTrigger}
       />
       <RegisterWorkerModal
@@ -38,7 +49,6 @@ const WorkerResources = () => {
         phase={state.phase}
         workerName={state.workerName}
         token={state.token}
-        errorMessage={state.errorMessage}
         onWorkerNameChange={(value) =>
           dispatch({ type: "SET_WORKER_NAME", payload: value })
         }

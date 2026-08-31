@@ -27,19 +27,25 @@ export interface WorkerResourceRow {
   actions: string;
 }
 
-export type AppState = BaseTableState<WorkerResourceRow>;
+export interface AppState extends BaseTableState<WorkerResourceRow> {
+  // Register error toast
+  registerErrorToastOpen: boolean;
+  registerErrorToastMessage: string;
+}
 
 export const ACTION_TYPES = {
   FETCH_WORKERS_SUCCESS: "FETCH_WORKERS_SUCCESS",
+  SHOW_REGISTER_ERROR: "SHOW_REGISTER_ERROR",
+  HIDE_REGISTER_ERROR: "HIDE_REGISTER_ERROR",
 } as const;
 
-export type AppAction = {
-  type: typeof ACTION_TYPES.FETCH_WORKERS_SUCCESS;
-  payload: {
-    rows: WorkerResourceRow[];
-    total: number;
-  };
-};
+export type AppAction =
+  | {
+      type: typeof ACTION_TYPES.FETCH_WORKERS_SUCCESS;
+      payload: { rows: WorkerResourceRow[]; total: number };
+    }
+  | { type: typeof ACTION_TYPES.SHOW_REGISTER_ERROR; payload: string }
+  | { type: typeof ACTION_TYPES.HIDE_REGISTER_ERROR };
 
 export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
@@ -85,6 +91,8 @@ export const INITIAL_STATE: AppState = {
   exportToastKind: "success",
   isLoading: true,
   fetchError: null,
+  registerErrorToastOpen: false,
+  registerErrorToastMessage: "",
 };
 
 function ownCases(state: AppState, action: AppAction): AppState {
@@ -100,6 +108,18 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ),
         totalItems: action.payload.total,
         fetchError: null,
+      };
+    case ACTION_TYPES.SHOW_REGISTER_ERROR:
+      return {
+        ...state,
+        registerErrorToastOpen: true,
+        registerErrorToastMessage: action.payload,
+      };
+    case ACTION_TYPES.HIDE_REGISTER_ERROR:
+      return {
+        ...state,
+        registerErrorToastOpen: false,
+        registerErrorToastMessage: "",
       };
     default:
       return state;

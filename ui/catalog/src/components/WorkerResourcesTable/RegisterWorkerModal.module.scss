@@ -21,12 +21,6 @@
   gap: $spacing-03;
 }
 
-.errorText {
-  @include type-style("body-short-01");
-  color: $text-error;
-  margin: 0;
-}
-
 .successContent {
   display: flex;
   flex-direction: column;
