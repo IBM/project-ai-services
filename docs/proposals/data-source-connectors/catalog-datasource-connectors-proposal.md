@@ -106,8 +106,8 @@ The implementation uses the following provider IDs. The catalog provider IDs **m
 
 | Type                | Catalog `provider` value | Digitize `type` value | Key Credentials                                                     |
 | ------------------- | ------------------------ | --------------------- | ------------------------------------------------------------------- |
-| Object Storage (S3) | `object_storage`         | `s3`                  | `endpoint_url`, `bucket_name`, `access_key_id`, `secret_access_key` |
-| File System (SSH)   | `file_system`            | `ssh`                 | `host`, `username`, `private_key`, `remote_path`                    |
+| Object Storage (S3) | `object_storage`         | `object_storage`      | `endpoint_url`, `bucket_name`, `access_key_id`, `secret_access_key` |
+| File System (SSH)   | `file_system`            | `file_system`         | `host`, `username`, `private_key`, `remote_path`                    |
 
 Additional provider types can be added by implementing the provider interface described in Section 8.
 
