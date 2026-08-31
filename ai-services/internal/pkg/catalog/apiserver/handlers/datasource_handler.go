@@ -223,6 +223,59 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// UpdateDatasource godoc
+//
+//	@Summary		Update datasource credentials
+//	@Description	Updates the Authentication credential fields for a datasource as defined in the provider schema. Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.
+//	@Tags			Datasources
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string							true	"Datasource ID (UUID)"
+//	@Param			request	body		models.UpdateDatasourceRequest	true	"Credential update request"
+//	@Success		200		{object}	models.UpdateDatasourceResponse	"Datasource updated"
+//	@Failure		400		{object}	ErrorResponse					"Invalid request body or invalid ID"
+//	@Failure		401		{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse					"Datasource not found"
+//	@Failure		422		{object}	ErrorResponse					"Connection test failed with new credentials"
+//	@Failure		500		{object}	ErrorResponse					"Internal Server Error"
+//	@Router			/datasources/{id} [put]
+func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid datasource ID format"})
+
+		return
+	}
+
+	var req models.UpdateDatasourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid request body: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.UpdateDatasource(c.Request.Context(), id, req)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to update datasource %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "failed to update datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // ConnectDatasourcesToApplication godoc
 //
 //	@Summary		Connect datasources to application

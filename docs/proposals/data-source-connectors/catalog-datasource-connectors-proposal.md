@@ -228,7 +228,7 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 | `DELETE` | `/datasources/:id`                                          | Delete a datasource (only if not connected to any application)                                           |
 | `GET`    | `/datasources/:id/services`                                 | List all services connected to a datasource with sync status                                             |
 | `GET`    | `/connectors/:connector_type/providers/:provider_id/params` | Get the input schema for a provider (use `connector_type=datasource`)                                    |
-| `GET`    | `/connectors[?connector_type=datasource]`                   | List all supported datasource provider types (use `connector_type=datasource` to filter for datasources) |
+| `GET`    | `/connectors[?type=datasource]`                             | List all supported datasource provider types (use `type=datasource` to filter for datasources)           |
 
 ### 5.2 Application-Datasource Connection APIs
 
@@ -358,40 +358,49 @@ The request body varies by `provider`. The catalog backend validates the connect
 
 **`PUT /api/v1/connectors/datasources/:id`**
 
-Only the credential fields for the datasource's provider may be updated. Structural fields (bucket, host, path, etc.) are immutable after creation. Any non-updatable field present in the request body is ignored.
+Only the credential (Authentication) fields for the datasource's provider may be updated. Updatable fields are those whose `ui:section` is `"Authentication"` in the provider's `schema.json`. Structural fields are immutable after creation. Any non-updatable field present in the request body is silently ignored.
 
-| Provider | Updatable fields                     |
-| -------- | ------------------------------------ |
-| `s3`     | `access_key_id`, `secret_access_key` |
-| `ssh`    | `username`, `private_key`            |
+The connectivity check is always re-run with the merged credentials before saving. If the check fails, return `422 Unprocessable Entity` and leave the existing record unchanged.
 
-The connectivity check is always re-run with the new credentials before saving. If the check fails, return `422 Unprocessable Entity` and leave the existing record unchanged.
-
-**Request body (S3 example):**
+**Request body (object_storage example):**
 
 ```json
 {
-  "metadata": {
+  "params": {
     "access_key_id": "AKIANEWKEYEXAMPLE",
     "secret_access_key": "newSecretKeyValue"
   }
 }
 ```
 
-**Request body (SSH example):**
+**Request body (file_system example):**
 
 ```json
 {
-  "metadata": {
+  "params": {
     "username": "new_user",
     "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n..."
   }
 }
 ```
 
-**Response `200 OK`:** Updated datasource object without secret fields.
+**Response `200 OK`:** Updated datasource object without secret fields. When one or more linked Digitize services could not be notified, the datasource is still updated and the failures are listed in `propagation_errors`.
 
-When a datasource is updated, for every application it is currently connected to, the catalog backend calls `PUT /v1/connectors/:connectorid` on the Digitize service to propagate the updated credentials.
+```json
+{
+  "id": "550e8400-...",
+  "name": "My S3 Bucket",
+  "type": "datasource",
+  "provider": "object_storage",
+  "status": "Connected",
+  "message": "",
+  "created_by": "admin@example.com",
+  "created_at": "2026-06-01T10:00:00Z",
+  "updated_at": "2026-06-01T11:00:00Z"
+}
+```
+
+When a datasource is updated, for every application it is currently connected to, the catalog backend calls `PUT /v1/connectors/:connectorid` on the Digitize service to propagate the updated credentials. The payload wraps the updated credential fields under a `connection_details` key.
 
 ### 6.5 Delete Datasource
 
@@ -462,27 +471,41 @@ Returns the JSON Schema for the connector creation/edit form, read directly from
 
 ### 6.7 List Providers for a Connector Type
 
-**`GET /api/v1/connectors[?connector_type=datasource]`**
+**`GET /api/v1/connectors[?type=datasource]`**
 
 Returns all registered providers for the given connector type, discovered from the `assets/connectors/<connector_type>/` directory (see Section 8.4). The UI uses this to populate the provider picker when creating a new connector.
 
-**Example:** `GET /api/v1/connectors[?connector_type=datasource]`
+**Query parameters:**
+
+| Parameter | Type   | Required | Description                                                         |
+| --------- | ------ | -------- | ------------------------------------------------------------------- |
+| `type`    | string | No       | Filter by connector type (e.g. `datasource`). Omit to return all.  |
+
+**Example:** `GET /api/v1/connectors?type=datasource`
 
 **Response `200 OK`:**
 
 ```json
 [
   {
-    "id": "s3",
-    "name": "Amazon S3",
-    "description": "Amazon S3 bucket or IBM Cloud Object Storage bucket via HMAC credentials",
-    "schema": "/api/v1/connectors/datasource/providers/s3/schema"
+    "type": "datasource",
+    "name": "Data sources",
+    "provider": {
+      "id": "object_storage",
+      "name": "Object storage",
+      "description": "HTTPS based connection with cloud S3-compatible object storage support",
+      "schema": "/api/v1/connectors/datasource/providers/object_storage/params"
+    }
   },
   {
-    "id": "ssh",
-    "name": "Remote SSH",
-    "description": "Remote server accessible via SSH private key",
-    "schema": "/api/v1/connectors/datasource/providers/ssh/schema"
+    "type": "datasource",
+    "name": "Data sources",
+    "provider": {
+      "id": "file_system",
+      "name": "File system",
+      "description": "SSH based connection with IBM i, AIX, Linux and Windows support.",
+      "schema": "/api/v1/connectors/datasource/providers/file_system/params"
+    }
   }
 ]
 ```
@@ -820,16 +843,21 @@ The digitize service responds with `202 Accepted` (no response body). Nothing ne
 
 When `PUT /api/v1/connectors/datasources/:id` is called:
 
-1. Extract only the updatable credential fields for the provider (`access_key_id`, `secret_access_key` for S3; `username`, `private_key` for SSH). Ignore any other fields in the request body.
-2. Validate connectivity using the new credentials merged with the existing immutable metadata (bucket, host, path, etc.).
-3. If connectivity fails, return `422 Unprocessable Entity` — do not persist any changes.
-4. Update only the updatable fields in the `connectors` record, leaving all other metadata intact.
-5. Query `service_dependencies` to find all rows where `dependency_id = datasource_id` and `dependency_type = 'datasource'`, joined to `services` to resolve the downstream pod.
-6. For each link, call `PUT /v1/connectors/<dependency_id>` on the Digitize service with the updated credential payload, using `dependency_id` as the `connector_id`.
-   - If the call fails, retry **once**.
-   - If the retry also fails: record the error for that link and continue to the next — do **not** roll back the datasource record update.
-7. The digitize service performs a partial update — only the credential fields sent in the payload are overwritten.
-8. Return `200 OK`. If any propagations failed, include a `propagation_errors` array in the response so the UI can show an inline error against each affected application. The user retriggers by re-submitting the datasource update from the UI.
+1. Fetch the existing connector record (including encrypted credentials).
+2. Load the provider's `schema.json` to derive the updatable fields (those with `ui:section: "Authentication"`) and sensitive fields (those with `format: "password"`).
+3. Filter the request `params` to only the updatable fields for this provider. Return `400 Bad Request` if no updatable fields are present.
+4. Decrypt the existing stored credentials to obtain the full current field set.
+5. Merge: start from the existing decrypted metadata, then overlay the filtered updates.
+6. Validate connectivity using the merged (full) metadata. If the test fails, return `422 Unprocessable Entity` — do not persist any changes.
+7. Encrypt, persist only the updated fields in the `connectors` record, leaving all other metadata intact.
+8. Query `service_dependencies` to find all rows where `dependency_id = datasource_id` and `dependency_type = 'connector'`, joined to `services` to resolve the downstream pod endpoint URL.
+9. For each link, call `PUT /v1/connectors/<datasource_id>` on the Digitize service with the credential payload wrapped in `connection_details`:
+   ```json
+   { "connection_details": { "<updatable field>": "..." } }
+   ```
+   - If the call fails, retry **once** (two total attempts).
+   - If both attempts fail: record the error for that link and continue to the next — do **not** roll back the datasource record update.
+10. Return `200 OK`. If any propagations failed, include a `propagation_errors` array so the UI can show an inline error against each affected application.
 
 **Response when all propagations succeed:**
 
@@ -837,8 +865,13 @@ When `PUT /api/v1/connectors/datasources/:id` is called:
 {
   "id": "550e8400-...",
   "name": "My S3 Bucket",
-  "provider": "s3",
-  "status": "Connected"
+  "type": "datasource",
+  "provider": "object_storage",
+  "status": "Connected",
+  "message": "",
+  "created_by": "admin@example.com",
+  "created_at": "2026-06-01T10:00:00Z",
+  "updated_at": "2026-06-01T11:00:00Z"
 }
 ```
 
@@ -848,13 +881,18 @@ When `PUT /api/v1/connectors/datasources/:id` is called:
 {
   "id": "550e8400-...",
   "name": "My S3 Bucket",
-  "provider": "s3",
+  "type": "datasource",
+  "provider": "object_storage",
   "status": "Connected",
+  "message": "",
+  "created_by": "admin@example.com",
+  "created_at": "2026-06-01T10:00:00Z",
+  "updated_at": "2026-06-01T11:00:00Z",
   "propagation_errors": [
     {
       "application_id": "app-uuid-1",
       "application_name": "My App",
-      "error": "failed to reach digitize service after 1 retry: connection refused"
+      "error": "failed to propagate credentials to Digitize service after 2 attempt(s): connection refused"
     }
   ]
 }

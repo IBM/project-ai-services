@@ -83,6 +83,21 @@ func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	return dst
 }
 
+// MergeMaps returns a new map that starts with all keys from base, then overlays overrides.
+// Neither input map is modified.
+func MergeMaps(base, overrides map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	return merged
+}
+
 // JoinAndRemove joins the first `count` elements using `sep`,
 // returns the joined string, and removes those elements from the original slice.
 func JoinAndRemove(slice *[]string, count int, sep string) string {

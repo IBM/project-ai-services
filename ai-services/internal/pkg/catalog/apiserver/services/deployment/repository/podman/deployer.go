@@ -33,6 +33,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
+	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -52,6 +54,14 @@ type (
 	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
+// PodmanWorkerConfig holds configuration sourced from a remote worker's
+// registration metadata.
+type PodmanWorkerConfig struct {
+	DomainSuffix string
+	HTTPSPort    string
+	BaseDir      string
+}
+
 // PodmanDeployer implements deployment execution for Podman runtime.
 type PodmanDeployer struct {
 	runtime         runtime.Runtime
@@ -59,6 +69,9 @@ type PodmanDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	// workerConfig is non-nil for remote worker deployments. When set,
+	// getCaddyConfiguration uses its values instead of local env vars.
+	workerConfig *PodmanWorkerConfig
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -76,6 +89,13 @@ func NewPodmanDeployer(
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
 	}
+}
+
+// SetPodmanWorkerConfig injects the Caddy configuration for a remote worker
+// deployment. When set, getCaddyConfiguration uses these values instead of
+// local env vars.
+func (d *PodmanDeployer) SetPodmanWorkerConfig(cfg PodmanWorkerConfig) {
+	d.workerConfig = &cfg
 }
 
 // ExecuteDeployment executes the deployment plan for an application or standalone service.
@@ -218,7 +238,26 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
+// For remote workers the command is sent over the gRPC stream so the download
+// runs on the worker node where the models directory lives; for local workers
+// helpers.DownloadModelContainer is called directly.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
+	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		modelsPath := d.workerConfig.BaseDir + "/models"
+		for modelName := range modelSet {
+			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
+			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
+				Model:     modelName,
+				TargetDir: modelsPath,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to download model %s: %w", modelName, err)
+			}
+		}
+
+		return nil
+	}
+
 	modelsPath := utils.GetModelsPath()
 
 	for modelName := range modelSet {
@@ -1102,22 +1141,23 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 }
 
 // getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
-// For a local runtime it reads CADDY_ADMIN_URL from the environment.
-// For a remote runtime it returns a RemoteProxyManager that sends route commands
-// over the gRPC CommandStream to the worker.
+// For a remote runtime the domain/port come from the worker's registration
+// metadata (via workerConfig) and a RemoteProxyManager is returned.
+// For a local runtime both values are read from environment variables and a
+// local Caddy ProxyManager is returned.
 func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
+	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		pm := proxy.NewRemoteProxyManager(rt.Sender)
+
+		return d.workerConfig.DomainSuffix, d.workerConfig.HTTPSPort, pm, nil
+	}
+
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
 		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
 	}
 
 	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
-
-	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		pm := proxy.NewRemoteProxyManager(rt.Sender)
-
-		return domainSuffix, httpsPort, pm, nil
-	}
 
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {

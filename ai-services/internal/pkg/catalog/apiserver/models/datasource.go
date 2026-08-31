@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -21,37 +22,56 @@ type CreateDatasourceRequest struct {
 	CreatedBy string `json:"-"`
 }
 
-// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
-type ConnectDatasourceRequest struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	Type              string         `json:"type"`
-	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
-	ConnectionDetails map[string]any `json:"connection_details"`
-}
-
-// ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.
-type ConnectDatasourcesRequest struct {
-	// DatasourceIDs is the list of datasource connector UUIDs to connect.
-	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
-}
-
 // CreateDatasourceResponse is the response body returned after a successful datasource creation.
 type CreateDatasourceResponse struct {
 	ID string `json:"id"`
 }
 
-// DatasourceConnectionItem is the per-datasource result within a ConnectDatasourcesResponse.
-type DatasourceConnectionItem struct {
-	DatasourceID string `json:"datasource_id"`
-	ConnectorID  string `json:"connector_id,omitempty"`
-	Error        string `json:"error,omitempty"`
+// UpdateDatasourceRequest is the request body for updating datasource credentials.
+// Only the credential fields for the provider may be updated; structural fields are
+// immutable after creation. Any non-updatable field present in Params is silently ignored.
+type UpdateDatasourceRequest struct {
+	// Params holds the credential fields to update. Only fields in the provider's
+	// schema whose ui:section is "Authentication" may be changed; structural fields
+	// are filtered out server-side.
+	// Note: binding:"required" only prevents null/missing — an empty map is rejected in the
+	// service layer, which also validates that at least one updatable field is present.
+	Params map[string]any `json:"params" binding:"required"`
 }
 
-// ConnectDatasourcesResponse is the response body returned after connecting datasources to an application.
-type ConnectDatasourcesResponse struct {
-	ApplicationID string                     `json:"application_id"`
-	Connections   []DatasourceConnectionItem `json:"connections"`
+// PropagationError describes a single Digitize propagation failure during a datasource update.
+type PropagationError struct {
+	// ApplicationID is the UUID of the application whose Digitize service could not be updated.
+	ApplicationID string `json:"application_id"`
+	// ApplicationName is the display name of that application, for UI rendering.
+	ApplicationName string `json:"application_name"`
+	// Error is the human-readable reason the propagation failed.
+	Error string `json:"error"`
+}
+
+// DatasourceItem is the public representation of a datasource connector returned by the API.
+// Sensitive credential fields are never included.
+type DatasourceItem struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	Provider  string    `json:"provider"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message,omitempty"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// UpdateDatasourceResponse is the response body returned after a successful datasource update.
+// When all Digitize propagations succeed, PropagationErrors is nil (omitted from JSON).
+// When one or more propagations fail, the array is populated but the overall HTTP status is
+// still 200 OK — the record was saved; only downstream propagation is partial.
+type UpdateDatasourceResponse struct {
+	DatasourceItem
+	// PropagationErrors lists any downstream Digitize propagation failures.
+	// Omitted when all propagations succeeded.
+	PropagationErrors []PropagationError `json:"propagation_errors,omitempty"`
 }
 
 // DatasourceProviderInfo is the provider sub-object embedded in datasource API responses.
@@ -153,6 +173,34 @@ type ListDatasourcesRequest struct {
 	PageSize int
 	Status   string
 	Provider string
+}
+
+// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
+type ConnectDatasourceRequest struct {
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
+	ConnectionDetails map[string]any `json:"connection_details"`
+}
+
+// ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.
+type ConnectDatasourcesRequest struct {
+	// DatasourceIDs is the list of datasource connector UUIDs to connect.
+	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
+}
+
+// DatasourceConnectionItem is the per-datasource result within a ConnectDatasourcesResponse.
+type DatasourceConnectionItem struct {
+	DatasourceID string `json:"datasource_id"`
+	ConnectorID  string `json:"connector_id,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// ConnectDatasourcesResponse is the response body returned after connecting datasources to an application.
+type ConnectDatasourcesResponse struct {
+	ApplicationID string                     `json:"application_id"`
+	Connections   []DatasourceConnectionItem `json:"connections"`
 }
 
 // Made with Bob
