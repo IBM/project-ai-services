@@ -12,60 +12,60 @@ import (
 )
 
 const (
-	// digitizeHTTPTimeout is the per-request timeout for calls to a Digitize pod.
-	digitizeHTTPTimeout = 15 * time.Second
-	// digitizeMaxRetries is the number of retries on failure (one retry = two total attempts).
-	digitizeMaxRetries  = 1
-	digitizeConnectPath = "/v1/connectors"
+	// serviceHTTPTimeout is the per-request timeout for calls to a downstream service pod.
+	serviceHTTPTimeout = 15 * time.Second
+	// serviceMaxRetries is the number of retries on failure (one retry = two total attempts).
+	serviceMaxRetries  = 1
+	serviceConnectPath = "/v1/connectors"
 )
 
-// digitizeUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
-// Only the fields being updated are sent; the Digitize service performs a partial update.
-type digitizeUpdatePayload struct {
+// serviceUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
+// Only the fields being updated are sent; the service performs a partial update.
+type serviceUpdatePayload struct {
 	// ConnectionDetails holds the updated credential fields.
 	ConnectionDetails map[string]any `json:"connection_details"`
 }
 
-// DigitizeClient is an HTTP client for Digitize pod API calls.
-// TLS verification is skipped because Digitize services are deployed with
+// ServiceClient is an HTTP client for downstream service API calls (e.g. Digitize).
+// TLS verification is skipped because services are deployed with
 // cluster-internal self-signed certificates (nip.io / OpenShift routes).
-type DigitizeClient struct {
+type ServiceClient struct {
 	http *resty.Client
 }
 
-// NewDigitizeClient creates a DigitizeClient pointed at baseURL.
+// NewServiceClient creates a ServiceClient pointed at baseURL.
 // The resty client is configured with a 15-second timeout and TLS verification
 // skipped for internal cluster communications.
 // TODO : set the Insecure flag to conditionally based on self-signed certificates used.
-func NewDigitizeClient(baseURL string) *DigitizeClient {
+func NewServiceClient(baseURL string) *ServiceClient {
 	r := resty.New().
 		SetBaseURL(baseURL).
-		SetTimeout(digitizeHTTPTimeout).
+		SetTimeout(serviceHTTPTimeout).
 		SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec // internal service-to-service call with self-signed cert
 
-	return &DigitizeClient{http: r}
+	return &ServiceClient{http: r}
 }
 
-// UpdateConnector calls PUT /v1/connectors/{connectorID} on the Digitize pod to propagate
+// UpdateConnector calls PUT /v1/connectors/{connectorID} on the service pod to propagate
 // updated credentials. Retries once on failure. Returns nil on success.
-func (c *DigitizeClient) UpdateConnector(ctx context.Context, connectorID string, updatedCreds map[string]any) error {
-	payload := digitizeUpdatePayload{ConnectionDetails: updatedCreds}
+func (c *ServiceClient) UpdateConnector(ctx context.Context, connectorID string, updatedCreds map[string]any) error {
+	payload := serviceUpdatePayload{ConnectionDetails: updatedCreds}
 
 	var lastErr error
 
-	for attempt := 0; attempt <= digitizeMaxRetries; attempt++ {
+	for attempt := 0; attempt <= serviceMaxRetries; attempt++ {
 		resp, err := c.http.R().
 			SetContext(ctx).
 			SetBody(payload).
 			Put("/v1/connectors/" + connectorID)
 		if err != nil {
-			lastErr = fmt.Errorf("digitize PUT request failed: %w", err)
+			lastErr = fmt.Errorf("service PUT request failed: %w", err)
 
 			continue
 		}
 
 		if resp.IsError() {
-			lastErr = fmt.Errorf("digitize service returned unexpected status %d", resp.StatusCode())
+			lastErr = fmt.Errorf("service returned unexpected status %d", resp.StatusCode())
 
 			continue
 		}
@@ -73,13 +73,13 @@ func (c *DigitizeClient) UpdateConnector(ctx context.Context, connectorID string
 		return nil
 	}
 
-	return fmt.Errorf("failed to propagate credentials to Digitize service after %d attempt(s): %w", digitizeMaxRetries+1, lastErr)
+	return fmt.Errorf("failed to propagate credentials to service after %d attempt(s): %w", serviceMaxRetries+1, lastErr)
 }
 
-// GetConnectorSync calls GET /v1/connectors/{connectorID} on the Digitize pod and
+// GetConnectorSync calls GET /v1/connectors/{connectorID} on the service pod and
 // returns the connector's sync_status and last_sync_at values.
 // Returns an error when the HTTP call fails or the pod returns a non-200 status.
-func (c *DigitizeClient) GetConnectorSync(ctx context.Context, connectorID string) (*apimodels.ConnectorSyncState, error) {
+func (c *ServiceClient) GetConnectorSync(ctx context.Context, connectorID string) (*apimodels.ConnectorSyncState, error) {
 	var result apimodels.ConnectorSyncState
 
 	resp, err := c.http.R().
@@ -87,25 +87,25 @@ func (c *DigitizeClient) GetConnectorSync(ctx context.Context, connectorID strin
 		SetResult(&result).
 		Get("/v1/connectors/" + connectorID)
 	if err != nil {
-		return nil, fmt.Errorf("digitize request failed: %w", err)
+		return nil, fmt.Errorf("service request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("digitize returned status %d", resp.StatusCode())
+		return nil, fmt.Errorf("service returned status %d", resp.StatusCode())
 	}
 
 	return &result, nil
 }
 
-// Connect calls POST /v1/connectors on the given Digitize base URL.
+// Connect calls POST /v1/connectors on the given service base URL.
 // 409 Conflict is treated as success (idempotent — connector already exists).
-func (c *DigitizeClient) Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error {
+func (c *ServiceClient) Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error {
 	resp, err := c.http.R().
 		SetContext(ctx).
 		SetBody(req).
-		Post(baseURL + digitizeConnectPath)
+		Post(baseURL + serviceConnectPath)
 	if err != nil {
-		return fmt.Errorf("digitize POST request failed: %w", err)
+		return fmt.Errorf("service POST request failed: %w", err)
 	}
 
 	if resp.StatusCode() == http.StatusConflict {
@@ -113,7 +113,7 @@ func (c *DigitizeClient) Connect(ctx context.Context, baseURL string, req apimod
 	}
 
 	if resp.IsError() {
-		return fmt.Errorf("digitize service returned unexpected status %d", resp.StatusCode())
+		return fmt.Errorf("service returned unexpected status %d", resp.StatusCode())
 	}
 
 	return nil

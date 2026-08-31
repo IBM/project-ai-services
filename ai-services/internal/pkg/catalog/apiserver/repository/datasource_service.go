@@ -34,7 +34,7 @@ func NewDatasourceService(
 		svcDepRepo,
 		validator,
 		provider,
-		catalogclient.NewDigitizeClient(""),
+		catalogclient.NewServiceClient(""),
 		encryptionKey,
 	), nil
 }

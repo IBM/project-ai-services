@@ -29,10 +29,9 @@ const (
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
 
-// DigitizeClientInterface is the contract for sending connector payloads to downstream Digitize services.
-// Defined here so the inner package owns its dependency; the outer interface.go re-exports it
-// so the router wiring can reference it without importing this package directly.
-type DigitizeClientInterface interface {
+// ServiceConnectorClientInterface is the contract for sending connector payloads to downstream
+// services that accept datasource connectors.
+type ServiceConnectorClientInterface interface {
 	Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error
 }
 
@@ -48,7 +47,7 @@ type DatasourceService struct {
 	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
-	digitizeClient  DigitizeClientInterface
+	serviceClient   ServiceConnectorClientInterface
 	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
@@ -64,7 +63,7 @@ func NewDatasourceService(
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
-	digitizeClient DigitizeClientInterface,
+	serviceClient ServiceConnectorClientInterface,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
@@ -73,7 +72,7 @@ func NewDatasourceService(
 		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
-		digitizeClient:  digitizeClient,
+		serviceClient:   serviceClient,
 		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
 			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
@@ -568,7 +567,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
-// sendToService POSTs the connector payload to a single Digitize service and records the
+// sendToService POSTs the connector payload to a single eligible service and records the
 // service_dependency row. Returns a *ValidationError on downstream failure.
 func (s *DatasourceService) sendToService(
 	ctx context.Context,
@@ -601,7 +600,7 @@ func (s *DatasourceService) sendToService(
 		ConnectionDetails: connectionDetails,
 	}
 
-	if err := s.digitizeClient.Connect(ctx, svc.URL, connectReq); err != nil {
+	if err := s.serviceClient.Connect(ctx, svc.URL, connectReq); err != nil {
 		return &ValidationError{
 			Code:    http.StatusBadGateway,
 			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.ServiceCatalogID, err),
@@ -796,7 +795,7 @@ func (s *DatasourceService) propagateCredentials(
 			continue
 		}
 
-		if err := catalogclient.NewDigitizeClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
+		if err := catalogclient.NewServiceClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ApplicationID:   svc.ApplicationID.String(),
 				ApplicationName: svc.ApplicationName,
@@ -839,7 +838,7 @@ func datasourceItemFromConnector(c *dbmodels.Connector) apimodels.DatasourceItem
 }
 
 // fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
-// using catalogclient.DigitizeClient (resty-based) and returns the sync_status, last_sync_at,
+// using catalogclient.ServiceClient (resty-based) and returns the sync_status, last_sync_at,
 // and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
 // The caller embeds errMsg in the response item so users know why sync state is unavailable;
 // the connector record is always returned regardless of sync-state fetch outcome.
@@ -848,7 +847,7 @@ func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL s
 		return "unknown", nil, "no api endpoint registered for this service"
 	}
 
-	state, err := catalogclient.NewDigitizeClient(baseURL).GetConnectorSync(ctx, connectorID.String())
+	state, err := catalogclient.NewServiceClient(baseURL).GetConnectorSync(ctx, connectorID.String())
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to fetch sync state for datasource %s from %s: %v", connectorID, baseURL, err)
 
