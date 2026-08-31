@@ -174,7 +174,9 @@ func initCreateCommonFlags() {
 	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
 
-	createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, workerconstants.LocalWorkerName,
+	// TODO: Once runtime deployment is enabled, use default value as workerconstants.LocalWorkerName
+	// createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, workerconstants.LocalWorkerName,
+	createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, "",
 		"Name of a connected remote worker to deploy to.\n"+
 			fmt.Sprintf("Defaults to %q (local deployment).\n", workerconstants.LocalWorkerName)+
 			"Example: --worker node-1\n")

@@ -53,25 +53,6 @@ func (e *DeploymentExecutor) WithWorkerRegistry(reg stream.WorkerRegistry) *Depl
 	return e
 }
 
-// ValidateWorker confirms the named worker is ready before any DB records are
-// written so the API can return 400 immediately.
-func (e *DeploymentExecutor) ValidateWorker(ctx context.Context, workerName string) error {
-	// TODO: Remove when remote deployment is by default
-	if workerName == "" {
-		return nil
-	}
-
-	if e.workerRegistry == nil {
-		return fmt.Errorf("worker deployment is not configured on this server")
-	}
-
-	if !e.workerRegistry.IsWorkerConnected(ctx, workerName) {
-		return fmt.Errorf("worker %q is not connected", workerName)
-	}
-
-	return nil
-}
-
 // ExecuteWithPlan runs the deployment described by plan. DB records have
 // already been written by the caller before this is invoked.
 func (e *DeploymentExecutor) ExecuteWithPlan(

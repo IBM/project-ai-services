@@ -296,6 +296,11 @@ func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName, runt
 		return fmt.Errorf("worker deployment is not configured on this server")
 	}
 
+	// TODO: Remove this when remote deployment is by default
+	if workerName == "" {
+		return nil
+	}
+
 	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {
 		return fmt.Errorf("worker %q is not connected", workerName)
 	}
