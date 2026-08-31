@@ -44,7 +44,7 @@ type DigitizeClientInterface interface {
 // schema.json, keyed on format: "password".
 type DatasourceService struct {
 	connectorRepo   dbrepo.ConnectorRepository
-	serviceRepo     dbrepo.ServiceRepository
+	appRepo         dbrepo.ApplicationRepository
 	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
@@ -60,7 +60,7 @@ type DatasourceService struct {
 // from the environment at call time.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	serviceRepo dbrepo.ServiceRepository,
+	appRepo dbrepo.ApplicationRepository,
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
@@ -69,7 +69,7 @@ func NewDatasourceService(
 ) *DatasourceService {
 	return &DatasourceService{
 		connectorRepo:   connectorRepo,
-		serviceRepo:     serviceRepo,
+		appRepo:         appRepo,
 		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
@@ -454,25 +454,23 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 		}
 	}
 
-	connections := make([]apimodels.DatasourceConnectionItem, 0, len(datasourceIDs))
+	var connErrors []apimodels.DatasourceConnectionError
 
 	for _, datasourceID := range datasourceIDs {
-		connection := apimodels.DatasourceConnectionItem{DatasourceID: datasourceID.String()}
-
-		connectedServiceID, connectErr := s.connectOneDatasource(ctx, datasourceID, linkedServices)
+		_, connectErr := s.connectOneDatasource(ctx, datasourceID, linkedServices)
 		if connectErr != nil {
-			connection.Error = connectErr.Error()
-		} else {
-			connection.ConnectorID = connectedServiceID.String()
+			connErrors = append(connErrors, apimodels.DatasourceConnectionError{
+				DatasourceID: datasourceID.String(),
+				Error:        connectErr.Error(),
+			})
 		}
-
-		connections = append(connections, connection)
 	}
 
-	return &apimodels.ConnectDatasourcesResponse{
-		ApplicationID: applicationID.String(),
-		Connections:   connections,
-	}, nil
+	if len(connErrors) == 0 {
+		return nil, nil
+	}
+
+	return &apimodels.ConnectDatasourcesResponse{Errors: connErrors}, nil
 }
 
 // connectOneDatasource loads, decrypts, and propagates a single datasource connector
@@ -503,31 +501,35 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 
 // eligibleServicesForApp returns the subset of services in applicationID whose catalog
 // entry has AcceptsDatasource == true and which have a registered api-type endpoint.
-// It uses GetServiceEndpointsByAppID — a single JOIN query across services → applications —
-// so endpoint URLs are resolved at the DB level (same pattern as GetLinkedServiceEndpoints
-// in the service-dependency repo used by the AIS_1634 read path).
 func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceRow, error) {
-	all, err := s.serviceRepo.GetServiceEndpointsByAppID(ctx, applicationID)
+	app, err := s.appRepo.GetByID(ctx, applicationID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load services for application: %w", err)
+		return nil, fmt.Errorf("failed to load application: %w", err)
 	}
 
 	var eligible []dbrepo.LinkedServiceRow
 
-	for _, ep := range all {
-		catalogSvc, loadErr := s.catalogProvider.LoadService(ep.ServiceCatalogID)
+	for _, svc := range app.Services {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.CatalogID)
 		if loadErr != nil || !catalogSvc.AcceptsDatasource {
 			continue
 		}
 
-		ep.URL = extractAPIEndpointURL(ep.EndpointsJSON)
-		if ep.URL == "" {
-			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", ep.ServiceID, ep.ServiceCatalogID)
+		endpointsJSON, _ := json.Marshal(svc.Endpoints)
+		url := extractAPIEndpointURL(endpointsJSON)
+		if url == "" {
+			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ID, svc.CatalogID)
 
 			continue
 		}
 
-		eligible = append(eligible, ep)
+		eligible = append(eligible, dbrepo.LinkedServiceRow{
+			ServiceID:        svc.ID,
+			ServiceCatalogID: svc.CatalogID,
+			ApplicationID:    app.ID,
+			ApplicationName:  app.Name,
+			URL:              url,
+		})
 	}
 
 	return eligible, nil
@@ -563,7 +565,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	return decryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
 // sendToService POSTs the connector payload to a single Digitize service and records the
@@ -576,9 +578,7 @@ func (s *DatasourceService) sendToService(
 	datasourceID uuid.UUID,
 ) error {
 	if svc.URL == "" {
-		logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ServiceCatalogID)
-
-		return nil
+		return fmt.Errorf("service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ServiceCatalogID)
 	}
 
 	// Extract allowed_extensions from connection_details — stored there during CreateDatasource.

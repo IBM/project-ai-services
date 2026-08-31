@@ -20,10 +20,6 @@ type ServiceRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	// GetByAppID retrieves all services for a specific application.
 	GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error)
-	// GetServiceEndpointsByAppID returns a LinkedServiceEndpoint row for every service
-	// belonging to appID, including the application context and the first api-type URL.
-	// Used by the connect-datasource flow to resolve service endpoints in one query.
-	GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceRow, error)
 	// Update updates a service in the database.
 	Update(ctx context.Context, service *models.Service) error
 	// UpdateStatus updates only the status and message of a service.
@@ -170,43 +166,6 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 	}
 
 	return services, nil
-}
-
-// GetServiceEndpointsByAppID returns one LinkedServiceEndpoint per service in appID,
-// joining services → applications in a single query to obtain the application context
-// and the first api-type endpoint URL. This mirrors the shape used by
-// GetLinkedServiceEndpoints so the connect-datasource flow can work with the same type.
-func (r *serviceRepo) GetServiceEndpointsByAppID(ctx context.Context, appID uuid.UUID) ([]LinkedServiceRow, error) {
-	query := `
-		SELECT s.id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
-		FROM services     s
-		INNER JOIN applications a ON a.id = s.app_id
-		WHERE s.app_id = $1
-		ORDER BY s.created_at
-	`
-
-	rows, err := r.pool.Query(ctx, query, appID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query service endpoints for app: %w", err)
-	}
-	defer rows.Close()
-
-	var results []LinkedServiceRow
-	for rows.Next() {
-		var row LinkedServiceRow
-
-		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
-			return nil, fmt.Errorf("failed to scan service endpoint row: %w", err)
-		}
-
-		results = append(results, row)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating service endpoint rows: %w", err)
-	}
-
-	return results, nil
 }
 
 // Update updates a service in the database.

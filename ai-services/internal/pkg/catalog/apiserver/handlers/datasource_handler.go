@@ -279,14 +279,15 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 // ConnectDatasourcesToApplication godoc
 //
 //	@Summary		Connect datasources to application
-//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 422 when no eligible running service with an API endpoint is found.
+//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 200 with per-datasource errors when one or more fail.
 //	@Tags			Datasources
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string								true	"Application ID (UUID)"
-//	@Param			request	body		models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
-//	@Success		200		{object}	models.ConnectDatasourcesResponse	"Datasources connected"
+//	@Param			id		path	string								true	"Application ID (UUID)"
+//	@Param			request	body	models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
+//	@Success		204		"All datasources connected successfully"
+//	@Success		200		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
 //	@Failure		400		{object}	ErrorResponse						"Invalid request body"
 //	@Failure		401		{object}	ErrorResponse						"Unauthorized"
 //	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
@@ -340,6 +341,11 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 			Error: "Failed to connect datasources to application",
 		})
 
+		return
+	}
+
+	if resp == nil {
+		c.Status(http.StatusNoContent)
 		return
 	}
 

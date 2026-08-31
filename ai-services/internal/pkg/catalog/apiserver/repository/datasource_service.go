@@ -6,6 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -16,7 +17,7 @@ import (
 // so that a missing or empty key causes a fast failure before the server accepts any requests.
 func NewDatasourceService(
 	connectorRepo dbrepo.ConnectorRepository,
-	serviceRepo dbrepo.ServiceRepository,
+	appRepo dbrepo.ApplicationRepository,
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
 ) (DatasourceServiceInterface, error) {
@@ -29,11 +30,11 @@ func NewDatasourceService(
 
 	return datasourceservice.NewDatasourceService(
 		connectorRepo,
-		serviceRepo,
+		appRepo,
 		svcDepRepo,
 		validator,
 		provider,
-		datasourceservice.NewDigitizeClient(),
+		catalogclient.NewDigitizeClient(""),
 		encryptionKey,
 	), nil
 }

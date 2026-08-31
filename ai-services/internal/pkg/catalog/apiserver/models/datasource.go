@@ -190,17 +190,16 @@ type ConnectDatasourcesRequest struct {
 	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
 }
 
-// DatasourceConnectionItem is the per-datasource result within a ConnectDatasourcesResponse.
-type DatasourceConnectionItem struct {
+// DatasourceConnectionError is a per-datasource error entry in a ConnectDatasourcesResponse.
+type DatasourceConnectionError struct {
 	DatasourceID string `json:"datasource_id"`
-	ConnectorID  string `json:"connector_id,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Error        string `json:"error"`
 }
 
-// ConnectDatasourcesResponse is the response body returned after connecting datasources to an application.
+// ConnectDatasourcesResponse is returned when one or more datasources fail to connect.
+// On full success the handler returns 204 No Content with no body.
 type ConnectDatasourcesResponse struct {
-	ApplicationID string                     `json:"application_id"`
-	Connections   []DatasourceConnectionItem `json:"connections"`
+	Errors []DatasourceConnectionError `json:"errors"`
 }
 
 // Made with Bob

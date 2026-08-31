@@ -369,7 +369,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 422 when no eligible running service with an API endpoint is found.",
+                "description": "Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 200 with per-datasource errors when one or more fail.",
                 "consumes": [
                     "application/json"
                 ],
@@ -400,10 +400,13 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Datasources connected",
+                        "description": "One or more datasources failed to connect",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse"
                         }
+                    },
+                    "204": {
+                        "description": "All datasources connected successfully"
                     },
                     "400": {
                         "description": "Invalid request body",
@@ -2199,13 +2202,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse": {
             "type": "object",
             "properties": {
-                "application_id": {
-                    "type": "string"
-                },
-                "connections": {
+                "errors": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionItem"
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError"
                     }
                 }
             }
@@ -2327,12 +2327,9 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionItem": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError": {
             "type": "object",
             "properties": {
-                "connector_id": {
-                    "type": "string"
-                },
                 "datasource_id": {
                     "type": "string"
                 },

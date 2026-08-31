@@ -29,11 +29,9 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse:
     properties:
-      application_id:
-        type: string
-      connections:
+      errors:
         items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionItem'
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError'
         type: array
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo:
@@ -132,10 +130,8 @@ definitions:
       id:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionItem:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError:
     properties:
-      connector_id:
-        type: string
       datasource_id:
         type: string
       error:
@@ -1118,7 +1114,8 @@ paths:
       - application/json
       description: Links one or more datasource connectors to each eligible (Digitize)
         service in a running application. Each datasource is processed independently.
-        Returns 422 when no eligible running service with an API endpoint is found.
+        Returns 204 when all succeed; returns 200 with per-datasource errors when
+        one or more fail.
       parameters:
       - description: Application ID (UUID)
         in: path
@@ -1135,9 +1132,11 @@ paths:
       - application/json
       responses:
         "200":
-          description: Datasources connected
+          description: One or more datasources failed to connect
           schema:
             $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse'
+        "204":
+          description: All datasources connected successfully
         "400":
           description: Invalid request body
           schema:

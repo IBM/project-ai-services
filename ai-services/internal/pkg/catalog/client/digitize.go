@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -14,7 +15,8 @@ const (
 	// digitizeHTTPTimeout is the per-request timeout for calls to a Digitize pod.
 	digitizeHTTPTimeout = 15 * time.Second
 	// digitizeMaxRetries is the number of retries on failure (one retry = two total attempts).
-	digitizeMaxRetries = 1
+	digitizeMaxRetries  = 1
+	digitizeConnectPath = "/v1/connectors"
 )
 
 // digitizeUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
@@ -93,4 +95,26 @@ func (c *DigitizeClient) GetConnectorSync(ctx context.Context, connectorID strin
 	}
 
 	return &result, nil
+}
+
+// Connect calls POST /v1/connectors on the given Digitize base URL.
+// 409 Conflict is treated as success (idempotent — connector already exists).
+func (c *DigitizeClient) Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error {
+	resp, err := c.http.R().
+		SetContext(ctx).
+		SetBody(req).
+		Post(baseURL + digitizeConnectPath)
+	if err != nil {
+		return fmt.Errorf("digitize POST request failed: %w", err)
+	}
+
+	if resp.StatusCode() == http.StatusConflict {
+		return nil
+	}
+
+	if resp.IsError() {
+		return fmt.Errorf("digitize service returned unexpected status %d", resp.StatusCode())
+	}
+
+	return nil
 }
