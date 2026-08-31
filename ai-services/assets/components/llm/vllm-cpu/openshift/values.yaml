@@ -4,7 +4,7 @@ apiKey: ""
 resources:
   requests:
     cpu: "12"
-    memory: "200Gi"
+    memory: "150Gi"
   limits:
     cpu: "12"
-    memory: "200Gi"
+    memory: "150Gi"
