@@ -80,6 +80,15 @@ func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
 	return out, nil
 }
 
+func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Worker, error) {
+	w, ok := r.workers[name]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 
 // ──────────────────────────────────────────────────────────────────────────────

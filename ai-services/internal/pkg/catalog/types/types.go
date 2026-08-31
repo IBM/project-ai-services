@@ -182,12 +182,48 @@ type ComponentSummary struct {
 
 // Connector holds the metadata loaded from a connector's metadata.yaml file.
 type Connector struct {
-	Type          string `yaml:"type" json:"type"`                     // always "connector"
-	ID            string `yaml:"id" json:"id"`                         // e.g. "object_storage", "file_system"
-	Name          string `yaml:"name" json:"name"`                     // display name
-	Description   string `yaml:"description" json:"description"`       // short description
-	ConnectorType string `yaml:"connector_type" json:"connector_type"` // e.g. "datasource"
-	ConnectorName string `yaml:"connector_name" json:"connector_name"` // display label for connector_type
+	Type          string `yaml:"type"`           // always "connector"
+	ID            string `yaml:"id"`             // e.g. "object_storage", "file_system"
+	Name          string `yaml:"name"`           // provider display name
+	Description   string `yaml:"description"`    // short description
+	ConnectorType string `yaml:"connector_type"` // e.g. "datasource"
+	ConnectorName string `yaml:"connector_name"` // display label for connector_type, e.g. "Data sources"
+}
+
+// ConnectorProvider holds the provider-level fields nested inside ConnectorResponse.
+type ConnectorProvider struct {
+	// ID is the provider identifier (e.g. "object_storage", "file_system").
+	ID string `json:"id"`
+	// Name is the human-readable display name of the provider.
+	Name string `json:"name"`
+	// Description is a short description of the provider.
+	Description string `json:"description"`
+	// Schema is the path to the provider's JSON Schema params endpoint.
+	Schema string `json:"schema"`
+}
+
+// ConnectorResponse is the API response shape for a connector entry.
+type ConnectorResponse struct {
+	// Type is the connector type (e.g. "datasource").
+	Type string `json:"type"`
+	// Name is the display label for the connector type (e.g. "Data sources").
+	Name string `json:"name"`
+	// Provider contains the identity and schema URL of the connector provider.
+	Provider ConnectorProvider `json:"provider"`
+}
+
+// ToConnectorResponse converts a Connector into the API response shape.
+func ToConnectorResponse(c *Connector) ConnectorResponse {
+	return ConnectorResponse{
+		Type: c.ConnectorType,
+		Name: c.ConnectorName,
+		Provider: ConnectorProvider{
+			ID:          c.ID,
+			Name:        c.Name,
+			Description: c.Description,
+			Schema:      "/api/v1/connectors/" + c.ConnectorType + "/providers/" + c.ID + "/params",
+		},
+	}
 }
 
 // RuntimeMetadata contains runtime-specific metadata.

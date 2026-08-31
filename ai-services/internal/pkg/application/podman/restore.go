@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
-	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
+	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
@@ -59,7 +59,7 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 	}
 
 	// Call the OpenSearch-specific restore function
-	return restore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
+	return podmanrestore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
 }
 
 // restoreDigitize restores digitize metadata using the Import API.
@@ -72,8 +72,8 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 		return err
 	}
 
-	// Get digitize service API URL from application details
-	digitizeURL, err := restore.GetDigitizeAPIURL(appDetails)
+	// Get digitize service API URL from catalog service endpoints
+	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
 	if err != nil {
 		return err
 	}

@@ -117,7 +117,7 @@ class TestConnectorCreateRequest:
     def _valid_payload(self, **overrides):
         base = {
             "name": "my-connector",
-            "type": "s3",
+            "type": "file_system",
             "allowed_extensions": [".pdf", ".docx"],
             "connection_details": {"bucket": "my-bucket"},
         }

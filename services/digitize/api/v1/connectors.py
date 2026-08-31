@@ -26,6 +26,7 @@ from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_tim
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from digitize.connectors.models import (
     ConnectorCreateRequest,
+    ConnectorCreateResponse,
     ConnectorDetailResponse,
     ConnectorListItem,
     ConnectorUpdateRequest,
@@ -54,6 +55,7 @@ logger = get_logger("connectors_router")
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=ConnectorCreateResponse,
     responses={
         409: http_error_responses[409],
         500: http_error_responses[500],
@@ -70,17 +72,26 @@ logger = get_logger("connectors_router")
 async def create_connector(body: ConnectorCreateRequest):
     """Create a new connector and schedule its worker.
 
-    Validates connector settings, encrypts credentials, persists the new connector
-    configuration in the database, and schedules the background worker.
+    Checks for duplicate connector id and name via explicit SELECTs before
+    touching the scheduler or writing to the database.  Only once both checks
+    pass is the scheduler job registered and the row inserted.
     """
     connector_id = body.id or str(uuid.uuid4())
     try:
-        encrypted_details = encrypt_secrets(body.type, body.connection_details)
+        # --- Duplicate checks (GET by id, then GET by name) ---
+        if db_ops.get_connector_by_id(connector_id) is not None:
+            msg = f"Connector id {connector_id!r} already exists"
+            logger.error(msg)
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
 
+        if db_ops.get_connector_by_name(body.name) is not None:
+            msg = f"Connector name {body.name!r} already exists"
+            logger.error(msg)
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
+
+        encrypted_details = encrypt_secrets(body.type, body.connection_details)
         sync_interval = settings.digitize.connector.sync_interval_seconds
 
-        # Register the connector with the scheduler so it starts ticking
-        # immediately (fire_immediately=True for the first-ever sync).
         try:
             import digitize.connectors.scheduler as _sched
             await _sched.register_connector_job(
@@ -96,6 +107,7 @@ async def create_connector(body: ConnectorCreateRequest):
                 f"during connector creation: {sched_exc}"
             ) from sched_exc
 
+        # Scheduler job registered — persist the row.
         db_ops.insert_connector(
             connector_id=connector_id,
             name=body.name,
@@ -112,23 +124,20 @@ async def create_connector(body: ConnectorCreateRequest):
 
         return Response(
             content=f'{{"id": "{connector_id}"}}',
-            status_code=201,
+            status_code=202,
             media_type="application/json",
         )
 
     except IntegrityError:
-        # id or name already exists
-        logger.error(f"Connector {connector_id!r} or name {body.name!r} already exists")
-        APIError.raise_error(
-            ErrorCode.RESOURCE_LOCKED,
-            f"Connector {connector_id!r} or name {body.name!r} already exists",
-        )
+        msg = f"Connector {connector_id!r} already exists"
+        logger.error(msg)
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
     except RuntimeError as exc:
-        # encryption key not found
-        logger.error(f"Encryption key error: {exc}")
+        # encryption key not found, or scheduler registration failure
+        logger.error(f"Runtime error creating connector: {exc}")
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Failed to create connector {connector_id!r} (name={body.name!r}): encryption error — {exc}",
+            f"Failed to create connector {connector_id!r} (name={body.name!r}): {exc}",
         )
     except HTTPException as exc:
         message = f"Failed to create connector {connector_id!r}: {extract_http_error_message(exc)}"
@@ -174,7 +183,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         if body.name is None and body.allowed_extensions is None and body.connection_details is None:
             return Response(status_code=200)
 
-        existing = db_ops.get_active_connector(connector_id)
+        existing = db_ops.get_connector_by_id(connector_id)
         if existing is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -273,7 +282,7 @@ async def delete_connector(connector_id: str):
         return 204 immediately.
     """
     try:
-        connector = db_ops.get_active_connector(connector_id)
+        connector = db_ops.get_connector_by_id(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -535,7 +544,7 @@ async def get_connector(connector_id: str):
     Strips out any sensitive/secret connection details from the response.
     """
     try:
-        connector = db_ops.get_active_connector(connector_id)
+        connector = db_ops.get_connector_by_id(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -616,7 +625,7 @@ async def dispatch_sync(connector_id: str) -> int:
     """
     from digitize.connectors.sync_tick import run_tick
 
-    connector = db_ops.get_active_connector(connector_id)
+    connector = db_ops.get_connector_by_id(connector_id)
     if connector is None:
         raise SyncNotFound(f"Connector {connector_id!r} not found")
     if connector.sync_status == ConnectorStatus.DELETE_PENDING:
@@ -726,7 +735,7 @@ async def cancel_sync(connector_id: str, sync_seq: int):
     Sends a cancellation signal to the connector worker.
     """
     try:
-        connector = db_ops.get_active_connector(connector_id)
+        connector = db_ops.get_connector_by_id(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -789,7 +798,7 @@ async def get_sync_history(
 ):
     """Retrieve a paginated history of sync runs for a specific connector."""
     try:
-        connector = db_ops.get_active_connector(connector_id)
+        connector = db_ops.get_connector_by_id(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -847,7 +856,7 @@ async def get_sync_history(
 async def get_sync(connector_id: str, sync_seq: int):
     """Retrieve details of a single sync run by its sequence number."""
     try:
-        connector = db_ops.get_active_connector(connector_id)
+        connector = db_ops.get_connector_by_id(connector_id)
         if connector is None:
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,

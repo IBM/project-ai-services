@@ -16,6 +16,42 @@ definitions:
     - provider_id
     - version
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem:
+    properties:
+      application_id:
+        description: ApplicationID is the UUID of the application that owns this service.
+        type: string
+      application_name:
+        description: ApplicationName is the human-readable display name of the owning
+          application.
+        type: string
+      err_msg:
+        description: |-
+          ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
+          no endpoint registered). Empty on success.
+        type: string
+      last_sync_at:
+        description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
+          or null when unavailable.
+        type: string
+      service:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo'
+        description: Service contains the catalog identity (id + resolved name) of
+          the owning application.
+      sync_status:
+        description: |-
+          SyncStatus is the current sync state sourced from the Digitize pod.
+          Set to "unknown" when the Digitize pod is unreachable.
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
       catalog_id:
@@ -29,6 +65,11 @@ definitions:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
         type: array
       version:
+        type: string
+      worker_name:
+        description: |-
+          WorkerName is the name of a connected remote worker to deploy to.
+          When empty the application is deployed locally.
         type: string
     required:
     - catalog_id
@@ -108,6 +149,62 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse:
+    properties:
+      created_at:
+        description: CreatedAt is the creation timestamp.
+        type: string
+      id:
+        description: ID is the UUID of the datasource connector.
+        type: string
+      message:
+        description: Message contains a human-readable description of the current
+          status (may be empty).
+        type: string
+      metadata:
+        additionalProperties: {}
+        description: |-
+          Metadata holds the non-sensitive configuration fields.
+          Sensitive fields (e.g. secret_access_key, private_key) are always stripped.
+        type: object
+      name:
+        description: Name is the unique human-readable label.
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+        description: Provider contains the provider ID and its resolved display name.
+      services:
+        description: |-
+          Services lists every service currently connected to this datasource,
+          enriched with live sync state from each service's Digitize pod.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem'
+        type: array
+      status:
+        description: Status is the current connectivity status ("connected" or "offline").
+        type: string
+      type:
+        description: Type is always "datasource".
+        type: string
+      updated_at:
+        description: UpdatedAt is the last-update timestamp.
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError:
+    properties:
+      application_id:
+        description: ApplicationID is the UUID of the application whose Digitize service
+          could not be updated.
+        type: string
+      application_name:
+        description: ApplicationName is the display name of that application, for
+          UI rendering.
+        type: string
+      error:
+        description: Error is the human-readable reason the propagation failed.
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
       catalog_id:
@@ -126,6 +223,48 @@ definitions:
     - catalog_id
     - components
     - version
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest:
+    properties:
+      params:
+        additionalProperties: {}
+        description: |-
+          Params holds the credential fields to update. Only fields in the provider's
+          schema whose ui:section is "Authentication" may be changed; structural fields
+          are filtered out server-side.
+          Note: binding:"required" only prevents null/missing — an empty map is rejected in the
+          service layer, which also validates that at least one updatable field is present.
+        type: object
+    required:
+    - params
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      propagation_errors:
+        description: |-
+          PropagationErrors lists any downstream Digitize propagation failures.
+          Omitted when all propagations succeeded.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError'
+        type: array
+      provider:
+        type: string
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
     properties:
@@ -350,25 +489,34 @@ definitions:
       type:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider:
     properties:
-      connector_name:
-        description: display label for connector_type
-        type: string
-      connector_type:
-        description: e.g. "datasource"
-        type: string
       description:
-        description: short description
+        description: Description is a short description of the provider.
         type: string
       id:
-        description: e.g. "object_storage", "file_system"
+        description: ID is the provider identifier (e.g. "object_storage", "file_system").
         type: string
       name:
-        description: display name
+        description: Name is the human-readable display name of the provider.
         type: string
+      schema:
+        description: Schema is the path to the provider's JSON Schema params endpoint.
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse:
+    properties:
+      name:
+        description: Name is the display label for the connector type (e.g. "Data
+          sources").
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider'
+        description: Provider contains the identity and schema URL of the connector
+          provider.
       type:
-        description: always "connector"
+        description: Type is the connector type (e.g. "datasource").
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference:
@@ -1554,7 +1702,7 @@ paths:
           description: List of providers
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse'
             type: array
         "401":
           description: Unauthorized
@@ -1739,6 +1887,95 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete datasource connector
+      tags:
+      - Datasources
+    get:
+      description: Returns the full details of a datasource connector including non-sensitive
+        metadata and the list of connected services enriched with live sync state
+        from each service's Digitize pod.
+      parameters:
+      - description: Datasource UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource detail
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse'
+        "400":
+          description: Invalid UUID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a single datasource connector
+      tags:
+      - Datasources
+    put:
+      consumes:
+      - application/json
+      description: Updates the Authentication credential fields for a datasource as
+        defined in the provider schema. Re-runs the connectivity test before saving.
+        If any linked Digitize services cannot be notified, the datasource is still
+        updated and the failures are listed in propagation_errors.
+      parameters:
+      - description: Datasource ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Credential update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource updated
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse'
+        "400":
+          description: Invalid request body or invalid ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Connection test failed with new credentials
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update datasource credentials
       tags:
       - Datasources
   /resources:

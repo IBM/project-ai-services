@@ -30,7 +30,7 @@ Coverage areas
 5. db/manager.py      – upsert_file_checksum (insert + on-conflict update)
                       – find_completed_document_by_hash (match / no-match / DB error)
                       – delete_document removes checksum registry row first
-                      – delete_all_documents wipes checksum registry
+                      – delete_user_documents skips connector docs, wipes user checksum registry
                       – get_all_documents excludes already_exists by default
 """
 
@@ -1026,29 +1026,46 @@ class TestDatabaseManagerDeleteDocumentClearsChecksum:
 
 
 @pytest.mark.unit
-class TestDatabaseManagerDeleteAllDocumentsClearsRegistry:
-    """delete_all_documents must wipe the checksum registry."""
+class TestDatabaseManagerDeleteUserDocuments:
+    """delete_user_documents must skip connector-sourced docs and wipe checksum registry."""
 
-    def test_execute_called_twice(self):
+    def test_returns_early_when_no_user_docs(self):
         session = MagicMock()
-        session.execute.return_value = Mock(rowcount=3)
+        session.scalars.return_value = Mock(all=Mock(return_value=[]))
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            DatabaseManager.delete_all_documents()
+            result = DatabaseManager.delete_user_documents()
 
-        # First call: wipe registry. Second call: delete all documents.
-        assert session.execute.call_count == 2
+        # No execute calls — short-circuits when doc_ids is empty.
+        assert session.execute.call_count == 0
+        assert result == {"deleted_count": 0, "doc_ids": [], "success": True}
+
+    def test_execute_called_three_times_when_user_docs_exist(self):
+        session = MagicMock()
+        session.scalars.return_value = Mock(all=Mock(return_value=["doc-1", "doc-2"]))
+        session.execute.return_value = Mock(rowcount=2)
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            DatabaseManager.delete_user_documents()
+
+        # 1st execute: delete checksum registry rows.
+        # 2nd execute: delete shadow already_exists docs.
+        # 3rd execute: delete the documents themselves.
+        assert session.execute.call_count == 3
 
     def test_returns_deleted_count(self):
         session = MagicMock()
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=5)]
+        session.scalars.return_value = Mock(all=Mock(return_value=["doc-1", "doc-2"]))
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=2)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            result = DatabaseManager.delete_all_documents()
+            result = DatabaseManager.delete_user_documents()
 
-        assert result["deleted_count"] == 5
+        assert result["deleted_count"] == 2
+        assert result["success"] is True
 
 
 @pytest.mark.unit
