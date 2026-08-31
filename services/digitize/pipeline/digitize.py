@@ -17,10 +17,17 @@ from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager
-from digitize.db.manager import db_manager
 from digitize.exceptions import JobCancelledError
 
 logger = get_logger("digitize")
+
+# Terminal statuses that end polling — includes CANCELLED so a cancelled task
+# does not leave the poll loop spinning until the deadline expires.
+_POLL_TERMINAL = frozenset({
+    ConversionTaskStatus.COMPLETED,
+    ConversionTaskStatus.FAILED,
+    ConversionTaskStatus.CANCELLED,
+})
 
 
 def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
@@ -64,7 +71,8 @@ def digitize(
 ):
     """
     Poll the conversion_tasks row until the dispatcher marks it terminal
-    (completed or failed), then update job and document status accordingly.
+    (completed, failed, or cancelled), then update job and document status
+    accordingly.
 
     The dispatcher handles conversion, semaphore management, and writes
     result_path / error to the task row.  This function owns all
@@ -96,17 +104,36 @@ def digitize(
     timeout_s = settings.digitize.conversion_timeout_s
     deadline = time.monotonic() + timeout_s
 
-    # Check cancellation before entering the ProcessPoolExecutor — the only safe abort point
+    # Check cancellation before starting to poll
     if job_id and db_manager.is_job_cancelled(job_id):
+        db_manager.cancel_tasks_for_job(job_id)
         raise JobCancelledError(f"Job {job_id} was cancelled before digitization started")
 
     try:
         # Phase 1: wait until the dispatcher picks up the task (queued → running).
+        # Also stops on CANCELLED so a cancel that arrives during the queued phase
+        # is observed immediately without waiting for the deadline.
         task = _poll_until(
             job_id,
-            {ConversionTaskStatus.RUNNING, ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            {
+                ConversionTaskStatus.RUNNING,
+                ConversionTaskStatus.COMPLETED,
+                ConversionTaskStatus.FAILED,
+                ConversionTaskStatus.CANCELLED,
+            },
             deadline, timeout_s, "start",
         )
+
+        # CANCELLED observed in phase 1 — signal the dispatcher (idempotent) and
+        # raise so the caller handles the cancellation cleanup.
+        if task is not None and task.status == ConversionTaskStatus.CANCELLED:
+            raise JobCancelledError(f"Job {job_id} conversion task was cancelled")
+
+        # Also check the job flag in case cancellation arrived between the check
+        # above and the dispatcher setting the task status.
+        if job_id and db_manager.is_job_cancelled(job_id):
+            db_manager.cancel_tasks_for_job(job_id)
+            raise JobCancelledError(f"Job {job_id} was cancelled during conversion")
 
         # Mark IN_PROGRESS as soon as the dispatcher starts running.
         if task is not None and task.status == ConversionTaskStatus.RUNNING and doc_id:
@@ -116,9 +143,13 @@ def digitize(
         # Phase 2: wait until the dispatcher reaches a terminal state.
         task = _poll_until(
             job_id,
-            {ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            _POLL_TERMINAL,
             deadline, timeout_s, "complete",
         )
+
+        # CANCELLED observed in phase 2
+        if task is not None and task.status == ConversionTaskStatus.CANCELLED:
+            raise JobCancelledError(f"Job {job_id} conversion task was cancelled during execution")
 
     except _DeadlineExceeded as exc:
         _fail(str(exc))

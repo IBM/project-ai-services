@@ -1968,7 +1968,11 @@ class DatabaseManager:
                 }
                 if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
+                if status in (
+                    ConversionTaskStatus.COMPLETED,
+                    ConversionTaskStatus.FAILED,
+                    ConversionTaskStatus.CANCELLED,
+                ):
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -1985,6 +1989,50 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             logger.error(f"DB error updating task {task_id}: {e}", exc_info=True)
             return False
+
+    @staticmethod
+    def cancel_tasks_for_job(job_id: str) -> int:
+        """
+        Mark all non-terminal ConversionTask rows for ``job_id`` as
+        ``cancel_pending`` so the dispatcher will stop them at the next
+        safe checkpoint.
+
+        Only tasks in the active pre-terminal statuses (pending, queued,
+        running) are touched.  Tasks already in completed, failed,
+        cancel_pending, or cancelled are left unchanged.
+
+        Returns:
+            Number of rows updated.
+        """
+        active_statuses = [
+            ConversionTaskStatus.PENDING,
+            ConversionTaskStatus.QUEUED,
+            ConversionTaskStatus.RUNNING,
+        ]
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status.in_(active_statuses),
+                    )
+                    .values(status=ConversionTaskStatus.CANCEL_PENDING)
+                )
+                result = cast(CursorResult, session.execute(stmt))
+                updated = result.rowcount
+                if updated:
+                    logger.info(
+                        f"cancel_tasks_for_job: marked {updated} task(s) "
+                        f"as cancel_pending for job {job_id}"
+                    )
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in cancel_tasks_for_job({job_id}): {e}", exc_info=True
+            )
+            return 0
+
 
     @staticmethod
     def peek_head(operation: str) -> Optional[ConversionTask]:

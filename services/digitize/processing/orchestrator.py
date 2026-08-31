@@ -540,7 +540,8 @@ def process_documents(
     # can abort mid-table-summarization without waiting for all LLM calls.
     _process_stop_event = threading.Event()
 
-    is_cancelled = False  # latched True on first cancellation; never reset
+    is_cancelled = False        # latched True on first cancellation; never reset
+    _tasks_cancel_signalled = False  # tracks whether cancel_tasks_for_job has been called
 
     worker_count = max(1, min(WORKER_SIZE, len(input_paths)))
 
@@ -555,8 +556,13 @@ def process_documents(
                 is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
                 if is_cancelled:
                     _process_stop_event.set()
+                    # Signal the dispatcher to stop any pending/queued/running conversion
+                    # tasks belonging to this job.  Done exactly once on first detection.
+                    if not _tasks_cancel_signalled:
+                        db_manager.cancel_tasks_for_job(job_id)
+                        _tasks_cancel_signalled = True
 
-                # --- A. React to completed/failed conversion tasks ---
+                # --- A. React to completed/failed/cancelled conversion tasks ---
                 timeout_s = settings.digitize.conversion_timeout_s
                 for task_id in list(pending_task_ids):
                     if is_cancelled:
@@ -570,7 +576,12 @@ def process_documents(
                         pending_task_ids.discard(task_id)
                         task_deadlines.pop(task_id, None)
                         continue
-                    if task.status not in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
+                    _terminal = (
+                        ConversionTaskStatus.COMPLETED,
+                        ConversionTaskStatus.FAILED,
+                        ConversionTaskStatus.CANCELLED,
+                    )
+                    if task.status not in _terminal:
                         # Start the deadline clock the first time we see this task.
                         if task_id not in task_deadlines:
                             task_deadlines[task_id] = time.monotonic() + timeout_s
@@ -646,6 +657,15 @@ def process_documents(
                             status_mgr.update_job_progress(
                                 doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS
                             )
+
+                    elif task.status == ConversionTaskStatus.CANCELLED:
+                        # Dispatcher acknowledged the cancel — the job-level cancel
+                        # handler (_run_ingest / _run_digitize) will set the final
+                        # doc/job status to CANCELLED; nothing more to do here.
+                        converted_pdf_stats.pop(path, None)
+                        logger.info(
+                            f"Conversion task {task_id} was cancelled by dispatcher"
+                        )
 
                 # --- B. Drain completed process futures → submit chunking ---
                 for fut in list(process_futures):

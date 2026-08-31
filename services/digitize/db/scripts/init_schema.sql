@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     completed_at    TIMESTAMPTZ,
     CONSTRAINT chk_ct_operation    CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_ct_output_format CHECK (output_format IN ('json', 'md', 'txt')),
-    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'))
+    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancel_pending', 'cancelled'))
 );
 
 -- Supports dispatcher pick query (ORDER BY queued_at per status + operation)

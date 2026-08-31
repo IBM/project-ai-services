@@ -318,11 +318,13 @@ class ConnectorSyncLog(Base):
 
 class ConversionTaskStatus(str, enum.Enum):
     """Lifecycle statuses for a ConversionTask row."""
-    PENDING   = "pending"    # over-quota; waiting for queue headroom
-    QUEUED    = "queued"     # admitted to queue; waiting for semaphore slot
-    RUNNING   = "running"    # semaphore slot acquired
-    COMPLETED = "completed"  # conversion finished successfully
-    FAILED    = "failed"     # conversion failed or timed out
+    PENDING        = "pending"         # over-quota; waiting for queue headroom
+    QUEUED         = "queued"          # admitted to queue; waiting for semaphore slot
+    RUNNING        = "running"         # semaphore slot acquired
+    COMPLETED      = "completed"       # conversion finished successfully
+    FAILED         = "failed"          # conversion failed or timed out
+    CANCEL_PENDING = "cancel_pending"  # cancellation requested; dispatcher will stop before or after current chunk
+    CANCELLED      = "cancelled"       # dispatcher acknowledged cancellation and halted
 
 
 class ConversionTask(Base):
@@ -391,7 +393,7 @@ class ConversionTask(Base):
             name="chk_ct_output_format",
         ),
         CheckConstraint(
-            "status IN ('pending', 'queued', 'running', 'completed', 'failed')",
+            "status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancel_pending', 'cancelled')",
             name="chk_ct_status",
         ),
         # Supports dispatcher's pick query (ORDER BY queued_at per status+operation)
