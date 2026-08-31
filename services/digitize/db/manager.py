@@ -1396,6 +1396,41 @@ class DatabaseManager:
             return False
 
     @staticmethod
+    def increment_ingested_files(connector_id: str, seq: int, count: int = 1) -> bool:
+        """
+        Atomically increment ingested_files by *count* on the identified sync-log row.
+
+        Uses a SQL expression (ingested_files + count) so concurrent calls do
+        not race against each other.  Returns True if the row was found and
+        updated, False otherwise.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
+                    .values(
+                        ingested_files=ConnectorSyncLog.ingested_files + count
+                    )
+                )
+                result = session.execute(stmt)
+                updated = result.rowcount > 0
+                if not updated:
+                    logger.warning(
+                        f"Sync log connector={connector_id!r} seq={seq} not found for ingested_files increment"
+                    )
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in increment_ingested_files(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
     def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
         """
         Return the status of a specific sync-log row identified by (connector_id, seq).

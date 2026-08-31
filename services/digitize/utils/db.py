@@ -1507,6 +1507,15 @@ def update_sync_log(
     )
 
 
+def increment_ingested_files(connector_id: str, seq: int, count: int = 1) -> bool:
+    """
+    Atomically increment the ingested_files counter on a sync-log row.
+
+    Returns True on success, False if the row was not found.
+    """
+    return db_manager.increment_ingested_files(connector_id=connector_id, seq=seq, count=count)
+
+
 def list_sync_logs(
     connector_id: str,
     limit: int = 50,

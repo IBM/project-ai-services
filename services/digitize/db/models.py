@@ -268,6 +268,7 @@ class ConnectorSyncLog(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     new_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ingested_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     removed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")

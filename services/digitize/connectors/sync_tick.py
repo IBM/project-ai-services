@@ -52,6 +52,7 @@ from digitize.utils.db import (
     get_connector_sync_status,
     get_sync_log_status,
     get_job,
+    increment_ingested_files,
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
@@ -261,12 +262,21 @@ _BATCH_SIZE = 10
 _JOB_POLL_INTERVAL = 10  # seconds between job-status polls while waiting for a batch
 
 
-async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
+async def _wait_for_job(
+    job_id: str,
+    connector_id: str,
+    sync_seq: int,
+) -> None:
     """Poll *job_id* until it reaches a terminal state.
 
     Sleeps *_JOB_POLL_INTERVAL* seconds between polls.  On every wake-up it
     also calls ``_check_interrupt_call`` so that a deletion/cancel request is
     honoured promptly even while the batch is running.
+
+    On each poll that returns job data, any documents that have newly moved into
+    a completed state are counted and ``increment_ingested_files`` is called
+    immediately so the sync log reflects real-time progress rather than a single
+    bulk update at the end.
 
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
@@ -282,6 +292,15 @@ async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
         job_data = get_job(job_id)
         status = (job_data or {}).get("status", "")
         logger.debug(f"Polling job {job_id!r} for connector {connector_id!r}: status={status!r}")
+
+        # Count any docs that newly reached 'completed' since the last poll.
+        job_stats = get_job_document_stats(job_id)
+        completed_count = len(job_stats["completed_docs"])
+        newly_completed = completed_count - prev_completed_count
+        if newly_completed > 0:
+            prev_completed_count = completed_count
+            increment_ingested_files(connector_id, sync_seq, count=newly_completed)
+
         if status in _TERMINAL:
             break
 

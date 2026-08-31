@@ -250,12 +250,14 @@ class TestSyncLogItem:
             finished_at="2024-01-01T00:05:00Z",
             total_files=100,
             new_files=10,
+            ingested_files=10,
             removed_files=2,
             status="completed",
             error="",
         )
         assert item.seq == 1
         assert item.error == ""
+        assert item.ingested_files == 10
 
 
 class TestSyncLogResponse:
@@ -266,6 +268,7 @@ class TestSyncLogResponse:
             finished_at=None,
             total_files=5,
             new_files=5,
+            ingested_files=3,
             removed_files=0,
             status="started",
             error="",
@@ -293,6 +296,7 @@ class TestSyncLogDetailResponse:
             finished_at=None,
             total_files=0,
             new_files=0,
+            ingested_files=0,
             removed_files=0,
             status="failed",
             error="something went wrong",
