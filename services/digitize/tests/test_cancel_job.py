@@ -347,14 +347,16 @@ class TestRunDigitize:
                 doc_id_dict={"sample.pdf": "doc-active"},
             )
 
-        # Completed doc must NOT be touched
-        update_calls = mock_db.update_document.call_args_list
-        updated_doc_ids = [c.args[0] for c in update_calls]
+        # Completed doc must NOT be touched via status manager
+        doc_meta_calls = mock_status_mgr.update_doc_metadata.call_args_list
+        updated_doc_ids = [c.args[0] for c in doc_meta_calls]
         assert "doc-done" not in updated_doc_ids
 
-        # In-progress doc must be marked CANCELLED
+        # In-progress doc must be marked CANCELLED via status manager
         assert "doc-active" in updated_doc_ids
-        mock_db.update_job.assert_called_once_with(job_id, status=JobStatus.CANCELLED)
+        mock_status_mgr.update_job_progress.assert_called_once_with(
+            "", DocStatus.CANCELLED, JobStatus.CANCELLED
+        )
 
     @pytest.mark.asyncio
     async def test_terminal_docs_are_not_overwritten_on_cancellation(self, tmp_path):
@@ -453,19 +455,23 @@ class TestRunIngest:
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
 
+        mock_status_mgr = Mock()
+
         with (
             patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
             patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
+            patch("digitize.api.v1.jobs.get_status_manager", return_value=mock_status_mgr),
             patch("digitize.api.v1.jobs.cleanup_staging_directory"),
             patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
             await jobs_module._run_ingest(job_id, {"file.pdf": "doc-pending"})
 
-        updated = [c.args[0] for c in mock_db.update_document.call_args_list]
+        updated = [c.args[0] for c in mock_status_mgr.update_doc_metadata.call_args_list]
         assert "doc-pending" in updated
         assert "doc-done" not in updated
-        mock_db.update_job.assert_called_once_with(job_id, status=JobStatus.CANCELLED)
+        mock_status_mgr.update_job_progress.assert_called_once_with(
+            "", DocStatus.CANCELLED, JobStatus.CANCELLED
+        )
 
     @pytest.mark.asyncio
     async def test_clean_files_true_removes_vector_db_entries(self, tmp_path):

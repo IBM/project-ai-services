@@ -9,6 +9,7 @@ Exposes one router:
 """
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -41,6 +42,7 @@ async def _run_digitize(
 
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Digitization started for job: {job_id}")
         from digitize.pipeline.digitize import digitize
@@ -57,11 +59,13 @@ async def _run_digitize(
                 models.DocStatus.CANCELLED.value,
                 models.DocStatus.ALREADY_EXISTS.value,
             ):
-                db_manager.update_document(doc.doc_id, status=models.DocStatus.CANCELLED)
-        db_manager.update_job(job_id, status=models.JobStatus.CANCELLED)
+                status_mgr.update_doc_metadata(
+                    doc.doc_id,
+                    {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
+                )
+        status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
     except Exception as exc:
         logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
@@ -84,6 +88,7 @@ async def _run_ingest(
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
     job_staging_path = settings.digitize.staging_dir / job_id
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
         from digitize.pipeline.ingest import ingest
@@ -101,8 +106,11 @@ async def _run_ingest(
         }
         for doc in docs:
             if doc.status not in terminal:
-                db_manager.update_document(doc.doc_id, status=models.DocStatus.CANCELLED)
-        db_manager.update_job(job_id, status=models.JobStatus.CANCELLED)
+                status_mgr.update_doc_metadata(
+                    doc.doc_id,
+                    {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
+                )
+        status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
 
         # Sub-Task 6: clean vector DB if requested
         try:
@@ -130,7 +138,6 @@ async def _run_ingest(
 
     except Exception as exc:
         logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
