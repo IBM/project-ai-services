@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 
+	"github.com/google/uuid"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
@@ -24,6 +25,10 @@ type WorkerRegistry interface {
 	// WorkerMetadata returns the registration metadata for the named worker, or
 	// (nil, false) if the worker is not connected.
 	WorkerMetadata(workerName string) (map[string]string, bool)
+
+	// WorkerID returns the database UUID of the named worker, or (uuid.Nil, false)
+	// if the worker is not connected.
+	WorkerID(workerName string) (uuid.UUID, bool)
 
 	// IsWorkerConnected reports whether the named worker has status=ready in the DB.
 	IsWorkerConnected(ctx context.Context, workerName string) bool

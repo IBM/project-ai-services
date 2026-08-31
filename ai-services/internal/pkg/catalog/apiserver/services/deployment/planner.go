@@ -287,6 +287,17 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 	return totalSpyreCards, nil
 }
 
+// WorkerDBID returns the database UUID for the named worker by consulting the
+// in-memory registry. Returns (uuid.Nil, false) when the worker is not
+// connected or the registry is nil (local-only server).
+func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
+	if p.workerRegistry == nil {
+		return uuid.Nil, false
+	}
+
+	return p.workerRegistry.WorkerID(workerName)
+}
+
 // ValidateWorker confirms the named remote worker is connected and, for Podman
 // workers, that the required Caddy metadata (domainSuffix, httpsPort) is
 // present. Called from PlanDeployment before any DB records are written so the
