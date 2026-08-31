@@ -361,6 +361,22 @@ func (r *Registry) WorkerID(workerName string) (uuid.UUID, bool) {
 	return entry.DBID, true
 }
 
+// WorkerNameByID returns the name of the worker whose DBID matches id.
+// Scans the in-memory map under a read lock — O(n) but n is tiny in practice.
+// Returns ("", false) if no connected worker has that ID.
+func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for name, entry := range r.workers {
+		if entry.DBID == id {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
 // IsWorkerConnected checks the in-memory cache first, then confirms status=ready
 // in the DB. Returns false if the worker is absent from the cache, not found in
 // the DB, or has any status other than ready.

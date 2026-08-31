@@ -90,24 +90,23 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
 	}
 
-	// Initialize sync service for background DB-Pod synchronization
-	// TODO: implement sync service on remote machines
-	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider)
-	if err != nil {
-		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
-	}
-	syncService.Start(ctx)
-
 	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, svcDepRepo, catalogProvider)
 	if err != nil {
-		syncService.Stop(ctx)
-
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
 	}
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	workerRepo := repository.NewWorkerRepository(pool)
 	workerReg := workerregistry.New(workerRepo)
+
+	// Initialize sync service for background DB-Pod synchronization.
+	// workerReg is passed so the sync service can use a RemoteRuntime for apps
+	// deployed on remote workers.
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider, workerReg)
+	if err != nil {
+		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
 
 	var authSvc auth.Service
 	if manageiqURL != "" {

@@ -30,6 +30,10 @@ type WorkerRegistry interface {
 	// if the worker is not connected.
 	WorkerID(workerName string) (uuid.UUID, bool)
 
+	// WorkerNameByID returns the name of the worker with the given database UUID,
+	// or ("", false) if no connected worker has that ID.
+	WorkerNameByID(id uuid.UUID) (string, bool)
+
 	// IsWorkerConnected reports whether the named worker has status=ready in the DB.
 	IsWorkerConnected(ctx context.Context, workerName string) bool
 }
