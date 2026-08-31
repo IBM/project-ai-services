@@ -51,6 +51,7 @@ VALID_EXTRACTION = {
 
 def _mock_schema_row(
     schema_id="schema-001",
+    name="my-schema",
     json_schema=None,
     examples=None,
     custom_prompt=None,
@@ -60,6 +61,7 @@ def _mock_schema_row(
 ):
     row = Mock()
     row.schema_id = schema_id
+    row.name = name
     row.json_schema = json_schema or SIMPLE_SCHEMA
     row.examples = examples
     row.custom_prompt = custom_prompt
@@ -286,6 +288,16 @@ class TestExtractionRequestModel:
         assert req.text == "hello"
         assert req.schema_id == "abc-123"
 
+    def test_valid_with_schema_name(self):
+        req = ExtractionRequest(text="hello", schema_name="my-schema")
+        assert req.schema_name == "my-schema"
+        assert req.schema_id is None
+
+    def test_valid_with_both_schema_id_and_name(self):
+        req = ExtractionRequest(text="hello", schema_id="abc-123", schema_name="my-schema")
+        assert req.schema_id == "abc-123"
+        assert req.schema_name == "my-schema"
+
     def test_empty_text_rejected(self):
         with pytest.raises(Exception):
             ExtractionRequest(text="", schema_id="abc")
@@ -294,13 +306,20 @@ class TestExtractionRequestModel:
         with pytest.raises(Exception):
             ExtractionRequest(text="hello", schema_id="")
 
+    def test_empty_schema_name_rejected(self):
+        with pytest.raises(Exception):
+            ExtractionRequest(text="hello", schema_name="")
+
     def test_missing_text_rejected(self):
         with pytest.raises(Exception):
             ExtractionRequest(schema_id="abc")
 
-    def test_missing_schema_id_rejected(self):
-        with pytest.raises(Exception):
-            ExtractionRequest(text="hello")
+    def test_schema_id_and_name_both_optional(self):
+        """Both schema_id and schema_name are optional at the model level.
+        The endpoint validates that at least one is provided."""
+        req = ExtractionRequest(text="hello")
+        assert req.schema_id is None
+        assert req.schema_name is None
 
 
 # ---------------------------------------------------------------------------
@@ -378,10 +397,11 @@ class TestExtractSyncEndpoint:
         )
         assert resp.status_code == 422
 
-    def test_400_missing_schema_id(self, extract_test_client):
+    def test_400_missing_schema_id_and_name(self, extract_test_client):
+        """Neither schema_id nor schema_name → 400 INVALID_REQUEST."""
         resp = extract_test_client.post("/v1/extract", json={"text": "hello"})
-        assert resp.status_code == 422
-        assert resp.json()["detail"][0]["type"] == "missing"
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
     def test_400_missing_text(self, extract_test_client):
         resp = extract_test_client.post("/v1/extract", json={"schema_id": "abc"})
@@ -395,6 +415,85 @@ class TestExtractSyncEndpoint:
         )
         assert resp.status_code == 422
         assert resp.json()["detail"][0]["type"] == "string_too_short"
+
+    # ── schema_name resolution ────────────────────────────────────────────
+
+    def test_200_resolve_by_schema_name(self, extract_test_client, monkeypatch):
+        """schema_name resolves the schema when schema_id is omitted."""
+        schema_row = _mock_schema_row()
+        good_json = json.dumps(VALID_EXTRACTION)
+        _setup_happy_path(monkeypatch, schema_row, input_tokens=100, raw_output=good_json)
+        monkeypatch.setattr(
+            "extract.api.v1.jobs.db_repo.get_schema_by_name",
+            Mock(return_value=schema_row),
+        )
+
+        resp = extract_test_client.post(
+            "/v1/extract",
+            json={"text": "some invoice text", "schema_name": "my-schema"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["extraction"] == VALID_EXTRACTION
+
+    def test_schema_id_takes_priority_over_schema_name(self, extract_test_client, monkeypatch):
+        """When both schema_id and schema_name are given, schema_id is used."""
+        schema_row = _mock_schema_row()
+        good_json = json.dumps(VALID_EXTRACTION)
+        _setup_happy_path(monkeypatch, schema_row, input_tokens=100, raw_output=good_json)
+        mock_by_name = Mock(return_value=schema_row)
+        monkeypatch.setattr("extract.api.v1.jobs.db_repo.get_schema_by_name", mock_by_name)
+
+        resp = extract_test_client.post(
+            "/v1/extract",
+            json={"text": "hello", "schema_id": "schema-001", "schema_name": "my-schema"},
+        )
+
+        assert resp.status_code == 200
+        mock_by_name.assert_not_called()
+
+    def test_400_schema_id_and_name_mismatch(self, extract_test_client, monkeypatch):
+        """Both schema_id and schema_name provided but name does not match the resolved row → 400."""
+        schema_row = _mock_schema_row(name="actual-schema-name")
+        monkeypatch.setattr(
+            "extract.api.v1.jobs.db_repo.get_schema_by_id", Mock(return_value=schema_row)
+        )
+
+        resp = extract_test_client.post(
+            "/v1/extract",
+            json={"text": "hello", "schema_id": "schema-001", "schema_name": "wrong-name"},
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert "not for the same record" in resp.json()["error"]["message"]
+
+    def test_200_schema_id_and_name_match(self, extract_test_client, monkeypatch):
+        """Both schema_id and schema_name provided and name matches → 200, no name lookup."""
+        schema_row = _mock_schema_row(name="my-schema")
+        good_json = json.dumps(VALID_EXTRACTION)
+        _setup_happy_path(monkeypatch, schema_row, input_tokens=100, raw_output=good_json)
+        mock_by_name = Mock(return_value=schema_row)
+        monkeypatch.setattr("extract.api.v1.jobs.db_repo.get_schema_by_name", mock_by_name)
+
+        resp = extract_test_client.post(
+            "/v1/extract",
+            json={"text": "hello", "schema_id": "schema-001", "schema_name": "my-schema"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["extraction"] == VALID_EXTRACTION
+        mock_by_name.assert_not_called()
+
+    def test_404_unknown_schema_name(self, extract_test_client):
+        """schema_name that does not exist → 404 SCHEMA_NOT_FOUND."""
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_name", return_value=None):
+            resp = extract_test_client.post(
+                "/v1/extract",
+                json={"text": "hello", "schema_name": "nonexistent-schema"},
+            )
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
 
     # ── 404 Not Found ─────────────────────────────────────────────────────
 

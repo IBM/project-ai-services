@@ -78,9 +78,10 @@ def _mock_doc_row(
     return row
 
 
-def _mock_schema_row(schema_id="schema-001"):
+def _mock_schema_row(schema_id="schema-001", name="my-schema"):
     row = Mock()
     row.schema_id = schema_id
+    row.name = name
     return row
 
 
@@ -284,6 +285,117 @@ class TestCreateExtractJob:
         assert resp.json()["error"]["code"] == "DATABASE_ERROR"
 
 
+    # ── schema_name form field ────────────────────────────────────────────
+
+    def test_202_accepted_via_schema_name(self, extract_test_client):
+        """schema_name form field resolves the schema when schema_id is omitted."""
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_name", return_value=_mock_schema_row()), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.stage_multiple_files"), \
+             patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
+             patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_name": "my-schema"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 202
+        assert "job_id" in resp.json()
+
+    def test_400_missing_schema_id_and_name(self, extract_test_client):
+        """Neither schema_id nor schema_name → 400 INVALID_REQUEST."""
+        with _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+
+    def test_schema_id_takes_priority_over_schema_name(self, extract_test_client):
+        """When both schema_id and schema_name are given, schema_id is used."""
+        schema_row = _mock_schema_row()
+        mock_by_name = Mock(return_value=schema_row)
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
+             patch("extract.api.v1.jobs.db_repo.get_schema_by_name", mock_by_name), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.stage_multiple_files"), \
+             patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
+             patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_id": "schema-001", "schema_name": "my-schema"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 202
+        mock_by_name.assert_not_called()
+
+    def test_400_schema_id_and_name_mismatch(self, extract_test_client):
+        """Both schema_id and schema_name provided but name doesn't match resolved row → 400."""
+        schema_row = _mock_schema_row(name="actual-schema-name")
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_id": "schema-001", "schema_name": "wrong-name"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert "not for the same record" in resp.json()["error"]["message"]
+
+    def test_202_schema_id_and_name_match(self, extract_test_client):
+        """Both schema_id and schema_name provided and name matches → 202, no name lookup."""
+        schema_row = _mock_schema_row(name="my-schema")
+        mock_by_name = Mock(return_value=schema_row)
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
+             patch("extract.api.v1.jobs.db_repo.get_schema_by_name", mock_by_name), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.stage_multiple_files"), \
+             patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
+             patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_id": "schema-001", "schema_name": "my-schema"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 202
+        assert "job_id" in resp.json()
+        mock_by_name.assert_not_called()
+
+    def test_404_unknown_schema_name(self, extract_test_client):
+        """schema_name that does not exist → 404 SCHEMA_NOT_FOUND."""
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_name", return_value=None), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            resp = extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_name": "nonexistent-schema"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
+
+
 # ---------------------------------------------------------------------------
 # GET /v1/extract/jobs
 # ---------------------------------------------------------------------------
@@ -319,21 +431,35 @@ class TestListExtractJobs:
         with patch("extract.api.v1.jobs.db_repo.list_jobs", return_value=([], 0)) as mock_list:
             extract_test_client.get("/v1/extract/jobs?status=completed")
         mock_list.assert_called_once_with(
-            status="completed", schema_id=None, limit=20, offset=0, latest=False
+            status="completed", schema_id=None, schema_name=None, limit=20, offset=0, latest=False
         )
 
     def test_schema_id_filter_passed_to_db(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.list_jobs", return_value=([], 0)) as mock_list:
             extract_test_client.get("/v1/extract/jobs?schema_id=schema-001")
         mock_list.assert_called_once_with(
-            status=None, schema_id="schema-001", limit=20, offset=0, latest=False
+            status=None, schema_id="schema-001", schema_name=None, limit=20, offset=0, latest=False
+        )
+
+    def test_schema_name_filter_passed_to_db(self, extract_test_client):
+        with patch("extract.api.v1.jobs.db_repo.list_jobs", return_value=([], 0)) as mock_list:
+            extract_test_client.get("/v1/extract/jobs?schema_name=my-schema")
+        mock_list.assert_called_once_with(
+            status=None, schema_id=None, schema_name="my-schema", limit=20, offset=0, latest=False
+        )
+
+    def test_schema_name_and_id_filters_together(self, extract_test_client):
+        with patch("extract.api.v1.jobs.db_repo.list_jobs", return_value=([], 0)) as mock_list:
+            extract_test_client.get("/v1/extract/jobs?schema_id=schema-001&schema_name=my-schema")
+        mock_list.assert_called_once_with(
+            status=None, schema_id="schema-001", schema_name="my-schema", limit=20, offset=0, latest=False
         )
 
     def test_pagination_params_passed_to_db(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.list_jobs", return_value=([], 0)) as mock_list:
             extract_test_client.get("/v1/extract/jobs?limit=5&offset=10")
         mock_list.assert_called_once_with(
-            status=None, schema_id=None, limit=5, offset=10, latest=False
+            status=None, schema_id=None, schema_name=None, limit=5, offset=10, latest=False
         )
 
     def test_400_invalid_status_value(self, extract_test_client):
@@ -834,3 +960,8 @@ def _patch_extract_limiter_free():
     """Patch extract_limiter so locked() is False and async-with passes."""
     import asyncio
     return patch("extract.state.extract_limiter", asyncio.BoundedSemaphore(1))
+
+
+# Legacy alias used by schema_name tests (same behaviour as _patch_extract_limiter_free
+# but kept separate to preserve the original test intent).
+_patch_job_limiter_free = _patch_extract_limiter_free
