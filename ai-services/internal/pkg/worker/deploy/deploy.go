@@ -14,8 +14,6 @@ import (
 	"strconv"
 	ttemplate "text/template"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-
 	"github.com/project-ai-services/ai-services/assets"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -42,6 +40,8 @@ const (
 
 	dirPerm  = 0o750
 	filePerm = 0o644
+
+	WorkerAppName = "ai-services"
 )
 
 // Options carries the parameters needed to set up the worker node.
@@ -76,34 +76,12 @@ type Options struct {
 func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr string, token string) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
-	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {workerconstants.WorkerProxyLabel},
-	})
+	deployed, existingResource, err := CheckStatus(ctx, rt)
 	if err != nil {
-		return fmt.Errorf("worker setup: list pods: %w", err)
+		return err
 	}
 
-	workerPod, err := rt.ListPods(ctx, map[string][]string{
-		"label": {workerconstants.WorkerPodLabel},
-	})
-
-	if err != nil {
-		return fmt.Errorf("worker setup: list pods: %w", err)
-	}
-
-	existingResource := make([]string, 0, len(pods) + len(workerPod))
-	for _, i := range workerPod {
-		existingResource = append(existingResource, i.Name)
-	}
-	for _, i := range pods {
-		existingResource = append(existingResource, i.Name)
-	}
-
-	logger.InfofCtx(ctx, "existingResource: ", existingResource)
-
-
-
-	if len(pods) > 1 && len(workerPod) > 1 {
+	if deployed {
 		logger.InfolnCtx(ctx, "Worker node already set up — skipping deploy.")
 
 		return nil
@@ -120,6 +98,34 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr st
 	logger.InfolnCtx(ctx, "Worker node setup complete.")
 
 	return nil
+}
+
+// CheckStatus checks whether the worker node is already deployed by listing
+// pods with the worker proxy and worker pod labels.
+// Returns (true, existingResources, nil) when all worker pods are already running.
+func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error) {
+	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
+
+	var existingResources []string
+	deployed := true
+	for _, label := range labels {
+		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
+		if err != nil {
+			return false, nil, fmt.Errorf("worker setup: list pods: %w", err)
+		}
+
+		for _, p := range pods {
+			existingResources = append(existingResources, p.Name)
+		}
+		if len(pods) == 0 {
+			// Set deployed to false when pod is not present for the given label.
+			deployed = false
+		}
+	}
+
+	logger.InfofCtx(ctx, "existingResource: ", existingResources)
+
+	return deployed, existingResources, nil
 }
 
 // ─── internal ────────────────────────────────────────────────────────────────
@@ -164,9 +170,9 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingRe
 	}
 
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
-		"caddy.httpsPort": strconv.Itoa(opts.HTTPSPort),
-		"worker.token": token,
-		"worker.gatewayAddr.": gatewayAddr,
+		"caddy.httpsPort":    strconv.Itoa(opts.HTTPSPort),
+		"worker.token":       token,
+		"worker.gatewayAddr": gatewayAddr,
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
@@ -174,6 +180,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingRe
 
 	params := map[string]any{
 		"BaseDir": opts.BaseDir,
+		"AppName": WorkerAppName,
 		"Values":  values,
 	}
 
@@ -209,6 +216,8 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 	// Skipping deployment of existing resources
 	if slices.Contains(existingResources, podSpec.Name) {
 		logger.Infof("%s: Skipping resource deploy as '%s' it already exists", tmplName, podSpec.Name)
+
+		return nil
 	}
 
 	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
