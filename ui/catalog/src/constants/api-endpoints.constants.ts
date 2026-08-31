@@ -46,4 +46,5 @@ export const CONNECTORS_ENDPOINTS = {
 export const WORKERS_ENDPOINTS = {
   LIST_WORKERS: "/workers",
   REGISTER_WORKER: "/workers",
+  DEREGISTER_WORKER: (id: string) => `/workers/${id}`,
 };

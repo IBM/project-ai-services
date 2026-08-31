@@ -22,7 +22,7 @@ export const NameCell = ({ value, rowId }: CellRendererProps) => (
   <SharedNameCell value={value} rowId={rowId} isLinkEnabled={false} />
 );
 
-export const ActionCell = () => (
+export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
   <OverflowMenu size="lg" flipped aria-label="Actions">
     <OverflowMenuItem
       itemText={
@@ -32,6 +32,9 @@ export const ActionCell = () => (
         </div>
       }
       isDelete
+      onClick={() =>
+        dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
+      }
     />
   </OverflowMenu>
 );
@@ -41,5 +44,5 @@ type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
-  actions: ActionCell,
+  actions: ActionCell as RendererFn,
 };
