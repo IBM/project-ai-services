@@ -465,6 +465,15 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		CreatedBy:      createdBy,
 	}
 
+	// Attach the worker FK for remote deployments. WorkerName is always set by
+	// PlanDeployment
+	// TODO: Remove the check once remote deployment is enabled by default.
+	if plan.WorkerName != "" {
+		if dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName); ok {
+			app.WorkerID = &dbID
+		}
+	}
+
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
 		return fmt.Errorf("failed to insert application: %w", err)
 	}

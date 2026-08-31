@@ -1,17 +1,17 @@
-summarize:
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.18
+extract:
+  image: icr.io/ai-services-cicd/extract-service:v0.0.7
   log_level: "INFO"
-  database: "summarize_metadata"
+  database: "extract_metadata"
   resources:
     requests:
       cpu: "500m"
       memory: "512Mi"
     limits:
       cpu: "500m"
-      memory: "512Mi"
+      memory: "1Gi"
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-4
   storage: 5Gi
   # @generate:password
   password: ""

@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "summarize-api"
+  name: "extract-api"
   labels:
     ai-services.io/service: {{ .Release.Name }}
     ai-services.io/template: {{ .Values.templateID }}
@@ -11,19 +11,19 @@ spec:
   selector:
     matchLabels:
       ai-services.io/service: {{ .Release.Name }}
-      ai-services.io/component: summarize-api
+      ai-services.io/component: extract-api
   template:
     metadata:
       labels:
         ai-services.io/service: {{ .Release.Name }}
         ai-services.io/template: {{ .Values.templateID }}
-        ai-services.io/component: summarize-api
+        ai-services.io/component: extract-api
         ai-services.io/component-type: api
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
       initContainers:
-        - name: summarize-db-wait
+        - name: extract-db-wait
           image: "{{ .Values.postgres.image }}"
           command:
             - "/bin/sh"
@@ -31,68 +31,68 @@ spec:
             - |
               RETRIES=0
               MAX_RETRIES=60
-              until pg_isready -h summarize-db -p 5432; do
+              until pg_isready -h extract-db -p 5432; do
                 RETRIES=$((RETRIES + 1))
                 if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-                  echo "ERROR: summarize-db did not become ready after $((MAX_RETRIES * 5)) seconds. Giving up."
+                  echo "ERROR: extract-db did not become ready after $((MAX_RETRIES * 5)) seconds. Giving up."
                   exit 1
                 fi
-                echo "Waiting for summarize-db to be ready... ($RETRIES/$MAX_RETRIES)"
+                echo "Waiting for extract-db to be ready... ($RETRIES/$MAX_RETRIES)"
                 sleep 5
               done
-        - name: summarize-db-init
-          image: "{{ .Values.summarize.image }}"
+        - name: extract-db-init
+          image: "{{ .Values.extract.image }}"
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
           env:
             - name: POSTGRES_HOST
-              value: "summarize-db"
+              value: "extract-db"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              value: "{{ .Values.summarize.database }}"
+              value: "{{ .Values.extract.database }}"
             - name: POSTGRES_USER
               value: "postgres"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "summarize-db-secret"
+                  name: "extract-db-secret"
                   key: password
       containers:
-        - name: summarize-api
-          image: "{{ .Values.summarize.image }}"
+        - name: extract-api
+          image: "{{ .Values.extract.image }}"
           command:
             - "/var/venv/bin/python"
             - "-m"
             - "uvicorn"
-            - "app:app"
+            - "extract.app:app"
             - "--host"
             - "0.0.0.0"
             - "--port"
-            - "6000"
+            - "9500"
             - "--loop"
             - "uvloop"
             - "--http"
             - "httptools"
           env:
             - name: POSTGRES_HOST
-              value: "summarize-db"
+              value: "extract-db"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              value: "{{ .Values.summarize.database }}"
+              value: "{{ .Values.extract.database }}"
             - name: POSTGRES_USER
               value: "postgres"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "summarize-db-secret"
+                  name: "extract-db-secret"
                   key: password
             - name: DB_POOL_SIZE
               value: "5"
             - name: DB_MAX_OVERFLOW
               value: "5"
             - name: PORT
-              value: "6000"
+              value: "9500"
             - name: LLM_ENDPOINT
               value: http://llm-predictor:8000
             - name: LLM_MODEL
@@ -102,7 +102,7 @@ spec:
             - name: LLM_MAX_BATCH_SIZE
               value: "32"
             - name: LOG_LEVEL
-              value: "{{ .Values.summarize.log_level }}"
+              value: "{{ .Values.extract.log_level }}"
           {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
               valueFrom:
@@ -111,12 +111,12 @@ spec:
                   key: apiKey
           {{- end }}
           ports:
-            - containerPort: 6000
+            - containerPort: 9500
               protocol: TCP
           livenessProbe:
             httpGet:
               path: /health
-              port: 6000
+              port: 9500
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
@@ -124,22 +124,22 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 6000
+              port: 9500
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           resources:
             requests:
-              cpu: {{ .Values.summarize.resources.requests.cpu | quote }}
-              memory: {{ .Values.summarize.resources.requests.memory | quote }}
+              cpu: {{ .Values.extract.resources.requests.cpu | quote }}
+              memory: {{ .Values.extract.resources.requests.memory | quote }}
             limits:
-              cpu: {{ .Values.summarize.resources.limits.cpu | quote }}
-              memory: {{ .Values.summarize.resources.limits.memory | quote }}
+              cpu: {{ .Values.extract.resources.limits.cpu | quote }}
+              memory: {{ .Values.extract.resources.limits.memory | quote }}
           volumeMounts:
-            - mountPath: /var/cache
+            - mountPath: /var/cache/extract
               name: cache
       volumes:
         - name: cache
           persistentVolumeClaim:
-            claimName: summarize-cache
+            claimName: extract-cache
