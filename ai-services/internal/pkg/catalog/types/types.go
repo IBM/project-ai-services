@@ -192,17 +192,24 @@ type Connector struct {
 
 // ConnectorProvider holds the provider-level fields nested inside ConnectorResponse.
 type ConnectorProvider struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
+	// ID is the provider identifier (e.g. "object_storage", "file_system").
+	ID string `json:"id"`
+	// Name is the human-readable display name of the provider.
+	Name string `json:"name"`
+	// Description is a short description of the provider.
 	Description string `json:"description"`
-	Schema      string `json:"schema"` // path to the provider's JSON Schema params endpoint
+	// Schema is the path to the provider's JSON Schema params endpoint.
+	Schema string `json:"schema"`
 }
 
 // ConnectorResponse is the API response shape for a connector entry.
 type ConnectorResponse struct {
-	Type     string            `json:"type"`     // connector_type, e.g. "datasource"
-	Name     string            `json:"name"`     // connector_name, e.g. "Data sources"
-	Provider ConnectorProvider `json:"provider"` // provider identity
+	// Type is the connector type (e.g. "datasource").
+	Type string `json:"type"`
+	// Name is the display label for the connector type (e.g. "Data sources").
+	Name string `json:"name"`
+	// Provider contains the identity and schema URL of the connector provider.
+	Provider ConnectorProvider `json:"provider"`
 }
 
 // ToConnectorResponse converts a Connector into the API response shape.

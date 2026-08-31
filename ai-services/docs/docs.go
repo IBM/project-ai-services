@@ -2623,16 +2623,19 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "description": {
+                    "description": "Description is a short description of the provider.",
                     "type": "string"
                 },
                 "id": {
+                    "description": "ID is the provider identifier (e.g. \"object_storage\", \"file_system\").",
                     "type": "string"
                 },
                 "name": {
+                    "description": "Name is the human-readable display name of the provider.",
                     "type": "string"
                 },
                 "schema": {
-                    "description": "path to the provider's JSON Schema params endpoint",
+                    "description": "Schema is the path to the provider's JSON Schema params endpoint.",
                     "type": "string"
                 }
             }
@@ -2641,11 +2644,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
-                    "description": "connector_name, e.g. \"Data sources\"",
+                    "description": "Name is the display label for the connector type (e.g. \"Data sources\").",
                     "type": "string"
                 },
                 "provider": {
-                    "description": "provider identity",
+                    "description": "Provider contains the identity and schema URL of the connector provider.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider"
@@ -2653,7 +2656,7 @@ const docTemplate = `{
                     ]
                 },
                 "type": {
-                    "description": "connector_type, e.g. \"datasource\"",
+                    "description": "Type is the connector type (e.g. \"datasource\").",
                     "type": "string"
                 }
             }
