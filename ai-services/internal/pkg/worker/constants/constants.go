@@ -3,6 +3,10 @@
 package constants
 
 const (
+	// LocalWorkerName is the sentinel value used when no remote worker is specified.
+	// It means "deploy on this machine using the local runtime".
+	LocalWorkerName = "Local"
+
 	// WorkerProxyLabel is the pod label set by deploy.Setup; used by deploy (idempotency) and uninstall (lookup).
 	WorkerProxyLabel = "ai-services.io/component=worker-proxy"
 

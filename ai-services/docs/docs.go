@@ -2099,6 +2099,10 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                },
+                "worker_name": {
+                    "description": "WorkerName is the name of a connected remote worker to deploy to.\nWhen empty the application is deployed locally.",
+                    "type": "string"
                 }
             }
         },

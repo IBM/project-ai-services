@@ -5,7 +5,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.35.1
-// source: internal/pkg/worker/proto/worker.proto
+// source: worker.proto
 
 package proto
 
@@ -28,34 +28,35 @@ const (
 type CommandType int32
 
 const (
-	CommandType_COMMAND_TYPE_UNSPECIFIED             CommandType = 0
-	CommandType_COMMAND_TYPE_LIST_IMAGES             CommandType = 1
-	CommandType_COMMAND_TYPE_PULL_IMAGE              CommandType = 2
-	CommandType_COMMAND_TYPE_LIST_PODS               CommandType = 3
-	CommandType_COMMAND_TYPE_CREATE_POD              CommandType = 4
-	CommandType_COMMAND_TYPE_DELETE_POD              CommandType = 5
-	CommandType_COMMAND_TYPE_STOP_POD                CommandType = 6
-	CommandType_COMMAND_TYPE_START_POD               CommandType = 7
-	CommandType_COMMAND_TYPE_INSPECT_POD             CommandType = 8
-	CommandType_COMMAND_TYPE_POD_EXISTS              CommandType = 9
-	CommandType_COMMAND_TYPE_POD_LOGS                CommandType = 10
-	CommandType_COMMAND_TYPE_GET_POD_RESOURCES       CommandType = 11
-	CommandType_COMMAND_TYPE_LIST_SECRETS            CommandType = 12
-	CommandType_COMMAND_TYPE_DELETE_SECRET           CommandType = 13
-	CommandType_COMMAND_TYPE_SECRET_EXISTS           CommandType = 14
-	CommandType_COMMAND_TYPE_DELETE_VOLUME           CommandType = 15
-	CommandType_COMMAND_TYPE_VOLUME_EXISTS           CommandType = 16
-	CommandType_COMMAND_TYPE_INSPECT_CONTAINER       CommandType = 17
-	CommandType_COMMAND_TYPE_CONTAINER_EXISTS        CommandType = 18
-	CommandType_COMMAND_TYPE_CONTAINER_LOGS          CommandType = 19
-	CommandType_COMMAND_TYPE_LIST_ROUTES             CommandType = 20
-	CommandType_COMMAND_TYPE_DELETE_PVCS             CommandType = 21
-	CommandType_COMMAND_TYPE_GET_SYSTEM_INFO         CommandType = 22
-	CommandType_COMMAND_TYPE_RUNTIME_TYPE            CommandType = 23
-	CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER CommandType = 24
+	CommandType_COMMAND_TYPE_UNSPECIFIED       CommandType = 0
+	CommandType_COMMAND_TYPE_LIST_IMAGES       CommandType = 1
+	CommandType_COMMAND_TYPE_PULL_IMAGE        CommandType = 2
+	CommandType_COMMAND_TYPE_LIST_PODS         CommandType = 3
+	CommandType_COMMAND_TYPE_CREATE_POD        CommandType = 4
+	CommandType_COMMAND_TYPE_DELETE_POD        CommandType = 5
+	CommandType_COMMAND_TYPE_STOP_POD          CommandType = 6
+	CommandType_COMMAND_TYPE_START_POD         CommandType = 7
+	CommandType_COMMAND_TYPE_INSPECT_POD       CommandType = 8
+	CommandType_COMMAND_TYPE_POD_EXISTS        CommandType = 9
+	CommandType_COMMAND_TYPE_POD_LOGS          CommandType = 10
+	CommandType_COMMAND_TYPE_GET_POD_RESOURCES CommandType = 11
+	CommandType_COMMAND_TYPE_LIST_SECRETS      CommandType = 12
+	CommandType_COMMAND_TYPE_DELETE_SECRET     CommandType = 13
+	CommandType_COMMAND_TYPE_SECRET_EXISTS     CommandType = 14
+	CommandType_COMMAND_TYPE_DELETE_VOLUME     CommandType = 15
+	CommandType_COMMAND_TYPE_VOLUME_EXISTS     CommandType = 16
+	CommandType_COMMAND_TYPE_INSPECT_CONTAINER CommandType = 17
+	CommandType_COMMAND_TYPE_CONTAINER_EXISTS  CommandType = 18
+	CommandType_COMMAND_TYPE_CONTAINER_LOGS    CommandType = 19
+	CommandType_COMMAND_TYPE_LIST_ROUTES       CommandType = 20
+	CommandType_COMMAND_TYPE_DELETE_PVCS       CommandType = 21
+	CommandType_COMMAND_TYPE_GET_SYSTEM_INFO   CommandType = 22
+	CommandType_COMMAND_TYPE_RUNTIME_TYPE      CommandType = 23
+	CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER CommandType = 24
 	// Caddy proxy management on the worker node.
 	// A single command covers all route operations; the op is encoded in the payload.
-	CommandType_COMMAND_TYPE_PROXY_ROUTE CommandType = 25
+	CommandType_COMMAND_TYPE_PROXY_ROUTE    CommandType = 25
+	CommandType_COMMAND_TYPE_DOWNLOAD_MODEL CommandType = 27
 	// HTTP proxy tunnel through the gRPC stream.
 	// The control plane sends an HTTP request; the worker executes it locally
 	// against a pod endpoint and returns the response.
@@ -89,38 +90,40 @@ var (
 		21: "COMMAND_TYPE_DELETE_PVCS",
 		22: "COMMAND_TYPE_GET_SYSTEM_INFO",
 		23: "COMMAND_TYPE_RUNTIME_TYPE",
-		24: "COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER",
+		24: "COMMAND_TYPE_EXEC_IN_CONTAINER",
 		25: "COMMAND_TYPE_PROXY_ROUTE",
+		27: "COMMAND_TYPE_DOWNLOAD_MODEL",
 		26: "COMMAND_TYPE_HTTP_PROXY",
 	}
 	CommandType_value = map[string]int32{
-		"COMMAND_TYPE_UNSPECIFIED":             0,
-		"COMMAND_TYPE_LIST_IMAGES":             1,
-		"COMMAND_TYPE_PULL_IMAGE":              2,
-		"COMMAND_TYPE_LIST_PODS":               3,
-		"COMMAND_TYPE_CREATE_POD":              4,
-		"COMMAND_TYPE_DELETE_POD":              5,
-		"COMMAND_TYPE_STOP_POD":                6,
-		"COMMAND_TYPE_START_POD":               7,
-		"COMMAND_TYPE_INSPECT_POD":             8,
-		"COMMAND_TYPE_POD_EXISTS":              9,
-		"COMMAND_TYPE_POD_LOGS":                10,
-		"COMMAND_TYPE_GET_POD_RESOURCES":       11,
-		"COMMAND_TYPE_LIST_SECRETS":            12,
-		"COMMAND_TYPE_DELETE_SECRET":           13,
-		"COMMAND_TYPE_SECRET_EXISTS":           14,
-		"COMMAND_TYPE_DELETE_VOLUME":           15,
-		"COMMAND_TYPE_VOLUME_EXISTS":           16,
-		"COMMAND_TYPE_INSPECT_CONTAINER":       17,
-		"COMMAND_TYPE_CONTAINER_EXISTS":        18,
-		"COMMAND_TYPE_CONTAINER_LOGS":          19,
-		"COMMAND_TYPE_LIST_ROUTES":             20,
-		"COMMAND_TYPE_DELETE_PVCS":             21,
-		"COMMAND_TYPE_GET_SYSTEM_INFO":         22,
-		"COMMAND_TYPE_RUNTIME_TYPE":            23,
-		"COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER": 24,
-		"COMMAND_TYPE_PROXY_ROUTE":             25,
-		"COMMAND_TYPE_HTTP_PROXY":              26,
+		"COMMAND_TYPE_UNSPECIFIED":       0,
+		"COMMAND_TYPE_LIST_IMAGES":       1,
+		"COMMAND_TYPE_PULL_IMAGE":        2,
+		"COMMAND_TYPE_LIST_PODS":         3,
+		"COMMAND_TYPE_CREATE_POD":        4,
+		"COMMAND_TYPE_DELETE_POD":        5,
+		"COMMAND_TYPE_STOP_POD":          6,
+		"COMMAND_TYPE_START_POD":         7,
+		"COMMAND_TYPE_INSPECT_POD":       8,
+		"COMMAND_TYPE_POD_EXISTS":        9,
+		"COMMAND_TYPE_POD_LOGS":          10,
+		"COMMAND_TYPE_GET_POD_RESOURCES": 11,
+		"COMMAND_TYPE_LIST_SECRETS":      12,
+		"COMMAND_TYPE_DELETE_SECRET":     13,
+		"COMMAND_TYPE_SECRET_EXISTS":     14,
+		"COMMAND_TYPE_DELETE_VOLUME":     15,
+		"COMMAND_TYPE_VOLUME_EXISTS":     16,
+		"COMMAND_TYPE_INSPECT_CONTAINER": 17,
+		"COMMAND_TYPE_CONTAINER_EXISTS":  18,
+		"COMMAND_TYPE_CONTAINER_LOGS":    19,
+		"COMMAND_TYPE_LIST_ROUTES":       20,
+		"COMMAND_TYPE_DELETE_PVCS":       21,
+		"COMMAND_TYPE_GET_SYSTEM_INFO":   22,
+		"COMMAND_TYPE_RUNTIME_TYPE":      23,
+		"COMMAND_TYPE_EXEC_IN_CONTAINER": 24,
+		"COMMAND_TYPE_PROXY_ROUTE":       25,
+		"COMMAND_TYPE_DOWNLOAD_MODEL":    27,
+		"COMMAND_TYPE_HTTP_PROXY":        26,
 	}
 )
 
@@ -135,11 +138,11 @@ func (x CommandType) String() string {
 }
 
 func (CommandType) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_pkg_worker_proto_worker_proto_enumTypes[0].Descriptor()
+	return file_worker_proto_enumTypes[0].Descriptor()
 }
 
 func (CommandType) Type() protoreflect.EnumType {
-	return &file_internal_pkg_worker_proto_worker_proto_enumTypes[0]
+	return &file_worker_proto_enumTypes[0]
 }
 
 func (x CommandType) Number() protoreflect.EnumNumber {
@@ -148,7 +151,7 @@ func (x CommandType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CommandType.Descriptor instead.
 func (CommandType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{0}
+	return file_worker_proto_rawDescGZIP(), []int{0}
 }
 
 type RegisterRequest struct {
@@ -165,7 +168,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[0]
+	mi := &file_worker_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -177,7 +180,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[0]
+	mi := &file_worker_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -190,7 +193,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{0}
+	return file_worker_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *RegisterRequest) GetWorkerName() string {
@@ -233,7 +236,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[1]
+	mi := &file_worker_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -245,7 +248,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[1]
+	mi := &file_worker_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -258,7 +261,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{1}
+	return file_worker_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RegisterResponse) GetWorkerName() string {
@@ -293,7 +296,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[2]
+	mi := &file_worker_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +308,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[2]
+	mi := &file_worker_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +321,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{2}
+	return file_worker_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Command) GetCommandId() string {
@@ -356,7 +359,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +371,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +384,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{3}
+	return file_worker_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CommandResult) GetCommandId() string {
@@ -426,11 +429,11 @@ func (x *CommandResult) GetWorkerName() string {
 	return ""
 }
 
-var File_internal_pkg_worker_proto_worker_proto protoreflect.FileDescriptor
+var File_worker_proto protoreflect.FileDescriptor
 
-const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
+const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"&internal/pkg/worker/proto/worker.proto\x12\tworker.v1\"\x82\x02\n" +
+	"\fworker.proto\x12\tworker.v1\"\x82\x02\n" +
 	"\x0fRegisterRequest\x12\x1f\n" +
 	"\vworker_name\x18\x01 \x01(\tR\n" +
 	"workerName\x12(\n" +
@@ -459,7 +462,7 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fis_heartbeat\x18\x05 \x01(\bR\visHeartbeat\x12\x1f\n" +
 	"\vworker_name\x18\x06 \x01(\tR\n" +
-	"workerName*\xd6\x06\n" +
+	"workerName*\xf1\x06\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMMAND_TYPE_LIST_IMAGES\x10\x01\x12\x1b\n" +
@@ -485,29 +488,30 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\x18COMMAND_TYPE_LIST_ROUTES\x10\x14\x12\x1c\n" +
 	"\x18COMMAND_TYPE_DELETE_PVCS\x10\x15\x12 \n" +
 	"\x1cCOMMAND_TYPE_GET_SYSTEM_INFO\x10\x16\x12\x1d\n" +
-	"\x19COMMAND_TYPE_RUNTIME_TYPE\x10\x17\x12(\n" +
-	"$COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER\x10\x18\x12\x1c\n" +
-	"\x18COMMAND_TYPE_PROXY_ROUTE\x10\x19\x12\x1b\n" +
+	"\x19COMMAND_TYPE_RUNTIME_TYPE\x10\x17\x12\"\n" +
+	"\x1eCOMMAND_TYPE_EXEC_IN_CONTAINER\x10\x18\x12\x1c\n" +
+	"\x18COMMAND_TYPE_PROXY_ROUTE\x10\x19\x12\x1f\n" +
+	"\x1bCOMMAND_TYPE_DOWNLOAD_MODEL\x10\x1b\x12\x1b\n" +
 	"\x17COMMAND_TYPE_HTTP_PROXY\x10\x1a2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"
 
 var (
-	file_internal_pkg_worker_proto_worker_proto_rawDescOnce sync.Once
-	file_internal_pkg_worker_proto_worker_proto_rawDescData []byte
+	file_worker_proto_rawDescOnce sync.Once
+	file_worker_proto_rawDescData []byte
 )
 
-func file_internal_pkg_worker_proto_worker_proto_rawDescGZIP() []byte {
-	file_internal_pkg_worker_proto_worker_proto_rawDescOnce.Do(func() {
-		file_internal_pkg_worker_proto_worker_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_pkg_worker_proto_worker_proto_rawDesc), len(file_internal_pkg_worker_proto_worker_proto_rawDesc)))
+func file_worker_proto_rawDescGZIP() []byte {
+	file_worker_proto_rawDescOnce.Do(func() {
+		file_worker_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)))
 	})
-	return file_internal_pkg_worker_proto_worker_proto_rawDescData
+	return file_worker_proto_rawDescData
 }
 
-var file_internal_pkg_worker_proto_worker_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_pkg_worker_proto_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_internal_pkg_worker_proto_worker_proto_goTypes = []any{
+var file_worker_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_worker_proto_goTypes = []any{
 	(CommandType)(0),         // 0: worker.v1.CommandType
 	(*RegisterRequest)(nil),  // 1: worker.v1.RegisterRequest
 	(*RegisterResponse)(nil), // 2: worker.v1.RegisterResponse
@@ -515,7 +519,7 @@ var file_internal_pkg_worker_proto_worker_proto_goTypes = []any{
 	(*CommandResult)(nil),    // 4: worker.v1.CommandResult
 	nil,                      // 5: worker.v1.RegisterRequest.MetadataEntry
 }
-var file_internal_pkg_worker_proto_worker_proto_depIdxs = []int32{
+var file_worker_proto_depIdxs = []int32{
 	5, // 0: worker.v1.RegisterRequest.metadata:type_name -> worker.v1.RegisterRequest.MetadataEntry
 	0, // 1: worker.v1.Command.type:type_name -> worker.v1.CommandType
 	1, // 2: worker.v1.WorkerGateway.Register:input_type -> worker.v1.RegisterRequest
@@ -529,27 +533,27 @@ var file_internal_pkg_worker_proto_worker_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_internal_pkg_worker_proto_worker_proto_init() }
-func file_internal_pkg_worker_proto_worker_proto_init() {
-	if File_internal_pkg_worker_proto_worker_proto != nil {
+func init() { file_worker_proto_init() }
+func file_worker_proto_init() {
+	if File_worker_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_pkg_worker_proto_worker_proto_rawDesc), len(file_internal_pkg_worker_proto_worker_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_pkg_worker_proto_worker_proto_goTypes,
-		DependencyIndexes: file_internal_pkg_worker_proto_worker_proto_depIdxs,
-		EnumInfos:         file_internal_pkg_worker_proto_worker_proto_enumTypes,
-		MessageInfos:      file_internal_pkg_worker_proto_worker_proto_msgTypes,
+		GoTypes:           file_worker_proto_goTypes,
+		DependencyIndexes: file_worker_proto_depIdxs,
+		EnumInfos:         file_worker_proto_enumTypes,
+		MessageInfos:      file_worker_proto_msgTypes,
 	}.Build()
-	File_internal_pkg_worker_proto_worker_proto = out.File
-	file_internal_pkg_worker_proto_worker_proto_goTypes = nil
-	file_internal_pkg_worker_proto_worker_proto_depIdxs = nil
+	File_worker_proto = out.File
+	file_worker_proto_goTypes = nil
+	file_worker_proto_depIdxs = nil
 }

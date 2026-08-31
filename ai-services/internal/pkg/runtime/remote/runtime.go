@@ -272,7 +272,7 @@ func (r *RemoteRuntime) ContainerLogs(ctx context.Context, containerNameOrID str
 }
 
 func (r *RemoteRuntime) ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER,
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER,
 		payload.ExecInContainer{PodName: podName, ContainerName: containerName, Command: command})
 	if err != nil {
 		return "", err

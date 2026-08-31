@@ -8,6 +8,7 @@ type CreateFlags struct {
 	Params         string
 	Values         string
 	Legacy         string
+	WorkerName     string
 
 	// Podman-specific flags
 	SkipImageDownload string
@@ -26,6 +27,7 @@ var Create = CreateFlags{
 	Params:         "params",
 	Values:         "values",
 	Legacy:         "legacy",
+	WorkerName:     "worker",
 
 	// Podman-specific flags
 	SkipImageDownload: "skip-image-download",
