@@ -29,6 +29,7 @@ import (
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -1101,9 +1102,10 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 }
 
 // getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
+// For a local runtime it reads CADDY_ADMIN_URL from the environment.
+// For a remote runtime it returns a RemoteProxyManager that sends route commands
+// over the gRPC CommandStream to the worker.
 func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
-	// Get domain suffix from env var (set during catalog configure)
-	// This is pre-computed: certDomain OR customDomain OR hostIP.nip.io
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
 		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
@@ -1111,7 +1113,12 @@ func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyMan
 
 	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
 
-	// Get Caddy proxy manager - fails if CADDY_ADMIN_URL not set
+	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		pm := proxy.NewRemoteProxyManager(rt.Sender)
+
+		return domainSuffix, httpsPort, pm, nil
+	}
+
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
 		return "", "", nil, err

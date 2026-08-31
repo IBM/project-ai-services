@@ -146,7 +146,7 @@ class TestUpsertActiveConnector:
 
 
 # ===========================================================================
-# get_active_connector
+# get_connector_by_id
 # ===========================================================================
 
 class TestGetConnector:
@@ -169,26 +169,26 @@ class TestGetConnector:
         connector = self._make_connector()
         session = MagicMock()
         session.get.return_value = connector
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector(CONNECTOR_ID)
+            result = get_connector_by_id(CONNECTOR_ID)
         assert result is connector
         session.expunge.assert_called_once_with(connector)
 
     def test_returns_none_when_not_found(self):
         session = MagicMock()
         session.get.return_value = None
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector("nonexistent-id")
+            result = get_connector_by_id("nonexistent-id")
         assert result is None
 
     def test_returns_none_on_db_error(self):
         session = MagicMock()
         session.get.side_effect = SQLAlchemyError("timeout")
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector(CONNECTOR_ID)
+            result = get_connector_by_id(CONNECTOR_ID)
         assert result is None
 
 
