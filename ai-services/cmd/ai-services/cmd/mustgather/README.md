@@ -123,6 +123,7 @@ The authenticated user or service account must have at minimum:
 | `persistentvolumeclaims` | `list` |
 | `nodes` | `list` |
 | `routes.route.openshift.io` | `list` |
+| `inferenceservices.serving.kserve.io` | `list` |
 
 Missing permissions cause per-step warnings — collection continues for all
 other sections.
@@ -194,40 +195,45 @@ must-gather.local.<timestamp>/
 
 ### OpenShift
 
+Each application namespace gets its own sub-directory under `applications/`.
+Catalog-scoped resources (secrets, PVCs) are written directly into `catalog/`.
+
 ```
 must-gather.local.<timestamp>/
 ├── catalog/
 │   ├── pods/
 │   │   └── <pod-name>/
-│   │       ├── inspect.json                    # full corev1.Pod object (sanitized)
+│   │       ├── inspect.json          # full corev1.Pod object (sanitized)
 │   │       ├── inspect/
-│   │       │   └── <container>.json            # container spec + status (sanitized)
+│   │       │   └── <container>.json  # container spec + status (sanitized)
 │   │       └── logs/
-│   │           └── <container>.log             # last 1000 lines (sanitized)
-│   └── catalog-credentials.json               # tokens redacted
-├── pods/
-│   └── <app-pod-name>/
-│       ├── inspect.json
-│       ├── inspect/
-│       │   └── <container>.json
-│       └── logs/
-│           └── <container>.log
-├── events/
-│   └── events.json                             # K8s Events per app namespace (sanitized)
-├── inference-services/
-│   └── <app-namespace>-inference-services.json # KServe InferenceService CRs (sanitized)
-├── secrets/
-│   ├── catalog-secrets.json                   # K8s Secrets from ai-services ns (metadata only)
-│   └── <app-namespace>-secrets.json           # K8s Secrets from each app ns (metadata only)
-├── system/
-│   ├── version.json                            # cluster server version
-│   └── nodes.json                              # node list (sanitized)
-├── network/
-│   ├── services.json                           # K8s Services per app namespace (sanitized)
-│   └── routes.json                             # OpenShift Routes per app namespace (sanitized)
-└── volumes/
-    ├── catalog-pvcs.json                       # PVCs from ai-services ns (sanitized)
-    └── <app-namespace>-pvcs.json              # PVCs from each app ns (sanitized)
+│   │           └── <container>.log   # last 1000 lines (sanitized)
+│   ├── catalog-credentials.json     # tokens redacted
+│   ├── secrets.json                  # K8s Secrets from catalog ns (metadata only)
+│   └── pvcs.json                     # PVCs from catalog ns
+├── applications/
+│   └── <app-namespace>/              # one directory per app namespace
+│       ├── pods/
+│       │   └── <app-pod-name>/
+│       │       ├── inspect.json
+│       │       ├── inspect/
+│       │       │   └── <container>.json
+│       │       └── logs/
+│       │           └── <container>.log
+│       ├── events/
+│       │   └── events.json           # K8s Events (sanitized)
+│       ├── inference-services/
+│       │   └── inference-services.json # KServe InferenceService CRs (sanitized)
+│       ├── network/
+│       │   ├── services.json         # K8s Services (sanitized)
+│       │   └── routes.json           # OpenShift Routes (sanitized)
+│       ├── secrets/
+│       │   └── secrets.json          # K8s Secrets (metadata only)
+│       └── volumes/
+│           └── pvcs.json             # PersistentVolumeClaims (sanitized)
+└── system/
+    ├── version.json                  # cluster server version
+    └── nodes.json                    # node list (sanitized)
 ```
 
 ---
@@ -292,33 +298,33 @@ must-gather --runtime openshift
   ├─► Check catalog installed?   (label: ai-services.io/application=ai-services
   │                                in catalog namespace "ai-services")
   │     │
-  │     ├─ YES ─► Collect catalog pods (inspect + container inspect + logs)
+  │     ├─ YES ─► Collect catalog artifacts → catalog/
+  │     │           ├─ Catalog pods (backend + db + ui): inspect + container inspect + logs
+  │     │           └─ catalog-credentials.json (tokens redacted)
   │     │
-  │     ├─ YES ─► Collect catalog-credentials.json (tokens redacted)
-  │     │
-  │     ├─ YES ─► Collect application pods          [requires catalog login]
+  │     ├─ YES ─► Collect application pods   [requires catalog login]
   │     │           ├─ List apps via catalog API
   │     │           │   ├─ --application given → warn if not found, skip
   │     │           │   └─ no --application    → collect all apps
   │     │           ├─ Derive app namespace from UUID (ai-services-<8 chars>)
-  │     │           └─ Per app: pod inspect + container inspect + logs
+  │     │           └─ Per app → applications/<ns>/pods/: inspect + container inspect + logs
   │     │
   │     └─ NO  ─► Skip catalog-dependent steps (warning logged)
   │
-  ├─► Collect system info           (always, from catalog namespace)
+  ├─► Collect system info           (always) → system/
   │     ├─ cluster server version
   │     └─ node list
   │
-  ├─► Collect catalog namespace secrets/PVCs   (always)
-  │     ├─ secrets/catalog-secrets.json
-  │     └─ volumes/catalog-pvcs.json
+  ├─► Collect catalog namespace resources   (always) → catalog/
+  │     ├─ secrets.json
+  │     └─ pvcs.json
   │
-  └─► Per app namespace (derived from catalog API)   (always)
-        ├─ Collect events → events/events.json
-        ├─ Collect secrets → secrets/<app-namespace>-secrets.json
-        ├─ Collect network → network/services.json + routes.json
-        ├─ Collect PVCs → volumes/<app-namespace>-pvcs.json
-        └─ Collect InferenceServices → inference-services/<app-namespace>-inference-services.json
+  └─► Per app namespace (derived from catalog API)   (always) → applications/<ns>/
+        ├─ events/events.json
+        ├─ secrets/secrets.json
+        ├─ network/services.json + routes.json
+        ├─ volumes/pvcs.json
+        └─ inference-services/inference-services.json
 ```
 
 ---
