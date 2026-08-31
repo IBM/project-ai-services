@@ -14,6 +14,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
@@ -24,6 +26,9 @@ type DeploymentPlanner struct {
 	catalogProvider *catalog.CatalogProvider
 	componentRepo   repository.ComponentRepository
 	paramBuilder    *params.ParamBuilder
+	// workerRegistry is optional; when set, PlanDeployment validates remote
+	// worker metadata (e.g. Caddy config) before any DB records are written.
+	workerRegistry stream.WorkerRegistry
 }
 
 // NewDeploymentPlanner creates a new deployment planner.
@@ -36,6 +41,15 @@ func NewDeploymentPlanner(
 		componentRepo:   componentRepo,
 		paramBuilder:    params.NewParamBuilder(provider),
 	}
+}
+
+// WithWorkerRegistry wires the worker registry into the planner so it can
+// validate remote worker metadata during PlanDeployment and fail early before
+// any DB records are written.
+func (p *DeploymentPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *DeploymentPlanner {
+	p.workerRegistry = reg
+
+	return p
 }
 
 // Type aliases for deployment plan types.
@@ -51,6 +65,19 @@ func (p *DeploymentPlanner) PlanDeployment(
 	req apimodels.CreateApplicationRequest,
 	runtimeType string,
 ) (*DeploymentPlan, error) {
+	// Default to local when the caller did not specify a worker so that
+	// WorkerName is always set and no downstream code needs to treat "" as local.
+	// TODO: Enable this to test local worker by default
+	// if req.WorkerName == "" {
+	// 	req.WorkerName = workerconstants.LocalWorkerName
+	// }
+
+	// For remote workers, validate connectivity and Caddy metadata before
+	// touching the DB so the Create API returns an immediate error on failure.
+	if err := p.ValidateWorker(ctx, req.WorkerName, runtimeType); err != nil {
+		return nil, err
+	}
+
 	// First, determine if this is an architecture or standalone service
 	isArchitecture := false
 	_, archErr := p.catalogProvider.LoadArchitecture(req.CatalogID)
@@ -258,6 +285,42 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 	}
 
 	return totalSpyreCards, nil
+}
+
+// ValidateWorker confirms the named remote worker is connected and, for Podman
+// workers, that the required Caddy metadata (domainSuffix, httpsPort) is
+// present. Called from PlanDeployment before any DB records are written so the
+// Create API can return an error immediately on failure.
+func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName, runtimeType string) error {
+	if p.workerRegistry == nil {
+		return fmt.Errorf("worker deployment is not configured on this server")
+	}
+
+	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {
+		return fmt.Errorf("worker %q is not connected", workerName)
+	}
+
+	// Validate all the metadata for deployment is present
+	if runtimeType == runtimeTypes.RuntimeTypePodman.String() {
+		meta, ok := p.workerRegistry.WorkerMetadata(workerName)
+		if !ok {
+			return fmt.Errorf("worker %q metadata not available", workerName)
+		}
+
+		if meta[workerconstants.MetaKeyDomainSuffix] == "" {
+			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyDomainSuffix)
+		}
+
+		if meta[workerconstants.MetaKeyHTTPSPort] == "" {
+			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyHTTPSPort)
+		}
+
+		if meta[workerconstants.MetaKeyBaseDir] == "" {
+			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyBaseDir)
+		}
+	}
+
+	return nil
 }
 
 // Made with Bob

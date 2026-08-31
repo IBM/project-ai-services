@@ -18,11 +18,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
-// DeploymentExecutor orchestrates the complete deployment process.
-// It uses the DeploymentPlanner to create a plan and then executes it
-// using the appropriate runtime-specific deployer.
+// DeploymentExecutor orchestrates the execution of an already-planned
+// deployment, routing to the correct runtime-specific deployer.
 type DeploymentExecutor struct {
-	planner         *DeploymentPlanner
 	catalogProvider *catalog.CatalogProvider
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
@@ -39,7 +37,6 @@ func NewDeploymentExecutor(
 	componentRepo repository.ComponentRepository,
 ) *DeploymentExecutor {
 	return &DeploymentExecutor{
-		planner:         NewDeploymentPlanner(catalogProvider, componentRepo),
 		catalogProvider: catalogProvider,
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
@@ -48,20 +45,20 @@ func NewDeploymentExecutor(
 }
 
 // WithWorkerRegistry wires the worker registry into the executor so it can
-// validate workers, read their metadata, and create RemoteRuntime instances.
-// Must be called before any deployment that targets a non-local worker.
+// resolve a RemoteRuntime for worker deployments. Must be called before any
+// deployment that targets a non-local worker.
 func (e *DeploymentExecutor) WithWorkerRegistry(reg stream.WorkerRegistry) *DeploymentExecutor {
 	e.workerRegistry = reg
 
 	return e
 }
 
-// ValidateWorker checks that workerName is non-empty and that the named worker
-// is currently connected with status=ready (cache + DB check). Called before
-// any DB records are written so the API can return 400 immediately.
+// ValidateWorker confirms the named worker is ready before any DB records are
+// written so the API can return 400 immediately.
 func (e *DeploymentExecutor) ValidateWorker(ctx context.Context, workerName string) error {
+	// TODO: Remove when remote deployment is by default
 	if workerName == "" {
-		return fmt.Errorf("worker name must not be empty")
+		return nil
 	}
 
 	if e.workerRegistry == nil {
@@ -91,9 +88,7 @@ func (e *DeploymentExecutor) ExecuteWithPlan(
 }
 
 // executeDeployment routes to the correct deployer based on plan.WorkerName.
-// Any name other than LocalWorkerName is treated as a remote worker and
-// dispatched over the gRPC CommandStream. LocalWorkerName falls back to the
-// local runtime determined by runtimeType.
+// WorkerName is always set by PlanDeployment.
 func (e *DeploymentExecutor) executeDeployment(
 	ctx context.Context,
 	plan *DeploymentPlan,
@@ -101,7 +96,9 @@ func (e *DeploymentExecutor) executeDeployment(
 	runtimeType types.RuntimeType,
 ) error {
 	// ── Remote worker deployment ──────────────────────────────────────────────
-	if plan.WorkerName != "" && plan.WorkerName != workerconstants.LocalWorkerName {
+	// TODO Remove the check when remote deployment is by default
+	// and the remaining code will be dead
+	if plan.WorkerName != "" {
 		return e.executeWorkerDeployment(ctx, plan, req)
 	}
 

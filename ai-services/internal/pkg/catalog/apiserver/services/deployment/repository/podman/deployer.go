@@ -33,7 +33,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	k8syaml "sigs.k8s.io/yaml"
@@ -239,9 +238,9 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
-// For remote workers the command is forwarded to the worker node via the gRPC
-// stream so the download runs where the models directory lives; for local
-// workers helpers.DownloadModelContainer is called directly.
+// For remote workers the command is sent over the gRPC stream so the download
+// runs on the worker node where the models directory lives; for local workers
+// helpers.DownloadModelContainer is called directly.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
 		modelsPath := d.workerConfig.BaseDir + "/models"
@@ -1147,20 +1146,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 // local Caddy ProxyManager is returned.
 func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		if d.workerConfig == nil {
-			return "", "", nil, fmt.Errorf("remote runtime requires worker config with domain suffix and HTTPS port")
-		}
-
-		if d.workerConfig.DomainSuffix == "" {
-			return "", "", nil, fmt.Errorf("worker metadata missing %q", workerconstants.MetaKeyDomainSuffix)
-		}
-
-		if d.workerConfig.HTTPSPort == "" {
-			return "", "", nil, fmt.Errorf("worker metadata missing %q", workerconstants.MetaKeyHTTPSPort)
-		}
-
 		pm := proxy.NewRemoteProxyManager(rt.Sender)
-
 		return d.workerConfig.DomainSuffix, d.workerConfig.HTTPSPort, pm, nil
 	}
 
