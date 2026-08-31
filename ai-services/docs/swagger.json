@@ -689,6 +689,58 @@
                 }
             }
         },
+        "/architectures/{id}/images": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle architectures are supported.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get architecture images",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Architecture ID (e.g., 'rag')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of container image references",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Architecture not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Authenticate user and return access and refresh tokens",
@@ -1932,6 +1984,58 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Service not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/services/{id}/images": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the complete list of container images required to deploy a service and all its component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle services are supported.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get service images",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Service ID (e.g., 'chat', 'digitize', 'summarize')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of container image references",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse"
                         }
                     },
                     "401": {
@@ -3325,6 +3429,17 @@
             "properties": {
                 "error": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.ImagesResponse": {
+            "type": "object",
+            "properties": {
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
