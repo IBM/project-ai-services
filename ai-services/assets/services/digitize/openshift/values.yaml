@@ -33,7 +33,3 @@ embedding:
   model:
     name: ""
 
-llm:
-  model:
-    name: ""
-  apiKey: ""
