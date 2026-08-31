@@ -249,9 +249,7 @@ const WorkerResourcesTable = ({
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="worker resource"
         onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
-        onDeleteErrorRetry={async () => {
-          dispatch({ type: "SHARED_HIDE_ERROR" });
-        }}
+        onDeleteErrorRetry={handleDeregister}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
