@@ -447,8 +447,11 @@ class DatabaseManager:
             name: Filter by document name (partial match)
             limit: Maximum number of documents to return
             offset: Number of documents to skip
-            exclude_connector_sourced: When True, omit docs that appear in
-                connector_document_checksum (connector-sourced documents).
+            exclude_connector_sourced: When True, omit docs whose parent job
+                name starts with "Connector-" (connector-sourced documents).
+                This filter works at every processing stage — accepted,
+                in_progress, completed, etc. — because the job name is fixed
+                at job-creation time.
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -468,11 +471,11 @@ class DatabaseManager:
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
-                    # Exclude connector-sourced documents via NOT EXISTS subquery.
-                    filters.append(
-                        ~select(ConnectorDocumentChecksum.doc_id)
-                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
-                        .exists()
+                    # Exclude connector-sourced documents
+                    # Since the connector doc checksum is inserted after successful ingestion
+                    # we need a mechanism to exclude connector sourced docs irrespective of which stage they are in (Accepted, Digtized, In Progress, etc.)
+                    stmt = stmt.join(Job, Job.job_id == Document.job_id).where(
+                        ~Job.job_name.like("Connector-%")
                     )
 
                 if filters:
