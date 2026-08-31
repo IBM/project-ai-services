@@ -20,7 +20,15 @@ const (
 	svcDeployOptionsRoute   = "/api/v1/services/%s/deploy-options"
 	archDeployOptionsRoute  = "/api/v1/architectures/%s/deploy-options"
 	compProviderParamsRoute = "/api/v1/components/%s/providers/%s/params"
+	svcImagesRoute          = "/api/v1/services/%s/images"
+	archImagesRoute         = "/api/v1/architectures/%s/images"
 )
+
+// ImagesResponse is the JSON body returned by GET /api/v1/services/:id/images
+// and GET /api/v1/architectures/:id/images.
+type ImagesResponse struct {
+	Images []string `json:"images"`
+}
 
 // HTTPError represents an HTTP error with status code.
 type HTTPError struct {
@@ -270,6 +278,54 @@ func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, comp
 	}
 
 	return result, nil
+}
+
+// GetServiceImages returns the complete list of container images required to deploy
+// the given service and all its component dependencies. The response always includes
+// catalog asset images (tool image and catalog infrastructure images).
+// Both embedded (built-in) and custom bundle services are supported.
+func (c *ApplicationClient) GetServiceImages(ctx context.Context, serviceID string) (*ImagesResponse, error) {
+	var result ImagesResponse
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(svcImagesRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service images: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return &result, nil
+}
+
+// GetArchitectureImages returns the complete list of container images required to deploy
+// the given architecture and all its services and component dependencies. The response
+// always includes catalog asset images (tool image and catalog infrastructure images).
+// Both embedded (built-in) and custom bundle architectures are supported.
+func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architectureID string) (*ImagesResponse, error) {
+	var result ImagesResponse
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(archImagesRoute, architectureID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture images: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return &result, nil
 }
 
 // Made with Bob

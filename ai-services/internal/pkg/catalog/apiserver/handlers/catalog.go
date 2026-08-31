@@ -323,6 +323,73 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 	c.JSON(http.StatusOK, schema)
 }
 
+// GetServiceImages godoc
+//
+//	@Summary		Get service images
+//	@Description	Returns the complete list of container images required to deploy a service and all its component dependencies.
+//	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
+//	@Description	and the catalog infrastructure images for the catalog service itself).
+//	@Description	Both embedded (built-in) and custom bundle services are supported.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
+//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/services/{id}/images [get]
+func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
+	id := c.Param("id")
+
+	images, err := h.provider.GetServiceImages(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get images for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+}
+
+// GetArchitectureImages godoc
+//
+//	@Summary		Get architecture images
+//	@Description	Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.
+//	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
+//	@Description	and the catalog infrastructure images for the catalog service itself).
+//	@Description	Both embedded (built-in) and custom bundle architectures are supported.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/architectures/{id}/images [get]
+func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
+	id := c.Param("id")
+
+	images, err := h.provider.GetArchitectureImages(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get images for architecture '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+}
+
+// ImagesResponse holds a list of container image references.
+type ImagesResponse struct {
+	Images []string `json:"images"`
+}
+
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
