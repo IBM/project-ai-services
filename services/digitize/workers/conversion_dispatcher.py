@@ -96,7 +96,9 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
     """
     Execute a single conversion task inside the shared process pool.
     Releases the semaphore unconditionally in the finally block.
-    Deletes the staged input file on completion or failure (best-effort).
+    Staged input files are NOT deleted here — each pipeline (_run_ingest,
+    _run_digitize, sync_tick batch loop) deletes them via its own
+    cleanup_staging_directory() call after the full pipeline finishes.
 
     Responsibility boundary
     -----------------------
@@ -138,8 +140,9 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
 
     finally:
-        # Delete the staged input file — result_path is kept until user exports.
-        _safe_remove(task.cached_file)
+        # Do NOT delete task.cached_file here — the pipeline layer owns staging
+        # cleanup after all post-conversion processing (page loading, chunking,
+        # indexing) has finished.  See _run_ingest / _run_digitize / sync_tick.
         await conversion_semaphore.release(weight)
 
 

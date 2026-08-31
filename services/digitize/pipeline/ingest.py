@@ -306,3 +306,11 @@ def ingest(
                 raise fnf_error
 
         return None
+
+    finally:
+        # Remove the staging directory now that all processing (conversion,
+        # page loading, chunking, indexing) has finished.  Callers that do
+        # their own cleanup (sync_tick, _run_ingest) will find the directory
+        # already gone — cleanup_staging_directory is idempotent.
+        if job_id:
+            cleanup_staging_directory(job_id, directory_path.parent)
