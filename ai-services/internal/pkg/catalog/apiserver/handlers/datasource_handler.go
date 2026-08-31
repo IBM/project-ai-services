@@ -346,6 +346,7 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 
 	if resp == nil {
 		c.Status(http.StatusNoContent)
+
 		return
 	}
 
