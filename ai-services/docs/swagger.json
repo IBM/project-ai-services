@@ -1265,7 +1265,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns registered providers. When connector_type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.",
                 "produces": [
                     "application/json"
                 ],
@@ -1277,7 +1277,7 @@
                     {
                         "type": "string",
                         "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
-                        "name": "connector_type",
+                        "name": "type",
                         "in": "query"
                     }
                 ],
@@ -1287,7 +1287,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse"
                             }
                         }
                     },
@@ -1491,6 +1491,197 @@
                     },
                     "422": {
                         "description": "Connection test failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Get a single datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource detail",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates the Authentication credential fields for a datasource as defined in the provider schema. Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Update datasource credentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Credential update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource updated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or invalid ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Connection test failed with new credentials",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a datasource connector by ID. Returns 409 Conflict if the connector is still linked to one or more applications.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Delete datasource connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource connector ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Datasource deleted"
+                    },
+                    "400": {
+                        "description": "Invalid connector ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Datasource is connected to one or more applications",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -1907,6 +2098,50 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
+            "type": "object",
+            "properties": {
+                "application_id": {
+                    "description": "ApplicationID is the UUID of the application that owns this service.",
+                    "type": "string"
+                },
+                "application_name": {
+                    "description": "ApplicationName is the human-readable display name of the owning application.",
+                    "type": "string"
+                },
+                "err_msg": {
+                    "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
+                "last_sync_at": {
+                    "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
+                    "type": "string"
+                },
+                "service": {
+                    "description": "Service contains the catalog identity (id + resolved name) of the owning application.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
+                        }
+                    ]
+                },
+                "sync_status": {
+                    "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
@@ -1931,6 +2166,10 @@
                     }
                 },
                 "version": {
+                    "type": "string"
+                },
+                "worker_name": {
+                    "description": "WorkerName is the name of a connected remote worker to deploy to.\nWhen empty the application is deployed locally.",
                     "type": "string"
                 }
             }
@@ -2033,6 +2272,76 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "CreatedAt is the creation timestamp.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the datasource connector.",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Message contains a human-readable description of the current status (may be empty).",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "Metadata holds the non-sensitive configuration fields.\nSensitive fields (e.g. secret_access_key, private_key) are always stripped.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "description": "Name is the unique human-readable label.",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider contains the provider ID and its resolved display name.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo"
+                        }
+                    ]
+                },
+                "services": {
+                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each service's Digitize pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
+                    }
+                },
+                "status": {
+                    "description": "Status is the current connectivity status (\"connected\" or \"offline\").",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is always \"datasource\".",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "UpdatedAt is the last-update timestamp.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError": {
+            "type": "object",
+            "properties": {
+                "application_id": {
+                    "description": "ApplicationID is the UUID of the application whose Digitize service could not be updated.",
+                    "type": "string"
+                },
+                "application_name": {
+                    "description": "ApplicationName is the display name of that application, for UI rendering.",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error is the human-readable reason the propagation failed.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
             "type": "object",
             "required": [
@@ -2056,6 +2365,58 @@
                     "additionalProperties": {}
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest": {
+            "type": "object",
+            "required": [
+                "params"
+            ],
+            "properties": {
+                "params": {
+                    "description": "Params holds the credential fields to update. Only fields in the provider's\nschema whose ui:section is \"Authentication\" may be changed; structural fields\nare filtered out server-side.\nNote: binding:\"required\" only prevents null/missing — an empty map is rejected in the\nservice layer, which also validates that at least one updatable field is present.",
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "propagation_errors": {
+                    "description": "PropagationErrors lists any downstream Digitize propagation failures.\nOmitted when all propagations succeeded.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -2399,31 +2760,44 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Connector": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider": {
             "type": "object",
             "properties": {
-                "connector_name": {
-                    "description": "display label for connector_type",
-                    "type": "string"
-                },
-                "connector_type": {
-                    "description": "e.g. \"datasource\"",
-                    "type": "string"
-                },
                 "description": {
-                    "description": "short description",
+                    "description": "Description is a short description of the provider.",
                     "type": "string"
                 },
                 "id": {
-                    "description": "e.g. \"object_storage\", \"file_system\"",
+                    "description": "ID is the provider identifier (e.g. \"object_storage\", \"file_system\").",
                     "type": "string"
                 },
                 "name": {
-                    "description": "display name",
+                    "description": "Name is the human-readable display name of the provider.",
                     "type": "string"
                 },
+                "schema": {
+                    "description": "Schema is the path to the provider's JSON Schema params endpoint.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorResponse": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name is the display label for the connector type (e.g. \"Data sources\").",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider contains the identity and schema URL of the connector provider.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider"
+                        }
+                    ]
+                },
                 "type": {
-                    "description": "always \"connector\"",
+                    "description": "Type is the connector type (e.g. \"datasource\").",
                     "type": "string"
                 }
             }

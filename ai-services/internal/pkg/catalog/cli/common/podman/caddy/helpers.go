@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -66,18 +64,18 @@ func getHTTPSPort(ctx context.Context, runtime *podman.PodmanClient, caddyPodNam
 	return "", fmt.Errorf("HTTPS port not found in Caddy pod")
 }
 
-// GenerateCaddyfile copies the static Caddyfile to the caddy directory.
-func GenerateCaddyfile(baseDir string) error {
+// GetCaddyFileContent returns caddy file content.
+func GetCaddyFileContent() (string, error) {
 	// Read the Caddyfile template
 	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
 	if err != nil {
-		return fmt.Errorf("failed to read Caddyfile template: %w", err)
+		return "", fmt.Errorf("failed to read Caddyfile template: %w", err)
 	}
 
 	// Parse the Caddyfile as a template
 	tmpl, err := template.New("Caddyfile.tmpl").Parse(string(caddyfileContent))
 	if err != nil {
-		return fmt.Errorf("failed to parse Caddyfile template: %w", err)
+		return "", fmt.Errorf("failed to parse Caddyfile template: %w", err)
 	}
 
 	// Prepare template data with the server name constant
@@ -88,21 +86,10 @@ func GenerateCaddyfile(baseDir string) error {
 	// Execute the template
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, templateData); err != nil {
-		return fmt.Errorf("failed to execute Caddyfile template: %w", err)
+		return "", fmt.Errorf("failed to execute Caddyfile template: %w", err)
 	}
 
-	// Ensure directory exists and write Caddyfile
-	caddyDir := filepath.Join(baseDir, "common", "caddy")
-	if err := os.MkdirAll(caddyDir, dirPerm); err != nil {
-		return fmt.Errorf("failed to create caddy directory: %w", err)
-	}
-
-	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
-	if err := os.WriteFile(caddyfilePath, rendered.Bytes(), filePerm); err != nil {
-		return fmt.Errorf("failed to write Caddyfile: %w", err)
-	}
-
-	return nil
+	return rendered.String(), nil
 }
 
 // Made with Bob

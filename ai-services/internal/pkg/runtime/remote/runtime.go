@@ -10,40 +10,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
-	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
-)
-
-const (
-	// commandTimeout is the maximum time to wait for a worker to respond to a
-	// single command. Long-running operations such as PullImage can exceed a
-	// few minutes; callers can pass a context with a tighter deadline if needed.
-	commandTimeout = 10 * time.Minute
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // RemoteRuntime implements runtime.Runtime by forwarding each call as a
 // Command over the gRPC CommandStream to the named worker.
 type RemoteRuntime struct {
-	workerName  string
+	*stream.Sender
 	runtimeType types.RuntimeType
-	registry    WorkerRegistry
 }
 
 // New returns a RemoteRuntime targeting the named worker.
 // runtimeType is the worker's declared runtime (stored in the DB at Register
 // time) — used only by the Type() method; the gRPC protocol is runtime-agnostic.
-func New(workerName string, runtimeType types.RuntimeType, reg WorkerRegistry) *RemoteRuntime {
+func New(workerName string, runtimeType types.RuntimeType, reg stream.WorkerRegistry) *RemoteRuntime {
 	return &RemoteRuntime{
-		workerName:  workerName,
+		Sender:      stream.New(workerName, reg),
 		runtimeType: runtimeType,
-		registry:    reg,
 	}
 }
 
@@ -282,7 +272,7 @@ func (r *RemoteRuntime) ContainerLogs(ctx context.Context, containerNameOrID str
 }
 
 func (r *RemoteRuntime) ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER,
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER,
 		payload.ExecInContainer{PodName: podName, ContainerName: containerName, Command: command})
 	if err != nil {
 		return "", err
@@ -369,62 +359,11 @@ func (r *RemoteRuntime) GetSystemInfo(ctx context.Context) (*models.SystemInfo, 
 	return &info, nil
 }
 
-// ─── send / receive ───────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-// send encodes payload as JSON, enqueues the Command on the worker's channel,
-// and blocks until the worker returns a CommandResult or ctx/timeout expires.
-func (r *RemoteRuntime) send(ctx context.Context, cmdType workerpb.CommandType, payload any) (*workerpb.CommandResult, error) {
-	commandID := uuid.New().String()
-
-	var payloadBytes []byte
-	if payload != nil {
-		var err error
-		payloadBytes, err = json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("remote runtime: marshal payload for %s: %w", cmdType, err)
-		}
-	}
-
-	// Register result channel BEFORE sending to avoid a race where the worker
-	// responds before we start listening.
-	resultCh, err := r.registry.WaitForResult(r.workerName, commandID)
-	if err != nil {
-		return nil, fmt.Errorf("remote runtime: worker %s not connected: %w", r.workerName, err)
-	}
-
-	cmdCh, ok := r.registry.WorkerCommandChannel(r.workerName)
-	if !ok {
-		return nil, fmt.Errorf("remote runtime: worker %s disconnected", r.workerName)
-	}
-
-	cmd := &workerpb.Command{
-		CommandId: commandID,
-		Type:      cmdType,
-		Payload:   payloadBytes,
-	}
-
-	select {
-	case cmdCh <- cmd:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-	defer cancel()
-
-	select {
-	case res := <-resultCh:
-		if !res.GetSuccess() {
-			return nil, fmt.Errorf("remote runtime: worker %s: command %s failed: %s",
-				r.workerName, cmdType, res.GetError())
-		}
-
-		return res, nil
-
-	case <-timeoutCtx.Done():
-		return nil, fmt.Errorf("remote runtime: worker %s: command %s timed out after %s",
-			r.workerName, cmdType, commandTimeout)
-	}
+// send delegates to the embedded Sender for convenience.
+func (r *RemoteRuntime) send(ctx context.Context, cmdType workerpb.CommandType, p any) (*workerpb.CommandResult, error) {
+	return r.Send(ctx, cmdType, p)
 }
 
 // unmarshalData decodes CommandResult.data into v.

@@ -16,8 +16,8 @@ Coverage:
   - POST   /v1/connectors/{id}/sync                       (202 dispatched, 202 no-op, 404)
   - POST   /v1/connectors/{id}/syncs/{sync_seq}/stop      (204 signalled, 409 stale seq, 409 not running, 404)
   - GET    /v1/documents — excludes connector-sourced docs
-  - GET    /v1/documents/{doc_id} — 404 for connector-sourced
-  - DELETE /v1/documents/{doc_id} — 404 for connector-sourced
+  - GET    /v1/documents/{doc_id} — 405 for connector-sourced
+  - DELETE /v1/documents/{doc_id} — 405 for connector-sourced
 """
 
 from datetime import datetime, timezone
@@ -41,12 +41,12 @@ _NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 CONNECTOR_ID = "c7f3a2d1-0000-0000-0000-000000000001"
 CONNECTOR_NAME = "prod-sftp-reports"
-CONNECTOR_TYPE = "ssh"
+CONNECTOR_TYPE = "file_system"
 
 SSH_PAYLOAD = {
     "id": CONNECTOR_ID,
     "name": CONNECTOR_NAME,
-    "type": "ssh",
+    "type": "file_system",
     "allowed_extensions": [".pdf", ".docx"],
     "connection_details": {
         "host": "sftp.example.com",
@@ -59,7 +59,7 @@ SSH_PAYLOAD = {
 S3_PAYLOAD = {
     "id": "a1b2c3d4-0000-0000-0000-000000000002",
     "name": "prod-s3-rag-docs",
-    "type": "s3",
+    "type": "object_storage",
     "allowed_extensions": [".pdf"],
     "connection_details": {
         "endpoint_url": "https://s3.us-east-1.amazonaws.com",
@@ -122,8 +122,6 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
       - encrypt_secrets / merge_and_encrypt_partial → return input unchanged
       - db_ops.insert_connector, upsert_connector, etc.
     """
-    from digitize.workers.concurrency import concurrency_manager
-
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
     for path in (digitized_dir, staging_dir):
@@ -134,8 +132,10 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
         digitize=SimpleNamespace(
             digitized_docs_dir=digitized_dir,
             staging_dir=staging_dir,
-            digitization_concurrency_limit=2,
-            ingestion_concurrency_limit=1,
+            ingestion_queue_quota=10,
+            digitization_queue_quota=5,
+            heavy_doc_page_threshold=500,
+            conversion_poll_interval=2.0,
             connector=SimpleNamespace(
                 sync_interval_seconds=300,
             ),
@@ -146,17 +146,24 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
 
     import digitize.api.v1.connectors as connectors_module
+    import digitize.api.v1.jobs as jobs_router_module
+    from unittest.mock import AsyncMock
 
     monkeypatch.setattr(connectors_module, "settings", fake_settings, raising=False)
 
-    # Concurrency stubs
-    from unittest.mock import AsyncMock
-    monkeypatch.setattr(concurrency_manager, "is_locked", Mock(return_value=False))
-    monkeypatch.setattr(concurrency_manager, "acquire", AsyncMock())
-    monkeypatch.setattr(concurrency_manager, "release", Mock())
+    # db_manager mock for jobs.py (queue gate + dedup).
+    mock_db_manager = Mock()
+    mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
+    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
 
-    # Misc stubs
-    monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+    # Stub dg_util helpers that touch disk / DB.
+    monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
+    monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
+    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+    monkeypatch.setattr(jobs_router_module, "_run_digitize", Mock())
+    monkeypatch.setattr(jobs_router_module, "_run_ingest", Mock())
+
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())
 
@@ -177,10 +184,9 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
         },
     )
 
-    import digitize.api.v1.jobs as jobs_router_module
-    mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
-    monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
+    # db_ops connector stubs — return None by default (no pre-existing connector)
+    monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_id", Mock(return_value=None))
+    monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_name", Mock(return_value=None))
 
     # Scheduler stubs — prevent RuntimeError from uninitialised _scheduler
     import digitize.connectors.scheduler as scheduler_module
@@ -195,10 +201,10 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
 # ===========================================================================
 
 class TestPostConnector:
-    def test_returns_201_on_success(self, connector_test_client, monkeypatch):
+    def test_returns_202_on_success(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
-        assert response.status_code == 201
+        assert response.status_code == 202
         assert response.json() == {"id": CONNECTOR_ID}
 
     def test_encrypts_private_key_before_insert(self, connector_test_client, monkeypatch):
@@ -220,10 +226,26 @@ class TestPostConnector:
         response = connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
         assert response.status_code == 409
 
-    def test_s3_connector_returns_201(self, connector_test_client, monkeypatch):
+    def test_scheduler_not_called_on_duplicate(self, connector_test_client, monkeypatch):
+        """Scheduler job must NOT be registered when a duplicate is detected by pre-check."""
+        import digitize.connectors.scheduler as scheduler_module
+
+        # Simulate pre-check finding an existing connector with the same id.
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
+            Mock(return_value=_make_connector()),
+        )
+        scheduler_spy = AsyncMock()
+        monkeypatch.setattr(scheduler_module, "register_connector_job", scheduler_spy)
+
+        connector_test_client.post("/v1/connectors", json=SSH_PAYLOAD)
+
+        scheduler_spy.assert_not_called()
+
+    def test_s3_connector_returns_202(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
         response = connector_test_client.post("/v1/connectors", json=S3_PAYLOAD)
-        assert response.status_code == 201
+        assert response.status_code == 202
 
     def test_secret_not_returned_in_response(self, connector_test_client, monkeypatch):
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.insert_connector", Mock())
@@ -240,7 +262,7 @@ class TestPostConnector:
 class TestPutConnector:
     def test_returns_200_on_success(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
@@ -252,7 +274,7 @@ class TestPutConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -268,7 +290,7 @@ class TestPutConnector:
     def test_partial_update_only_overwrites_supplied_keys(self, connector_test_client, monkeypatch):
         """PUT with only name must not touch connection_details."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         upsert_mock = Mock()
@@ -283,7 +305,7 @@ class TestPutConnector:
 
     def test_returns_409_on_name_conflict(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -298,7 +320,7 @@ class TestPutConnector:
 
     def test_returns_409_when_delete_pending(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)),
         )
         response = connector_test_client.put(
@@ -334,7 +356,7 @@ class TestDeleteConnector:
         """Case B: not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         def _consume_coro(coro):
@@ -349,7 +371,7 @@ class TestDeleteConnector:
         """Case A: syncing → mark DELETE_PENDING, return 204; no teardown task created."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
@@ -360,7 +382,7 @@ class TestDeleteConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
@@ -469,7 +491,7 @@ class TestListConnectors:
 class TestGetConnector:
     def test_returns_200_with_detail(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
@@ -485,7 +507,7 @@ class TestGetConnector:
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(f"/v1/connectors/{CONNECTOR_ID}")
@@ -499,7 +521,7 @@ class TestGetConnector:
             "private_key": "ENCRYPTED_PRIVATE_KEY",
         }
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=c),
         )
         monkeypatch.setattr(
@@ -521,7 +543,7 @@ class TestSyncLog:
     def test_returns_paginated_history(self, connector_test_client, monkeypatch):
         logs = [_make_sync_log(seq=3), _make_sync_log(seq=2)]
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -540,7 +562,7 @@ class TestSyncLog:
 
     def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(
@@ -551,7 +573,7 @@ class TestSyncLog:
     def test_limit_capped_at_200(self, connector_test_client, monkeypatch):
         """limit > 200 must be rejected by FastAPI's Query validation."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -568,7 +590,7 @@ class TestGetSync:
     def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
         log = _make_sync_log(seq=3)
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -586,7 +608,7 @@ class TestGetSync:
 
     def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -600,7 +622,7 @@ class TestGetSync:
 
     def test_returns_404_when_connector_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.get(
@@ -634,14 +656,14 @@ class TestDocumentListConnectorFilter:
         connector_test_client.get("/v1/documents")
         assert captured.get("exclude_connector_sourced") is True
 
-    def test_get_doc_returns_404_for_connector_sourced(self, connector_test_client, monkeypatch):
+    def test_get_doc_returns_405_for_connector_sourced(self, connector_test_client, monkeypatch):
         """is_connector_sourced_document is imported inside the handler — patch the source."""
         monkeypatch.setattr(
             "digitize.utils.db.is_connector_sourced_document",
             Mock(return_value=True),
         )
         response = connector_test_client.get("/v1/documents/some-connector-doc-id")
-        assert response.status_code == 404
+        assert response.status_code == 405
 
     def test_get_doc_returns_data_for_user_submitted(self, connector_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
@@ -664,13 +686,13 @@ class TestDocumentListConnectorFilter:
         response = connector_test_client.get("/v1/documents/doc-001")
         assert response.status_code == 200
 
-    def test_delete_doc_returns_404_for_connector_sourced(self, connector_test_client, monkeypatch):
+    def test_delete_doc_returns_405_for_connector_sourced(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
             "digitize.utils.db.is_connector_sourced_document",
             Mock(return_value=True),
         )
         response = connector_test_client.delete("/v1/documents/connector-owned-doc")
-        assert response.status_code == 404
+        assert response.status_code == 405
 
 # ===========================================================================
 # dispatch_sync  (core logic — no HTTP)
@@ -689,7 +711,7 @@ class TestDispatchSync:
         from digitize.api.v1.connectors import dispatch_sync
 
         task_mock = Mock(side_effect=lambda coro: coro.close())
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=None), \
@@ -708,7 +730,7 @@ class TestDispatchSync:
         from digitize.api.v1.connectors import dispatch_sync
 
         task_mock = Mock()
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=3), \
@@ -725,7 +747,7 @@ class TestDispatchSync:
     def test_raises_sync_not_found_when_connector_missing(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncNotFound
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=None):
             with pytest.raises(SyncNotFound):
                 self._run(dispatch_sync(CONNECTOR_ID))
@@ -733,7 +755,7 @@ class TestDispatchSync:
     def test_raises_sync_locked_when_delete_pending(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncLocked
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector(sync_status=ConnectorStatus.DELETE_PENDING)):
             with pytest.raises(SyncLocked):
                 self._run(dispatch_sync(CONNECTOR_ID))
@@ -741,7 +763,7 @@ class TestDispatchSync:
     def test_raises_sync_locked_when_cancel_pending(self):
         from digitize.api.v1.connectors import dispatch_sync, SyncLocked
 
-        with patch("digitize.api.v1.connectors.db_ops.get_active_connector",
+        with patch("digitize.api.v1.connectors.db_ops.get_connector_by_id",
                    return_value=_make_connector()), \
              patch("digitize.api.v1.connectors.db_ops.get_active_sync_seq",
                    return_value=5), \
@@ -823,7 +845,7 @@ class TestStopSync:
     ):
         """Correct sync_seq + mark_sync_cancel_pending True → 204."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
         monkeypatch.setattr(
@@ -844,7 +866,7 @@ class TestStopSync:
     ):
         """sync_seq older than the active one → 409 without calling mark_sync_cancel_pending."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -867,7 +889,7 @@ class TestStopSync:
     ):
         """get_active_sync_seq returns None (not syncing) → 409."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr(
@@ -883,7 +905,7 @@ class TestStopSync:
         self, connector_test_client, monkeypatch
     ):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=None),
         )
         response = connector_test_client.post(
@@ -905,7 +927,7 @@ class TestPutConnectorTriggersSync:
         from digitize.connectors.models import ConnectorUpdateRequest
 
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())
@@ -933,7 +955,7 @@ class TestPutConnectorTriggersSync:
         from digitize.connectors.models import ConnectorUpdateRequest
 
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_active_connector",
+            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector()),
         )
         monkeypatch.setattr("digitize.api.v1.connectors.db_ops.upsert_connector", Mock())

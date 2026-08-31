@@ -8,6 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // RuntimeFactory creates runtime instances based on configuration.
@@ -32,7 +33,7 @@ func (f *RuntimeFactory) Create(namespace string) (Runtime, error) {
 // registry (stored there at Register time) and used only for Type() reporting —
 // the gRPC protocol itself is runtime-agnostic.
 // Returns an error if the worker is not currently connected.
-func (f *RuntimeFactory) CreateRemote(workerName string, reg remote.WorkerRegistry) (Runtime, error) {
+func (f *RuntimeFactory) CreateRemote(workerName string, reg stream.WorkerRegistry) (Runtime, error) {
 	rtStr, ok := reg.WorkerRuntimeType(workerName)
 	if !ok {
 		return nil, fmt.Errorf("worker %s is not connected", workerName)

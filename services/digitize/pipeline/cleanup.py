@@ -1,32 +1,38 @@
 """
 System reset / cleanup pipeline.
 
-Full digitize service reset: VDB reset → PostgreSQL wipe → filesystem cleanup.
+Deletes all user-submitted documents and jobs: VDB reset → PostgreSQL wipe →
+filesystem cleanup.  Connector-sourced documents and connector jobs are left
+untouched.
 """
 import common.db_utils as db
 from common.misc_utils import get_logger
 from digitize.utils.storage import storage_manager
-from digitize.utils.db import get_all_document_ids
+from digitize.utils.db import get_user_document_ids
 from digitize.db.manager import db_manager
 
 logger = get_logger("cleanup")
 
+
 def reset_db():
     """
-    Reset the vector database, PostgreSQL database, and clean up all document files.
+    Reset the vector database, PostgreSQL database, and clean up all
+    user-submitted document files.
 
-    This function performs a complete cleanup:
-    1. Reads all document IDs from metadata files in DOCS_DIR
-    2. Deletes chunks for those documents from the vector database index
-    3. Deletes all jobs and documents from PostgreSQL database
-    4. Deletes all digitized content files from /var/cache/digitized
-    5. Deletes all document metadata files from /var/cache/docs
+    Connector-sourced documents and connector jobs are preserved.
+
+    This function performs the following steps:
+    1. Reads user-submitted document IDs from the database
+    2. Deletes their chunks from the vector database index
+    3. Deletes user-submitted documents from PostgreSQL
+    4. Deletes user-submitted jobs from PostgreSQL
+    5. Deletes the corresponding content files from /var/cache/digitized
 
     Raises:
         Exception: If vector database reset fails or file deletion fails completely
     """
-    # Step 1: Read all document IDs from metadata files
-    doc_ids = get_all_document_ids()
+    # Step 1: Read user-submitted document IDs
+    doc_ids = get_user_document_ids()
 
     # Step 2: Delete chunks from vector database FIRST
     # This ensures documents are removed from search even if file deletion fails
@@ -40,13 +46,12 @@ def reset_db():
     except Exception as e:
         error_msg = f"Failed to reset vector database: {str(e)}"
         logger.error(f"✗ {error_msg}")
-        # Raise error immediately - VDB reset is critical
         raise Exception(error_msg) from e
 
     # Step 3: Delete all records from PostgreSQL database
     try:
-        logger.debug("Deleting all documents from PostgreSQL database...")
-        doc_result = db_manager.delete_all_documents()
+        logger.debug("Deleting user-submitted documents from PostgreSQL database...")
+        doc_result = db_manager.delete_user_documents()
 
         if doc_result["success"]:
             logger.info(f"✓ Deleted {doc_result['deleted_count']} documents from PostgreSQL database")
@@ -55,8 +60,8 @@ def reset_db():
             logger.error(f"✗ {error_msg}")
             raise Exception(error_msg)
 
-        logger.debug("Deleting all jobs from PostgreSQL database...")
-        job_result = db_manager.delete_all_jobs()
+        logger.debug("Deleting user-submitted jobs from PostgreSQL database...")
+        job_result = db_manager.delete_user_jobs()
 
         if job_result["success"]:
             logger.info(f"✓ Deleted {job_result['deleted_count']} jobs from PostgreSQL database")
@@ -72,10 +77,16 @@ def reset_db():
             f"Partial deletion: vector database reset but PostgreSQL deletion failed. {error_msg}"
         ) from e
 
-    # Step 4: Delete all document files LAST
+    # Step 4: Delete content files for user-submitted docs LAST
     try:
-        logger.debug("Deleting all document files...")
-        deletion_stats = storage_manager.delete_all_contents()
+        logger.debug("Deleting document content files...")
+        deletion_stats: dict = {"content_files_deleted": 0, "errors": []}
+        for doc_id in doc_ids:
+            try:
+                storage_manager.delete_document_content_by_id(doc_id)
+                deletion_stats["content_files_deleted"] += 1
+            except Exception as file_exc:
+                deletion_stats["errors"].append(str(file_exc))
 
         total_deleted = deletion_stats["content_files_deleted"]
         logger.info(
@@ -83,9 +94,8 @@ def reset_db():
             f"(metadata is managed in PostgreSQL database)"
         )
 
-        # If there were any file deletion errors, raise an error
         if deletion_stats["errors"]:
-            error_summary = "; ".join(deletion_stats["errors"][:3])  # Limit to first 3 errors
+            error_summary = "; ".join(deletion_stats["errors"][:3])
             logger.error(f"File deletion completed with errors: {error_summary}")
             raise Exception(
                 f"Partial deletion: vector database reset but some files failed to delete. {error_summary}"

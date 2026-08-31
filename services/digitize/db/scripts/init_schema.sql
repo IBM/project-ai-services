@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
-    CONSTRAINT chk_connector_type CHECK (type IN ('ssh', 's3'))
+    CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name
@@ -88,6 +88,40 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
         FOREIGN KEY (connector_id)
         REFERENCES connectors(id) ON DELETE CASCADE
 );
+
+-- conversion_tasks — Postgres-backed Docling conversion queue
+-- Managed by Base.metadata.create_all on startup; this SQL entry keeps the
+-- init_schema.sql reference in sync for direct DB initialisation.
+CREATE TABLE IF NOT EXISTS conversion_tasks (
+    task_id         VARCHAR(255)    PRIMARY KEY,
+    -- link back to the digitize job that owns this task
+    job_id          VARCHAR(255)    REFERENCES jobs(job_id) ON DELETE SET NULL,
+    doc_id          VARCHAR(255),                           -- informational; no FK
+    operation       VARCHAR(50)     NOT NULL,
+    -- input
+    cached_file     TEXT            NOT NULL,               -- absolute path at enqueue time
+    output_format   VARCHAR(10)     NOT NULL,
+    page_count      INTEGER,
+    is_large        BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- lifecycle
+    status          VARCHAR(50)     NOT NULL,
+    result_path     TEXT,                                   -- written on completion
+    error           TEXT,
+    queued_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    CONSTRAINT chk_ct_operation    CHECK (operation IN ('ingestion', 'digitization')),
+    CONSTRAINT chk_ct_output_format CHECK (output_format IN ('json', 'md', 'txt')),
+    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'))
+);
+
+-- Supports dispatcher pick query (ORDER BY queued_at per status + operation)
+CREATE INDEX IF NOT EXISTS idx_ct_status_op_queued
+    ON conversion_tasks (status, operation, queued_at);
+
+-- Supports get_conversion_task_by_job_id — avoids full-table scans on poll
+CREATE INDEX IF NOT EXISTS idx_ct_job_id
+    ON conversion_tasks (job_id);
 
 -- Create indexes with IF NOT EXISTS
 CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);

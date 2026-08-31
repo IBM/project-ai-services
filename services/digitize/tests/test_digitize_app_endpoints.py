@@ -8,10 +8,10 @@ from fastapi.testclient import TestClient
 import digitize.app as digitize_app
 import digitize.api.v1.admin as jobs_router_module
 import digitize.api.v1.documents as documents_router_module
+import digitize.api.v1.jobs as jobs_router
 import digitize.utils.db as db_ops
 import digitize.db.connection as db_conn
 from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest
-from digitize.workers.concurrency import concurrency_manager
 
 
 @pytest.fixture
@@ -29,19 +29,38 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
         digitize=SimpleNamespace(
             digitized_docs_dir=digitized_dir,
             staging_dir=staging_dir,
-            digitization_concurrency_limit=2,
-            ingestion_concurrency_limit=1,
+            ingestion_queue_quota=10,
+            digitization_queue_quota=5,
+            heavy_doc_page_threshold=500,
+            conversion_poll_interval=2.0,
         ),
     )
 
     monkeypatch.setattr(digitize_app, "settings", fake_settings, raising=False)
     monkeypatch.setattr(digitize_app.dg_util, "settings", fake_settings, raising=False)
-    # Semaphores now live inside ConcurrencyManager — patch its is_locked and acquire/release
-    # so tests don't block on semaphore state from other tests.
-    monkeypatch.setattr(concurrency_manager, "is_locked", Mock(return_value=False))
-    monkeypatch.setattr(concurrency_manager, "acquire", AsyncMock())
-    monkeypatch.setattr(concurrency_manager, "release", Mock())
-    monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+
+    # Build a single mock db_manager that covers all DB calls made by jobs.py.
+    # This must be set before TestClient is created so the patched reference is
+    # seen by every request handler.
+    mock_db_manager = Mock()
+    # check_quota_atomic returns (quota_ok=True, queued_count=0) by default → always admitted.
+    mock_db_manager.check_quota_atomic = Mock(return_value=(True, 0))
+    mock_db_manager.create_conversion_task = Mock(return_value=None)
+    # find_completed_document_by_hash returns None → every file is treated as novel.
+    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
+
+    # Stub out page count inside dg_util so enqueue_conversion_tasks doesn't read disk.
+    monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
+    # Stub out enqueue_conversion_tasks so tests don't insert DB rows.
+    monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
+    # Stub out hash generation so tests don't need real file content.
+    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+
+    # Stub out pipeline background tasks so TestClient doesn't execute them.
+    # Must be AsyncMock — asyncio.create_task() requires a coroutine.
+    monkeypatch.setattr(jobs_router, "_run_digitize", AsyncMock())
+    monkeypatch.setattr(jobs_router, "_run_ingest", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
@@ -50,12 +69,6 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # reset_db is now imported inside documents_router_module, not in app.py
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
-
-    # Stub out hash-based duplicate detection so tests run without a real DB.
-    # find_completed_document_by_hash returns None → every file is treated as novel.
-    mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
-    monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db_manager)
 
     return TestClient(digitize_app.app)
 
@@ -138,8 +151,10 @@ class TestCreateJobs:
 
         assert response.status_code == 400
 
-    def test_rejects_when_ingestion_job_already_active(self, digitize_test_client, monkeypatch):
-        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(True, ["job-active"])))
+    def test_rejects_when_ingestion_queue_full(self, digitize_test_client, monkeypatch):
+        import digitize.api.v1.jobs as jobs_router
+        # check_quota_atomic returns (False, 10) → quota full → 429
+        monkeypatch.setattr(jobs_router.db_manager, "check_quota_atomic", Mock(return_value=(False, 10)))
 
         response = digitize_test_client.post(
             "/v1/jobs?operation=ingestion",
@@ -147,7 +162,6 @@ class TestCreateJobs:
         )
 
         assert response.status_code == 429
-        assert "job-active" in response.text
 
     def test_rejects_invalid_pdf_file(self, digitize_test_client):
         response = digitize_test_client.post(
@@ -267,6 +281,7 @@ class TestCreateJobs:
 
         # First file already exists; second is novel.
         mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.find_completed_document_by_hash = Mock(
             side_effect=[existing_doc, None]
         )
@@ -337,13 +352,17 @@ class TestJobsEndpoints:
         assert response.status_code == 404
 
     def test_delete_completed_job_succeeds(self, digitize_test_client, monkeypatch):
+        import digitize.api.v1.jobs as jobs_router_module
+
         monkeypatch.setattr(
             db_ops,
             "get_job",
             Mock(return_value={"job_id": "job-123", "status": JobStatus.COMPLETED.value}),
         )
         mock_delete = Mock()
-        monkeypatch.setattr("digitize.db.manager.db_manager.delete_job", mock_delete)
+        # jobs.py references db_manager through its own module namespace, which the
+        # fixture replaced with a mock.  Patch delete_job on that mock directly.
+        monkeypatch.setattr(jobs_router_module.db_manager, "delete_job", mock_delete)
 
         response = digitize_test_client.delete("/v1/jobs/job-123")
 
@@ -507,6 +526,7 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 204
         reset_db_mock.assert_called_once()
+
 
 @pytest.mark.unit
 class TestImportExportEndpoints:
