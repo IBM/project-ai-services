@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -46,6 +47,53 @@ type CreateDatasourceRequest struct {
 // CreateDatasourceResponse is the response body returned after a successful datasource creation.
 type CreateDatasourceResponse struct {
 	ID string `json:"id"`
+}
+
+// UpdateDatasourceRequest is the request body for updating datasource credentials.
+// Only the credential fields for the provider may be updated; structural fields are
+// immutable after creation. Any non-updatable field present in Params is silently ignored.
+type UpdateDatasourceRequest struct {
+	// Params holds the credential fields to update. Only fields in the provider's
+	// schema whose ui:section is "Authentication" may be changed; structural fields
+	// are filtered out server-side.
+	// Note: binding:"required" only prevents null/missing — an empty map is rejected in the
+	// service layer, which also validates that at least one updatable field is present.
+	Params map[string]any `json:"params" binding:"required"`
+}
+
+// PropagationError describes a single Digitize propagation failure during a datasource update.
+type PropagationError struct {
+	// ApplicationID is the UUID of the application whose Digitize service could not be updated.
+	ApplicationID string `json:"application_id"`
+	// ApplicationName is the display name of that application, for UI rendering.
+	ApplicationName string `json:"application_name"`
+	// Error is the human-readable reason the propagation failed.
+	Error string `json:"error"`
+}
+
+// DatasourceItem is the public representation of a datasource connector returned by the API.
+// Sensitive credential fields are never included.
+type DatasourceItem struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	Provider  string    `json:"provider"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message,omitempty"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// UpdateDatasourceResponse is the response body returned after a successful datasource update.
+// When all Digitize propagations succeed, PropagationErrors is nil (omitted from JSON).
+// When one or more propagations fail, the array is populated but the overall HTTP status is
+// still 200 OK — the record was saved; only downstream propagation is partial.
+type UpdateDatasourceResponse struct {
+	DatasourceItem
+	// PropagationErrors lists any downstream Digitize propagation failures.
+	// Omitted when all propagations succeeded.
+	PropagationErrors []PropagationError `json:"propagation_errors,omitempty"`
 }
 
 // DatasourceProviderInfo is the provider sub-object embedded in datasource API responses.

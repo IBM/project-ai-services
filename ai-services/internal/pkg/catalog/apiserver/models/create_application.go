@@ -7,6 +7,9 @@ type CreateApplicationRequest struct {
 	Version   string    `json:"version" binding:"required"`
 	Services  []Service `json:"services" binding:"required,dive"`
 	CreatedBy string    `json:"-"` // Set from auth context, not from request body
+	// WorkerName is the name of a connected remote worker to deploy to.
+	// When empty the application is deployed locally.
+	WorkerName string `json:"worker_name,omitempty"`
 }
 
 // Service represents a service configuration in the application.

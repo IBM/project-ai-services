@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
@@ -212,14 +213,22 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return nil, rt.ContainerLogs(ctx, req.NameOrID)
 
-	case workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER:
+	case workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER:
 		var req payload.ExecInContainer
 		if err := json.Unmarshal(p, &req); err != nil {
-			return nil, fmt.Errorf("decode run_ephemeral_container payload: %w", err)
+			return nil, fmt.Errorf("decode exec_in_container payload: %w", err)
 		}
 		out, err := rt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
 
 		return marshalOr(out, err)
+
+	case workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
+		var req payload.DownloadModel
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode download_model payload: %w", err)
+		}
+
+		return nil, helpers.DownloadModelContainer(ctx, req.Model, req.TargetDir)
 
 	// ── Caddy proxy management ────────────────────────────────────────────────
 

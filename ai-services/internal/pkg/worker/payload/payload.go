@@ -57,6 +57,11 @@ type ExecInContainer struct {
 	Command       []string `json:"command"`
 }
 
+type DownloadModel struct {
+	Model     string `json:"model"`
+	TargetDir string `json:"targetDir"`
+}
+
 // ─── Network ──────────────────────────────────────────────────────────────────
 
 type ListRoutes struct {
