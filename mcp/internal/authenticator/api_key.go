@@ -60,9 +60,9 @@ func (a *APIKeyAuthenticator) redactError(errorMsg string) string {
 
 	// Redact common patterns for API keys and tokens
 	patterns := []string{
-		`[A-Za-z0-9_-]{40,}`,                   // Long alphanumeric strings
-		`Bearer\s+[A-Za-z0-9._-]+`,             // Bearer tokens
-		`apikey["\s]*[:=]["\s]*[A-Za-z0-9_-]+`, // API key patterns
+		`[A-Za-z0-9_-]{40,}`,                   // Long alphanumeric strings.
+		`Bearer\s+[A-Za-z0-9._-]+`,             // Bearer tokens.
+		`apikey["\s]*[:=]["\s]*[A-Za-z0-9_-]+`, // API key patterns.
 	}
 
 	for _, pattern := range patterns {

@@ -54,14 +54,12 @@ const (
 	CommandType_COMMAND_TYPE_RUNTIME_TYPE            CommandType = 23
 	CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER CommandType = 24
 	// Caddy proxy management on the worker node.
-	CommandType_COMMAND_TYPE_REGISTER_PROXY_ROUTE   CommandType = 25
-	CommandType_COMMAND_TYPE_UNREGISTER_PROXY_ROUTE CommandType = 26
-	CommandType_COMMAND_TYPE_GET_PROXY_ROUTE        CommandType = 27
-	CommandType_COMMAND_TYPE_PROXY_HEALTH_CHECK     CommandType = 28
+	// A single command covers all route operations; the op is encoded in the payload.
+	CommandType_COMMAND_TYPE_PROXY_ROUTE CommandType = 25
 	// HTTP proxy tunnel through the gRPC stream.
 	// The control plane sends an HTTP request; the worker executes it locally
 	// against a pod endpoint and returns the response.
-	CommandType_COMMAND_TYPE_HTTP_PROXY CommandType = 29
+	CommandType_COMMAND_TYPE_HTTP_PROXY CommandType = 26
 )
 
 // Enum value maps for CommandType.
@@ -92,11 +90,8 @@ var (
 		22: "COMMAND_TYPE_GET_SYSTEM_INFO",
 		23: "COMMAND_TYPE_RUNTIME_TYPE",
 		24: "COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER",
-		25: "COMMAND_TYPE_REGISTER_PROXY_ROUTE",
-		26: "COMMAND_TYPE_UNREGISTER_PROXY_ROUTE",
-		27: "COMMAND_TYPE_GET_PROXY_ROUTE",
-		28: "COMMAND_TYPE_PROXY_HEALTH_CHECK",
-		29: "COMMAND_TYPE_HTTP_PROXY",
+		25: "COMMAND_TYPE_PROXY_ROUTE",
+		26: "COMMAND_TYPE_HTTP_PROXY",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":             0,
@@ -124,11 +119,8 @@ var (
 		"COMMAND_TYPE_GET_SYSTEM_INFO":         22,
 		"COMMAND_TYPE_RUNTIME_TYPE":            23,
 		"COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER": 24,
-		"COMMAND_TYPE_REGISTER_PROXY_ROUTE":    25,
-		"COMMAND_TYPE_UNREGISTER_PROXY_ROUTE":  26,
-		"COMMAND_TYPE_GET_PROXY_ROUTE":         27,
-		"COMMAND_TYPE_PROXY_HEALTH_CHECK":      28,
-		"COMMAND_TYPE_HTTP_PROXY":              29,
+		"COMMAND_TYPE_PROXY_ROUTE":             25,
+		"COMMAND_TYPE_HTTP_PROXY":              26,
 	}
 )
 
@@ -467,7 +459,7 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fis_heartbeat\x18\x05 \x01(\bR\visHeartbeat\x12\x1f\n" +
 	"\vworker_name\x18\x06 \x01(\tR\n" +
-	"workerName*\xcf\a\n" +
+	"workerName*\xd6\x06\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMMAND_TYPE_LIST_IMAGES\x10\x01\x12\x1b\n" +
@@ -494,12 +486,9 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\x18COMMAND_TYPE_DELETE_PVCS\x10\x15\x12 \n" +
 	"\x1cCOMMAND_TYPE_GET_SYSTEM_INFO\x10\x16\x12\x1d\n" +
 	"\x19COMMAND_TYPE_RUNTIME_TYPE\x10\x17\x12(\n" +
-	"$COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER\x10\x18\x12%\n" +
-	"!COMMAND_TYPE_REGISTER_PROXY_ROUTE\x10\x19\x12'\n" +
-	"#COMMAND_TYPE_UNREGISTER_PROXY_ROUTE\x10\x1a\x12 \n" +
-	"\x1cCOMMAND_TYPE_GET_PROXY_ROUTE\x10\x1b\x12#\n" +
-	"\x1fCOMMAND_TYPE_PROXY_HEALTH_CHECK\x10\x1c\x12\x1b\n" +
-	"\x17COMMAND_TYPE_HTTP_PROXY\x10\x1d2\x97\x01\n" +
+	"$COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER\x10\x18\x12\x1c\n" +
+	"\x18COMMAND_TYPE_PROXY_ROUTE\x10\x19\x12\x1b\n" +
+	"\x17COMMAND_TYPE_HTTP_PROXY\x10\x1a2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"

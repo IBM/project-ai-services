@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.284
+  image: icr.io/ai-services-cicd/ai-services:v0.0.290
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -31,3 +31,9 @@ caddy:
   image: icr.io/ai-services-cicd/caddy:v2.11.4-2
   adminPort: ""
   httpsPort: ""
+  # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
+  caddyFileContent: ""
+  # Populated from the certificate content specified via '--ssl-cert' during catalog configuration
+  sslCertContent: ""
+  # Populated from the private key content specified via '--ssl-key' during catalog configuration
+  sslKeyContent: ""
