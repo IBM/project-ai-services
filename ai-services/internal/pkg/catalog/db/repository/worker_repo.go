@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
@@ -29,6 +31,8 @@ type WorkerRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) (bool, error)
 	// GetAll returns all worker rows ordered by registered_at ascending.
 	GetAll(ctx context.Context) ([]models.Worker, error)
+	// GetByName returns the worker with the given name, or (nil, nil) if not found.
+	GetByName(ctx context.Context, name string) (*models.Worker, error)
 }
 
 // workerRepo implements WorkerRepository using pgx.
@@ -167,6 +171,45 @@ func (r *workerRepo) GetAll(ctx context.Context) ([]models.Worker, error) {
 	}
 
 	return workers, nil
+}
+
+// GetByName returns the worker with the given name, or (nil, nil) if not found.
+func (r *workerRepo) GetByName(ctx context.Context, name string) (*models.Worker, error) {
+	query := `
+		SELECT id, name, runtime_type, status, last_heartbeat, metadata, registered_at, updated_at
+		FROM workers
+		WHERE name = $1
+	`
+
+	var (
+		w            models.Worker
+		hb           sql.NullTime
+		metadataJSON []byte
+	)
+
+	err := r.pool.QueryRow(ctx, query, name).Scan(
+		&w.ID, &w.Name, &w.RuntimeType, &w.Status,
+		&hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("failed to get worker %q: %w", name, err)
+	}
+
+	if hb.Valid {
+		w.LastHeartbeat = &hb.Time
+	}
+
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
+		}
+	}
+
+	return &w, nil
 }
 
 // Made with Bob
