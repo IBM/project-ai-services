@@ -288,6 +288,16 @@ _run_teardown(connector_id)  (connectors.py — used for BOTH Case A and Case B)
 #### `GET /v1/connectors/{connector_id}/syncs`
 Returns paginated execution history from `connector_sync_logs` (`limit` default 50, max 200, `offset` 0). Results ordered newest first.
 
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `50` | Max records to return (capped at 200). Ignored when `latest=true`. |
+| `offset` | integer | `0` | Pagination offset. Ignored when `latest=true`. |
+| `latest` | boolean | `false` | When `true`, bypasses pagination and returns only the single most-recent sync log entry as a **plain object** (not a list). Returns `404` if no sync has ever run for the connector. |
+
+When `latest=true` the response shape is the same single-entry object as `GET /v1/connectors/{connector_id}/syncs/{sync_seq}` — not a list wrapper.
+
 #### `GET /v1/connectors/{connector_id}/syncs/{sync_seq}`
 Returns a single sync log entry identified by its sequence number. Returns `404` if the connector or the specific `sync_seq` does not exist.
 
@@ -383,6 +393,7 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 | `get_sync_log()` → `get_sync_log()` | Single sync-log row by `(connector_id, seq)`. |
 | `get_sync_log_status()` → `get_sync_log_status()` | Minimal `SELECT status` for `(connector_id, seq)`. Used by `_check_interrupt_call`. |
 | `list_sync_logs()` → `get_sync_logs()` + `count_sync_logs()` | Paginated log history. Returns `(items, total_count)`. |
+| `get_latest_sync_log()` → `get_latest_sync_log()` | Returns the single most-recent log row for a connector (`ORDER BY seq DESC LIMIT 1`). Returns `None` if no rows exist. Used by `GET /v1/connectors/{cid}/syncs?latest=true`. |
 | `reset_syncing_connectors()` → `reset_syncing_connectors()` | Bulk `UPDATE connectors SET sync_status='out of sync' WHERE sync_status='syncing'`. Returns list of affected IDs. Used on startup crash recovery. |
 | `close_open_sync_log()` → `close_open_sync_log()` | Closes the open sync-log row (`started` \| `cancel pending`) to `failed` with error string. Used on startup crash recovery. |
 

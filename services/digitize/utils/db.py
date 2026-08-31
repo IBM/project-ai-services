@@ -1531,6 +1531,15 @@ def get_sync_log(connector_id: str, seq: int) -> Optional[ConnectorSyncLog]:
     return db_manager.get_sync_log(connector_id, seq)
 
 
+def get_latest_sync_log(connector_id: str) -> Optional[ConnectorSyncLog]:
+    """
+    Return the most-recent sync-log row for a connector (ORDER BY seq DESC LIMIT 1).
+
+    Returns None if no sync has ever run for the connector.
+    """
+    return db_manager.get_latest_sync_log(connector_id)
+
+
 def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
     """
     Return the status of the connector_sync_logs row for (connector_id, seq).

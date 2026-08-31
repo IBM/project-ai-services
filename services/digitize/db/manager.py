@@ -1453,6 +1453,43 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_latest_sync_log(connector_id: str) -> Optional[ConnectorSyncLog]:
+        """Return the most-recent sync-log row for a connector (ORDER BY seq DESC LIMIT 1).
+
+        Returns None if no rows exist for the connector.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConnectorSyncLog)
+                    .where(ConnectorSyncLog.connector_id == connector_id)
+                    .order_by(ConnectorSyncLog.seq.desc())
+                    .limit(1)
+                )
+                row = session.scalars(stmt).one_or_none()
+                if row is None:
+                    return None
+                _ = (
+                    row.connector_id,
+                    row.seq,
+                    row.started_at,
+                    row.finished_at,
+                    row.total_files,
+                    row.new_files,
+                    row.removed_files,
+                    row.status,
+                    row.error,
+                )
+                session.expunge(row)
+                return row
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_latest_sync_log(connector={connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
     def count_sync_logs(connector_id: str) -> int:
         """Return the total number of sync-log rows for the given connector."""
         try:
