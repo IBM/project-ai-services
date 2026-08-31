@@ -7,6 +7,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +22,16 @@ import (
 // ErrWorkerAlreadyActive is returned by Register when the named worker already
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
+
+// ErrUnsupportedRuntimeType is returned by Register when runtimeType is not a
+// recognised value (podman or openshift).
+var ErrUnsupportedRuntimeType = fmt.Errorf("unsupported runtime_type")
+
+// validRuntimeTypes is the list of runtime type strings accepted by Register.
+var validRuntimeTypes = []models.WorkerRuntimeType{
+	models.WorkerRuntimeTypePodman,
+	models.WorkerRuntimeTypeOpenShift,
+}
 
 const (
 	// commandChannelSize is the buffer size for the per-worker command channel.
@@ -41,6 +52,7 @@ type WorkerEntry struct {
 
 	WorkerName  string
 	RuntimeType string
+	Metadata    map[string]string
 
 	// CommandCh is written by RemoteRuntime to send commands to this worker.
 	// The gateway goroutine reads from it and writes to the gRPC stream.
@@ -100,6 +112,10 @@ func New(repo repository.WorkerRepository) *Registry {
 // workerName must come from the validated token — callers must not trust the name
 // the worker declares in its RegisterRequest.
 func (r *Registry) Register(ctx context.Context, workerName, runtimeType string, metadata map[string]string) (*WorkerEntry, error) {
+	if !slices.Contains(validRuntimeTypes, models.WorkerRuntimeType(runtimeType)) {
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedRuntimeType, runtimeType)
+	}
+
 	r.mu.Lock()
 	if _, exists := r.workers[workerName]; exists {
 		r.mu.Unlock()
@@ -110,6 +126,7 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 	entry := &WorkerEntry{
 		WorkerName:  workerName,
 		RuntimeType: runtimeType,
+		Metadata:    metadata,
 		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
 		results:     make(map[string]chan *workerpb.CommandResult),
 	}
@@ -293,7 +310,7 @@ func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.C
 }
 
 // WorkerCommandChannel returns the command channel for the named worker.
-// It satisfies the runtime/remote.WorkerRegistry interface.
+// It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Command, bool) {
 	r.mu.RLock()
 	entry, ok := r.workers[workerName]
@@ -306,7 +323,7 @@ func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Comma
 }
 
 // WorkerRuntimeType returns the runtime type string for the named worker.
-// It satisfies the runtime/remote.WorkerRegistry interface.
+// It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
 	r.mu.RLock()
 	entry, ok := r.workers[workerName]
@@ -316,6 +333,75 @@ func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
 	}
 
 	return entry.RuntimeType, true
+}
+
+// WorkerMetadata returns the metadata map for the named worker.
+// It satisfies the stream.WorkerRegistry interface.
+func (r *Registry) WorkerMetadata(workerName string) (map[string]string, bool) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerName]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+
+	return entry.Metadata, true
+}
+
+// WorkerID returns the database UUID assigned to the named worker at registration
+// time. Returns (uuid.Nil, false) if the worker is not currently connected.
+func (r *Registry) WorkerID(workerName string) (uuid.UUID, bool) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerName]
+	r.mu.RUnlock()
+	if !ok {
+		return uuid.Nil, false
+	}
+
+	return entry.DBID, true
+}
+
+// WorkerNameByID returns the name of the worker whose DBID matches id.
+// Scans the in-memory map under a read lock — O(n) but n is tiny in practice.
+// Returns ("", false) if no connected worker has that ID.
+func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for name, entry := range r.workers {
+		if entry.DBID == id {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
+// IsWorkerConnected checks the in-memory cache first, then confirms status=ready
+// in the DB. Returns false if the worker is absent from the cache, not found in
+// the DB, or has any status other than ready.
+// When repo is nil (New was called without a DB — tests only) the cache check
+// is the sole authority.
+// It satisfies the stream.WorkerRegistry interface.
+func (r *Registry) IsWorkerConnected(ctx context.Context, workerName string) bool {
+	r.mu.RLock()
+	_, inCache := r.workers[workerName]
+	r.mu.RUnlock()
+
+	if !inCache {
+		return false
+	}
+
+	if r.repo == nil {
+		return true
+	}
+
+	w, err := r.repo.GetByName(ctx, workerName)
+	if err != nil || w == nil {
+		return false
+	}
+
+	return w.Status == models.WorkerStatusReady
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

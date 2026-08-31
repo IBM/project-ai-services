@@ -41,6 +41,7 @@ func canonicalizeName(name string) string {
 	name = re.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)
 	name = regexp.MustCompile(`\s+`).ReplaceAllString(name, "-")
+
 	return name
 }
 
@@ -157,6 +158,7 @@ func (intf *Interface) collectOperations() {
 						if strings.Contains(strings.ToLower(ct), "merge-patch+json") {
 							contentType = ct
 							schema = mediaType.Schema
+
 							break
 						} else if strings.Contains(strings.ToLower(ct), "json") && contentType == "" {
 							contentType = ct

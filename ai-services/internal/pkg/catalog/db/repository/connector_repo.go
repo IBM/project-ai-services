@@ -14,6 +14,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// ErrConnectorInUse is returned by DeleteIfUnlinked when the connector is still
+// referenced by one or more service_dependencies rows.
+var ErrConnectorInUse = errors.New("connector is in use")
+
 // ErrConnectorNotFound is returned when a connector cannot be located by its ID.
 var ErrConnectorNotFound = errors.New("connector not found")
 
@@ -29,10 +33,12 @@ type ConnectorFilters struct {
 	Offset   int                    // Optional: number of records to skip
 }
 
-// ConnectorUpdateFields holds the credential metadata fields that may be changed after creation.
-// Only the metadata JSONB column is mutable; name, type, and provider are immutable.
+// ConnectorUpdateFields holds the fields that may be changed after creation.
+// Name, type, and provider are immutable; metadata, status, and message are mutable.
 type ConnectorUpdateFields struct {
 	Metadata map[string]any
+	Status   models.ConnectorStatus
+	Message  string
 }
 
 // ConnectorRepository defines the interface for connector data operations.
@@ -57,9 +63,13 @@ type ConnectorRepository interface {
 	// Update applies a partial update of credential metadata fields only.
 	// Name, type, and provider are immutable after creation.
 	Update(ctx context.Context, id uuid.UUID, fields ConnectorUpdateFields) (*models.Connector, error)
-	// Delete removes a connector from the database.
-	// Callers are responsible for checking service_dependencies before invoking this method.
-	Delete(ctx context.Context, id uuid.UUID) error
+	// DeleteIfUnlinked removes a connector from the database inside a serializable transaction.
+	// It checks for existence and absence of service_dependencies atomically:
+	//   - Returns ErrConnectorNotFound if the connector does not exist.
+	//   - Returns ErrConnectorInUse (with the linked count in the error message) if
+	//     one or more service_dependencies rows reference the connector.
+	//   - Returns nil on successful deletion.
+	DeleteIfUnlinked(ctx context.Context, id uuid.UUID, depType models.DependencyType) (int, error)
 	// UpdateStatus sets the status and message columns for the given connector.
 	// Used by the ConnectorSyncJob heartbeat.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ConnectorStatus, message string) error
@@ -131,7 +141,6 @@ func scanConnectorWithCreds(rows pgx.Rows) (*models.Connector, error) {
 
 // Insert creates a new connector row, populating the ID, CreatedAt, and UpdatedAt fields on success.
 // Sensitive fields inside connector.Metadata are stored as-is for now.
-// TODO: encrypt sensitive fields inside connector.Metadata before write.
 func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector) error {
 	if connector.ID == uuid.Nil {
 		connector.ID = uuid.New()
@@ -194,7 +203,6 @@ func (r *connectorRepo) GetByName(ctx context.Context, name string) (*models.Con
 // Pass includeCreds=false for API responses (metadata omitted).
 // Pass includeCreds=true for internal paths that need credentials (sync job, Digitize propagation);
 // the caller must decrypt sensitive fields in-memory and must never forward the value to a response.
-// TODO: decrypt sensitive fields in Metadata when includeCreds is true.
 func (r *connectorRepo) GetByID(ctx context.Context, id uuid.UUID, includeCreds bool) (*models.Connector, error) {
 	var colList string
 	if includeCreds {
@@ -317,7 +325,6 @@ func (r *connectorRepo) List(ctx context.Context, filters *ConnectorFilters) ([]
 // Update replaces the metadata JSONB column for the given connector.
 // Name, type, and provider are immutable and are never touched here.
 // Sensitive fields inside fields.Metadata are stored as-is for now.
-// TODO: encrypt sensitive fields inside fields.Metadata before write.
 func (r *connectorRepo) Update(ctx context.Context, id uuid.UUID, fields ConnectorUpdateFields) (*models.Connector, error) {
 	metadataJSON, err := json.Marshal(fields.Metadata)
 	if err != nil {
@@ -326,11 +333,11 @@ func (r *connectorRepo) Update(ctx context.Context, id uuid.UUID, fields Connect
 
 	query := `
 		UPDATE connectors
-		SET metadata = $1, updated_at = NOW()
-		WHERE id = $2
+		SET metadata = $1, status = $2, message = $3, updated_at = NOW()
+		WHERE id = $4
 		RETURNING ` + nonSensitiveColumns
 
-	rows, err := r.pool.Query(ctx, query, metadataJSON, id)
+	rows, err := r.pool.Query(ctx, query, metadataJSON, fields.Status, sql.NullString{String: fields.Message, Valid: fields.Message != ""}, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update connector: %w", err)
 	}
@@ -347,18 +354,58 @@ func (r *connectorRepo) Update(ctx context.Context, id uuid.UUID, fields Connect
 	return scanConnector(rows)
 }
 
-// Delete removes a connector from the database.
-// Callers must check service_dependencies (via ServiceDependencyRepository.GetServicesByDependency)
-// and enforce any in-use guard before calling this method.
-func (r *connectorRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `DELETE FROM connectors WHERE id = $1`
-
-	_, err := r.pool.Exec(ctx, query, id)
+// DeleteIfUnlinked removes a connector atomically inside a serializable transaction.
+// All three phases run in the same transaction to prevent a concurrent link operation
+// from slipping between the guard and the DELETE:
+//
+//  1. Verify the connector exists — returns ErrConnectorNotFound if not.
+//  2. Count service_dependencies rows — returns ErrConnectorInUse if > 0.
+//  3. DELETE the connector row.
+//
+// Returns (linkedCount, nil) on success (linkedCount is always 0 at that point)
+// and (linkedCount, ErrConnectorInUse) when blocked.
+func (r *connectorRepo) DeleteIfUnlinked(ctx context.Context, id uuid.UUID, depType models.DependencyType) (int, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
-		return fmt.Errorf("failed to delete connector: %w", err)
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Phase 1: verify the connector exists.
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM connectors WHERE id = $1)`, id,
+	).Scan(&exists); err != nil {
+		return 0, fmt.Errorf("failed to check connector existence: %w", err)
 	}
 
-	return nil
+	if !exists {
+		return 0, ErrConnectorNotFound
+	}
+
+	// Phase 2: count service_dependencies rows that reference this connector.
+	var linkedCount int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM service_dependencies WHERE dependency_id = $1 AND dependency_type = $2`,
+		id, depType,
+	).Scan(&linkedCount); err != nil {
+		return 0, fmt.Errorf("failed to count connector dependencies: %w", err)
+	}
+
+	if linkedCount > 0 {
+		return linkedCount, ErrConnectorInUse
+	}
+
+	// Phase 3: delete the connector row.
+	if _, err := tx.Exec(ctx, `DELETE FROM connectors WHERE id = $1`, id); err != nil {
+		return 0, fmt.Errorf("failed to delete connector: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("failed to commit delete transaction: %w", err)
+	}
+
+	return 0, nil
 }
 
 // UpdateStatus sets the status and message columns for the given connector.
