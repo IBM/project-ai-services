@@ -423,14 +423,18 @@ export interface DataSourceConnectorsListResponse {
   page_size: number;
 }
 
-/** Shape returned by GET /api/v1/connectors?type=datasource */
-export interface ConnectorType {
-  type: string;
+/** Shape returned by GET /api/v1/connectors */
+export interface ConnectorTypeProvider {
   id: string;
   name: string;
   description: string;
-  connector_type: string;
-  connector_name: string;
+  schema: string;
+}
+
+export interface ConnectorType {
+  type: string;
+  name: string;
+  provider: ConnectorTypeProvider;
 }
 
 /** A single property inside the JSON-Schema params response */

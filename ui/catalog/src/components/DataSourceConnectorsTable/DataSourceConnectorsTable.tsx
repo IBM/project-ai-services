@@ -164,11 +164,13 @@ const DataSourceConnectorsTable = ({
 
         // Prefetch params for each provider in parallel — skip any still fresh
         types.forEach((type) => {
-          if (!isParamsStale(type.id)) return;
-          setParamsLoading(type.id, true);
-          fetchConnectorParams(type.id)
-            .then((schema) => setParams(type.id, schema))
-            .catch(() => setParamsError(type.id, "Failed to load params"));
+          if (!isParamsStale(type.provider.id)) return;
+          setParamsLoading(type.provider.id, true);
+          fetchConnectorParams(type.provider.id)
+            .then((schema) => setParams(type.provider.id, schema))
+            .catch(() =>
+              setParamsError(type.provider.id, "Failed to load params"),
+            );
         });
       })
       .catch(() => setConnectorTypesError("Failed to load connector types"));

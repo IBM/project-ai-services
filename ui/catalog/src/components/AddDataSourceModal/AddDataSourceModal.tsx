@@ -93,7 +93,7 @@ const AddDataSourceModal = ({
     if (!open) return;
     if (connectorTypes.length > 0 && !selectedType) {
       const objectStorage = connectorTypes.find(
-        (t) => t.id === "object_storage",
+        (t) => t.provider.id === "object_storage",
       );
       dispatch({
         type: ACTION_TYPES.SET_SELECTED_TYPE,
@@ -103,7 +103,9 @@ const AddDataSourceModal = ({
   }, [open, connectorTypes, selectedType]);
 
   // ── Parse fields from schema ───────────────────────────────────────────────
-  const paramsSchema = selectedType ? getParams(selectedType.id) : null;
+  const paramsSchema = selectedType
+    ? getParams(selectedType.provider.id)
+    : null;
 
   const fields = useMemo(
     () => (paramsSchema ? parseConnectorSchema(paramsSchema) : []),
@@ -143,9 +145,11 @@ const AddDataSourceModal = ({
   };
 
   // ── Derived loading / error states ────────────────────────────────────────
-  const paramsLoading = selectedType ? isParamsLoading(selectedType.id) : false;
+  const paramsLoading = selectedType
+    ? isParamsLoading(selectedType.provider.id)
+    : false;
   const paramsError = selectedType
-    ? (paramsCacheError[selectedType.id] ?? null)
+    ? (paramsCacheError[selectedType.provider.id] ?? null)
     : null;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -183,7 +187,7 @@ const AddDataSourceModal = ({
     try {
       const payload = transformToCreateDatasourcePayload(
         dataSourceName.trim(),
-        selectedType.id,
+        selectedType.provider.id,
         formValues,
         fields,
       );
@@ -361,7 +365,7 @@ const AddDataSourceModal = ({
                 titleText="Source type"
                 label="Select source type"
                 items={connectorTypes ?? []}
-                itemToString={(item) => item?.name ?? ""}
+                itemToString={(item) => item?.provider.name ?? ""}
                 selectedItem={selectedType}
                 disabled={isSubmitting}
                 onChange={({ selectedItem }) => {
@@ -373,9 +377,9 @@ const AddDataSourceModal = ({
                   }
                 }}
               />
-              {selectedType?.description && (
+              {selectedType?.provider.description && (
                 <p className={styles.connectorDescription}>
-                  {selectedType.description}
+                  {selectedType.provider.description}
                 </p>
               )}
             </>
