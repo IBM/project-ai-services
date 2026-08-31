@@ -24,6 +24,11 @@ type DatasourceServiceInterface interface {
 	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
 	// Sensitive credential fields are never included in any returned item.
 	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
+	// ListApplicationDatasources returns a paginated list of datasource connectors linked to
+	// the given application, enriched with live sync state (status, files, last_sync, message)
+	// from each connector's Digitize pod.
+	// Returns a *ValidationError with code 404 when the application does not exist.
+	ListApplicationDatasources(ctx context.Context, req apimodels.ListApplicationDatasourcesRequest) (*apimodels.ApplicationDatasourceListResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

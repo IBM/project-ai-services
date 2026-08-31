@@ -36,10 +36,11 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), tokenMgr, blacklist)
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
+	datasourceHandler := handlers.NewDatasourceHandler(datasourceSvc)
 	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(), auth)
-	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), auth)
+	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceHandler, auth)
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
-	registerDatasourceRoutes(v1, handlers.NewDatasourceHandler(datasourceSvc), auth)
+	registerDatasourceRoutes(v1, datasourceHandler, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 
 	return router
@@ -91,7 +92,7 @@ func registerBundleRoutes(v1 *gin.RouterGroup, h *handlers.BundleHandler, authMw
 	}
 }
 
-func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandler, authMw gin.HandlerFunc) {
+func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandler, datasourceH *handlers.DatasourceHandler, authMw gin.HandlerFunc) {
 	g := v1.Group("applications")
 	g.Use(authMw)
 	{
@@ -102,6 +103,8 @@ func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandl
 		g.PUT("/:id", h.UpdateApplication)
 		g.DELETE("/:id", h.DeleteApplication)
 		g.GET("/:id/ps", h.ApplicationPS)
+		// GET /api/v1/applications/:id/datasources — list datasources linked to this application
+		g.GET("/:id/datasources", datasourceH.ListApplicationDatasources)
 	}
 }
 

@@ -55,3 +55,57 @@ func (c *DigitizeClient) GetConnectorSync(ctx context.Context, connectorID strin
 
 	return &result, nil
 }
+
+// ListConnectors calls GET /v1/connectors on the Digitize pod and returns all connectors
+// as a map keyed by connector ID for O(1) lookup.
+// The list endpoint is not paginated — it always returns all connectors on the pod.
+func (c *DigitizeClient) ListConnectors(ctx context.Context) (map[string]apimodels.DigitizeConnectorItem, error) {
+	var result []apimodels.DigitizeConnectorItem
+
+	resp, err := c.http.R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get("/v1/connectors")
+	if err != nil {
+		return nil, fmt.Errorf("digitize request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("digitize returned status %d", resp.StatusCode())
+	}
+
+	byID := make(map[string]apimodels.DigitizeConnectorItem, len(result))
+	for _, item := range result {
+		byID[item.ID] = item
+	}
+
+	return byID, nil
+}
+
+// GetLatestConnectorSyncLog calls GET /v1/connectors/{connectorID}/syncs?latest=true on the
+// Digitize pod and returns the most recent sync log entry.
+// The latest=true query parameter will be implemented on the Digitize side; the caller
+// uses the first item in the returned list.
+// Returns nil (no error) when no sync log exists yet for the connector.
+func (c *DigitizeClient) GetLatestConnectorSyncLog(ctx context.Context, connectorID string) (*apimodels.ConnectorSyncLog, error) {
+	var result apimodels.ConnectorSyncLogResponse
+
+	resp, err := c.http.R().
+		SetContext(ctx).
+		SetQueryParam("latest", "true").
+		SetResult(&result).
+		Get("/v1/connectors/" + connectorID + "/syncs")
+	if err != nil {
+		return nil, fmt.Errorf("digitize request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("digitize returned status %d", resp.StatusCode())
+	}
+
+	if len(result.Items) == 0 {
+		return nil, nil
+	}
+
+	return &result.Items[0], nil
+}
