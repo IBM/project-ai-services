@@ -22,7 +22,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          exec /usr/bin/ai-services worker grpc-connect {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }}
+          exec /usr/bin/ai-services worker grpc-connect {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }} {{ .Values.worker.optionalFlags }}
       env:
         - name: AI_SERVICES_LOG_LEVEL
           value: "info"

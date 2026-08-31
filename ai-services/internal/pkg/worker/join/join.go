@@ -87,7 +87,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
 
-	// ── Step 1: Setup worker node ────────────────────────────────────────────
+	// Setup worker node
 	if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
 		return fmt.Errorf("worker join: setup: %w", err)
 	}
@@ -96,18 +96,14 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // GrpcConnect dials the catalog gRPC worker-gateway, registers with the
-// bootstrap token, and holds the CommandStream open until ctx is cancelled
-// or an unrecoverable error occurs.
-//
-// Unlike Run, it skips the node-setup (Caddy deploy) step and computes the
-// domain suffix and metadata from opts itself.
+// bootstrap token, and holds the CommandStream open.
 func GrpcConnect(ctx context.Context, opts Options) error {
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
 
-	// ── Step 1b: Build Caddy proxy router (Podman only) ──────────────────────
+	// ── Step 1: Build Caddy proxy router (Podman only) ──────────────────────
 	// Must happen after Setup so the Caddy pod is running and its admin port
 	// is discoverable. For OpenShift workers routes are managed natively.
 	var pr *workercaddy.ProxyRouter
@@ -123,7 +119,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
+	// ── Step 2: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 
 	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -134,7 +130,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 
 	client := workerpb.NewWorkerGatewayClient(conn)
 
-	// ── Step 2: Register + stream loop ──────────────────────────────────────-
+	// ── Step 3: Register + stream loop ──────────────────────────────────────-
 	meta := map[string]string{
 		workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
 		workerconstants.MetaKeyDomainSuffix: domainSuffix,

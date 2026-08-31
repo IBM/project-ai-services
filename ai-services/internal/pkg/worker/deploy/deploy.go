@@ -168,11 +168,11 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingRe
 	if err != nil {
 		return fmt.Errorf("worker setup: load templates: %w", err)
 	}
-
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
 		"caddy.httpsPort":    strconv.Itoa(opts.HTTPSPort),
-		"worker.token":       token,
-		"worker.gatewayAddr": gatewayAddr,
+		"worker.token":         token,
+		"worker.gatewayAddr":   gatewayAddr,
+		"worker.optionalFlags": getOptionalFlags(opts),
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
@@ -226,4 +226,21 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
+}
+
+// getOptionalFlags builds the optional CLI flags string that is forwarded from
+// the 'worker join' command to the 'worker grpc-connect' command running inside
+// the container.
+func getOptionalFlags(opts Options) string {
+	var flags string
+	if opts.SSLCertPath != "" && opts.SSLKeyPath != "" {
+		flags += fmt.Sprintf("--ssl-cert %s --ssl-key %s ", opts.SSLCertPath, opts.SSLKeyPath)
+	}
+	if opts.DomainName != "" {
+		flags += fmt.Sprintf("--domain-name %s ", opts.DomainName)
+	}
+	if opts.HTTPSPort > 0 {
+		flags += fmt.Sprintf("--https-port %d", opts.HTTPSPort)
+	}
+	return flags
 }

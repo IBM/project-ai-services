@@ -102,10 +102,7 @@ func joinRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return join.Run(ctx, opts)
+	return join.Run(context.Background(), opts)
 }
 
 // configureFlags registers the flags shared by the join and grpc-connect
@@ -183,10 +180,7 @@ func grpcConnectRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return join.GrpcConnect(ctx, opts)
+	return join.GrpcConnect(context.Background(), opts)
 }
 
 func newGrpcConnectCmd() *cobra.Command {
