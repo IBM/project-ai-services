@@ -657,7 +657,7 @@ The catalog backend resolves the `connector_id` from `service_dependencies`, fet
 
 **`GET /api/v1/applications/:id/datasources`**
 
-Returns all datasources currently connected to the given application, enriched with live sync status fetched from each service's Digitize pod.
+Returns a paginated list of datasources currently connected to the given application, enriched with live sync status fetched from the application's Digitize pod.
 
 **Path parameters:**
 
@@ -665,83 +665,90 @@ Returns all datasources currently connected to the given application, enriched w
 | --------- | ------ | -------------------- |
 | `id`      | `uuid` | The application UUID |
 
+**Query parameters:**
+
+| Parameter   | Type  | Default | Description                              |
+| ----------- | ----- | ------- | ---------------------------------------- |
+| `page`      | `int` | `1`     | Page number (1-indexed)                  |
+| `page_size` | `int` | `20`    | Items per page (max 100)                 |
+
 **Response `200 OK`:**
 
 ```json
 {
-  "application_id": "0d2de05d-...",
-  "application_name": "My RAG App",
-  "datasources": [
+  "data": [
     {
-      "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
       "name": "My S3 Bucket",
-      "type": "datasource",
-      "provider": "s3",
-      "provider_name": "Amazon S3",
-      "status": "Connected",
-      "connector_id": "550e8400-e29b-41d4-a716-446655440000",
+      "provider": {
+        "id": "object_storage",
+        "name": "Object Storage"
+      },
       "sync_status": "up to date",
       "total_files": 150,
-      "new_files": 2,
-      "removed_files": 0,
-      "failed_files": 8,
       "last_sync_at": "2026-06-01T11:00:00Z",
-      "last_sync_error": null
+      "message": "2 new files found"
     },
     {
-      "datasource_id": "661f9511-f30c-52e5-b827-557766551111",
+      "id": "661f9511-f30c-52e5-b827-557766551111",
       "name": "My SSH Share",
-      "type": "datasource",
-      "provider": "ssh",
-      "provider_name": "Remote SSH",
-      "status": "Connected",
-      "connector_id": "661f9511-f30c-52e5-b827-557766551111",
+      "provider": {
+        "id": "file_system",
+        "name": "File System"
+      },
       "sync_status": "out of sync",
       "total_files": 40,
-      "new_files": 0,
-      "removed_files": 3,
-      "failed_files": 1,
       "last_sync_at": "2026-06-01T08:00:00Z",
-      "last_sync_error": "connection timeout on last tick"
+      "message": "connection timeout on last tick",
+      "err_msg": ""
     }
-  ]
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total_items": 2,
+    "total_pages": 1,
+    "has_next": false,
+    "has_prev": false
+  }
 }
 ```
 
-| Field                           | Source                                       | Description                                                                                 |
-| ------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `application_id`                | path param                                   | The application UUID                                                                        |
-| `application_name`              | catalog (`applications.name`)                | Display name of the application                                                             |
-| `datasources[].datasource_id`   | catalog (`connectors.id`)                    | UUID of the datasource connector                                                            |
-| `datasources[].name`            | catalog (`connectors.name`)                  | User-supplied display name of the datasource                                                |
-| `datasources[].type`            | catalog (`connectors.type`)                  | Always `"datasource"`                                                                       |
-| `datasources[].provider`        | catalog (`connectors.provider`)              | Provider identifier, e.g. `"s3"`, `"ssh"`                                                   |
-| `datasources[].provider_name`   | provider registry (`DisplayName()`)          | Human-readable provider name, e.g. `"Amazon S3"`, `"Remote SSH"`                            |
-| `datasources[].status`          | catalog (`connectors.status`)                | Catalog-side connectivity health: `Connected` or `Offline`                                  |
-| `datasources[].connector_id`    | Digitize (echoed from `connectors.id`)       | The connector UUID used as the Digitize connector ID                                        |
-| `datasources[].sync_status`     | Digitize (`GET /v1/connectors/:connectorid`) | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
-| `datasources[].total_files`     | Digitize                                     | Total files known to the connector                                                          |
-| `datasources[].new_files`       | Digitize                                     | Files added since the last tick                                                             |
-| `datasources[].removed_files`   | Digitize                                     | Files removed since the last tick                                                           |
-| `datasources[].failed_files`    | Digitize                                     | Files that failed to process in the last tick                                               |
-| `datasources[].last_sync_at`    | Digitize                                     | Timestamp of the last completed sync, or `null`                                             |
-| `datasources[].last_sync_error` | Digitize                                     | Error string from the last failed sync, or `null`                                           |
+| Field                      | Source                                          | Description                                                                                                                                               |
+| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data[].id`                | catalog (`connectors.id`)                       | UUID of the datasource connector                                                                                                                          |
+| `data[].name`              | catalog (`connectors.name`)                     | User-supplied display name of the datasource                                                                                                              |
+| `data[].provider.id`       | catalog (`connectors.provider`)                 | Provider identifier, e.g. `"object_storage"`, `"file_system"`                                                                                            |
+| `data[].provider.name`     | provider registry                               | Human-readable provider name, e.g. `"Object Storage"`, `"File System"`                                                                                   |
+| `data[].sync_status`       | Digitize (`GET /v1/connectors`)                 | Current sync state: `"up to date"`, `"out of sync"`, `"syncing"`. Set to `"unknown"` when Digitize is unreachable.                                        |
+| `data[].total_files`       | Digitize (`GET /v1/connectors`)                 | Total files known to the connector                                                                                                                        |
+| `data[].last_sync_at`      | Digitize (`GET /v1/connectors`)                 | Timestamp of the last completed sync, or `null`                                                                                                           |
+| `data[].message`           | Digitize (`GET /v1/connectors/{id}/syncs?latest=true`) | Human-readable sync state description: `"syncing" → "Processing X/Y files"`, `"up to date" → "X new files found"`, `"out of sync" → error string. Empty when no sync has run yet. |
+| `data[].err_msg`           | —                                               | Populated when sync state could not be fetched from Digitize (e.g. pod unreachable, no endpoint registered). Omitted on success.                          |
+| `pagination`               | —                                               | Standard pagination envelope (page, page_size, total_items, total_pages, has_next, has_prev)                                                              |
 
 **Backend logic:**
 
 1. Look up the application by `id` — return `404` if not found.
-2. Query `service_dependencies` for all rows where `dependency_type = 'datasource'` linked to any service of this application.
-3. For each unique `dependency_id` (datasource connector UUID), fetch the `connectors` row and resolve `provider_name` from the provider registry.
-4. For each linked Digitize service pod, call `GET /v1/connectors/:connectorid` and merge the sync fields into the response entry.
-5. Return the merged list. If Digitize is unreachable for a given entry, populate sync fields with `null` and `sync_status: "unknown"` rather than failing the whole request.
+2. Query `service_dependencies` (joined to `services`) for all distinct connector `dependency_id` values linked to this application, with pagination applied at the DB level using a window-function query (single round-trip).
+3. For each connector UUID, fetch the `connectors` row from the catalog DB and resolve the provider display name from the catalog.
+4. Resolve the Digitize pod base URL from the first connector's linked service endpoints (all connectors in an application share the same Digitize pod). Call `GET /v1/connectors` **once** to bulk-fetch `sync_status`, `last_sync_at`, and `total_files` for all connectors on the pod.
+5. For each connector, call `GET /v1/connectors/{id}/syncs?latest=true` to obtain the latest sync log entry (`new_files`, `error`) and derive the human-readable `message`.
+6. If Digitize is unreachable or a connector is not found on the pod, set `sync_status: "unknown"`, leave numeric fields at zero, and populate `err_msg` — do not fail the whole request.
 
 **Response `200 OK` (no datasources connected):**
 
 ```json
 {
-  "application_id": "0d2de05d-...",
-  "application_name": "My RAG App",
-  "datasources": []
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total_items": 0,
+    "total_pages": 0,
+    "has_next": false,
+    "has_prev": false
+  }
 }
 ```
 
