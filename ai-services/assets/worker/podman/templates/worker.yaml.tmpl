@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--worker"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+spec:
+  restartPolicy: always
+  containers:
+    - name: worker
+      image: "{{ .Values.worker.image }}"
+      securityContext:
+        seLinuxOptions:
+          {{- if eq .Values.worker.podman.uri "/run/podman/podman.sock" }}
+          type: ai_services_root.process
+          {{- else }}
+          type: ai_services_nonroot.process
+          {{- end }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          exec /usr/bin/ai-services worker grpc-connect {{ .Values.worker.controlPlaneDomain }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }}
+      env:
+        - name: AI_SERVICES_LOG_LEVEL
+          value: "info"
+        - name: AI_SERVICES_LOG_FORMAT
+          value: "service"
+        - name: CONTAINER_HOST
+          value: "unix://{{ .Values.worker.podman.uri }}"
+      volumeMounts:
+        - name: podman-socket
+          mountPath: {{ .Values.worker.podman.uri }}
+        - name: iommu-groups
+          mountPath: /sys/kernel/iommu_groups
+          readOnly: true
+      resources:
+        requests:
+          podman.io/device=/dev/vfio: 4
+          memory: "1Gi"
+        limits:
+          memory: "1Gi"
+  volumes:
+    - name: podman-socket
+      hostPath:
+        # For rootless podman: /run/user/$(id -u)/podman/podman.sock
+        # For root podman: /run/podman/podman.sock
+        path: {{ .Values.worker.podman.uri }}
+        type: Socket
+    - name: iommu-groups
+      hostPath:
+        path: /sys/kernel/iommu_groups
+        type: Directory

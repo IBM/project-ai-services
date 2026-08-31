@@ -3,3 +3,4 @@ version: 0.0.1
 description: "Worker node services for Project AI-Services"
 podTemplateExecutions:
   - [caddy.yaml.tmpl]
+  - [worker.yaml.tmpl]

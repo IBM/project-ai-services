@@ -82,11 +82,6 @@ type Options struct {
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
 func Run(ctx context.Context, opts Options) error {
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return err
-	}
-
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
@@ -95,6 +90,21 @@ func Run(ctx context.Context, opts Options) error {
 	// ── Step 1: Setup worker node ────────────────────────────────────────────
 	if err := workerdeploy.Setup(ctx, rt, opts.Setup); err != nil {
 		return fmt.Errorf("worker join: setup: %w", err)
+	}
+
+	return nil
+}
+
+// GrpcConnect dials the catalog gRPC worker-gateway, registers with the
+// bootstrap token, and holds the CommandStream open until ctx is cancelled
+// or an unrecoverable error occurs.
+//
+// Unlike Run, it skips the node-setup (Caddy deploy) step and computes the
+// domain suffix and metadata from opts itself.
+func GrpcConnect(ctx context.Context, opts Options) error {
+	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
 
 	// ── Step 1b: Build Caddy proxy router (Podman only) ──────────────────────
@@ -108,18 +118,23 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	// ── Step 2: Dial the gateway ─────────────────────────────────────────────
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return err
+	}
+
+	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 
 	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("worker join: create client for %s: %w", opts.GatewayAddr, err)
+		return fmt.Errorf("worker grpc-connect: create client for %s: %w", opts.GatewayAddr, err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	client := workerpb.NewWorkerGatewayClient(conn)
 
-	// ── Step 3: Register + stream loop ───────────────────────────────────────
+	// ── Step 2: Register + stream loop ──────────────────────────────────────-
 	meta := map[string]string{
 		workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
 		workerconstants.MetaKeyDomainSuffix: domainSuffix,
