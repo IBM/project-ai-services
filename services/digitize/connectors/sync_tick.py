@@ -167,14 +167,16 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             removed_files=len(orphan_checksums),
         )
 
-        invalid_count = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
+        invalid_files = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
         update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
-        if invalid_count > 0:
-            validation_error_msg = f"{invalid_count} file(s) failed due to validation failure"
+        if invalid_files:
+            files_str = ", ".join(invalid_files)
+            validation_error_msg = f"Invalid file(s) detected from source - {files_str}"
+            logger.error(validation_error_msg)
             _fail_tick(sync_seq, connector_id, RuntimeError(validation_error_msg), error_msg=validation_error_msg)
         else:
             _complete_tick(sync_seq, connector_id)
@@ -290,7 +292,7 @@ async def _process_new_files(
     connector_name: str,
     scanner,
     ingest_list: list[tuple[str, str]],
-) -> int:
+) -> list[str]:
     """Download and ingest *ingest_list* in batches of up to 10 files.
 
     Each batch of up to 10 files is downloaded into a single staging directory,
@@ -303,14 +305,14 @@ async def _process_new_files(
 
     Returns
     -------
-    int
-        Number of files rejected by ``validate_document_file`` across all
-        batches.  If non-zero the caller closes the sync log as FAILED with
-        a message indicating how many files failed validation.
+    list[str]
+        Remote paths of files rejected by ``validate_document_file`` across all
+        batches.  If non-empty the caller closes the sync log as FAILED with
+        a message listing the invalid files.
     """
     staging_base = settings.digitize.staging_dir / "connectors"
     batch_failed = False
-    invalid_file_count = 0
+    invalid_files: list[str] = []
 
     for batch_number, batch_offset in enumerate(range(0, len(ingest_list), _BATCH_SIZE), start=1):
         batch = ingest_list[batch_offset : batch_offset + _BATCH_SIZE]
@@ -351,7 +353,7 @@ async def _process_new_files(
                         f"{connector_id!r}; skipping file: {val_exc}"
                     )
                     (batch_dir / filename).unlink(missing_ok=True)
-                    invalid_file_count += 1
+                    invalid_files.append(remote_path)
                     continue
                 filename_to_checksum[filename] = checksum
 
@@ -419,7 +421,7 @@ async def _process_new_files(
             f"Connector-{connector_name}-{sync_seq}-*"
         )
 
-    return invalid_file_count
+    return invalid_files
 
 
 # ---------------------------------------------------------------------------

@@ -503,7 +503,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             # must not raise despite close() failing
@@ -523,7 +523,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=1))
@@ -706,12 +706,37 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=11))  # must not raise
 
         assert mock_close.call_args.kwargs["status"] == SyncLogStatus.COMPLETED
+
+    def test_invalid_files_fail_tick_with_formatted_message(self):
+        """When _process_new_files returns a non-empty list, run_tick must close
+        the sync log as FAILED with the message 'Invalid file(s) detected from source - ...'."""
+        connector = _connector()
+        mock_scanner = self._make_scanner()
+
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
+             patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.update_sync_log"), \
+             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
+             patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
+             patch("digitize.connectors.sync_tick._process_new_files",
+                   new_callable=AsyncMock, return_value=["src/bad.pdf", "src/corrupt.docx"]), \
+             patch("digitize.connectors.sync_tick._delete_orphans",
+                   new_callable=AsyncMock, return_value=0):
+            asyncio.run(run_tick("conn-1", sync_seq=5))
+
+        args = mock_close.call_args.kwargs
+        assert args["status"] == SyncLogStatus.FAILED
+        assert args["error"] == "Invalid file(s) detected from source - src/bad.pdf, src/corrupt.docx"
 
     def test_cancelled_mid_process_closes_log(self):
         """_check_interrupt_call fires inside _process_new_files loop."""
@@ -1069,9 +1094,23 @@ class TestProcessNewFilesExtra:
 
         with self._base_patches():
             with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
-                # must not raise
-                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
-                                               [("remote/fake.pdf", "ck1")]))
+                # must not raise; returns the list of invalid remote paths
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("remote/fake.pdf", "ck1")]))
+        assert result == ["remote/fake.pdf"]
+
+    def test_all_files_invalid_returns_remote_paths(self):
+        """_process_new_files returns the list of invalid remote paths, not a count."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("a/one.pdf", "ck1"), ("b/two.pdf", "ck2")]))
+
+        assert result == ["a/one.pdf", "b/two.pdf"]
 
     def test_mixed_batch_only_valid_files_ingested(self):
         """In a mixed batch, only the valid file reaches ingest; the invalid one is deleted."""
@@ -1087,14 +1126,16 @@ class TestProcessNewFilesExtra:
             with patch(f"{DB_MODULE}.validate_document_file", side_effect=_validate), \
                  patch(f"{DB_MODULE}.initialize_job_state",
                        return_value={"works.pdf": "doc-1"}) as mock_init:
-                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
-                                               [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
 
         # initialize_job_state must only see the valid file
         mock_init.assert_called_once()
         call_args = mock_init.call_args
         assert call_args is not None
         assert call_args.kwargs["documents_info"] == ["works.pdf"]
+        # invalid file's remote path must be in the returned list
+        assert result == ["fake.pdf"]
 
 
 # ---------------------------------------------------------------------------
