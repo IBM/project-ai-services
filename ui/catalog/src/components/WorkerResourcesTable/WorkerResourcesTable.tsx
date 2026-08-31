@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useEffect } from "react";
 import {
   DataTable,
   Table,
@@ -13,10 +13,12 @@ import {
   Grid,
   Column,
   DataTableSkeleton,
+  ActionableNotification,
 } from "@carbon/react";
 import { ApiKey } from "@carbon/icons-react";
 import type { Dispatch } from "react";
 import type { AppAction, WorkerResourceRow } from "./types";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 import {
   ACTION_TYPES,
   DEFAULT_VISIBLE_COLUMNS,
@@ -85,17 +87,23 @@ const renderCell = ({
 
 export interface WorkerResourcesTableProps {
   onRegister?: () => void;
+  registerError?: { message: string; onRetry: () => void } | null;
+  onRegisterErrorDismiss?: () => void;
   refreshTrigger?: number;
 }
 
 const WorkerResourcesTable = ({
   onRegister,
+  registerError,
+  onRegisterErrorDismiss,
   refreshTrigger,
 }: WorkerResourcesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
+  const registerRetryRef = useRef<(() => void) | null>(null);
+  const isRegisterError = useRef(false);
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
@@ -200,15 +208,50 @@ const WorkerResourcesTable = ({
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  useEffect(() => {
+    if (!registerError) return;
+    registerRetryRef.current = registerError.onRetry;
+    isRegisterError.current = true;
+    dispatch({
+      type: ACTION_TYPES.SHOW_REGISTER_ERROR,
+      payload: registerError.message,
+    });
+  }, [registerError]);
+
+  const handleRegisterErrorClose = useCallback(() => {
+    isRegisterError.current = false;
+    dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
+    onRegisterErrorDismiss?.();
+  }, [onRegisterErrorDismiss]);
+
   return (
     <>
+      {state.registerErrorToastOpen && (
+        <ActionableNotification
+          kind="error"
+          title="Register worker failed"
+          subtitle={state.registerErrorToastMessage}
+          actionButtonLabel="Try again"
+          closeOnEscape
+          aria-label="close notification"
+          className={sharedStyles.customToast}
+          onCloseButtonClick={handleRegisterErrorClose}
+          onActionButtonClick={() => {
+            isRegisterError.current = false;
+            dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
+            registerRetryRef.current?.();
+          }}
+        />
+      )}
       <TableToasts
         toastOpen={state.toastOpen}
         deleteErrorRowName={state.deleteErrorRowName}
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="worker resource"
         onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
-        onDeleteErrorRetry={handleDeregister}
+        onDeleteErrorRetry={async () => {
+          dispatch({ type: "SHARED_HIDE_ERROR" });
+        }}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}

@@ -6,7 +6,7 @@ export interface WorkerResourcesState {
   phase: RegisterPhase;
   workerName: string;
   token: string;
-  errorMessage: string;
+  registerErrorMessage: string | null;
 }
 
 export type WorkerResourcesAction =
@@ -15,7 +15,8 @@ export type WorkerResourcesAction =
   | { type: "SET_WORKER_NAME"; payload: string }
   | { type: "SET_PHASE"; payload: RegisterPhase }
   | { type: "REGISTER_SUCCESS"; payload: { token: string } }
-  | { type: "REGISTER_ERROR"; payload: string };
+  | { type: "REGISTER_ERROR"; payload: string }
+  | { type: "CLEAR_REGISTER_ERROR" };
 
 export const initialState: WorkerResourcesState = {
   isModalOpen: false,
@@ -23,7 +24,7 @@ export const initialState: WorkerResourcesState = {
   phase: "idle",
   workerName: "",
   token: "",
-  errorMessage: "",
+  registerErrorMessage: null,
 };
 
 export const workerResourcesReducer = (
@@ -36,16 +37,12 @@ export const workerResourcesReducer = (
         ...state,
         isModalOpen: true,
         phase: "idle",
-        workerName: "",
+        workerName: state.registerErrorMessage ? state.workerName : "",
         token: "",
-        errorMessage: "",
+        registerErrorMessage: null,
       };
     case "CLOSE_MODAL":
-      return {
-        ...initialState,
-        isModalOpen: false,
-        refreshTrigger: state.refreshTrigger,
-      };
+      return { ...state, isModalOpen: false };
     case "SET_WORKER_NAME":
       return {
         ...state,
@@ -62,7 +59,14 @@ export const workerResourcesReducer = (
         refreshTrigger: state.refreshTrigger + 1,
       };
     case "REGISTER_ERROR":
-      return { ...state, phase: "error", errorMessage: action.payload };
+      return {
+        ...state,
+        phase: "idle",
+        isModalOpen: false,
+        registerErrorMessage: action.payload,
+      };
+    case "CLEAR_REGISTER_ERROR":
+      return { ...state, registerErrorMessage: null };
     default:
       return state;
   }
