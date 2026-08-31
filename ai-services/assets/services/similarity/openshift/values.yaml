@@ -1,5 +1,5 @@
 similarity:
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.14
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.15
   log_level: "INFO"
   resources:
     requests:

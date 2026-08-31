@@ -243,6 +243,9 @@ class TestProcessNewFiles:
         stack.enter_context(
             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
         )
+        # validate_document_file reads staged bytes from disk; bypass it in unit tests
+        # since the scanner is a MagicMock and no real files are written to disk.
+        stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
         return stack
 
     def test_happy_path_completes_without_error(self):
@@ -376,6 +379,7 @@ class TestProcessNewFiles:
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
+            stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
             with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
                 with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
                     asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
@@ -472,7 +476,7 @@ class TestRunTick:
         return scanner
 
     def test_aborts_when_connector_not_found(self):
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=None), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=None), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_fail:
             asyncio.run(run_tick("missing", sync_seq=1))
 
@@ -487,7 +491,7 @@ class TestRunTick:
         mock_scanner = self._make_scanner(scan_result=[])
         mock_scanner.close.side_effect = RuntimeError("close boom")
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -497,7 +501,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             # must not raise despite close() failing
@@ -507,7 +511,7 @@ class TestRunTick:
         connector = _connector()
         mock_scanner = self._make_scanner(scan_result=[])
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -517,7 +521,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=1))
@@ -529,7 +533,7 @@ class TestRunTick:
         connector = _connector()
         mock_scanner = self._make_scanner(connect_raises=ConnectionError("refused"))
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
@@ -546,7 +550,7 @@ class TestRunTick:
         connector = _connector()
         mock_scanner = self._make_scanner(connect_raises=ConnectionError("auth rejected"))
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
@@ -563,7 +567,7 @@ class TestRunTick:
         connector = _connector()
         mock_scanner = self._make_scanner(scan_raises=RuntimeError("scan exploded"))
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
@@ -578,7 +582,7 @@ class TestRunTick:
         connector = _connector()
         mock_scanner = self._make_scanner(scan_raises=IOError("timeout"))
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
@@ -674,7 +678,7 @@ class TestRunTickCancellation:
         connector = _connector()
         mock_scanner = self._make_scanner()
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.DELETE_PENDING), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
@@ -690,7 +694,7 @@ class TestRunTickCancellation:
         connector = _connector()
         mock_scanner = self._make_scanner()
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -700,7 +704,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=None), \
+                   new_callable=AsyncMock, return_value=0), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=11))  # must not raise
@@ -721,7 +725,7 @@ class TestRunTickCancellation:
                 return InterruptType.SYNC_CANCEL
             return None
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
@@ -927,6 +931,7 @@ class TestProcessNewFilesExtra:
         stack.enter_context(
             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
         )
+        stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
         return stack
 
     def test_empty_ingest_list_is_noop(self):
@@ -994,6 +999,7 @@ class TestProcessNewFilesExtra:
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
+            stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
             stack.enter_context(
                 patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_interrupt)
             )
@@ -1032,6 +1038,57 @@ class TestProcessNewFilesExtra:
                 asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
                                                [("a.pdf", "ck1"), ("b.pdf", "ck2")]))
 
+    def test_all_files_invalid_skips_job_creation(self):
+        """When every file in a batch fails validation, no job must be created."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")), \
+                 patch(f"{DB_MODULE}.initialize_job_state") as mock_init, \
+                 patch(f"{DB_MODULE}.ingest") as mock_ingest:
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("remote/fake.pdf", "ck1")]))
+
+        mock_init.assert_not_called()
+        mock_ingest.assert_not_called()
+
+    def test_all_files_invalid_does_not_set_batch_failed(self):
+        """A batch where all files are skipped due to invalid format must not raise RuntimeError."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
+                # must not raise
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("remote/fake.pdf", "ck1")]))
+
+    def test_mixed_batch_only_valid_files_ingested(self):
+        """In a mixed batch, only the valid file reaches ingest; the invalid one is deleted."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        def _validate(filename, _bytes):
+            if filename == "fake.pdf":
+                raise ValueError("bad format")
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=_validate), \
+                 patch(f"{DB_MODULE}.initialize_job_state",
+                       return_value={"works.pdf": "doc-1"}) as mock_init:
+                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                               [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
+
+        # initialize_job_state must only see the valid file
+        mock_init.assert_called_once()
+        call_args = mock_init.call_args
+        assert call_args is not None
+        assert call_args.kwargs["documents_info"] == ["works.pdf"]
+
 
 # ---------------------------------------------------------------------------
 # run_tick — _handle_interrupt wiring
@@ -1051,7 +1108,7 @@ class TestRunTickHandleInterrupt:
         connector = _connector()
         mock_scanner = self._make_scanner()
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status",
                    return_value=ConnectorStatus.DELETE_PENDING), \
@@ -1068,7 +1125,7 @@ class TestRunTickHandleInterrupt:
         connector = _connector()
         mock_scanner = self._make_scanner()
 
-        with patch(f"{DB_MODULE}.get_active_connector", return_value=connector), \
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status",
                    return_value=ConnectorStatus.DELETE_PENDING), \

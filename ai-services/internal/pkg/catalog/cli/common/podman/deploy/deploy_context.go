@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -92,7 +93,22 @@ func (d *DeployContext) CheckStatus(ctx context.Context) (bool, []string, error)
 		return false, nil, err
 	}
 
-	return len(existingResources) == len(d.templates), existingResources, nil
+	catalogResourceCount := len(d.templates)
+
+	// Checking if 'catalog-caddy-cert-secret' optional secret is present or not
+	exists, err := d.Runtime.SecretExists(ctx, catalogconstants.CatalogCertSecretName)
+	if err != nil {
+		return false, nil, err
+	}
+	if exists {
+		existingResources = append(existingResources, catalogconstants.CatalogCertSecretName)
+	} else {
+		// When 'catalog-caddy-cert-secret' secret not created, decrement catalogResourceCount by one,
+		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
+		catalogResourceCount--
+	}
+
+	return len(existingResources) == catalogResourceCount, existingResources, nil
 }
 
 // GetCaddyPodName extracts the Caddy pod name from templates.
@@ -195,6 +211,13 @@ func (d *DeployContext) executePodTemplate(ctx context.Context, podTemplateName 
 	var rendered bytes.Buffer
 	if err := podTemplate.Execute(&rendered, params); err != nil {
 		return fmt.Errorf("failed to render pod template: %w", err)
+	}
+
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", podTemplateName)
+
+		return nil
 	}
 
 	// Deploy the pod with readiness checks

@@ -177,21 +177,38 @@ async def _connector_scheduler_lifespan():
             # Re-register all existing connectors (fire_immediately=False so we
             # don't trigger a duplicate tick for connectors that are already
             # up-to-date after crash recovery).
+            # If a connector is in status 'delete pending', trigger the delete
+            # procedure again and do not register a job.
             try:
+                import asyncio
+                from digitize.connectors.models import ConnectorStatus
+                from digitize.api.v1.connectors import _run_teardown
+
                 connectors = list_connectors()
+                registered_count = 0
                 for connector in connectors:
+                    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+                        logger.info(
+                            f"Connector crash recovery: found connector {connector.id!r} "
+                            "in 'delete pending' status. Re-triggering delete procedure."
+                        )
+                        asyncio.create_task(_run_teardown(connector.id))
+                        continue
+
                     await scheduler_module.register_connector_job(
                         connector.id,
                         connector.sync_interval_seconds,
                         fire_immediately=False,
                     )
-                if connectors:
+                    registered_count += 1
+
+                if registered_count:
                     logger.info(
-                        f"Re-registered {len(connectors)} connector job(s) with scheduler"
+                        f"Re-registered {registered_count} connector job(s) with scheduler"
                     )
             except Exception as exc:
                 logger.error(
-                    f"Error re-registering connector jobs: {exc}", exc_info=True
+                    f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
                 )
 
             await sched.start_in_background()
@@ -270,7 +287,7 @@ tags_metadata = [
     },
     {
         "name": "connectors",
-        "description": "Data-source connector lifecycle management (SFTP, S3)",
+        "description": "Data-source connector lifecycle management (file_system, object_storage)",
     },
 ]
 

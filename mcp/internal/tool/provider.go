@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -35,7 +36,6 @@ func NewProvider(operation types.OperationInfo, endpoint string,
 	auth authenticator.Authenticator,
 	globalQuery, globalHeaders map[string]string,
 	tlsSkipVerify bool) (*Provider, error) {
-
 	provider := &Provider{
 		operation:     operation,
 		endpoint:      endpoint,
@@ -58,6 +58,7 @@ func getBodyName(operation types.OperationInfo) string {
 	} else if operation.Method == types.PATCH {
 		return "patch"
 	}
+
 	return "data"
 }
 
@@ -76,6 +77,7 @@ func (sb *schemaBuilder) toSchema() *jsonschema.Schema {
 	if len(sb.required) > 0 {
 		schema.Required = sb.required
 	}
+
 	return schema
 }
 
@@ -166,6 +168,7 @@ func (p *Provider) getQueryParameters() []types.ParameterInfo {
 			}
 		}
 	}
+
 	return params
 }
 
@@ -180,6 +183,7 @@ func (p *Provider) getHeaderParameters() []types.ParameterInfo {
 			}
 		}
 	}
+
 	return params
 }
 
@@ -302,7 +306,6 @@ func (p *Provider) Execute(ctx context.Context, params *mcp.CallToolParamsRaw) (
 			body = bytes.NewReader(bodyBytes)
 			headers["content-type"] = p.operation.RequestBody.ContentType
 		}
-
 	}
 
 	// Create HTTP request
@@ -328,7 +331,11 @@ func (p *Provider) Execute(ctx context.Context, params *mcp.CallToolParamsRaw) (
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Read response
 	responseBody, err := io.ReadAll(response.Body)
@@ -367,6 +374,7 @@ func (p *Provider) buildRequestURL(params *mcp.CallToolParamsRaw) (string, error
 		if value, exists := args[paramName]; exists {
 			return fmt.Sprintf("%v", value)
 		}
+
 		return match
 	})
 
@@ -464,6 +472,7 @@ func (p *Provider) hasLimitParameter() bool {
 			return true
 		}
 	}
+
 	return false
 }
 

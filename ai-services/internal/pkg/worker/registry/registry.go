@@ -308,7 +308,7 @@ func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.C
 }
 
 // WorkerCommandChannel returns the command channel for the named worker.
-// It satisfies the runtime/remote.WorkerRegistry interface.
+// It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Command, bool) {
 	r.mu.RLock()
 	entry, ok := r.workers[workerName]
@@ -321,7 +321,7 @@ func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Comma
 }
 
 // WorkerRuntimeType returns the runtime type string for the named worker.
-// It satisfies the runtime/remote.WorkerRegistry interface.
+// It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
 	r.mu.RLock()
 	entry, ok := r.workers[workerName]

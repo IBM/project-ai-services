@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
@@ -25,8 +26,9 @@ import (
 // CommandResult to send back on the stream. It never returns an error — all
 // failures are encoded as CommandResult{Success: false, Error: "..."} so the
 // control plane always gets a response and its blocking send() can unblock.
-func Dispatch(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) *workerpb.CommandResult {
-	data, err := handle(ctx, rt, cmd)
+// pr may be nil for runtimes that do not support proxy route management (e.g. OpenShift).
+func Dispatch(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) *workerpb.CommandResult {
+	data, err := handle(ctx, rt, pr, cmd)
 	if err != nil {
 		return failResult(cmd.GetCommandId(), err)
 	}
@@ -37,7 +39,7 @@ func Dispatch(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) *w
 // ─── router ───────────────────────────────────────────────────────────────────
 
 //nolint:gocognit,cyclop,funlen // large switch is unavoidable for a flat dispatch table
-func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]byte, error) {
+func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) ([]byte, error) {
 	p := cmd.GetPayload()
 
 	switch cmd.GetType() {
@@ -218,6 +220,28 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		out, err := rt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
 
 		return marshalOr(out, err)
+
+	// ── Caddy proxy management ────────────────────────────────────────────────
+
+	case workerpb.CommandType_COMMAND_TYPE_PROXY_ROUTE:
+		if pr == nil {
+			return nil, fmt.Errorf("proxy route management not supported")
+		}
+
+		var req payload.ProxyRoute
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode proxy_route payload: %w", err)
+		}
+
+		route, err := pr.ManageProxyRoute(ctx, req.Op, payload.Route{
+			ID:       req.ID,
+			Domain:   req.Domain,
+			Upstream: req.Upstream,
+			Terminal: req.Terminal,
+			Type:     req.Type,
+		})
+
+		return marshalOr(route, err)
 
 	// ── HTTP proxy tunnel ──────────────────────────────────────────────────────
 
