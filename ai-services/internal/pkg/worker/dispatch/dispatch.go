@@ -227,6 +227,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode download_model payload: %w", err)
 		}
+
 		return nil, helpers.DownloadModelContainer(ctx, req.Model, req.TargetDir)
 
 	// ── Caddy proxy management ────────────────────────────────────────────────

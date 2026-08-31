@@ -621,7 +621,6 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
 func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
-
 	// Phase 1: check for duplicate name
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {

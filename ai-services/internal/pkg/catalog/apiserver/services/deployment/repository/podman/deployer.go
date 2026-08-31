@@ -254,6 +254,7 @@ func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string
 				return fmt.Errorf("failed to download model %s: %w", modelName, err)
 			}
 		}
+
 		return nil
 	}
 
@@ -1147,6 +1148,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
 		pm := proxy.NewRemoteProxyManager(rt.Sender)
+
 		return d.workerConfig.DomainSuffix, d.workerConfig.HTTPSPort, pm, nil
 	}
 
