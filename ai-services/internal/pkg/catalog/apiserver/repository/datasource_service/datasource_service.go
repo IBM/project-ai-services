@@ -512,7 +512,11 @@ func (s *DatasourceService) persistAndPropagate(
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
 
-	updated, err := s.connectorRepo.Update(ctx, id, dbrepo.ConnectorUpdateFields{Metadata: encryptedMerged})
+	updated, err := s.connectorRepo.Update(ctx, id, dbrepo.ConnectorUpdateFields{
+		Metadata: encryptedMerged,
+		Status:   dbmodels.ConnectorStatusConnected,
+		Message:  "",
+	})
 	if err != nil {
 		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{Code: http.StatusNotFound, Message: "datasource not found"}
