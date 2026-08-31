@@ -45,12 +45,6 @@ _real_noop_crash_handler = lambda logger: (MagicMock(), MagicMock(), MagicMock()
 _diag_logger.setup_comprehensive_crash_handler = _real_noop_crash_handler
 
 
-# Stub optional heavy deps not installed in the test environment.
-for _pkg in ["lingua", "pdfplumber"]:
-    _stub_module(_pkg)
-sys.modules["lingua"].Language = MagicMock(name="Language")
-sys.modules["lingua"].LanguageDetectorBuilder = MagicMock(name="LanguageDetectorBuilder")
-
 # Ensure all package levels exist first.
 for _pkg in [
     "docling",
