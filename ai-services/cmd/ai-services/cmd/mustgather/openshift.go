@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -14,6 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // openshiftGatherer collects must-gather data from an OpenShift cluster via the
@@ -76,14 +78,13 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 		logger.WarninglnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+" — catalog is not installed. Skipping catalog artifacts and application pod collection.")
 	}
 
-	// Always collected from the catalog namespace.
+	// Always collected from the catalog namespace — written into catalog/ alongside catalog pods.
 	g.collectSystemInfo(ctx, catalogCl, outDir)
-	// Secrets are collected from both namespaces into separate files
-	g.collectSecretInfo(ctx, catalogCl, "catalog-secrets.json", outDir)
-	// PVCs are collected from both namespaces into separate files to avoid
-	g.collectVolumeInfo(ctx, catalogCl, "catalog-pvcs.json", outDir)
+	catalogDir := filepath.Join(outDir, "catalog")
+	g.collectSecretInfo(ctx, catalogCl, "secrets.json", catalogDir)
+	g.collectVolumeInfo(ctx, catalogCl, "pvcs.json", catalogDir)
 
-	// Always collected from every application namespace derived from the catalog API.
+	// Always collected from every application namespace — each written into applications/<ns>/.
 	for _, ns := range appNamespaces {
 		appCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
 		if err != nil {
@@ -92,10 +93,12 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 			continue
 		}
 
-		g.collectEventInfo(ctx, appCl, outDir)
-		g.collectSecretInfo(ctx, appCl, ns+"-secrets.json", outDir)
-		g.collectNetworkInfo(ctx, appCl, outDir)
-		g.collectVolumeInfo(ctx, appCl, ns+"-pvcs.json", outDir)
+		appNSDir := filepath.Join(outDir, "applications", ns)
+		g.collectEventInfo(ctx, appCl, "events.json", appNSDir)
+		g.collectSecretInfo(ctx, appCl, "secrets.json", appNSDir)
+		g.collectNetworkInfo(ctx, appCl, "services.json", "routes.json", appNSDir)
+		g.collectVolumeInfo(ctx, appCl, "pvcs.json", appNSDir)
+		g.collectInferenceServiceInfo(ctx, appCl, appNSDir)
 	}
 
 	return outDir, nil
@@ -258,7 +261,7 @@ func (g *openshiftGatherer) collectContainerLogs(ctx context.Context, rt *opensh
 		return
 	}
 
-	tail, _ := strconv.ParseInt(maxLogLines, 10, 64)
+	tail := int64(maxLogLines)
 	raw, err := rt.KubeClient.CoreV1().Pods(rt.Namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Container: containerName,
 		TailLines: &tail,
@@ -317,8 +320,10 @@ func (g *openshiftGatherer) collectSystemInfo(ctx context.Context, rt *openshift
 
 // ── events ────────────────────────────────────────────────────────────────────
 
-// collectEventInfo writes all Kubernetes Events from the application namespace.
-func (g *openshiftGatherer) collectEventInfo(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
+// collectEventInfo writes all Kubernetes Events from rt's namespace to
+// events/<filename>. Call with a namespace-prefixed filename to avoid
+// overwriting when iterating over multiple app namespaces.
+func (g *openshiftGatherer) collectEventInfo(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, filename, outDir string) {
 	logger.InfolnCtx(ctx, "Collecting events…")
 
 	eventsDir := filepath.Join(outDir, "events")
@@ -330,19 +335,19 @@ func (g *openshiftGatherer) collectEventInfo(ctx context.Context, rt *openshiftR
 
 	events, err := rt.KubeClient.CoreV1().Events(rt.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		logger.WarningfCtx(ctx, "Failed to list events: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to list events in namespace %q: %v\n", rt.Namespace, err)
 
 		return
 	}
 
 	raw, err := json.Marshal(events)
 	if err != nil {
-		logger.WarningfCtx(ctx, "Failed to marshal events: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to marshal events in namespace %q: %v\n", rt.Namespace, err)
 
 		return
 	}
 
-	writeFile(ctx, eventsDir, "events.json", g.sanitizer.SanitizeJSON(raw))
+	writeFile(ctx, eventsDir, filename, g.sanitizer.SanitizeJSON(raw))
 }
 
 // ── secrets ───────────────────────────────────────────────────────────────────
@@ -386,9 +391,11 @@ func (g *openshiftGatherer) collectSecretInfo(ctx context.Context, rt *openshift
 
 // ── network ───────────────────────────────────────────────────────────────────
 
-// collectNetworkInfo writes K8s Services and OpenShift Routes from the
-// application namespace.
-func (g *openshiftGatherer) collectNetworkInfo(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
+// collectNetworkInfo writes K8s Services and OpenShift Routes from rt's
+// namespace to network/<servicesFile> and network/<routesFile>. Call with
+// namespace-prefixed filenames to avoid overwriting when iterating over
+// multiple app namespaces.
+func (g *openshiftGatherer) collectNetworkInfo(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, servicesFile, routesFile, outDir string) {
 	logger.InfolnCtx(ctx, "Collecting network information…")
 
 	netDir := filepath.Join(outDir, "network")
@@ -401,20 +408,64 @@ func (g *openshiftGatherer) collectNetworkInfo(ctx context.Context, rt *openshif
 	// Services.
 	svcs, err := rt.KubeClient.CoreV1().Services(rt.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		logger.WarningfCtx(ctx, "Failed to list services: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to list services in namespace %q: %v\n", rt.Namespace, err)
 	} else {
 		raw, _ := json.Marshal(svcs)
-		writeFile(ctx, netDir, "services.json", g.sanitizer.SanitizeJSON(raw))
+		writeFile(ctx, netDir, servicesFile, g.sanitizer.SanitizeJSON(raw))
 	}
 
 	// OpenShift Routes.
 	routes, err := rt.RouteClient.RouteV1().Routes(rt.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		logger.WarningfCtx(ctx, "Failed to list routes: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to list routes in namespace %q: %v\n", rt.Namespace, err)
 	} else {
 		raw, _ := json.Marshal(routes)
-		writeFile(ctx, netDir, "routes.json", g.sanitizer.SanitizeJSON(raw))
+		writeFile(ctx, netDir, routesFile, g.sanitizer.SanitizeJSON(raw))
 	}
+}
+
+// ── inference services ────────────────────────────────────────────────────────
+
+// collectInferenceServiceInfo lists all KServe InferenceService CRs from the
+// application namespace and writes them as sanitized JSON to
+// inference-services/inference-services.json.
+func (g *openshiftGatherer) collectInferenceServiceInfo(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting InferenceService resources…")
+
+	isvcList := &unstructured.UnstructuredList{}
+	isvcList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "serving.kserve.io",
+		Version: "v1beta1",
+		Kind:    "InferenceServiceList",
+	})
+
+	if err := rt.Client.List(ctx, isvcList, client.InNamespace(rt.Namespace)); err != nil {
+		logger.WarningfCtx(ctx, "Failed to list InferenceServices in namespace %q: %v\n", rt.Namespace, err)
+
+		return
+	}
+
+	if len(isvcList.Items) == 0 {
+		logger.InfofCtx(ctx, "No InferenceServices found in namespace %q\n", rt.Namespace)
+
+		return
+	}
+
+	isvcDir := filepath.Join(outDir, "inference-services")
+	if err := os.MkdirAll(isvcDir, dirPerm); err != nil {
+		logger.WarningfCtx(ctx, "Failed to create inference-services directory: %v\n", err)
+
+		return
+	}
+
+	raw, err := json.Marshal(isvcList)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Failed to marshal InferenceServices in namespace %q: %v\n", rt.Namespace, err)
+
+		return
+	}
+
+	writeFile(ctx, isvcDir, rt.Namespace+"-inference-services.json", g.sanitizer.SanitizeJSON(raw))
 }
 
 // ── volumes ───────────────────────────────────────────────────────────────────

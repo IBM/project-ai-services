@@ -143,8 +143,12 @@ catalog state.
 
 #### 4. You must be logged in to the catalog for application data
 
-Same as Podman — application pod discovery uses the catalog REST API and
-requires `~/.config/ai-services/catalog-credentials.json`.
+Application pod discovery goes through the catalog REST API
+(`GET /api/v1/applications`). The API requires a valid session token stored in
+`~/.config/ai-services/catalog-credentials.json`.
+If you are not logged in (`ai-services catalog login`), the catalog client
+will fail to authenticate and application pod collection will be skipped with a
+warning — all other data is still gathered.
 
 ---
 
@@ -210,6 +214,8 @@ must-gather.local.<timestamp>/
 │           └── <container>.log
 ├── events/
 │   └── events.json                             # K8s Events per app namespace (sanitized)
+├── inference-services/
+│   └── <app-namespace>-inference-services.json # KServe InferenceService CRs (sanitized)
 ├── secrets/
 │   ├── catalog-secrets.json                   # K8s Secrets from ai-services ns (metadata only)
 │   └── <app-namespace>-secrets.json           # K8s Secrets from each app ns (metadata only)
@@ -311,7 +317,8 @@ must-gather --runtime openshift
         ├─ Collect events → events/events.json
         ├─ Collect secrets → secrets/<app-namespace>-secrets.json
         ├─ Collect network → network/services.json + routes.json
-        └─ Collect PVCs → volumes/<app-namespace>-pvcs.json
+        ├─ Collect PVCs → volumes/<app-namespace>-pvcs.json
+        └─ Collect InferenceServices → inference-services/<app-namespace>-inference-services.json
 ```
 
 ---
@@ -397,5 +404,3 @@ The following items are known gaps in the current implementation:
 6. **Catalog credentials file inclusion.** The credentials file is included in the output (tokens redacted). If the sanitizer regex misses a new field name introduced by a future API change, a live token could be included in the bundle.
 
 7. **No timeout on individual API / CLI invocations.** A hung `podman logs` / `podman inspect` call (Podman) or a stalled `GetLogs` stream (OpenShift) will block the entire gather indefinitely.
-
-8. **No InferenceService / ISVC resource collection (OpenShift).** RHOAI-based deployments expose `InferenceService` custom resources that are not yet included in the output.

@@ -193,7 +193,7 @@ func (g *podmanGatherer) collectContainerLogs(ctx context.Context, podDir, name 
 		return
 	}
 
-	raw, err := cliUtils.PodmanRun("logs", "--tail", maxLogLines, name)
+	raw, err := cliUtils.PodmanRun("logs", "--tail", fmt.Sprintf("%d", maxLogLines), name)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to get logs for container %q: %v\n", name, err)
 
