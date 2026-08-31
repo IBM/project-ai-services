@@ -91,6 +91,11 @@ class ExtractJob(Base):
         nullable=False,
     )
 
+    schema_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -126,6 +131,7 @@ class ExtractJob(Base):
         ),
         Index("idx_extract_jobs_submitted_at_status", "submitted_at", "status"),
         Index("idx_extract_jobs_schema_id", "schema_id"),
+        Index("idx_extract_jobs_schema_name", "schema_name"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover

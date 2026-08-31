@@ -26,8 +26,28 @@ class JobStatus(str):
 class ExampleItem(BaseModel):
     """A single few-shot example stored with a schema."""
 
-    text: str = Field(..., description="Source text for this example")
-    output: Dict[str, Any] = Field(..., description="Expected extraction output")
+    text: Optional[str] = Field(None, description="Source text for this example", json_schema_extra={
+        "example":"First line\nSecond line"})
+    output: Dict[str, Any] = Field(..., description="Expected extraction output", json_schema_extra={
+            "examples": [{
+                "example_argument1": "example value",
+                "another_argument": 123
+        }]
+    })
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples":
+            [
+                {
+                    "text": "First line\nSecond line",
+                    "output": {
+                        "example_argument1": "example value"
+                    }
+                }
+            ]
+        }
+    )
 
 
 class SchemaRegisterRequest(BaseModel):
@@ -180,7 +200,8 @@ class ExtractionRequest(BaseModel):
     """Request body for POST /v1/extract."""
 
     text: str = Field(..., min_length=1, description="Raw text to extract from")
-    schema_id: str = Field(..., min_length=1, description="ID of a registered schema")
+    schema_id: Optional[str] = Field(default=None, min_length=1, description="ID of a registered schema")
+    schema_name: Optional[str] = Field(default=None, min_length=1, description="Registered schema name")
 
 
 class ExtractionSourceInfo(BaseModel):
