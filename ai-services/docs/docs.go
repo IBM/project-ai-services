@@ -399,14 +399,14 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
+                    "204": {
+                        "description": "All datasources connected successfully"
+                    },
+                    "207": {
                         "description": "One or more datasources failed to connect",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse"
                         }
-                    },
-                    "204": {
-                        "description": "All datasources connected successfully"
                     },
                     "400": {
                         "description": "Invalid request body",

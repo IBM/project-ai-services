@@ -287,7 +287,7 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 //	@Param			id		path	string								true	"Application ID (UUID)"
 //	@Param			request	body	models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
 //	@Success		204		"All datasources connected successfully"
-//	@Success		200		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
+//	@Success		207		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
 //	@Failure		400		{object}	ErrorResponse						"Invalid request body"
 //	@Failure		401		{object}	ErrorResponse						"Unauthorized"
 //	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
@@ -350,7 +350,7 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusMultiStatus, resp)
 }
 
 // Made with Bob
