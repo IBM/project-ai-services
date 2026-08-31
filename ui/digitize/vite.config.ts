@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
         '@services': path.resolve(__dirname, './src/services'),
         '@utils': path.resolve(__dirname, './src/utils'),
         '@constants': path.resolve(__dirname, './src/constants'),
+        '~@ibm/plex': path.resolve(__dirname, './node_modules/@ibm/plex'),
       },
     },
     server: {
