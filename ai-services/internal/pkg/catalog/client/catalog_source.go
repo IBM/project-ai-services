@@ -10,6 +10,16 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+// isConnectivityError returns true for any error that is not an HTTPError.
+// HTTPError is produced by our client for non-2xx responses — those are
+// server-side errors that should be propagated. Everything else (dial failures,
+// timeouts, TLS errors) triggers the embedded catalog fallback.
+func isConnectivityError(err error) bool {
+	var httpErr *HTTPError
+
+	return !errors.As(err, &httpErr)
+}
+
 // CatalogSource is the read interface the CLI uses for listing and inspecting
 // catalog templates. List operations return summary types that contain all
 // fields needed for CLI display. Single-item loads return full types.
@@ -56,35 +66,86 @@ func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSou
 	}
 
 	return &apiSource{
-		ApplicationClient: apiClient,
-		embedded:          embedded,
+		api:      apiClient,
+		embedded: embedded,
 	}, nil
 }
 
 // --------------------------------------------------------------------------
-// API-first source
+// API-first source with embedded fallback
 // --------------------------------------------------------------------------
 
-// apiSource wraps ApplicationClient to satisfy CatalogSource.
-// It embeds *ApplicationClient directly — all methods except ListComponents
-// and the two renamed loaders are promoted automatically.
-// ListComponents has no API endpoint and always reads from the embedded catalog.
-// LoadArchitecture/LoadService map to the client's GetArchitectureDetails/GetServiceDetails.
+// apiSource tries the catalog API for every call. On a connectivity failure
+// (anything that is not an HTTPError) it falls back to the embedded catalog.
+// HTTPErrors (4xx/5xx) are propagated — the server is reachable, so the caller
+// should see the error rather than silently getting stale embedded data.
 type apiSource struct {
-	*ApplicationClient
+	api      *ApplicationClient
 	embedded EmbeddedCatalog
 }
 
-func (s *apiSource) LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error) {
-	return s.GetArchitectureDetails(ctx, id)
+func (s *apiSource) ListArchitectures(ctx context.Context) ([]types.ArchitectureSummary, error) {
+	summaries, err := s.api.ListArchitectures(ctx)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API ListArchitectures unreachable, falling back to embedded: %v", err)
+		return toArchitectureSummaries(s.embedded.ListArchitectures())
+	}
+
+	return summaries, err
 }
 
-func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service, error) {
-	return s.GetServiceDetails(ctx, id)
+func (s *apiSource) ListServices(ctx context.Context) ([]types.ServiceSummary, error) {
+	summaries, err := s.api.ListServices(ctx)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API ListServices unreachable, falling back to embedded: %v", err)
+		return toServiceSummaries(s.embedded.ListServices())
+	}
+
+	return summaries, err
 }
 
 func (s *apiSource) ListComponents(_ context.Context) ([]types.Component, error) {
 	return listComponentsFromEmbedded(s.embedded)
+}
+
+func (s *apiSource) LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error) {
+	arch, err := s.api.GetArchitectureDetails(ctx, id)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API GetArchitectureDetails unreachable, falling back to embedded: %v", err)
+		return loadArchitectureFromEmbedded(s.embedded, id)
+	}
+
+	return arch, err
+}
+
+func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service, error) {
+	svc, err := s.api.GetServiceDetails(ctx, id)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API GetServiceDetails unreachable, falling back to embedded: %v", err)
+		return loadServiceFromEmbedded(s.embedded, id)
+	}
+
+	return svc, err
+}
+
+func (s *apiSource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
+	schema, err := s.api.GetServiceParams(ctx, serviceID)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API GetServiceParams unreachable, falling back to embedded: %v", err)
+		return s.embedded.GetServiceParams(ctx, serviceID)
+	}
+
+	return schema, err
+}
+
+func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
+	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API GetComponentProviderParams unreachable, falling back to embedded: %v", err)
+		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
+	}
+
+	return schema, err
 }
 
 // --------------------------------------------------------------------------
@@ -122,27 +183,11 @@ func (s *embeddedOnlySource) ListComponents(_ context.Context) ([]types.Componen
 }
 
 func (s *embeddedOnlySource) LoadArchitecture(_ context.Context, id string) (*types.Architecture, error) {
-	arch, err := s.embedded.LoadArchitecture(id)
-	if err != nil {
-		return nil, err
-	}
-	if arch == nil {
-		return nil, fmt.Errorf("architecture '%s' not found", id)
-	}
-
-	return arch, nil
+	return loadArchitectureFromEmbedded(s.embedded, id)
 }
 
 func (s *embeddedOnlySource) LoadService(_ context.Context, id string) (*types.Service, error) {
-	svc, err := s.embedded.LoadService(id)
-	if err != nil {
-		return nil, err
-	}
-	if svc == nil {
-		return nil, fmt.Errorf("service '%s' not found", id)
-	}
-
-	return svc, nil
+	return loadServiceFromEmbedded(s.embedded, id)
 }
 
 func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
@@ -166,6 +211,34 @@ func listComponentsFromEmbedded(e EmbeddedCatalog) ([]types.Component, error) {
 	}
 
 	return comps, nil
+}
+
+// loadArchitectureFromEmbedded converts a nil result into a proper error so
+// callers never receive (nil, nil).
+func loadArchitectureFromEmbedded(e EmbeddedCatalog, id string) (*types.Architecture, error) {
+	arch, err := e.LoadArchitecture(id)
+	if err != nil {
+		return nil, err
+	}
+	if arch == nil {
+		return nil, fmt.Errorf("architecture '%s' not found", id)
+	}
+
+	return arch, nil
+}
+
+// loadServiceFromEmbedded converts a nil result into a proper error so callers
+// never receive (nil, nil).
+func loadServiceFromEmbedded(e EmbeddedCatalog, id string) (*types.Service, error) {
+	svc, err := e.LoadService(id)
+	if err != nil {
+		return nil, err
+	}
+	if svc == nil {
+		return nil, fmt.Errorf("service '%s' not found", id)
+	}
+
+	return svc, nil
 }
 
 // toArchitectureSummaries converts []Architecture to []ArchitectureSummary,
