@@ -1,9 +1,12 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "ai-services--worker-caddy"
+  name: "{{ .AppName }}--caddy"
   labels:
-    ai-services.io/component: "worker-proxy"
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/component: "proxy"
   annotations:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 spec:
