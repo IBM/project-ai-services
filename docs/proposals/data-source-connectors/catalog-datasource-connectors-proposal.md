@@ -296,7 +296,7 @@ Query parameters:
 
 **`GET /api/v1/datasources/:id`**
 
-**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and a `services` array listing all connected services enriched with live Digitize sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
+**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and a `services` array listing all connected services enriched with live sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
 
 **Response `404 Not Found`:**
 
@@ -569,6 +569,8 @@ Returns all registered providers for the given connector type, discovered from t
 
 Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each downstream service pod.
 
+> **Note:** The `services` array shape is identical in both `GET /api/v1/datasources/:id` and `GET /api/v1/datasources/:id/services`.
+
 **Response `200 OK`:**
 
 ```json
@@ -578,20 +580,16 @@ Returns the list of services currently connected to a datasource, enriched with 
     {
       "application_id": "app-uuid-1",
       "application_name": "My RAG App",
-      "service": {
-        "id": "rag",
-        "name": "Digital Assistants"
-      },
+      "catalog_id": "rag",
+      "name": "Digital Assistants",
       "sync_status": "up to date",
       "last_sync_at": "2026-06-01T11:00:00Z"
     },
     {
       "application_id": "app-uuid-2",
       "application_name": "My Summarise App",
-      "service": {
-        "id": "rag",
-        "name": "Digital Assistants"
-      },
+      "catalog_id": "rag",
+      "name": "Digital Assistants",
       "sync_status": "out of sync",
       "last_sync_at": "2026-06-01T09:00:00Z"
     }
@@ -604,8 +602,8 @@ Returns the list of services currently connected to a datasource, enriched with 
 | `datasource_id`               | path param                                        | The datasource component UUID                                                                                 |
 | `services[].application_id`   | catalog (`applications.id`)                       | ID of the application the service belongs to                                                                  |
 | `services[].application_name` | catalog (`applications.name`)                     | Display name of the application                                                                               |
-| `services[].service.id`       | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
-| `services[].service.name`     | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to catalog ID when entry cannot be loaded         |
+| `services[].catalog_id`       | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
+| `services[].name`             | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to `catalog_id` when entry cannot be loaded       |
 | `services[].sync_status`      | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
 | `services[].last_sync_at`     | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
 | `services[].err_msg`          | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |

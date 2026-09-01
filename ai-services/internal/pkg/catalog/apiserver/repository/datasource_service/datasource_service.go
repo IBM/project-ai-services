@@ -388,11 +388,25 @@ func (s *DatasourceService) buildConnectedServices(ctx context.Context, connecto
 	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
 		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
-		syncStatus, lastSyncAt, syncErr := fetchDigitzeSyncState(ctx, connectorID, baseURL)
+		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
+
+		// Resolve the display name from catalog metadata; fall back to catalog_id.
+		name := row.ApplicationCatalogID
+		if row.ApplicationDeploymentType == string(dbmodels.DeploymentTypeArchitectures) {
+			if arch, err := s.catalogProvider.LoadArchitecture(row.ApplicationCatalogID); err == nil {
+				name = arch.Name
+			}
+		} else {
+			if svc, err := s.catalogProvider.LoadService(row.ApplicationCatalogID); err == nil {
+				name = svc.Name
+			}
+		}
+
 		item := apimodels.ConnectedServiceItem{
 			ApplicationID:   row.ApplicationID.String(),
 			ApplicationName: row.ApplicationName,
-			Service:         s.resolveServiceInfo(row.ApplicationCatalogID, row.ApplicationDeploymentType),
+			CatalogID:       row.ApplicationCatalogID,
+			Name:            name,
 			SyncStatus:      syncStatus,
 			LastSyncAt:      lastSyncAt,
 		}
@@ -403,25 +417,6 @@ func (s *DatasourceService) buildConnectedServices(ctx context.Context, connecto
 	}
 
 	return services, nil
-}
-
-// resolveServiceInfo builds a ConnectedServiceInfo by loading the display name from catalog
-// metadata for the given catalogID + deploymentType. Falls back gracefully: when the catalog
-// entry cannot be loaded the id is used as the name so the response is never blocked.
-func (s *DatasourceService) resolveServiceInfo(catalogID, deploymentType string) apimodels.ConnectedServiceInfo {
-	info := apimodels.ConnectedServiceInfo{ID: catalogID, Name: catalogID}
-
-	if deploymentType == string(dbmodels.DeploymentTypeArchitectures) {
-		if arch, err := s.catalogProvider.LoadArchitecture(catalogID); err == nil {
-			info.Name = arch.Name
-		}
-	} else {
-		if svc, err := s.catalogProvider.LoadService(catalogID); err == nil {
-			info.Name = svc.Name
-		}
-	}
-
-	return info
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in
@@ -876,12 +871,12 @@ func datasourceItemFromConnector(c *dbmodels.Connector) apimodels.DatasourceItem
 	}
 }
 
-// fetchDigitzeSyncState calls GET /v1/connectors/{connectorID} on the Digitize pod at baseURL
+// fetchSyncState calls GET /v1/connectors/{connectorID} on the downstream service pod at baseURL
 // using catalogclient.ServiceClient (resty-based) and returns the sync_status, last_sync_at,
 // and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
 // The caller embeds errMsg in the response item so users know why sync state is unavailable;
 // the connector record is always returned regardless of sync-state fetch outcome.
-func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
+func fetchSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
 	if baseURL == "" {
 		return "unknown", nil, "no api endpoint registered for this service"
 	}

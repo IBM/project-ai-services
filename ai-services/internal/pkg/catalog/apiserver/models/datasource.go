@@ -82,34 +82,29 @@ type DatasourceProviderInfo struct {
 	Name string `json:"name"`
 }
 
-// ConnectedServiceInfo is the service sub-object embedded in ConnectedServiceItem.
-// id is the catalog_id of the owning application (e.g. "rag"); name is its resolved
-// display name from catalog metadata (e.g. "Digital Assistants").
-type ConnectedServiceInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// ConnectorSyncState holds the sync fields returned by the Digitize pod's
+// ConnectorSyncState holds the sync fields returned by the downstream service pod's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
 	SyncStatus string  `json:"sync_status"`
 	LastSyncAt *string `json:"last_sync_at"`
 }
 
-// ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
-// Identity fields are sourced from the service_dependencies → services → applications DB join;
-// sync fields are fetched live from the service's Digitize pod and gracefully degrade to
-// "unknown" when unreachable.
+// ConnectedServiceItem is one entry in the services array of GetDatasourceResponse and
+// DatasourceServicesResponse. Identity fields are sourced from the
+// service_dependencies → services → applications DB join; sync fields are fetched live
+// from the downstream service pod and gracefully degrade to "unknown" when unreachable.
 type ConnectedServiceItem struct {
 	// ApplicationID is the UUID of the application that owns this service.
 	ApplicationID string `json:"application_id"`
 	// ApplicationName is the human-readable display name of the owning application.
 	ApplicationName string `json:"application_name"`
-	// Service contains the catalog identity (id + resolved name) of the owning application.
-	Service ConnectedServiceInfo `json:"service"`
-	// SyncStatus is the current sync state sourced from the Digitize pod.
-	// Set to "unknown" when the Digitize pod is unreachable.
+	// CatalogID is the catalog identifier of the owning application (e.g. "rag").
+	CatalogID string `json:"catalog_id"`
+	// Name is the resolved display name of the owning application (e.g. "Digital Assistants").
+	// Falls back to CatalogID when the catalog entry cannot be loaded.
+	Name string `json:"name"`
+	// SyncStatus is the current sync state sourced from the downstream service pod.
+	// Set to "unknown" when the pod is unreachable.
 	SyncStatus string `json:"sync_status"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
@@ -120,7 +115,7 @@ type ConnectedServiceItem struct {
 
 // GetDatasourceResponse is the response body for GET /api/v1/datasources/:id.
 // It returns the full connector record with non-sensitive metadata and the list of
-// connected services enriched with live Digitize sync state.
+// connected services enriched with live sync state from each downstream service pod.
 type GetDatasourceResponse struct {
 	// ID is the UUID of the datasource connector.
 	ID string `json:"id"`
@@ -138,7 +133,7 @@ type GetDatasourceResponse struct {
 	// Sensitive fields (e.g. secret_access_key, private_key) are always stripped.
 	Metadata map[string]any `json:"metadata"`
 	// Services lists every service currently connected to this datasource,
-	// enriched with live sync state from each service's Digitize pod.
+	// enriched with live sync state from each downstream service pod.
 	Services []ConnectedServiceItem `json:"services"`
 	// CreatedAt is the creation timestamp.
 	CreatedAt time.Time `json:"created_at"`
