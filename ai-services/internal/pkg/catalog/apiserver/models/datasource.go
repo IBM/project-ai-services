@@ -92,22 +92,15 @@ type ConnectedServiceInfo struct {
 
 // ConnectorSyncState holds the sync fields returned by the connected service's
 // GET /v1/connectors/{id} endpoint.
-// New nullable fields (TotalFiles, NewFiles, RemovedFiles, FailedFiles, LastSyncError)
-// default to nil on JSON unmarshal when the service response does not include them —
-// existing callers that only read SyncStatus/LastSyncAt are unaffected.
 type ConnectorSyncState struct {
 	SyncStatus    string  `json:"sync_status"`
 	TotalFiles    *int    `json:"total_files"`
-	NewFiles      *int    `json:"new_files"`
-	RemovedFiles  *int    `json:"removed_files"`
-	FailedFiles   *int    `json:"failed_files"`
 	LastSyncAt    *string `json:"last_sync_at"`
 	LastSyncError *string `json:"last_sync_error"`
 }
 
 // ServiceSyncDetails holds the live sync state fetched from the connected service for a
-// single linked service. All numeric and timestamp fields are nullable — they are null
-// when the service is unreachable or has not yet completed a sync tick.
+// single linked service. Fields map directly to what the downstream connector API returns.
 // ErrMsg is populated when the sync state could not be fetched; omitted on success.
 // This matches the err_msg pattern used in ConnectedServiceItem.
 type ServiceSyncDetails struct {
@@ -115,12 +108,6 @@ type ServiceSyncDetails struct {
 	SyncStatus string `json:"sync_status"`
 	// TotalFiles is the total number of files known to the connector, or null when unavailable.
 	TotalFiles *int `json:"total_files"`
-	// NewFiles is the number of files added in the last sync tick, or null when unavailable.
-	NewFiles *int `json:"new_files"`
-	// RemovedFiles is the number of files removed in the last sync tick, or null when unavailable.
-	RemovedFiles *int `json:"removed_files"`
-	// FailedFiles is the number of files that failed to process in the last sync tick, or null.
-	FailedFiles *int `json:"failed_files"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
 	// LastSyncError is the error string from the last failed sync, or null on success.

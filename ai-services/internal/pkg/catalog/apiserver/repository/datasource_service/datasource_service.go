@@ -962,9 +962,6 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 	return apimodels.ServiceSyncDetails{
 		SyncStatus:    state.SyncStatus,
 		TotalFiles:    state.TotalFiles,
-		NewFiles:      state.NewFiles,
-		RemovedFiles:  state.RemovedFiles,
-		FailedFiles:   state.FailedFiles,
 		LastSyncAt:    state.LastSyncAt,
 		LastSyncError: state.LastSyncError,
 	}

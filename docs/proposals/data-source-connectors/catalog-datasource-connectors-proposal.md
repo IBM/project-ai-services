@@ -696,9 +696,6 @@ The catalog backend resolves the link from `service_dependencies`, fetches the d
   "service_details": {
     "sync_status": "up to date",
     "total_files": 150,
-    "new_files": 2,
-    "removed_files": 0,
-    "failed_files": 8,
     "last_sync_at": "2026-06-01T11:00:00Z",
     "last_sync_error": null
   }
@@ -720,9 +717,6 @@ The catalog backend resolves the link from `service_dependencies`, fetches the d
   "service_details": {
     "sync_status": "unknown",
     "total_files": null,
-    "new_files": null,
-    "removed_files": null,
-    "failed_files": null,
     "last_sync_at": null,
     "last_sync_error": null,
     "err_msg": "failed to fetch sync state: connection refused"
@@ -740,9 +734,6 @@ The catalog backend resolves the link from `service_dependencies`, fetches the d
 | `provider.name`                   | catalog (`CatalogProvider.LoadConnector`) | Human-readable provider name from `metadata.yaml`; falls back to `provider.id` on miss       |
 | `service_details.sync_status`     | connected service                         | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`; `"unknown"` when unreachable |
 | `service_details.total_files`     | connected service                         | Total files known to the connector; `null` when service is unreachable                       |
-| `service_details.new_files`       | connected service                         | Files added since the last tick; `null` when service is unreachable                          |
-| `service_details.removed_files`   | connected service                         | Files removed since the last tick; `null` when service is unreachable                        |
-| `service_details.failed_files`    | connected service                         | Files that failed to process in the last tick; `null` when service is unreachable            |
 | `service_details.last_sync_at`    | connected service                         | Timestamp of the last completed sync; `null` when service is unreachable                     |
 | `service_details.last_sync_error` | connected service                         | Error string from the last failed sync, or `null` on success                                 |
 | `service_details.err_msg`         | catalog (internal)                        | Populated when the service was unreachable or returned an error; omitted on success          |
