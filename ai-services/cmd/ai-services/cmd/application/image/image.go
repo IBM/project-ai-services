@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -33,8 +33,9 @@ var ImageCmd = &cobra.Command{
 // When a catalog server session is available it calls the API (which includes
 // custom bundle services and architectures). Falls back to the local embedded
 // catalog provider when no session exists (ErrNotLoggedIn).
+// Architecture is tried first, then service.
 func getCatalogImages(ctx context.Context, templateID string) ([]string, error) {
-	appClient, err := client.NewApplicationClient(ctx)
+	appClient, err := catalogclient.NewApplicationClient(ctx)
 	if err != nil {
 		if !errors.Is(err, config.ErrNotLoggedIn) {
 			return nil, fmt.Errorf("failed to create application client: %w", err)
@@ -46,21 +47,22 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 		return getCatalogImagesLocal(ctx, templateID)
 	}
 
-	resp, err := appClient.GetServiceImages(ctx, templateID)
+	resp, err := appClient.GetArchitectureImages(ctx, templateID)
 	if err == nil {
 		return resp.Images, nil
 	}
 
-	// Only retry as architecture when the server returned 404.
-	httpErr, ok := err.(*client.HTTPError)
-	if !ok || httpErr.StatusCode != http.StatusNotFound {
+	// Only retry as service when the server returned 404.
+	var httpErr *catalogclient.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
 		return nil, err
 	}
 
-	resp, err = appClient.GetArchitectureImages(ctx, templateID)
+	resp, err = appClient.GetServiceImages(ctx, templateID)
 	if err != nil {
 		// Both lookups failed — the ID is not in the catalog.
-		if archErr, ok := err.(*client.HTTPError); ok && archErr.StatusCode == http.StatusNotFound {
+		var svcErr *catalogclient.HTTPError
+		if errors.As(err, &svcErr) && svcErr.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
 		}
 
@@ -72,14 +74,14 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 
 // getCatalogImagesLocal collects images using the embedded-only local catalog provider.
 // Used as a fallback when no catalog server session is available.
-// Mirrors the same service-first, architecture-fallback logic as the API path.
+// Architecture is tried first, then service.
 func getCatalogImagesLocal(ctx context.Context, templateID string) ([]string, error) {
 	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	images, err := provider.GetServiceImages(ctx, templateID)
+	images, err := provider.GetArchitectureImages(ctx, templateID)
 	if err == nil {
 		return images, nil
 	}
@@ -88,7 +90,7 @@ func getCatalogImagesLocal(ctx context.Context, templateID string) ([]string, er
 		return nil, err
 	}
 
-	images, err = provider.GetArchitectureImages(ctx, templateID)
+	images, err = provider.GetServiceImages(ctx, templateID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
 			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
