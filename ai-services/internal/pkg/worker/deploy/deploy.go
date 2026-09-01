@@ -120,8 +120,17 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error
 
 	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
 
-	const workerResourceCount = 2
-	
+	// Verify if secret is present
+	exists, err := rt.SecretExists(ctx, workerconstants.WorkerTokenSecretName)
+	if err != nil {
+		return false, nil, fmt.Errorf("worker setup: secret exists: %w", err)
+	}
+	if exists {
+		existingResources = append(existingResources, workerconstants.WorkerTokenSecretName)
+	}
+
+	const workerResourceCount = 3
+
 	return len(existingResources) == workerResourceCount, existingResources, nil
 }
 
@@ -166,7 +175,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingRe
 		return fmt.Errorf("worker setup: load templates: %w", err)
 	}
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
-		"caddy.httpsPort":    strconv.Itoa(opts.HTTPSPort),
+		"caddy.httpsPort":      strconv.Itoa(opts.HTTPSPort),
 		"worker.token":         token,
 		"worker.gatewayAddr":   gatewayAddr,
 		"worker.optionalFlags": getOptionalFlags(opts),
@@ -239,6 +248,6 @@ func getOptionalFlags(opts Options) string {
 	if opts.HTTPSPort > 0 {
 		flags += fmt.Sprintf("--https-port %d", opts.HTTPSPort)
 	}
-	
+
 	return flags
 }

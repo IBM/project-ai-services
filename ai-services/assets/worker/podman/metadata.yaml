@@ -2,5 +2,6 @@ name: ai-services-worker
 version: 0.0.1
 description: "Worker node services for Project AI-Services"
 podTemplateExecutions:
+  - [worker-token-secret]
   - [caddy.yaml.tmpl]
   - [worker.yaml.tmpl]

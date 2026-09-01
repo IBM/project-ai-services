@@ -11,6 +11,7 @@ const (
 	WorkerProxyLabel = "ai-services.io/component=proxy"
 
 	WorkerPodLabel = "ai-services.io/component=worker"
+	WorkerTokenSecretName = "worker-token-secret"
 
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
