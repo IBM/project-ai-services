@@ -90,11 +90,65 @@ type ConnectedServiceInfo struct {
 	Name string `json:"name"`
 }
 
-// ConnectorSyncState holds the sync fields returned by the Digitize pod's
+// ConnectorSyncState holds the sync fields returned by the connected service's
 // GET /v1/connectors/{id} endpoint.
+// New nullable fields (TotalFiles, NewFiles, RemovedFiles, FailedFiles, LastSyncError)
+// default to nil on JSON unmarshal when the service response does not include them —
+// existing callers that only read SyncStatus/LastSyncAt are unaffected.
 type ConnectorSyncState struct {
-	SyncStatus string  `json:"sync_status"`
+	SyncStatus    string  `json:"sync_status"`
+	TotalFiles    *int    `json:"total_files"`
+	NewFiles      *int    `json:"new_files"`
+	RemovedFiles  *int    `json:"removed_files"`
+	FailedFiles   *int    `json:"failed_files"`
+	LastSyncAt    *string `json:"last_sync_at"`
+	LastSyncError *string `json:"last_sync_error"`
+}
+
+// ServiceSyncDetails holds the live sync state fetched from the connected service for a
+// single linked service. All numeric and timestamp fields are nullable — they are null
+// when the service is unreachable or has not yet completed a sync tick.
+// ErrMsg is populated when the sync state could not be fetched; omitted on success.
+// This matches the err_msg pattern used in ConnectedServiceItem.
+type ServiceSyncDetails struct {
+	// SyncStatus is the current sync state from the service. Set to "unknown" when unreachable.
+	SyncStatus string `json:"sync_status"`
+	// TotalFiles is the total number of files known to the connector, or null when unavailable.
+	TotalFiles *int `json:"total_files"`
+	// NewFiles is the number of files added in the last sync tick, or null when unavailable.
+	NewFiles *int `json:"new_files"`
+	// RemovedFiles is the number of files removed in the last sync tick, or null when unavailable.
+	RemovedFiles *int `json:"removed_files"`
+	// FailedFiles is the number of files that failed to process in the last sync tick, or null.
+	FailedFiles *int `json:"failed_files"`
+	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
+	// LastSyncError is the error string from the last failed sync, or null on success.
+	LastSyncError *string `json:"last_sync_error"`
+	// ErrMsg is populated when the connected service was unreachable or returned an error.
+	// Omitted from the JSON response when empty (i.e. when the service was reachable).
+	ErrMsg string `json:"err_msg,omitempty"`
+}
+
+// GetApplicationDatasourceResponse is the response body for
+// GET /api/v1/applications/:id/datasources/:datasource_id.
+// Catalog identity fields (id, name, status, provider) are sourced from the connectors
+// table; live sync fields are nested under service_details and sourced from the linked
+// service. When the service is unreachable, service_details degrades gracefully:
+// sync_status = "unknown", all numeric/timestamp fields = null, err_msg populated.
+type GetApplicationDatasourceResponse struct {
+	// ID is the UUID of the datasource connector.
+	ID string `json:"id"`
+	// Name is the unique human-readable label for this connector.
+	Name string `json:"name"`
+	// Status is the catalog-side connectivity health: "connected" or "offline".
+	Status string `json:"status"`
+	// Message contains a human-readable description of the current status (omitted when empty).
+	Message string `json:"message,omitempty"`
+	// Provider contains the provider ID and its resolved display name.
+	Provider DatasourceProviderInfo `json:"provider"`
+	// ServiceDetails contains live sync state fetched from the linked service.
+	ServiceDetails ServiceSyncDetails `json:"service_details"`
 }
 
 // ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
