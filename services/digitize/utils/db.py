@@ -1349,6 +1349,17 @@ def list_connectors() -> List[Connector]:
     return db_manager.get_all_connectors()
 
 
+def list_connectors_paginated(
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[List[Connector], int]:
+    """Return paginated connectors ordered by attached_at descending.
+
+    Returns (items, total_count).
+    """
+    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset)
+
+
 def delete_active_connector(connector_id: str) -> bool:
     """
     Delete a connector row by id (cascades to connector_sync_logs).

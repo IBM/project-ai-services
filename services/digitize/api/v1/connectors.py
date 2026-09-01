@@ -29,6 +29,7 @@ from digitize.connectors.models import (
     ConnectorCreateResponse,
     ConnectorDetailResponse,
     ConnectorListItem,
+    ConnectorListResponse,
     ConnectorUpdateRequest,
     SyncLogDetailResponse,
     SyncLogItem,
@@ -479,23 +480,26 @@ def _sweep_staging_dir(
 
 @router.get(
     "",
-    response_model=List[ConnectorListItem],
+    response_model=ConnectorListResponse,
     responses={500: http_error_responses[500]},
     summary="List all connectors",
     description=(
-        "Returns all attached connectors with their sync state. "
+        "Returns a paginated list of attached connectors with their sync state. "
         "Secret connection fields (private_key, secret_access_key) are never included."
     ),
-    response_description="List of connectors",
+    response_description="Paginated list of connectors",
 )
-async def list_connectors():
-    """Retrieve a list of all active connectors with their current sync state.
+async def list_connectors(
+    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)."),
+    offset: int = Query(0, ge=0, description="Zero-based offset for pagination."),
+):
+    """Retrieve a paginated list of all active connectors with their current sync state.
 
     Strips out any sensitive/secret connection details from the response.
     """
     try:
-        connectors = db_ops.list_connectors()
-        return [
+        connectors, total = db_ops.list_connectors_paginated(limit=limit, offset=offset)
+        items = [
             ConnectorListItem(
                 id=c.id,
                 name=c.name,
@@ -508,6 +512,7 @@ async def list_connectors():
             )
             for c in connectors
         ]
+        return ConnectorListResponse(total=total, limit=limit, offset=offset, items=items)
     except HTTPException as exc:
         message = f"Failed to list connectors: {extract_http_error_message(exc)}"
         logger.error(message)

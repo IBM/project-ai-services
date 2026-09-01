@@ -961,6 +961,47 @@ class DatabaseManager:
             return []
 
     @staticmethod
+    def get_all_connectors_paginated(
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[List[Connector], int]:
+        """
+        Return paginated connectors ordered by attached_at descending.
+
+        Returns (items, total_count).
+        Each object is eagerly loaded and expunged from the session.
+        """
+        try:
+            with get_db_session() as session:
+                base = select(Connector)
+                total = session.execute(
+                    select(func.count()).select_from(base.subquery())
+                ).scalar() or 0
+                stmt = (
+                    select(Connector)
+                    .order_by(Connector.attached_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                connectors = list(session.scalars(stmt).all())
+                for c in connectors:
+                    _ = (
+                        c.id, c.name, c.type, c.connection_details,
+                        c.allowed_extensions, c.sync_interval_seconds,
+                        c.attached_at, c.last_sync_at, c.sync_status,
+                        c.error, c.total_files,
+                    )
+                    session.expunge(c)
+                logger.debug(
+                    f"Listed {len(connectors)} connector(s) "
+                    f"(limit={limit}, offset={offset}, total={total})"
+                )
+                return connectors, total
+        except SQLAlchemyError as e:
+            logger.error(f"DB error listing connectors (paginated): {e}", exc_info=True)
+            return [], 0
+
+    @staticmethod
     def delete_connector(connector_id: str) -> bool:
         """
         Delete a connector row by id (cascades to connector_sync_logs).

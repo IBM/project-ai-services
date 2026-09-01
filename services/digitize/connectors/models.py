@@ -312,6 +312,37 @@ class SyncLogItem(BaseModel):
     }
 
 
+class ConnectorListResponse(BaseModel):
+    """Paginated response for GET /v1/connectors."""
+
+    total: int
+    limit: int
+    offset: int
+    items: List[ConnectorListItem]
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "total": 1,
+                "limit": 50,
+                "offset": 0,
+                "items": [
+                    {
+                        "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
+                        "name": "prod-sftp-reports",
+                        "type": "file_system",
+                        "attached_at": "2025-01-15T10:00:00Z",
+                        "last_sync_at": "2025-01-15T10:30:00Z",
+                        "sync_status": "up to date",
+                        "error": None,
+                        "total_files": 15,
+                    }
+                ],
+            }
+        }
+    }
+
+
 class SyncLogResponse(BaseModel):
     """Paginated response for GET /v1/connectors/{connector_id}/syncs."""
 

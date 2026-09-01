@@ -450,16 +450,32 @@ class TestRunTeardown:
 # ===========================================================================
 
 class TestListConnectors:
-    def test_returns_200_with_list(self, connector_test_client, monkeypatch):
+    def test_returns_200_with_paginated_envelope(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[_make_connector()]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([_make_connector()], 1)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 1
-        assert data[0]["id"] == CONNECTOR_ID
+        assert data["total"] == 1
+        assert data["limit"] == 50
+        assert data["offset"] == 0
+        assert len(data["items"]) == 1
+        assert data["items"][0]["id"] == CONNECTOR_ID
+
+    def test_pagination_params_forwarded(self, connector_test_client, monkeypatch):
+        mock = Mock(return_value=([_make_connector()], 5))
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            mock,
+        )
+        response = connector_test_client.get("/v1/connectors?limit=10&offset=2")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 10
+        assert data["offset"] == 2
+        mock.assert_called_once_with(limit=10, offset=2)
 
     def test_never_returns_secret_fields(self, connector_test_client, monkeypatch):
         c = _make_connector()
@@ -469,20 +485,22 @@ class TestListConnectors:
             "private_key": "ENCRYPTED_PRIVATE_KEY",
         }
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[c]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([c], 1)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert "private_key" not in str(response.json())
 
     def test_returns_empty_list(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([], 0)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data["total"] == 0
+        assert data["items"] == []
 
 
 # ===========================================================================
