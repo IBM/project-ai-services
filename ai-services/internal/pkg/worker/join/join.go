@@ -32,6 +32,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
@@ -82,14 +83,27 @@ type Options struct {
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
 func Run(ctx context.Context, opts Options) error {
-	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
-	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
-	}
+	switch opts.RuntimeType {
+	case types.RuntimeTypePodman:
+		rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
+		if err != nil {
+			return fmt.Errorf("worker join: init runtime: %w", err)
+		}
 
-	// Setup worker node
-	if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
-		return fmt.Errorf("worker join: setup: %w", err)
+		// Setup worker node
+		if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
+			return fmt.Errorf("worker join: setup: %w", err)
+		}
+	case types.RuntimeTypeOpenShift:
+		rt, err := runtime.CreateRuntime(opts.RuntimeType, workerconstants.WorkerAppName)
+		if err != nil {
+			return fmt.Errorf("worker join: init runtime: %w", err)
+		}
+		
+
+		fmt.Println("openshift")
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", opts.RuntimeType)
 	}
 
 	return nil

@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: worker
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: worker
+    spec:
+      serviceAccountName: ai-services-sa
+      automountServiceAccountToken: true
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image }}"
+          command:
+            - /usr/bin/ai-services
+            - worker
+            - grpcserver
+            - "{{ .Values.worker.gatewayAddr }}"
+            - --token={{ .Values.worker.token }}
+            - --runtime={{ .Values.worker.runtime }}
+          env:
+            - name: AI_SERVICES_LOG_LEVEL
+              value: "info"
+            - name: AI_SERVICES_LOG_FORMAT
+              value: "service"
+          resources:
+            requests:
+              memory: "{{ .Values.worker.resources.requests.memory }}"
+              cpu: "{{ .Values.worker.resources.requests.cpu }}"
+            limits:
+              memory: "{{ .Values.worker.resources.limits.memory }}"
+              cpu: "{{ .Values.worker.resources.limits.cpu }}"

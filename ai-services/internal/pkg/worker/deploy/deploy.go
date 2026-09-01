@@ -43,8 +43,6 @@ const (
 
 	dirPerm  = 0o750
 	filePerm = 0o644
-
-	WorkerAppName = "ai-services"
 )
 
 // Options carries the parameters needed to set up the worker node.
