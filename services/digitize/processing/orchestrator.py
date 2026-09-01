@@ -430,6 +430,9 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
 
     timings: dict[str, float] = {"process_text": 0.0, "process_tables": 0.0}
 
+    if stop_event and stop_event.is_set():
+        raise JobCancelledError(f"Job cancelled before processing document: {doc_path}")
+
     try:
         converted_doc = DoclingDocument.load_from_json(Path(converted_json_path))
         if not converted_doc:
@@ -450,6 +453,9 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
                 logger.info(f"Detected document language: {document_language} for doc: {doc_path}")
         except Exception as e:
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
+
+        if stop_event and stop_event.is_set():
+            raise JobCancelledError(f"Job cancelled before processing tables for document: {doc_path}")
 
         table_count, process_time, table_failures = process_table(
             converted_doc, doc_path, processed_table_json_path, gen_model, gen_endpoint, document_language,
