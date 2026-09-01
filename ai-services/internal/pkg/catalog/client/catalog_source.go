@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -45,12 +44,10 @@ type CatalogSource interface {
 func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSource, error) {
 	apiClient, err := NewApplicationClient(ctx)
 	if err != nil {
-		if errors.Is(err, config.ErrNotLoggedIn) {
-			// Auth config is missing — do not silently fall back; propagate.
-			return nil, err
-		}
-		// Any other client-init error (e.g. bad config file) — fall back and warn.
-		logger.WarningfCtx(ctx, "catalog API client unavailable, using embedded catalog: %v", err)
+		// Any client-init failure (not logged in, bad config, etc.) falls back to
+		// the embedded catalog. The templates command is a read-only display — it
+		// does not require a live server connection.
+		logger.DebugfCtx(ctx, "catalog API client unavailable, using embedded catalog: %v", err)
 
 		return &embeddedOnlySource{embedded: embedded}, nil
 	}
