@@ -98,6 +98,11 @@ func Run(ctx context.Context, opts Options) error {
 // GrpcConnect dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
 func GrpcConnect(ctx context.Context, opts Options) error {
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return err
+	}
+
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
@@ -112,11 +117,6 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 		if pr, err = workercaddy.New(ctx, rt); err != nil {
 			return fmt.Errorf("worker join: init local Caddy manager: %w", err)
 		}
-	}
-
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return err
 	}
 
 	// ── Step 2: Dial the gateway ─────────────────────────────────────────────
