@@ -3,7 +3,7 @@ import requests
 import threading
 import time
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
@@ -142,26 +142,33 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
-        for future in as_completed(futures):
-            # Check for job cancellation after each table's LLM call completes.
-            if stop_event is not None and stop_event.is_set():
-                # Cancel any futures that haven't started yet.
-                for pending_fut in futures:
-                    if not pending_fut.running() and not pending_fut.done():
-                        pending_fut.cancel()
+        pending = dict(futures)  # future -> idx, shrinks as futures complete
+        while pending:
+            for fut in list(pending):
+                if not fut.done():
+                    # Cancel queued (not-yet-running) futures if stop_event is set.
+                    if stop_event is not None and stop_event.is_set() and not fut.running():
+                        fut.cancel()
+                        del pending[fut]
+                    continue
+                idx = pending.pop(fut)
+                try:
+                    results[idx] = fut.result()
+                    logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
+                except Exception as e:
+                    error_msg = f"Failed to process table {idx}: {str(e)}"
+                    logger.error(error_msg)
+                    results[idx] = ("No summary.", False)
+                    failures[idx] = error_msg
+
+            if stop_event is not None and stop_event.is_set() and not pending:
                 from digitize.exceptions import JobCancelledError
                 raise JobCancelledError(
                     f"Job cancelled during table summarization for '{doc_path}'"
                 )
-            idx = futures[future]
-            try:
-                results[idx] = future.result()
-                logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
-            except Exception as e:
-                error_msg = f"Failed to process table {idx}: {str(e)}"
-                logger.error(error_msg)
-                results[idx] = ("No summary.", False)
-                failures[idx] = error_msg
+
+            if pending:
+                time.sleep(0.05)
 
     # Unpack results in index order. Every slot starts as the fallback
     # and is overwritten either by a successful future or left as-is on failure.
