@@ -63,8 +63,8 @@ func getCatalogModels(ctx context.Context, templateID string, excludeProviders .
 		if !errors.Is(err, catalogconfig.ErrNotLoggedIn) {
 			return nil, fmt.Errorf("failed to connect to catalog API: %w", err)
 		}
-		// Not logged in — fall back to the local embedded provider.
-		logger.DebugfCtx(ctx, "catalog API not available, using local provider for template '%s'\n", templateID)
+		// No active session — fall back to embedded-only local provider.
+		logger.Warningln("Not logged in to catalog server, falling back to local embedded catalog (custom bundle items will not be included)")
 
 		return getCatalogModelsLocal(ctx, templateID, excludeProviders...)
 	}
