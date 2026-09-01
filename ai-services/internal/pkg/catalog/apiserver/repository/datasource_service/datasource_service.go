@@ -506,6 +506,13 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		return nil, fmt.Errorf("failed to load application: %w", err)
 	}
 
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("application %s not found", applicationID),
+		}
+	}
+
 	var eligible []dbrepo.LinkedServiceRow
 
 	for _, svc := range app.Services {

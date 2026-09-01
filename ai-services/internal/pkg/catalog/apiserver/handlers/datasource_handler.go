@@ -279,7 +279,7 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 // ConnectDatasourcesToApplication godoc
 //
 //	@Summary		Connect datasources to application
-//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 200 with per-datasource errors when one or more fail.
+//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 207 with per-datasource errors when one or more fail.
 //	@Tags			Datasources
 //	@Accept			json
 //	@Produce		json
