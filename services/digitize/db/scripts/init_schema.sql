@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     finished_at      TIMESTAMPTZ,
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
-    ingested_files   INTEGER     NOT NULL DEFAULT 0,
+    completed_files   INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',

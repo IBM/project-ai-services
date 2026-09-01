@@ -52,7 +52,7 @@ from digitize.utils.db import (
     get_connector_sync_status,
     get_sync_log_status,
     get_job,
-    increment_ingested_files,
+    increment_completed_files,
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
@@ -274,7 +274,7 @@ async def _wait_for_job(
     honoured promptly even while the batch is running.
 
     On each poll that returns job data, any documents that have newly moved into
-    a completed state are counted and ``increment_ingested_files`` is called
+    a completed state are counted and ``increment_completed_files`` is called
     immediately so the sync log reflects real-time progress rather than a single
     bulk update at the end.
 
@@ -299,7 +299,7 @@ async def _wait_for_job(
         newly_completed = completed_count - prev_completed_count
         if newly_completed > 0:
             prev_completed_count = completed_count
-            increment_ingested_files(connector_id, sync_seq, count=newly_completed)
+            increment_completed_files(connector_id, sync_seq, count=newly_completed)
 
         if status in _TERMINAL:
             break

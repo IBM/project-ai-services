@@ -1440,11 +1440,11 @@ class DatabaseManager:
             return False
 
     @staticmethod
-    def increment_ingested_files(connector_id: str, seq: int, count: int = 1) -> bool:
+    def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
         """
-        Atomically increment ingested_files by *count* on the identified sync-log row.
+        Atomically increment completed_files by *count* on the identified sync-log row.
 
-        Uses a SQL expression (ingested_files + count) so concurrent calls do
+        Uses a SQL expression (completed_files + count) so concurrent calls do
         not race against each other.  Returns True if the row was found and
         updated, False otherwise.
         """
@@ -1457,19 +1457,19 @@ class DatabaseManager:
                         ConnectorSyncLog.seq == seq,
                     )
                     .values(
-                        ingested_files=ConnectorSyncLog.ingested_files + count
+                        completed_files=ConnectorSyncLog.completed_files + count
                     )
                 )
                 result = session.execute(stmt)
                 updated = result.rowcount > 0
                 if not updated:
                     logger.warning(
-                        f"Sync log connector={connector_id!r} seq={seq} not found for ingested_files increment"
+                        f"Sync log connector={connector_id!r} seq={seq} not found for completed_files increment"
                     )
                 return updated
         except SQLAlchemyError as e:
             logger.error(
-                f"DB error in increment_ingested_files(connector={connector_id!r}, seq={seq}): {e}",
+                f"DB error in increment_completed_files(connector={connector_id!r}, seq={seq}): {e}",
                 exc_info=True,
             )
             return False

@@ -1518,13 +1518,13 @@ def update_sync_log(
     )
 
 
-def increment_ingested_files(connector_id: str, seq: int, count: int = 1) -> bool:
+def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
     """
-    Atomically increment the ingested_files counter on a sync-log row.
+    Atomically increment the completed_files counter on a sync-log row.
 
     Returns True on success, False if the row was not found.
     """
-    return db_manager.increment_ingested_files(connector_id=connector_id, seq=seq, count=count)
+    return db_manager.increment_completed_files(connector_id=connector_id, seq=seq, count=count)
 
 
 def list_sync_logs(

@@ -290,7 +290,7 @@ class SyncLogItem(BaseModel):
     finished_at: Optional[str]
     total_files: int
     new_files: int
-    ingested_files: int
+    completed_files: int
     removed_files: int
     status: str
     error: str
@@ -303,7 +303,7 @@ class SyncLogItem(BaseModel):
                 "finished_at": "2025-01-15T10:30:15Z",
                 "total_files": 15,
                 "new_files": 3,
-                "ingested_files": 3,
+                "completed_files": 3,
                 "removed_files": 0,
                 "status": "completed",
                 "error": "",
@@ -364,7 +364,7 @@ class SyncLogResponse(BaseModel):
                         "finished_at": "2025-01-15T10:30:15Z",
                         "total_files": 15,
                         "new_files": 3,
-                        "ingested_files": 3,
+                        "completed_files": 3,
                         "removed_files": 0,
                         "status": "completed",
                         "error": "",
@@ -383,7 +383,7 @@ class SyncLogDetailResponse(BaseModel):
     finished_at: Optional[str]
     total_files: int
     new_files: int
-    ingested_files: int
+    completed_files: int
     removed_files: int
     status: str
     error: str
@@ -396,7 +396,7 @@ class SyncLogDetailResponse(BaseModel):
                 "finished_at": "2025-01-15T10:30:15Z",
                 "total_files": 15,
                 "new_files": 3,
-                "ingested_files": 3,
+                "completed_files": 3,
                 "removed_files": 0,
                 "status": "completed",
                 "error": "",
