@@ -12,8 +12,6 @@ from typing import Dict, List, Tuple, Optional
 from docx import Document
 
 from common.misc_utils import get_logger
-from common.llm_utils import tqdm_wrapper
-
 logger = get_logger("docx_utils")
 
 # Constants for page estimation

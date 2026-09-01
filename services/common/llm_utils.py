@@ -1,11 +1,8 @@
-import logging
 import os
 import requests
 import time
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-
 from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
@@ -13,7 +10,7 @@ import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
 
-is_debug = logger.isEnabledFor(logging.DEBUG)
+
 
 def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None, context: str = "LLM") -> int:
     """
@@ -46,13 +43,6 @@ def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None,
     )
     
     return effective_max_tokens
-
-def tqdm_wrapper(iterable, **kwargs):
-    """Wrapper for tqdm that only shows progress bar in debug mode."""
-    if is_debug:
-        return tqdm(iterable, **kwargs)
-    else:
-        return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
@@ -140,8 +130,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
-        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
-                                   desc=f"Summarizing and classifying tables of '{doc_path}'"):
+        for future in as_completed(futures):
             idx = futures[future]
             try:
                 results[idx] = future.result()
