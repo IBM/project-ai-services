@@ -429,6 +429,8 @@ definitions:
         type: string
       version:
         type: string
+      worker:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo:
     properties:
@@ -511,6 +513,15 @@ definitions:
       updated_at:
         type: string
       version:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      runtime_type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:

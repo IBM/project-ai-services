@@ -73,8 +73,16 @@ func (p *DeploymentPlanner) PlanDeployment(
 
 	// For remote workers, validate connectivity and Caddy metadata before
 	// touching the DB so the Create API returns an immediate error on failure.
-	if err := p.ValidateWorker(ctx, req.WorkerName, runtimeType); err != nil {
+	if err := p.ValidateWorker(ctx, req.WorkerName); err != nil {
 		return nil, err
+	}
+
+	// When deploying to a named worker, use the worker's registered runtime type
+	// for catalog path resolution and Spyre card allocation — not the server's.
+	if req.WorkerName != "" {
+		if workerRT, ok := p.workerRegistry.WorkerRuntimeType(req.WorkerName); ok {
+			runtimeType = workerRT
+		}
 	}
 
 	// First, determine if this is an architecture or standalone service
@@ -300,7 +308,7 @@ func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
 // ValidateWorker confirms the named remote worker is connected. Called from
 // PlanDeployment before any DB records are written so the Create API can
 // return an error immediately on failure.
-func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName, runtimeType string) error {
+func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName string) error {
 	if p.workerRegistry == nil {
 		return fmt.Errorf("worker deployment is not configured on this server")
 	}
