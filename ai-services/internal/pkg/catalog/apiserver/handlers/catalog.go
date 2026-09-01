@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -344,7 +345,12 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 
 	images, err := h.provider.GetServiceImages(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, ErrorResponse{
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get images for service '%s': %v", id, err),
 		})
 
@@ -375,7 +381,12 @@ func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
 
 	images, err := h.provider.GetArchitectureImages(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, ErrorResponse{
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get images for architecture '%s': %v", id, err),
 		})
 

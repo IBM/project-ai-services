@@ -2,7 +2,7 @@ package image
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -40,13 +40,18 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 	}
 
 	// Only fall through to architecture when the server returned 404.
-	var httpErr *client.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
+	httpErr, ok := err.(*client.HTTPError)
+	if !ok || httpErr.StatusCode != http.StatusNotFound {
 		return nil, err
 	}
 
 	resp, err = appClient.GetArchitectureImages(ctx, templateID)
 	if err != nil {
+		// Both service and architecture lookups failed — the ID is not in the catalog.
+		if archErr, ok := err.(*client.HTTPError); ok && archErr.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
+		}
+
 		return nil, err
 	}
 

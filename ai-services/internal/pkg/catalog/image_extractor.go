@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -13,13 +14,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// ErrCatalogItemNotFound is returned by GetArchitectureImages and GetServiceImages
+// when the requested ID does not exist in the catalog.
+var ErrCatalogItemNotFound = errors.New("catalog item not found")
+
 // GetArchitectureImages returns all container images required to deploy an architecture.
-// Fails immediately with an error if id is not a known architecture.
+// Fails immediately with ErrCatalogItemNotFound if id is not a known architecture.
 // The response always includes catalog asset images (tool image and catalog infrastructure images).
 func (p *CatalogProvider) GetArchitectureImages(ctx context.Context, id string) ([]string, error) {
 	arch, err := p.LoadArchitecture(id)
 	if err != nil {
-		return nil, fmt.Errorf("architecture '%s' not found", id)
+		return nil, fmt.Errorf("%w: architecture '%s'", ErrCatalogItemNotFound, id)
 	}
 
 	allImages := p.initBaseImages()
@@ -36,12 +41,12 @@ func (p *CatalogProvider) GetArchitectureImages(ctx context.Context, id string) 
 }
 
 // GetServiceImages returns all container images required to deploy a service and its dependencies.
-// Fails immediately with an error if id is not a known service.
+// Fails immediately with ErrCatalogItemNotFound if id is not a known service.
 // The response always includes catalog asset images (tool image and catalog infrastructure images).
 func (p *CatalogProvider) GetServiceImages(ctx context.Context, id string) ([]string, error) {
 	service, err := p.LoadService(id)
 	if err != nil {
-		return nil, fmt.Errorf("service '%s' not found", id)
+		return nil, fmt.Errorf("%w: service '%s'", ErrCatalogItemNotFound, id)
 	}
 
 	allImages := p.initBaseImages()

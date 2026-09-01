@@ -287,6 +287,16 @@ func validateServiceNotFound(t *testing.T, body []byte) {
 	assert.Contains(t, errResp["error"], "not found")
 }
 
+// validateNotFoundBody asserts the response body contains a JSON error field with "not found".
+func validateNotFoundBody(t *testing.T, body []byte) {
+	t.Helper()
+
+	var errResp map[string]string
+	err := json.Unmarshal(body, &errResp)
+	require.NoError(t, err)
+	assert.Contains(t, errResp["error"], "not found")
+}
+
 func TestGetServiceImages(t *testing.T) {
 	router := setupTestRouter()
 	handler := newTestCatalogHandler(t)
@@ -313,17 +323,13 @@ func TestGetServiceImages(t *testing.T) {
 			name:           "Architecture id returns 404 — wrong endpoint",
 			serviceID:      "rag",
 			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
 		},
 		{
 			name:           "Unknown id returns 404",
 			serviceID:      "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			validateBody: func(t *testing.T, body []byte) {
-				var errResp map[string]string
-				err := json.Unmarshal(body, &errResp)
-				require.NoError(t, err)
-				assert.Contains(t, errResp["error"], "not found")
-			},
+			validateBody:   validateNotFoundBody,
 		},
 	}
 
@@ -367,17 +373,13 @@ func TestGetArchitectureImages(t *testing.T) {
 			name:           "Service id returns 404 — wrong endpoint",
 			archID:         "chat",
 			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
 		},
 		{
 			name:           "Unknown id returns 404",
 			archID:         "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			validateBody: func(t *testing.T, body []byte) {
-				var errResp map[string]string
-				err := json.Unmarshal(body, &errResp)
-				require.NoError(t, err)
-				assert.Contains(t, errResp["error"], "not found")
-			},
+			validateBody:   validateNotFoundBody,
 		},
 	}
 
