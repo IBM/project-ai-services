@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS document_checksum (
     doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
+-- Schema for APScheduler job store
+-- APScheduler v3 SQLAlchemyJobStore attempts to auto-create its job store table
+-- (default: 'apscheduler_jobs') under the 'scheduler' schema, but it cannot auto-create
+-- the schema itself, which would cause an error on startup if the schema doesn't exist.
+-- The job store is initialized in services/digitize/app.py via
+-- SQLAlchemyJobStore(engine=db_engine, tableschema="scheduler")
+CREATE SCHEMA IF NOT EXISTS scheduler;
+
 -- Connector tables
 CREATE TABLE IF NOT EXISTS connectors (
     id                      TEXT        PRIMARY KEY,

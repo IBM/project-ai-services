@@ -276,4 +276,81 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// ConnectDatasourcesToApplication godoc
+//
+//	@Summary		Connect datasources to application
+//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 207 with per-datasource errors when one or more fail.
+//	@Tags			Datasources
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path	string								true	"Application ID (UUID)"
+//	@Param			request	body	models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
+//	@Success		204		"All datasources connected successfully"
+//	@Success		207		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
+//	@Failure		400		{object}	ErrorResponse						"Invalid request body"
+//	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
+//	@Failure		422		{object}	ErrorResponse						"No eligible running service found"
+//	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
+//	@Router			/applications/{id}/datasources [put]
+func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	var req models.ConnectDatasourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid request body: %v", err),
+		})
+
+		return
+	}
+
+	// Parse each string UUID into uuid.UUID.
+	datasourceIDs := make([]uuid.UUID, 0, len(req.DatasourceIDs))
+	for _, idStr := range req.DatasourceIDs {
+		id, parseErr := uuid.Parse(idStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error: fmt.Sprintf("Invalid datasource ID %q: %v", idStr, parseErr),
+			})
+
+			return
+		}
+
+		datasourceIDs = append(datasourceIDs, id)
+	}
+
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, datasourceIDs)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to connect datasources to application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to connect datasources to application",
+		})
+
+		return
+	}
+
+	if resp == nil {
+		c.Status(http.StatusNoContent)
+
+		return
+	}
+
+	c.JSON(http.StatusMultiStatus, resp)
+}
+
 // Made with Bob

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -20,6 +21,10 @@ const (
 	svcDeployOptionsRoute   = "/api/v1/services/%s/deploy-options"
 	archDeployOptionsRoute  = "/api/v1/architectures/%s/deploy-options"
 	compProviderParamsRoute = "/api/v1/components/%s/providers/%s/params"
+	svcImagesRoute          = "/api/v1/services/%s/images"
+	archImagesRoute         = "/api/v1/architectures/%s/images"
+	svcModelsRoute          = "/api/v1/services/%s/models"
+	archModelsRoute         = "/api/v1/architectures/%s/models"
 )
 
 // HTTPError represents an HTTP error with status code.
@@ -267,6 +272,106 @@ func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, comp
 
 	if resp.IsError() {
 		return nil, fmt.Errorf("get component provider params: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetServiceImages returns the complete list of container images required to deploy
+// the given service and all its component dependencies. The response always includes
+// catalog asset images (tool image and catalog infrastructure images).
+// Both embedded (built-in) and custom bundle services are supported.
+func (c *ApplicationClient) GetServiceImages(ctx context.Context, serviceID string) ([]string, error) {
+	var result []string
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(svcImagesRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service images: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return result, nil
+}
+
+// GetArchitectureImages returns the complete list of container images required to deploy
+// the given architecture and all its services and component dependencies. The response
+// always includes catalog asset images (tool image and catalog infrastructure images).
+// Both embedded (built-in) and custom bundle architectures are supported.
+func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architectureID string) ([]string, error) {
+	var result []string
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(archImagesRoute, architectureID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture images: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return result, nil
+}
+
+// GetServiceModels calls GET /api/v1/services/:id/models and returns the list of
+// unique model names referenced by the service's component dependencies.
+// Pass excludeProviders to have the server omit models from those component providers
+// (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
+func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID string, excludeProviders ...string) ([]string, error) {
+	var result []string
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if len(excludeProviders) > 0 {
+		req.SetQueryParam("exclude_providers", strings.Join(excludeProviders, ","))
+	}
+
+	resp, err := req.Get(fmt.Sprintf(svcModelsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service models: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetArchitectureModels calls GET /api/v1/architectures/:id/models and returns the
+// list of unique model names referenced across all services in the architecture.
+// Pass excludeProviders to have the server omit models from those component providers
+// (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
+func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architectureID string, excludeProviders ...string) ([]string, error) {
+	var result []string
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if len(excludeProviders) > 0 {
+		req.SetQueryParam("exclude_providers", strings.Join(excludeProviders, ","))
+	}
+
+	resp, err := req.Get(fmt.Sprintf(archModelsRoute, architectureID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture models: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
 	return result, nil

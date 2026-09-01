@@ -140,7 +140,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize catalog provider: %w", err)
 	}
 
-	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, svcDepRepo, catalogProvider)
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, appRepo, svcDepRepo, catalogProvider)
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
 	}

@@ -175,4 +175,31 @@ type ListDatasourcesRequest struct {
 	Provider string
 }
 
+// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
+type ConnectDatasourceRequest struct {
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
+	ConnectionDetails map[string]any `json:"connection_details"`
+}
+
+// ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.
+type ConnectDatasourcesRequest struct {
+	// DatasourceIDs is the list of datasource connector UUIDs to connect.
+	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
+}
+
+// DatasourceConnectionError is a per-datasource error entry in a ConnectDatasourcesResponse.
+type DatasourceConnectionError struct {
+	DatasourceID string `json:"datasource_id"`
+	Error        string `json:"error"`
+}
+
+// ConnectDatasourcesResponse is returned when one or more datasources fail to connect.
+// On full success the handler returns 204 No Content with no body.
+type ConnectDatasourcesResponse struct {
+	Errors []DatasourceConnectionError `json:"errors"`
+}
+
 // Made with Bob
