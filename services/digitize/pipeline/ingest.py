@@ -84,7 +84,7 @@ def create_indexing_handler(
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                 return False
 
-            # Update status to COMPLETED (or PARTIALLY_INGESTED if table failures
+            # Update status to COMPLETED (or COMPLETED_WITH_ERRORS if table failures
             # were recorded earlier in the pipeline for this document).
             if status_mgr and doc_id_dict:
                 from digitize.utils.db import get_document
@@ -96,7 +96,7 @@ def create_indexing_handler(
                 except Exception:
                     had_partial = False
 
-                final_doc_status = DocStatus.PARTIALLY_INGESTED if had_partial else DocStatus.COMPLETED
+                final_doc_status = DocStatus.COMPLETED_WITH_ERRORS if had_partial else DocStatus.COMPLETED
                 logger.debug(
                     f"Indexing Done: updating doc metadata to {final_doc_status.value} "
                     f"for document: {doc_id}"
@@ -219,7 +219,7 @@ def ingest(
             doc_stats = get_job_document_stats(job_id)
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
-            partial_docs = doc_stats["partial_docs"]
+            completed_with_errors_docs = doc_stats["completed_with_errors_docs"]
 
             pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
@@ -249,13 +249,13 @@ def ingest(
 
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
 
-            elif len(partial_docs) > 0:
-                # All documents reached a terminal success state, but some had table failures
+            elif len(completed_with_errors_docs) > 0:
+                # All documents reached a terminal state, but some had table summarization errors
                 logger.info(
-                    f"✅ Ingestion completed with partial failures, Time taken: {file_processing_time:.2f} seconds. "
-                    f"{len(partial_docs)} document(s) were partially ingested due to table summarization failures."
+                    f"✅ Ingestion completed with errors, Time taken: {file_processing_time:.2f} seconds. "
+                    f"{len(completed_with_errors_docs)} document(s) completed with errors due to table summarization failures."
                 )
-                status_mgr.update_job_progress("", DocStatus.PARTIALLY_INGESTED, JobStatus.COMPLETED_WITH_ERRORS)
+                status_mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS)
 
             else:
                 # All documents completed successfully

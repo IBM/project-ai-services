@@ -43,9 +43,11 @@ def get_job_document_stats(job_id: str) -> dict:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
         - completed_docs: List of completed document objects with id, name, status
+        - completed_with_errors_docs: List of docs with status completed_with_errors
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
         - completed_count: Number of completed documents
+        - completed_with_errors_count: Number of completed_with_errors documents
     """
     from digitize.models import DocStatus
 
@@ -61,23 +63,25 @@ def get_job_document_stats(job_id: str) -> dict:
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
         _terminal_ok = (
             DocStatus.COMPLETED.value,
-            DocStatus.PARTIALLY_INGESTED.value,
+            DocStatus.COMPLETED_WITH_ERRORS.value,
             DocStatus.ALREADY_EXISTS.value,
         )
         completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
-        partial_docs = [
+        completed_with_errors_docs = [
             doc for doc in documents
-            if doc.get("status") == DocStatus.PARTIALLY_INGESTED.value
+            if doc.get("status") == DocStatus.COMPLETED_WITH_ERRORS.value
         ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
-            "partial_docs": partial_docs,
+            "partial_docs": completed_with_errors_docs,
+            "completed_with_errors_docs": completed_with_errors_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
             "completed_count": len(completed_docs),
-            "partial_count": len(partial_docs),
+            "partial_count": len(completed_with_errors_docs),
+            "completed_with_errors_count": len(completed_with_errors_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)

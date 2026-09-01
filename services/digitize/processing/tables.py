@@ -352,12 +352,6 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         max_tokens=selected_max_tokens,
     )
 
-    # Log failures for visibility
-    if failures:
-        logger.warning(f"Table summarization failures for '{doc_path}': {len(failures)} table(s) failed")
-        for idx, error in failures.items():
-            logger.error(f"Table {idx} failed: {error}")
-
     filtered_table_dicts = {
         idx: {
             'summary': summary,

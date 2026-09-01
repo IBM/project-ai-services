@@ -788,7 +788,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_documents),
                 completed=sum(
                     1 for doc in exported_documents
-                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.PARTIALLY_INGESTED.value)
+                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
@@ -1091,9 +1091,9 @@ class DatabaseStatusManager:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
                 # Register the checksum once the document reaches any terminal
-                # success state (COMPLETED or PARTIALLY_INGESTED) so that future
+                # success state (COMPLETED or COMPLETED_WITH_ERRORS) so that future
                 # uploads of the same content are caught via document_checksum.
-                _terminal_ok_doc = (DocStatus.COMPLETED, DocStatus.PARTIALLY_INGESTED)
+                _terminal_ok_doc = (DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS)
                 if (
                     update_params.get("status") in _terminal_ok_doc
                     and "file_hash" in metadata_fields
@@ -1132,12 +1132,12 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS and PARTIALLY_INGESTED are both terminal success states —
+        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
         # count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
-            DocStatus.PARTIALLY_INGESTED.value,
+            DocStatus.COMPLETED_WITH_ERRORS.value,
         )
         stats = {
             "total_documents": len(documents),

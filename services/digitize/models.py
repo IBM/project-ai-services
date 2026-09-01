@@ -29,7 +29,7 @@ class DocStatus(str, Enum):
     PROCESSED = "processed"
     CHUNKED = "chunked"
     COMPLETED = "completed"
-    PARTIALLY_INGESTED = "partially_ingested"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
 

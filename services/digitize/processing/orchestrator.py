@@ -661,8 +661,8 @@ def process_documents(
 
                         if table_failures:
                             logger.warning(
-                                f"Document {doc_id}: {len(table_failures)} table(s) failed "
-                                f"summarization; those tables will not be indexed"
+                                f"Document {doc_id}: {len(table_failures)} table(s) completed "
+                                f"with errors; those tables will use fallback summaries"
                             )
 
                         status_mgr.update_doc_metadata(doc_id, {
@@ -735,7 +735,7 @@ def process_documents(
                             "chunks": chunk_count,
                             "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
                         }
-                        # Persist the table-failure flag into the doc's metadata JSONB
+                        # Persist the table-error flag into the doc's metadata JSONB
                         # so that the indexing callback in ingest.py can read it without
                         # ambiguity (reading doc.status would be ambiguous mid-pipeline).
                         if had_table_failures:
