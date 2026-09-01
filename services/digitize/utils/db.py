@@ -1090,12 +1090,11 @@ class DatabaseStatusManager:
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
-                # Register the checksum once the document reaches any terminal
-                # success state (COMPLETED or COMPLETED_WITH_ERRORS) so that future
-                # uploads of the same content are caught via document_checksum.
-                _terminal_ok_doc = (DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS)
+                # Register the checksum only when the document completed fully
+                # (not COMPLETED_WITH_ERRORS) so that a re-upload of a document
+                # that had table failures is not incorrectly de-duplicated.
                 if (
-                    update_params.get("status") in _terminal_ok_doc
+                    update_params.get("status") == DocStatus.COMPLETED
                     and "file_hash" in metadata_fields
                 ):
                     db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)

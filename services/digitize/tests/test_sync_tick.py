@@ -202,13 +202,13 @@ class TestProcessNewFiles:
     def _completed_stats(filename: str, doc_id: str) -> dict:
         """Helper: stats dict where the single doc completed successfully."""
         doc = {"id": doc_id, "name": filename, "status": "completed"}
-        return {"completed_docs": [doc], "failed_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1}
+        return {"completed_docs": [doc], "failed_docs": [], "completed_with_errors_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1, "completed_with_errors_count": 0}
 
     @staticmethod
     def _failed_stats(filename: str, doc_id: str) -> dict:
         """Helper: stats dict where the single doc failed."""
         doc = {"id": doc_id, "name": filename, "status": "failed"}
-        return {"completed_docs": [], "failed_docs": [doc], "total_docs": 1, "failed_count": 1, "completed_count": 0}
+        return {"completed_docs": [], "failed_docs": [doc], "completed_with_errors_docs": [], "total_docs": 1, "failed_count": 1, "completed_count": 0, "completed_with_errors_count": 0}
 
     def _patches(self, ingest_raises=None):
         """Return a context-manager stack that patches all external calls."""
@@ -354,9 +354,11 @@ class TestProcessNewFiles:
         partial_stats = {
             "completed_docs": [{"id": "doc-1", "name": "a.pdf", "status": "completed"}],
             "failed_docs":    [{"id": "doc-2", "name": "b.pdf", "status": "failed"}],
+            "completed_with_errors_docs": [],
             "total_docs": 2,
             "failed_count": 1,
             "completed_count": 1,
+            "completed_with_errors_count": 0,
         }
 
         from contextlib import ExitStack
@@ -912,7 +914,7 @@ class TestProcessNewFilesExtra:
     @staticmethod
     def _completed_stats(filename: str = "report.pdf", doc_id: str = "doc-1") -> dict:
         doc = {"id": doc_id, "name": filename, "status": "completed"}
-        return {"completed_docs": [doc], "failed_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1}
+        return {"completed_docs": [doc], "failed_docs": [], "completed_with_errors_docs": [], "total_docs": 1, "failed_count": 0, "completed_count": 1, "completed_with_errors_count": 0}
 
     def _base_patches(self):
         from contextlib import ExitStack
