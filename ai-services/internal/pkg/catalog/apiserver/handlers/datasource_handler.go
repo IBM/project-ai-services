@@ -133,12 +133,12 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 //	@Tags			Datasources
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string									true	"Datasource UUID"
-//	@Success		200	{object}	models.DatasourceServicesResponse		"Connected services with live sync state"
-//	@Failure		400	{object}	ErrorResponse							"Invalid UUID format"
-//	@Failure		401	{object}	ErrorResponse							"Unauthorized"
-//	@Failure		404	{object}	ErrorResponse							"Datasource not found"
-//	@Failure		500	{object}	ErrorResponse							"Internal Server Error"
+//	@Param			id	path		string								true	"Datasource UUID"
+//	@Success		200	{object}	models.DatasourceServicesResponse	"Connected services with live sync state"
+//	@Failure		400	{object}	ErrorResponse						"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse						"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse						"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse						"Internal Server Error"
 //	@Router			/datasources/{id}/services [get]
 func (h *DatasourceHandler) GetDatasourceServices(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

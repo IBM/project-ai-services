@@ -1826,6 +1826,64 @@
                 }
             }
         },
+        "/datasources/{id}/services": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the list of services currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the service entry is still returned with sync_status set to \"unknown\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Get connected services for a datasource",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connected services with live sync state",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -2490,6 +2548,22 @@
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse": {
+            "type": "object",
+            "properties": {
+                "datasource_id": {
+                    "description": "DatasourceID is the UUID of the queried datasource connector.",
+                    "type": "string"
+                },
+                "services": {
+                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
+                    }
                 }
             }
         },
