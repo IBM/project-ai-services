@@ -16,6 +16,8 @@ import (
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
+	connectorsync "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/connector_sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
@@ -69,6 +71,53 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
+// newConnectorSyncJob creates and starts a ConnectorSyncJob wired with all registered
+// provider testers. Extracted to keep buildAPIServerOptions within the line-length limit.
+func newConnectorSyncJob(ctx context.Context, connectorRepo repository.ConnectorRepository) *connectorsync.ConnectorSyncJob {
+	// Initialize connector sync job for periodic datasource connectivity heartbeats.
+	job := connectorsync.NewConnectorSyncJob(
+		connectorRepo,
+		map[string]datasourceservice.ConnectionTester{
+			constants.DatasourceProviderObjectStorage: datasourceservice.NewObjectStorageTester(),
+			constants.DatasourceProviderFileSystem:    datasourceservice.NewFileSystemTester(),
+		},
+		os.Getenv(constants.DBEncryptionKeyEnv),
+		connectorsync.DefaultConnectorSyncInterval,
+	)
+	job.Start(ctx)
+
+	return job
+}
+
+// startBackgroundServices starts the background sync services and returns a cleanup
+// function that stops them. Extracted to keep buildAPIServerOptions within the line-length limit.
+func startBackgroundServices(
+	ctx context.Context,
+	appRepo repository.ApplicationRepository,
+	svcRepo repository.ServiceRepository,
+	compRepo repository.ComponentRepository,
+	svcDepRepo repository.ServiceDependencyRepository,
+	connectorRepo repository.ConnectorRepository,
+	catalogProvider *catalog.CatalogProvider,
+	workerReg *workerregistry.Registry,
+) (func(context.Context), error) {
+	// Initialize sync service for background DB-Pod synchronization.
+	// workerReg is passed so the sync service can use a RemoteRuntime for apps
+	// deployed on remote workers.
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider, workerReg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize sync service: %w", err)
+	}
+	syncService.Start(ctx)
+
+	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo)
+
+	return func(ctx context.Context) {
+		syncService.Stop(ctx)
+		connectorSyncJob.Stop(ctx)
+	}, nil
+}
+
 // buildAPIServerOptions wires all service dependencies and returns the options
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
@@ -99,14 +148,10 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	workerRepo := repository.NewWorkerRepository(pool)
 	workerReg := workerregistry.New(workerRepo)
 
-	// Initialize sync service for background DB-Pod synchronization.
-	// workerReg is passed so the sync service can use a RemoteRuntime for apps
-	// deployed on remote workers.
-	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider, workerReg)
+	stopBackgroundServices, err := startBackgroundServices(ctx, appRepo, svcRepo, compRepo, svcDepRepo, connectorRepo, catalogProvider, workerReg)
 	if err != nil {
-		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize sync service: %w", err)
+		return apiserver.APIServerOptions{}, nil, err
 	}
-	syncService.Start(ctx)
 
 	var authSvc auth.Service
 	if manageiqURL != "" {
@@ -132,7 +177,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	}
 	cleanup := func() {
 		blacklist.Stop()
-		syncService.Stop(ctx)
+		stopBackgroundServices(ctx)
 	}
 
 	return opts, cleanup, nil
