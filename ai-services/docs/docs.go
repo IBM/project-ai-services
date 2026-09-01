@@ -723,7 +723,10 @@ const docTemplate = `{
                     "200": {
                         "description": "List of container image references",
                         "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {
@@ -773,14 +776,11 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "JSON object with a 'models' key containing the list of model names",
+                        "description": "List of unique model names",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
+                            "type": "array",
+                            "items": {
+                                "type": "string"
                             }
                         }
                     },
@@ -2099,7 +2099,10 @@ const docTemplate = `{
                     "200": {
                         "description": "List of container image references",
                         "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {
@@ -2149,14 +2152,11 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "JSON object with a 'models' key containing the list of model names",
+                        "description": "List of unique model names",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
+                            "type": "array",
+                            "items": {
+                                "type": "string"
                             }
                         }
                     },
@@ -3551,17 +3551,6 @@ const docTemplate = `{
             "properties": {
                 "error": {
                     "type": "string"
-                }
-            }
-        },
-        "internal_pkg_catalog_apiserver_handlers.ImagesResponse": {
-            "type": "object",
-            "properties": {
-                "images": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },

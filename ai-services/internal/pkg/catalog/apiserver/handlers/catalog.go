@@ -335,8 +335,8 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
-//	@Success		200	{array}		string	"List of container image references"
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
+//	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Service not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -371,8 +371,8 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{array}		string	"List of container image references"
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Architecture not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -404,11 +404,11 @@ func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Service ID (e.g., 'chat', 'digitize')"
-//	@Success		200	{array}		string	"List of unique model names"
-//	@Failure		401	{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse		"Service not found"
-//	@Failure		500	{object}	ErrorResponse		"Internal Server Error"
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services/{id}/models [get]
 func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
 	id := c.Param("id")
@@ -438,11 +438,11 @@ func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{array}		string	"List of unique model names"
-//	@Failure		401	{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse		"Architecture not found"
-//	@Failure		500	{object}	ErrorResponse		"Internal Server Error"
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures/{id}/models [get]
 func (h *CatalogHandler) GetArchitectureModels(c *gin.Context) {
 	id := c.Param("id")

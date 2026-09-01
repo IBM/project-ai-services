@@ -818,13 +818,6 @@ definitions:
       error:
         type: string
     type: object
-  internal_pkg_catalog_apiserver_handlers.ImagesResponse:
-    properties:
-      images:
-        items:
-          type: string
-        type: array
-    type: object
   internal_pkg_catalog_apiserver_handlers.ResourcesResponse:
     properties:
       accelerators:
@@ -1353,7 +1346,9 @@ paths:
         "200":
           description: List of container image references
           schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse'
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -1385,14 +1380,11 @@ paths:
       - application/json
       responses:
         "200":
-          description: JSON object with a 'models' key containing the list of model
-            names
+          description: List of unique model names
           schema:
-            additionalProperties:
-              items:
-                type: string
-              type: array
-            type: object
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -2277,7 +2269,9 @@ paths:
         "200":
           description: List of container image references
           schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse'
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -2309,14 +2303,11 @@ paths:
       - application/json
       responses:
         "200":
-          description: JSON object with a 'models' key containing the list of model
-            names
+          description: List of unique model names
           schema:
-            additionalProperties:
-              items:
-                type: string
-              type: array
-            type: object
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
