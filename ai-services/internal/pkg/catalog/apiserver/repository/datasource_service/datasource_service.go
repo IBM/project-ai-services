@@ -748,31 +748,10 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
 	}
 
-	// Step 3: confirm the datasource is linked to a service in this application and
-	// capture the endpoint URL in the same pass. A datasource can appear at most once
-	// per application, so we break as soon as the matching row is found.
-	allRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, datasourceID, dbmodels.DependencyTypeConnector)
+	// Step 3: confirm the datasource is linked to this application and capture its endpoint URL.
+	baseURL, err := s.resolveLinkedEndpoint(ctx, applicationID, datasourceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query linked services for datasource %s: %w", datasourceID, err)
-	}
-
-	var baseURL string
-	linked := false
-
-	for _, row := range allRows {
-		if row.ApplicationID == applicationID {
-			baseURL = extractAPIEndpointURL(row.EndpointsJSON)
-			linked = true
-
-			break
-		}
-	}
-
-	if !linked {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: "datasource not connected to this application",
-		}
+		return nil, err
 	}
 
 	// Step 4: resolve provider display name; fall back to stored provider ID on catalog miss.
@@ -793,6 +772,27 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 		Provider:       apimodels.DatasourceProviderInfo{ID: connector.Provider, Name: providerName},
 		ServiceDetails: serviceDetails,
 	}, nil
+}
+
+// resolveLinkedEndpoint confirms that datasourceID is linked to a service belonging to
+// applicationID and returns the API endpoint URL for that service. A datasource can
+// appear at most once per application, so the loop breaks on the first match.
+func (s *DatasourceService) resolveLinkedEndpoint(ctx context.Context, applicationID, datasourceID uuid.UUID) (string, error) {
+	allRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, datasourceID, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return "", fmt.Errorf("failed to query linked services for datasource %s: %w", datasourceID, err)
+	}
+
+	for _, row := range allRows {
+		if row.ApplicationID == applicationID {
+			return extractAPIEndpointURL(row.EndpointsJSON), nil
+		}
+	}
+
+	return "", &ValidationError{
+		Code:    http.StatusNotFound,
+		Message: "datasource not connected to this application",
+	}
 }
 
 // persistAndPropagate encrypts merged metadata, writes it to the DB, propagates the
