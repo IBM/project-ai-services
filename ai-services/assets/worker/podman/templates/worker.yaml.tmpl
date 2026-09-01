@@ -22,8 +22,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          export TOKEN=$(cat /etc/secret/worker-token-secret/token)
-          exec /usr/bin/ai-services worker grpc-connect {{ .Values.worker.gatewayAddr }} --token=${TOKEN} --runtime={{ .Values.worker.runtime }} {{ .Values.worker.optionalFlags }}
+          exec /usr/bin/ai-services worker grpc-connect {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }} {{ .Values.worker.optionalFlags }}
       env:
         - name: AI_SERVICES_LOG_LEVEL
           value: "info"
@@ -36,9 +35,6 @@ spec:
           mountPath: {{ .Values.worker.podman.uri }}
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
-          readOnly: true
-        - name: worker-token-secret
-          mountPath: /etc/secret/worker-token-secret
           readOnly: true
       resources:
         requests:
@@ -57,6 +53,3 @@ spec:
       hostPath:
         path: /sys/kernel/iommu_groups
         type: Directory
-    - name: worker-token-secret
-      secret:
-        secretName: worker-token-secret

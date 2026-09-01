@@ -13,9 +13,6 @@ const (
 	// WorkerPodLabel is the pod label set to identify worker pod deployed or not.
 	WorkerPodLabel = "ai-services.io/component=worker"
 
-	// WorkerTokenSecretName is the name of the secret that stores the worker's authentication token.
-	WorkerTokenSecretName = "worker-token-secret"
-
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
 

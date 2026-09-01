@@ -76,7 +76,9 @@ type Options struct {
 func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr string, token string) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
 
-	deployed, existingResource, err := CheckStatus(ctx, rt)
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
+
+	deployed, existingResource, err := CheckStatus(ctx, rt, tp)
 	if err != nil {
 		return err
 	}
@@ -91,7 +93,7 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr st
 		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, opts, existingResource, gatewayAddr, token); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource, gatewayAddr, token); err != nil {
 		return err
 	}
 
@@ -103,7 +105,7 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr st
 // CheckStatus checks whether the worker node is already deployed by listing
 // pods with the worker proxy and worker pod labels.
 // Returns (true, existingResources, nil) when all worker pods are already running.
-func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error) {
+func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template) (bool, []string, error) {
 	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
 
 	var existingResources []string
@@ -120,18 +122,12 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error
 
 	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
 
-	// Verify if secret is present
-	exists, err := rt.SecretExists(ctx, workerconstants.WorkerTokenSecretName)
+	tmpls, err := tp.LoadAllTemplates(workerApp)
 	if err != nil {
-		return false, nil, fmt.Errorf("worker setup: secret exists: %w", err)
-	}
-	if exists {
-		existingResources = append(existingResources, workerconstants.WorkerTokenSecretName)
+		return false, nil, fmt.Errorf("worker setup: load templates: %w", err)
 	}
 
-	const workerResourceCount = 3
-
-	return len(existingResources) == workerResourceCount, existingResources, nil
+	return len(existingResources) == len(tmpls), existingResources, nil
 }
 
 // ─── internal ────────────────────────────────────────────────────────────────
@@ -162,9 +158,7 @@ func writeCaddyfile(baseDir string) error {
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, opts Options, existingResources []string, gatewayAddr string, token string) error {
-	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
-
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts Options, existingResources []string, gatewayAddr string, token string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
