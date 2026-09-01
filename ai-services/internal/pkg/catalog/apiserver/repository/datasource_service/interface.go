@@ -42,11 +42,12 @@ type ConnectionTester interface {
 	TestConnection(ctx context.Context, params map[string]any) error
 }
 
-// sensitiveFieldsFromSchema inspects the top-level properties of a JSON Schema map and
+// SensitiveFieldsFromSchema inspects the top-level properties of a JSON Schema map and
 // returns the set of property names whose "format" is "password". This allows the set of
 // fields that require encryption to be driven by the connector's schema.json rather than
 // being hardcoded in each provider implementation.
-func sensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
+// Exported so the ConnectorSyncJob can reuse it without duplicating the logic.
+func SensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
 	return schemaFieldsBySection(schema, "format", "password")
 }
 

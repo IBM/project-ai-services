@@ -73,10 +73,11 @@ func getOrGenerateSecretKey() (string, error) {
 
 // newConnectorSyncJob creates and starts a ConnectorSyncJob wired with all registered
 // provider testers. Extracted to keep buildAPIServerOptions within the line-length limit.
-func newConnectorSyncJob(ctx context.Context, connectorRepo repository.ConnectorRepository) *connectorsync.ConnectorSyncJob {
+func newConnectorSyncJob(ctx context.Context, connectorRepo repository.ConnectorRepository, catalogProvider *catalog.CatalogProvider) *connectorsync.ConnectorSyncJob {
 	// Initialize connector sync job for periodic datasource connectivity heartbeats.
 	job := connectorsync.NewConnectorSyncJob(
 		connectorRepo,
+		catalogProvider,
 		map[string]datasourceservice.ConnectionTester{
 			constants.DatasourceProviderObjectStorage: datasourceservice.NewObjectStorageTester(),
 			constants.DatasourceProviderFileSystem:    datasourceservice.NewFileSystemTester(),
@@ -110,7 +111,7 @@ func startBackgroundServices(
 	}
 	syncService.Start(ctx)
 
-	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo)
+	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo, catalogProvider)
 
 	return func(ctx context.Context) {
 		syncService.Stop(ctx)

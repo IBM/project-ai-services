@@ -123,7 +123,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := encryptSensitiveFields(req.Params, SensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -187,7 +187,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	sensitiveFields := sensitiveFieldsFromSchema(schema)
+	sensitiveFields := SensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked services and enrich each with live Digitize sync state.
 	services, err := s.buildConnectedServices(ctx, id)
@@ -453,7 +453,7 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 	}
 
 	updatable := updatableFieldsFromSchema(schema)
-	sensitive := sensitiveFieldsFromSchema(schema)
+	sensitive := SensitiveFieldsFromSchema(schema)
 
 	// Phase 3: look up the ConnectionTester for this provider.
 	tester, ok := s.testers[existing.Provider]

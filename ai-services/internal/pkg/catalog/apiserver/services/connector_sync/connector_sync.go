@@ -14,12 +14,14 @@ import (
 	"sync"
 	"time"
 
+	catalogpkg "github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -33,24 +35,29 @@ const (
 // It is connector-type-agnostic: it delegates connection testing to the registered
 // ConnectionTester for each connector's provider.
 type ConnectorSyncJob struct {
-	connectorRepo dbrepo.ConnectorRepository
-	testers       map[string]datasourceservice.ConnectionTester
-	encryptionKey string
-	syncInterval  time.Duration
-	stopChan      chan struct{}
-	syncMutex     sync.Mutex // prevents overlapping sync cycles
-	isSyncing     bool       // true while a sync cycle is in progress
+	connectorRepo   dbrepo.ConnectorRepository
+	catalogProvider *catalogpkg.CatalogProvider
+	testers         map[string]datasourceservice.ConnectionTester
+	encryptionKey   string
+	syncInterval    time.Duration
+	stopChan        chan struct{}
+	syncMutex       sync.Mutex // prevents overlapping sync cycles
+	isSyncing       bool       // true while a sync cycle is in progress
 }
 
 // NewConnectorSyncJob creates a new ConnectorSyncJob.
 //
 // testers is a map from provider ID to its ConnectionTester implementation
 // (e.g. "object_storage" → objectStorageTester, "file_system" → fileSystemTester).
+// catalogProvider is used to load each provider's schema.json at sync time so that
+// sensitive fields are derived via datasourceservice.SensitiveFieldsFromSchema — the
+// same source of truth used by DatasourceService — rather than being hardcoded.
 // encryptionKey is the AES-256 key used to decrypt sensitive credential fields before
 // passing them to TestConnection; it must be the same key used at create/update time.
 // syncInterval controls how often the job runs; pass 0 to use DefaultConnectorSyncInterval.
 func NewConnectorSyncJob(
 	connectorRepo dbrepo.ConnectorRepository,
+	catalogProvider *catalogpkg.CatalogProvider,
 	testers map[string]datasourceservice.ConnectionTester,
 	encryptionKey string,
 	syncInterval time.Duration,
@@ -60,11 +67,12 @@ func NewConnectorSyncJob(
 	}
 
 	return &ConnectorSyncJob{
-		connectorRepo: connectorRepo,
-		testers:       testers,
-		encryptionKey: encryptionKey,
-		syncInterval:  syncInterval,
-		stopChan:      make(chan struct{}),
+		connectorRepo:   connectorRepo,
+		catalogProvider: catalogProvider,
+		testers:         testers,
+		encryptionKey:   encryptionKey,
+		syncInterval:    syncInterval,
+		stopChan:        make(chan struct{}),
 	}
 }
 
@@ -143,9 +151,10 @@ func (j *ConnectorSyncJob) performSync(ctx context.Context) {
 
 // syncConnector runs TestConnection for a single connector and writes the result
 // back to the database via UpdateStatus.
-// Sensitive credential fields stored encrypted in c.Metadata are decrypted in-memory
-// before being passed to TestConnection; the decrypted values are never logged or
-// forwarded to any API response.
+//
+// Sensitive credential fields are identified via datasourceservice.SensitiveFieldsFromSchema
+// applied to the provider's schema.json — the same source of truth used by DatasourceService
+// at create/update time — then decrypted in-memory. Decrypted values are never logged.
 func (j *ConnectorSyncJob) syncConnector(ctx context.Context, c dbmodels.Connector) {
 	tester, ok := j.testers[c.Provider]
 	if !ok {
@@ -162,13 +171,26 @@ func (j *ConnectorSyncJob) syncConnector(ctx context.Context, c dbmodels.Connect
 		return
 	}
 
-	// Derive sensitive fields from the provider's schema so we know which fields to decrypt.
-	// The encryptionKey is used to decrypt in-memory; values are never returned to callers.
-	decrypted, err := catalogutils.DecryptSensitiveFields(
-		full.Metadata,
-		sensitiveFieldsForProvider(c.Provider),
-		j.encryptionKey,
-	)
+	// Load the provider schema and derive sensitive fields using the shared helper so
+	// the set of encrypted fields is always consistent with create/update.
+	rawSchema, err := j.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, c.Provider)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Connector sync: failed to load schema for provider %q (connector %s): %v", c.Provider, c.ID, err)
+
+		return
+	}
+
+	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "Connector sync: failed to parse schema for provider %q (connector %s): %v", c.Provider, c.ID, err)
+
+		return
+	}
+
+	sensitiveFields := datasourceservice.SensitiveFieldsFromSchema(schema)
+
+	// Decrypt sensitive fields in-memory; values are never forwarded to any caller.
+	decrypted, err := catalogutils.DecryptSensitiveFields(full.Metadata, sensitiveFields, j.encryptionKey)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Connector sync: failed to decrypt credentials for connector %s: %v", c.ID, err)
 
@@ -196,20 +218,4 @@ func (j *ConnectorSyncJob) syncConnector(ctx context.Context, c dbmodels.Connect
 	}
 
 	logger.InfofCtx(ctx, "Connector sync: connector %s (%s/%s) → %s", c.ID, c.Type, c.Provider, newStatus)
-}
-
-// sensitiveFieldsForProvider returns the set of metadata field names that contain
-// encrypted values for the given provider. This mirrors the schema-driven approach
-// used by the datasource service: only the fields marked format:password in each
-// provider's schema.json are sensitive. The mapping is kept here as a compile-time
-// constant so the sync job does not need to load asset files at startup.
-func sensitiveFieldsForProvider(provider string) map[string]bool {
-	switch provider {
-	case catalogconstants.DatasourceProviderObjectStorage:
-		return map[string]bool{"secret_access_key": true}
-	case catalogconstants.DatasourceProviderFileSystem:
-		return map[string]bool{"private_key": true}
-	default:
-		return map[string]bool{}
-	}
 }
