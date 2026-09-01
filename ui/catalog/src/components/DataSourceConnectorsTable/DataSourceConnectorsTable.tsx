@@ -151,8 +151,6 @@ const DataSourceConnectorsTable = ({
 
   // Background prefetch — fires once after the connector list loads successfully.
   useEffect(() => {
-    // Wait until the table has data (list loaded)
-    if (state.rowsData.length === 0) return;
     // Skip if cache is still fresh
     if (!isConnectorTypesStale()) return;
 
@@ -174,9 +172,8 @@ const DataSourceConnectorsTable = ({
         });
       })
       .catch(() => setConnectorTypesError("Failed to load connector types"));
-    // Only re-run when rowsData goes from empty → populated (first successful load)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.rowsData.length]);
+  }, []);
 
   // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
   useAutoRefresh({
