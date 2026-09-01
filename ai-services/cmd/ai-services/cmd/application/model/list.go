@@ -69,7 +69,7 @@ func list(cmd *cobra.Command) error {
 // listCatalogModels lists models for services or architectures from the catalog.
 // watsonx models are excluded as they are not locally deployable.
 func listCatalogModels(ctx context.Context, templateID string) error {
-	models, err := getCatalogModels(ctx, templateID, "watsonx")
+	models, err := getCatalogModels(ctx, templateID)
 	if err != nil {
 		return err
 	}

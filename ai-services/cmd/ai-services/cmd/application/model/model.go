@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -55,8 +56,9 @@ func models(template string) ([]string, error) {
 // getCatalogModels resolves models for a service or architecture template.
 // It first tries the running catalog API; if the user is not logged in it falls
 // back to the embedded local CatalogProvider.
+// Architecture is tried first, then service — matching the image command behaviour.
 // excludeProviders is forwarded to the API as ?exclude_providers= and to the
-// local provider's exclude list (e.g. "watsonx" during download).
+// local provider's exclude list (e.g. "watsonx" during list/download).
 func getCatalogModels(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
 	appClient, err := client.NewApplicationClient(ctx)
 	if err != nil {
@@ -69,24 +71,55 @@ func getCatalogModels(ctx context.Context, templateID string, excludeProviders .
 		return getCatalogModelsLocal(ctx, templateID, excludeProviders...)
 	}
 
-	// Try service endpoint first, then architecture.
-	if apiModels, err := appClient.GetServiceModels(ctx, templateID, excludeProviders...); err == nil {
+	apiModels, err := appClient.GetArchitectureModels(ctx, templateID, excludeProviders...)
+	if err == nil {
 		return apiModels, nil
 	}
 
-	if apiModels, err := appClient.GetArchitectureModels(ctx, templateID, excludeProviders...); err == nil {
-		return apiModels, nil
+	// Only retry as service when the server returned 404.
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
+	apiModels, err = appClient.GetServiceModels(ctx, templateID, excludeProviders...)
+	if err != nil {
+		// Both lookups failed — the ID is not in the catalog.
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
+		}
+
+		return nil, err
+	}
+
+	return apiModels, nil
 }
 
 // getCatalogModelsLocal uses the embedded CatalogProvider directly (no API call).
+// Architecture is tried first, then service — matching the image command behaviour.
 func getCatalogModelsLocal(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
 	provider, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	return provider.GetCatalogModels(ctx, templateID, excludeProviders...)
+	modelList, err := provider.GetArchitectureModels(ctx, templateID, excludeProviders...)
+	if err == nil {
+		return modelList, nil
+	}
+
+	if !errors.Is(err, catalog.ErrCatalogItemNotFound) {
+		return nil, err
+	}
+
+	modelList, err = provider.GetServiceModels(ctx, templateID, excludeProviders...)
+	if err != nil {
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
+		}
+
+		return nil, err
+	}
+
+	return modelList, nil
 }
