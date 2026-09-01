@@ -58,35 +58,6 @@ async def _run_digitize(
         cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
 
-async def _run_ingest(
-    job_id: str,
-    doc_id_dict: dict,
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
-) -> None:
-    """
-    Run the ingestion pipeline for this job.  Polls conversion_tasks rows
-    reactively and drives process → chunk → index for each completed file.
-
-    Runs the blocking pipeline call in a thread so the event loop stays free.
-    """
-    job_staging_path = settings.digitize.staging_dir / job_id
-    try:
-        logger.info(f"🚀 Ingestion started for job: {job_id}")
-        from digitize.pipeline.ingest import ingest
-        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
-        logger.info(f"Ingestion for job {job_id} completed successfully")
-    except Exception as exc:
-        logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
-        status_mgr.update_job_progress(
-            "",
-            models.DocStatus.FAILED,
-            models.JobStatus.FAILED,
-            error=f"Error occurred while processing ingestion pipeline: {exc}",
-        )
-    finally:
-        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
-
 
 # ------------------------------------------------------------------ #
 # File validation helper                                              #
@@ -327,7 +298,7 @@ async def create_job(
         if operation == models.OperationType.DIGITIZATION:
             asyncio.create_task(_run_digitize(job_id, doc_id_dict))
         else:
-            asyncio.create_task(_run_ingest(job_id, doc_id_dict, file_checksum_dict))
+            asyncio.create_task(dg_util.launch_ingest_pipeline(job_id, doc_id_dict, file_checksum_dict))
 
         logger.info(
             f"Job {job_id} accepted — {len(filenames)} file(s), "

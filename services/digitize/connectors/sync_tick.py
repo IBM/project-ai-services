@@ -64,6 +64,7 @@ from digitize.utils.jobs import (
     generate_uuid,
     get_job_document_stats,
     initialize_job_state,
+    launch_ingest_pipeline,
 )
 
 logger = get_logger("sync_tick")
@@ -423,6 +424,18 @@ async def _process_new_files(
                 quota=0,          # unused for connector tasks
                 queued_for_op=0,  # unused for connector tasks
                 connector_id=connector_id,
+            )
+
+            # Launch the ingestion pipeline as a background task so it drives
+            # process → chunk → index after the dispatcher completes each file.
+            # Pass batch_dir as staging_dir so cleanup targets the correct subtree.
+            asyncio.create_task(
+                launch_ingest_pipeline(
+                    job_id=job_id,
+                    doc_id_dict=doc_id_dict,
+                    file_checksum_dict=filename_to_checksum,
+                    staging_dir=batch_dir,
+                )
             )
 
             await _wait_for_job(job_id, connector_id, sync_seq)
