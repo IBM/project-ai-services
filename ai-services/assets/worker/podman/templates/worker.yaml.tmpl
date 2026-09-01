@@ -7,6 +7,8 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "worker"
+  annotations:
+    run.oci.keep_original_groups: "1"
 spec:
   restartPolicy: always
   containers:
@@ -30,6 +32,8 @@ spec:
           value: "service"
         - name: CONTAINER_HOST
           value: "unix://{{ .Values.worker.podman.uri }}"
+        - name: REGISTRY_AUTH_FILE
+          value: "/run/containers/auth.json"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -21,6 +22,7 @@ import (
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 
 	k8syaml "sigs.k8s.io/yaml"
@@ -168,20 +170,32 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	if err != nil {
 		return fmt.Errorf("worker setup: load templates: %w", err)
 	}
+
+	// Resolve the actual podman socket path from the host environment so the
+	// worker container gets the correct CONTAINER_HOST and volume mount.
+	podmanURI, err := utils.ResolvePodmanURI()
+	if err != nil {
+		return fmt.Errorf("worker setup: resolve podman URI: %w", err)
+	}
+	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
+
 	values, err := tp.LoadValues(workerApp, nil, map[string]string{
 		"caddy.httpsPort":      strconv.Itoa(opts.HTTPSPort),
 		"worker.token":         token,
 		"worker.gatewayAddr":   gatewayAddr,
 		"worker.optionalFlags": getOptionalFlags(opts),
+		"worker.podman.uri":    podmanSocketPath,
 	})
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
 	}
 
 	params := map[string]any{
-		"BaseDir": opts.BaseDir,
-		"AppName": WorkerAppName,
-		"Values":  values,
+		"BaseDir":         opts.BaseDir,
+		"AppName":         WorkerAppName,
+		"AppTemplateName": workerApp,
+		"Version":         appMetadata.Version,
+		"Values":          values,
 	}
 
 	for _, layer := range appMetadata.PodTemplateExecutions {
@@ -233,6 +247,9 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 // the container.
 func getOptionalFlags(opts Options) string {
 	var flags string
+	if opts.BaseDir != "" {
+		flags += fmt.Sprintf("--basedir '%s' ", opts.BaseDir)
+	}
 	if opts.SSLCertPath != "" && opts.SSLKeyPath != "" {
 		flags += fmt.Sprintf("--ssl-cert '%s' --ssl-key '%s' ", opts.SSLCertPath, opts.SSLKeyPath)
 	}
