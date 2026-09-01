@@ -567,7 +567,7 @@ Returns all registered providers for the given connector type, discovered from t
 
 **`GET /api/v1/datasources/:id/services`**
 
-Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each service's Digitize pod.
+Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each downstream service pod.
 
 **Response `200 OK`:**
 
@@ -576,20 +576,22 @@ Returns the list of services currently connected to a datasource, enriched with 
   "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
   "services": [
     {
-      "service_id": "svc-uuid-1",
-      "service_name": "Digitize",
-      "service_type": "digitize",
       "application_id": "app-uuid-1",
       "application_name": "My RAG App",
+      "service": {
+        "id": "rag",
+        "name": "Digital Assistants"
+      },
       "sync_status": "up to date",
       "last_sync_at": "2026-06-01T11:00:00Z"
     },
     {
-      "service_id": "svc-uuid-2",
-      "service_name": "Digitize",
-      "service_type": "digitize",
       "application_id": "app-uuid-2",
       "application_name": "My Summarise App",
+      "service": {
+        "id": "rag",
+        "name": "Digital Assistants"
+      },
       "sync_status": "out of sync",
       "last_sync_at": "2026-06-01T09:00:00Z"
     }
@@ -597,16 +599,16 @@ Returns the list of services currently connected to a datasource, enriched with 
 }
 ```
 
-| Field                         | Source                                       | Description                                                                                                  |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `datasource_id`               | path param                                   | The datasource component UUID                                                                                |
-| `services[].service_id`       | catalog (`services.id`)                      | ID of the connected service                                                                                  |
-| `services[].service_name`     | catalog (`services.name`)                    | Display name of the service                                                                                  |
-| `services[].service_type`     | catalog (`services.type`)                    | Catalog type of the service, e.g. `"digitize"`                                                               |
-| `services[].application_id`   | catalog (`applications.id`)                  | ID of the application the service belongs to                                                                 |
-| `services[].application_name` | catalog (`applications.name`)                | Display name of the application                                                                              |
-| `services[].sync_status`      | Digitize (`GET /v1/connectors/:connectorid`) | Current sync state for this service: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
-| `services[].last_sync_at`     | Digitize (`GET /v1/connectors/:connectorid`) | Timestamp of the last completed sync for this service, or `null`                                             |
+| Field                         | Source                                            | Description                                                                                                   |
+| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `datasource_id`               | path param                                        | The datasource component UUID                                                                                 |
+| `services[].application_id`   | catalog (`applications.id`)                       | ID of the application the service belongs to                                                                  |
+| `services[].application_name` | catalog (`applications.name`)                     | Display name of the application                                                                               |
+| `services[].service.id`       | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
+| `services[].service.name`     | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to catalog ID when entry cannot be loaded         |
+| `services[].sync_status`      | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
+| `services[].last_sync_at`     | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
+| `services[].err_msg`          | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
 
 **Response `404 Not Found`:**
 
@@ -984,12 +986,12 @@ When `DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id` is 
 
 ### 7.5 Connected Services Fetch Flow
 
-When `GET /api/v1/connectors/datasources/:id/services` is called:
+When `GET /api/v1/datasources/:id/services` is called:
 
 1. Return `404` if no record exists in `connectors` for the given `id`.
-2. Query `service_dependencies` where `dependency_id = id` and `dependency_type = 'connector'`, joined with `services` and `applications`, collecting `application_id`, `application_name`, `catalog_id`, and the `endpoints` JSONB column.
-3. For each linked service, call `GET /v1/connectors/<dependency_id>` on its downstream Digitize pod, using `dependency_id` as the `connector_id`. Extract `sync_status` and `last_sync_at` from the response.
-4. If the Digitize call fails for a service, set `sync_status: null` and `last_sync_at: null` for that entry and continue — do not fail the entire request.
+2. Query `service_dependencies` where `dependency_id = id` and `dependency_type = 'connector'`, joined with `services` and `applications`, collecting `application_id`, `application_name`, `catalog_id`, `deployment_type`, and the `endpoints` JSONB column.
+3. For each linked service, extract the `"api"`-typed endpoint URL from `endpoints`, then call `GET /v1/connectors/<id>` on the downstream service pod. Extract `sync_status` and `last_sync_at` from the response. Resolve the application display name from catalog metadata using `catalog_id` + `deployment_type`.
+4. If the downstream service call fails for a service entry, set `sync_status` to `"unknown"` and `last_sync_at` to `null`, and populate `err_msg` with the reason — do not fail the entire request.
 5. Return the assembled list.
 
 ### 7.6 Application-Scoped Status Fetch Flow
