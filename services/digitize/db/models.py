@@ -78,7 +78,7 @@ class Job(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            "status IN ('accepted', 'in_progress', 'completed', 'failed')",
+            "status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')",
             name="chk_job_status"
         ),
         CheckConstraint(
@@ -140,7 +140,7 @@ class Document(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('accepted', 'in_progress', 'digitized', 'processed',"
-            " 'chunked', 'completed', 'failed', 'already_exists')",
+            " 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')",
             name="chk_doc_status"
         ),
         CheckConstraint(
