@@ -7,9 +7,10 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "worker"
-    ai-services.io/volume: "podman-auth-secret"
+    ai-services.io/volume: "podman-auth-secret,worker-tls"
   annotations:
     run.oci.keep_original_groups: "1"
+    
 spec:
   restartPolicy: always
   containers:
@@ -53,6 +54,8 @@ spec:
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
           readOnly: true
+        - name: worker-tls
+          mountPath: /var/lib/ai-services/worker-tls
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
       resources:
@@ -75,6 +78,9 @@ spec:
       hostPath:
         path: /sys/kernel/iommu_groups
         type: Directory
+    - name: worker-tls
+      persistentVolumeClaim:
+        claimName: worker-tls
     - name: ai-services-data
       hostPath:
         path: {{ .BaseDir }}

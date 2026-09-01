@@ -53,8 +53,9 @@ type WorkerCaddyConfig struct {
 }
 
 // performCleanup executes all cleanup operations after confirmation:
-// retrieves the Caddy pod config, deletes the pods, and removes the worker
-// data directory.
+// retrieves the Caddy pod config, deletes the pods, removes the worker data
+// directory, and removes the mTLS credentials so the next `worker join` can
+// re-register cleanly with a new token.
 func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error {
 	logger.InfolnCtx(ctx, "Proceeding with deletion...")
 
