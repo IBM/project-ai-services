@@ -64,8 +64,6 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     Returns:
         List of text chunks
     """
-    logger.debug(f"Using language for chunking: {language}")
-
     sentences = SentenceSplitter(language=language).split(text)
     chunks = []
     current_chunk = []
