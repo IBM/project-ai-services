@@ -2,13 +2,17 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogconfig "github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -48,28 +52,41 @@ func models(template string) ([]string, error) {
 	return helpers.ListModels(template, "")
 }
 
-// getCatalogModels calls the running catalog API to retrieve models for a
-// service or architecture template. It tries the service endpoint first, then
-// the architecture endpoint.
-// excludeProviders is forwarded to the server as the ?exclude_providers= query
-// param (e.g. pass "watsonx" to omit watsonx models during download).
+// getCatalogModels resolves models for a service or architecture template.
+// It first tries the running catalog API; if the user is not logged in it falls
+// back to the embedded local CatalogProvider.
+// excludeProviders is forwarded to the API as ?exclude_providers= and to the
+// local provider's exclude list (e.g. "watsonx" during download).
 func getCatalogModels(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
 	appClient, err := client.NewApplicationClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to catalog API: %w", err)
+		if !errors.Is(err, catalogconfig.ErrNotLoggedIn) {
+			return nil, fmt.Errorf("failed to connect to catalog API: %w", err)
+		}
+		// Not logged in — fall back to the local embedded provider.
+		logger.DebugfCtx(ctx, "catalog API not available, using local provider for template '%s'\n", templateID)
+
+		return getCatalogModelsLocal(ctx, templateID, excludeProviders...)
 	}
 
-	// Try service endpoint first.
-	apiModels, err := appClient.GetServiceModels(ctx, templateID, excludeProviders...)
-	if err == nil {
+	// Try service endpoint first, then architecture.
+	if apiModels, err := appClient.GetServiceModels(ctx, templateID, excludeProviders...); err == nil {
 		return apiModels, nil
 	}
 
-	// Fall through to architecture endpoint.
-	apiModels, err = appClient.GetArchitectureModels(ctx, templateID, excludeProviders...)
-	if err == nil {
+	if apiModels, err := appClient.GetArchitectureModels(ctx, templateID, excludeProviders...); err == nil {
 		return apiModels, nil
 	}
 
 	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
+}
+
+// getCatalogModelsLocal uses the embedded CatalogProvider directly (no API call).
+func getCatalogModelsLocal(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
+	provider, err := catalog.NewCatalogProvider(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	return provider.GetCatalogModels(ctx, templateID, excludeProviders...)
 }
