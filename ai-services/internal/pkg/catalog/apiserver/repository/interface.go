@@ -35,6 +35,11 @@ type DatasourceServiceInterface interface {
 	// A 200 is returned even when propagation to some Digitize services fails; in that case,
 	// the response body contains a non-empty PropagationErrors list.
 	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
+
+	// GetDatasourceServices returns the list of services currently connected to a datasource,
+	// each enriched with live sync state from its Digitize pod.
+	// Returns a *ValidationError with code 404 when the connector does not exist.
+	GetDatasourceServices(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceServicesResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

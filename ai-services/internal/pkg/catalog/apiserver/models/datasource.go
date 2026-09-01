@@ -202,4 +202,16 @@ type ConnectDatasourcesResponse struct {
 	Errors []DatasourceConnectionError `json:"errors"`
 }
 
+// DatasourceServicesResponse is the response body for GET /api/v1/datasources/:id/services.
+// It returns the list of services currently connected to the datasource, enriched with live
+// sync state from each service's Digitize pod. The services array reuses ConnectedServiceItem
+// verbatim — identical shape to the services field in GetDatasourceResponse.
+type DatasourceServicesResponse struct {
+	// DatasourceID is the UUID of the queried datasource connector.
+	DatasourceID string `json:"datasource_id"`
+	// Services lists every service currently connected to this datasource,
+	// enriched with live sync state from each service's Digitize pod.
+	Services []ConnectedServiceItem `json:"services"`
+}
+
 // Made with Bob

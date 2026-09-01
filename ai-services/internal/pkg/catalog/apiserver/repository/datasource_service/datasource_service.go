@@ -224,6 +224,38 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 	}, nil
 }
 
+// GetDatasourceServices returns the list of services connected to the given datasource,
+// enriched with live sync state from each service's Digitize pod.
+//
+// Flow:
+//  1. Verify the datasource exists — returns 404 when it does not.
+//  2. Delegate entirely to buildConnectedServices, which issues the single DB join query
+//     and fetches live sync state per service.
+func (s *DatasourceService) GetDatasourceServices(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceServicesResponse, error) {
+	// Step 1: existence check — fetch without credentials (no metadata needed here).
+	if _, err := s.connectorRepo.GetByID(ctx, id, false); err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return nil, &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: "datasource not found",
+			}
+		}
+
+		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
+	}
+
+	// Step 2: build the enriched services list, reusing the shared helper.
+	services, err := s.buildConnectedServices(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build connected services for datasource %s: %w", id, err)
+	}
+
+	return &apimodels.DatasourceServicesResponse{
+		DatasourceID: id.String(),
+		Services:     services,
+	}, nil
+}
+
 // DeleteDatasource removes a datasource connector by ID.
 // Returns 404 if not found, 409 if the connector is still linked to one or more services.
 //
