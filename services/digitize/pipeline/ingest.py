@@ -84,25 +84,36 @@ def create_indexing_handler(
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                 return False
 
-            # Update status to COMPLETED with indexing timing
+            # Update status to COMPLETED (or PARTIALLY_INGESTED if table failures
+            # were recorded earlier in the pipeline for this document).
             if status_mgr and doc_id_dict:
-                logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
+                from digitize.utils.db import get_document
+                try:
+                    current_doc = get_document(doc_id)
+                    had_partial = bool(
+                        (current_doc.metadata or {}).get("had_table_failures", False)
+                    )
+                except Exception:
+                    had_partial = False
+
+                final_doc_status = DocStatus.PARTIALLY_INGESTED if had_partial else DocStatus.COMPLETED
+                logger.debug(
+                    f"Indexing Done: updating doc metadata to {final_doc_status.value} "
+                    f"for document: {doc_id}"
+                )
                 file_hash = (
                     file_checksum_dict.get(Path(path).name)
                     if file_checksum_dict else None
                 )
                 metadata_update = {
-                    "status": DocStatus.COMPLETED,
+                    "status": final_doc_status,
                     "completed_at": get_utc_timestamp(),
                     "timing_in_secs": {"indexing": round(indexing_time, 2)},
                 }
                 if file_hash:
                     metadata_update["file_hash"] = file_hash
-                status_mgr.update_doc_metadata(
-                    doc_id,
-                    metadata_update,
-                )
-                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+                status_mgr.update_doc_metadata(doc_id, metadata_update)
+                status_mgr.update_job_progress(doc_id, final_doc_status, JobStatus.IN_PROGRESS)
 
             logger.info(f"✅ Successfully indexed document {doc_id}")
             return True
@@ -208,6 +219,7 @@ def ingest(
             doc_stats = get_job_document_stats(job_id)
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
+            partial_docs = doc_stats["partial_docs"]
 
             pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
@@ -216,7 +228,7 @@ def ingest(
             )
 
             if len(failed_docs) > 0:
-                # At least one document failed
+                # At least one document hard-failed
                 failed_doc_names = [doc["name"] for doc in failed_docs]
                 failed_files_list = "\n".join(failed_doc_names)
 
@@ -236,6 +248,15 @@ def ingest(
                 )
 
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
+
+            elif len(partial_docs) > 0:
+                # All documents reached a terminal success state, but some had table failures
+                logger.info(
+                    f"✅ Ingestion completed with partial failures, Time taken: {file_processing_time:.2f} seconds. "
+                    f"{len(partial_docs)} document(s) were partially ingested due to table summarization failures."
+                )
+                status_mgr.update_job_progress("", DocStatus.PARTIALLY_INGESTED, JobStatus.COMPLETED_WITH_ERRORS)
+
             else:
                 # All documents completed successfully
                 logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
@@ -243,7 +264,6 @@ def ingest(
                     f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
                     f"(100.00% of total documents)"
                 )
-
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats

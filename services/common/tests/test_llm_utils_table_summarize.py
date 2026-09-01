@@ -5,12 +5,10 @@ in common/llm_utils.py.
 Covers:
 - Successful summarization and classification
 - Retry behaviour on transient HTTP errors
-- Cancellation via threading.Event
-- Fail-fast: first failure stops remaining tables
+- Non-fatal failures: failed tables use fallback values, all other tables continue
 - Empty input edge case
 """
 
-import threading
 import pytest
 from unittest.mock import Mock, patch
 import requests
@@ -77,21 +75,6 @@ class TestSummarizeAndClassifySingleTable:
 
         assert summary == "A data table."
         assert decision is True
-
-    def test_cancelled_before_call(self, mock_session, mock_llm_settings):
-        """Returns (No summary., False) immediately if cancel_event is set before the call."""
-        from common.llm_utils import summarize_and_classify_single_table
-
-        cancel = threading.Event()
-        cancel.set()
-
-        summary, decision = summarize_and_classify_single_table(
-            "prompt", "model", "http://llm", 512, cancel_event=cancel
-        )
-
-        assert summary == "No summary."
-        assert decision is False
-        mock_session.post.assert_not_called()
 
     def test_raises_on_http_error_after_retries(self, mock_session, mock_llm_settings):
         """Raises after all retries are exhausted on a 500 error."""
@@ -177,10 +160,10 @@ class TestSummarizeAndClassifyTables:
         assert decisions == []
         assert failures == {}
 
-    def test_one_failure_stops_remaining_and_records_error(self):
+    def test_one_failure_all_others_still_processed(self):
         """
-        When one worker raises, cancel_event is set, remaining tables are
-        not processed, and the failure is recorded in the failures dict.
+        When one worker raises, the failure is recorded but remaining tables
+        continue to be processed — failures are non-fatal.
         """
         from common.llm_utils import summarize_and_classify_tables
 
@@ -188,9 +171,6 @@ class TestSummarizeAndClassifyTables:
 
         def flaky(prompt, *args, **kwargs):
             call_count["n"] += 1
-            cancel_event = kwargs.get("cancel_event")
-            if cancel_event is not None and cancel_event.is_set():
-                return "No summary.", False
             if call_count["n"] == 1:
                 raise requests.exceptions.HTTPError("500 Server Error")
             return "Summary", True
@@ -200,12 +180,14 @@ class TestSummarizeAndClassifyTables:
                 ["md1", "md2", "md3", "md4", "md5"],
                 "model", "http://llm", "doc.pdf",
                 PROMPT_TEMPLATE,
-                max_workers=1,  # sequential to make behaviour deterministic
+                max_workers=1,
             )
 
-        # At least one failure must be recorded
-        assert len(failures) >= 1
-        # The failed table's error message should be present
+        # All 5 tables must be represented in output
+        assert len(summaries) == 5
+        assert len(decisions) == 5
+        # Exactly one failure recorded
+        assert len(failures) == 1
         assert any("500" in msg or "Failed to process" in msg for msg in failures.values())
 
     def test_failure_recorded_with_table_index(self):
@@ -213,9 +195,6 @@ class TestSummarizeAndClassifyTables:
         from common.llm_utils import summarize_and_classify_tables
 
         def always_fail(prompt, *args, **kwargs):
-            cancel_event = kwargs.get("cancel_event")
-            if cancel_event is not None and cancel_event.is_set():
-                return "No summary.", False
             raise ValueError("LLM exploded")
 
         with patch("common.llm_utils.summarize_and_classify_single_table", side_effect=always_fail):
@@ -229,25 +208,19 @@ class TestSummarizeAndClassifyTables:
         assert 0 in failures
         assert "LLM exploded" in failures[0]
 
-    def test_cancelled_tables_skipped_gracefully(self):
+    def test_failed_table_uses_fallback_values(self):
         """
-        When cancel_event is set after the first failure, remaining workers
-        return ('No summary.', False) without raising. Output lists still
-        have one entry per input table and only the triggering failure is
-        recorded in failures.
+        A failed table gets ('No summary.', False) as its fallback values
+        and processing continues for all remaining tables.
         """
         from common.llm_utils import summarize_and_classify_tables
 
-        call_count = {"n": 0}
+        def fail_first(prompt, *args, **kwargs):
+            if "md0" in prompt:
+                raise ValueError("bad table")
+            return "Good summary", True
 
-        def one_fail_rest_cancel(prompt, *args, **kwargs):
-            call_count["n"] += 1
-            cancel_event = kwargs.get("cancel_event")
-            if cancel_event is not None and cancel_event.is_set():
-                return "No summary.", False
-            raise requests.exceptions.ConnectionError("timeout")
-
-        with patch("common.llm_utils.summarize_and_classify_single_table", side_effect=one_fail_rest_cancel):
+        with patch("common.llm_utils.summarize_and_classify_single_table", side_effect=fail_first):
             summaries, decisions, failures = summarize_and_classify_tables(
                 ["md0", "md1", "md2"],
                 "model", "http://llm", "doc.pdf",
@@ -255,27 +228,23 @@ class TestSummarizeAndClassifyTables:
                 max_workers=1,
             )
 
-        # The first table must be a failure
-        assert 0 in failures
-        # Lengths must always equal the number of input tables
         assert len(summaries) == 3
         assert len(decisions) == 3
+        # Failed table gets fallback
+        assert summaries[0] == "No summary."
+        assert decisions[0] is False
+        # Other tables processed normally
+        assert summaries[1] == "Good summary"
+        assert summaries[2] == "Good summary"
+        assert len(failures) == 1
 
     def test_partial_success_non_failed_tables_preserved(self):
-        """Successful results that completed before the failure are preserved."""
+        """Successful results are preserved alongside failures."""
         from common.llm_utils import summarize_and_classify_tables
 
-        results_map = {
-            0: ("Good summary", True),
-        }
-
         def selective_fail(prompt, *args, **kwargs):
-            cancel_event = kwargs.get("cancel_event")
-            if cancel_event is not None and cancel_event.is_set():
-                return "No summary.", False
-            # Identify table by prompt content
             if "md0" in prompt:
-                return results_map[0]
+                return "Good summary", True
             raise ValueError("bad table")
 
         with patch("common.llm_utils.summarize_and_classify_single_table", side_effect=selective_fail):
@@ -288,7 +257,5 @@ class TestSummarizeAndClassifyTables:
 
         assert len(summaries) == 2
         assert len(decisions) == 2
-        # md0 succeeded
         assert "Good summary" in summaries
-        # md1 failed
-        assert len(failures) >= 1
+        assert len(failures) == 1

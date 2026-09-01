@@ -646,7 +646,11 @@ def process_documents(
                         float(timings.get("process_text", 0) + timings.get("process_tables", 0)), 2
                     )
                     converted_pdf_stats.setdefault(path, {"timings": {}})
-                    converted_pdf_stats[path].update({"page_count": pgs, "table_count": tabs})
+                    converted_pdf_stats[path].update({
+                        "page_count": pgs,
+                        "table_count": tabs,
+                        "had_table_failures": bool(table_failures),
+                    })
                     converted_pdf_stats[path]["timings"]["processing"] = total_processing_time
 
                     if doc_id is not None:
@@ -654,42 +658,20 @@ def process_documents(
                             f"Processing Done: updating doc & job metadata "
                             f"for document: {doc_id}"
                         )
-                        
-                        # Check if table summarization failures occurred
+
                         if table_failures:
-                            # Mark document as FAILED if any table summarization failed
-                            error_msg = f"Table summarization failed for {len(table_failures)} table(s)"
-                            logger.error(f"Document {doc_id}: {error_msg}")
-                            
-                            metadata_update = {
-                                "status": DocStatus.FAILED,
-                                "pages": pgs,
-                                "tables": tabs,
-                                "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
-                                "table_summarization_failures": {
-                                    "count": len(table_failures),
-                                    "details": table_failures
-                                }
-                            }
-                            
-                            status_mgr.update_doc_metadata(doc_id, metadata_update, error=error_msg)
-                            status_mgr.update_job_progress(
-                                doc_id=doc_id,
-                                doc_status=DocStatus.FAILED,
-                                job_status=JobStatus.IN_PROGRESS,
-                                error=error_msg
+                            logger.warning(
+                                f"Document {doc_id}: {len(table_failures)} table(s) failed "
+                                f"summarization; those tables will not be indexed"
                             )
-                            converted_pdf_stats.pop(path, {})
-                            continue
-                        
-                        # No failures - mark as PROCESSED
+
                         status_mgr.update_doc_metadata(doc_id, {
                             "status": DocStatus.PROCESSED,
                             "pages": pgs,
                             "tables": tabs,
                             "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
                         })
-                        
+
                         status_mgr.update_job_progress(
                             doc_id, DocStatus.PROCESSED, JobStatus.IN_PROGRESS
                         )
@@ -741,17 +723,24 @@ def process_documents(
                     converted_pdf_stats.setdefault(path, {"timings": {}})
                     converted_pdf_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
                     converted_pdf_stats[path]["chunk_count"] = chunk_count
+                    had_table_failures = converted_pdf_stats[path].get("had_table_failures", False)
 
                     if doc_id is not None:
                         logger.debug(
                             f"Chunking Done: updating doc & job metadata "
                             f"for document: {doc_id}"
                         )
-                        status_mgr.update_doc_metadata(doc_id, {
+                        metadata_update: dict = {
                             "status": DocStatus.CHUNKED,
                             "chunks": chunk_count,
                             "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
-                        })
+                        }
+                        # Persist the table-failure flag into the doc's metadata JSONB
+                        # so that the indexing callback in ingest.py can read it without
+                        # ambiguity (reading doc.status would be ambiguous mid-pipeline).
+                        if had_table_failures:
+                            metadata_update["had_table_failures"] = True
+                        status_mgr.update_doc_metadata(doc_id, metadata_update)
                         status_mgr.update_job_progress(
                             doc_id, DocStatus.CHUNKED, JobStatus.IN_PROGRESS
                         )

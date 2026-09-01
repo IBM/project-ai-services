@@ -18,6 +18,7 @@ class JobStatus(str, Enum):
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
 
 
@@ -28,6 +29,7 @@ class DocStatus(str, Enum):
     PROCESSED = "processed"
     CHUNKED = "chunked"
     COMPLETED = "completed"
+    PARTIALLY_INGESTED = "partially_ingested"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
 

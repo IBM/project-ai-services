@@ -59,17 +59,25 @@ def get_job_document_stats(job_id: str) -> dict:
 
         documents = job_data.get("documents", [])
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
-        completed_docs = [
+        _terminal_ok = (
+            DocStatus.COMPLETED.value,
+            DocStatus.PARTIALLY_INGESTED.value,
+            DocStatus.ALREADY_EXISTS.value,
+        )
+        completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
+        partial_docs = [
             doc for doc in documents
-            if doc.get("status") in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+            if doc.get("status") == DocStatus.PARTIALLY_INGESTED.value
         ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
+            "partial_docs": partial_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
-            "completed_count": len(completed_docs)
+            "completed_count": len(completed_docs),
+            "partial_count": len(partial_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)

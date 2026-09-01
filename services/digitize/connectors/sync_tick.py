@@ -269,7 +269,7 @@ async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
     """
-    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.FAILED.value}
+    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
         interrupt = _check_interrupt_call(connector_id, sync_seq)

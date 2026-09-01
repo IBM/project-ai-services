@@ -873,6 +873,11 @@ class TestWaitForJob:
         with self._patches(["failed"]):
             asyncio.run(_wait_for_job("job-1", "conn-1", 1))
 
+    def test_completed_with_errors_is_terminal(self):
+        """Status 'completed_with_errors' must exit the wait loop."""
+        with self._patches(["completed_with_errors"]):
+            asyncio.run(_wait_for_job("job-1", "conn-1", 1))
+
     def test_raises_cancelled_error_on_interrupt(self):
         """Interrupt detected while waiting → CancelledError raised."""
         interrupt_seq = [None, InterruptType.SYNC_CANCEL]

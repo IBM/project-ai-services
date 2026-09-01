@@ -182,7 +182,6 @@ class ExtractionRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Raw text to extract from")
     schema_id: str = Field(..., min_length=1, description="ID of a registered schema")
 
-
 class ExtractionSourceInfo(BaseModel):
     """Source metadata embedded in the sync extraction response."""
 

@@ -1,7 +1,6 @@
 import logging
 import os
 import requests
-import threading
 import time
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -56,7 +55,7 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024, cancel_event=None):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
     """Combined function to summarize and classify a table in a single LLM call.
 
     Returns tuple: (summary, decision).
@@ -64,9 +63,6 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    if cancel_event is not None and cancel_event.is_set():
-        return "No summary.", False
 
     payload = {
         "model": gen_model,
@@ -127,22 +123,21 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
 
     Returns tuple: (summaries, decisions, failures).
     failures is a dict mapping table index to error message for failed tables.
+    Table failures are non-fatal: failed tables use fallback values and processing continues.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
     if not all_prompts:
         return [], [], {}
 
-    results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
-
-    cancel_event = threading.Event()
+    results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
     summaries: list[str] = []
     decisions: list[bool] = []
     failures: dict[int, str] = {}
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens, cancel_event): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
@@ -155,20 +150,12 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                 logger.error(error_msg)
                 results[idx] = ("No summary.", False)
                 failures[idx] = error_msg
-                cancel_event.set()
-                break
 
-    # Separate summaries and decisions with proper None handling
-    for idx, result in enumerate(results):
-        if result is not None:
-            summary, decision = result
-            summaries.append(summary)
-            decisions.append(decision)
-        else:
-            # Default values for failed futures
-            summaries.append("No summary.")
-            decisions.append(False)
-            failures[idx] = "Unknown error: result is None"
+    # Unpack results in index order. Every slot starts as the fallback
+    # and is overwritten either by a successful future or left as-is on failure.
+    for summary, decision in results:
+        summaries.append(summary)
+        decisions.append(decision)
 
     return summaries, decisions, failures
 
