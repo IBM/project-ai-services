@@ -69,9 +69,9 @@ func loadChart(ctx context.Context, tp templates.Template, name string) (chart.C
 // then merges them with the chart's default values via the template provider.
 func prepareValues(tp templates.Template, gatewayAddr string, token string) (map[string]any, error) {
 	// Generate argument parameters
-	argParams, err := generateArgParams(gatewayAddr, token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate arg params: %w", err)
+	argParams := map[string]string{
+		"worker.token":       token,
+		"worker.gatewayAddr": gatewayAddr,
 	}
 
 	// Load values from chart with overrides
@@ -81,18 +81,6 @@ func prepareValues(tp templates.Template, gatewayAddr string, token string) (map
 	}
 
 	return values, nil
-}
-
-// generateArgParams constructs the key-value argument overrides passed to the worker Helm chart.
-// The returned map sets the gRPC gateway address and the authentication token used by the worker pod
-// to establish its stream connection.
-func generateArgParams(gatewayAddr string, token string) (map[string]string, error) {
-	argParams := map[string]string{
-		"worker.token":       token,
-		"worker.gatewayAddr": gatewayAddr,
-	}
-
-	return argParams, nil
 }
 
 // deployWorkerHelm installs or upgrades the worker Helm release in the given namespace.
