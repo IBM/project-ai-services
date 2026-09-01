@@ -88,6 +88,7 @@ func (s *apiSource) ListArchitectures(ctx context.Context) ([]types.Architecture
 	summaries, err := s.api.ListArchitectures(ctx)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API ListArchitectures unreachable, falling back to embedded: %v", err)
+
 		return toArchitectureSummaries(s.embedded.ListArchitectures())
 	}
 
@@ -98,6 +99,7 @@ func (s *apiSource) ListServices(ctx context.Context) ([]types.ServiceSummary, e
 	summaries, err := s.api.ListServices(ctx)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API ListServices unreachable, falling back to embedded: %v", err)
+
 		return toServiceSummaries(s.embedded.ListServices())
 	}
 
@@ -112,6 +114,7 @@ func (s *apiSource) LoadArchitecture(ctx context.Context, id string) (*types.Arc
 	arch, err := s.api.GetArchitectureDetails(ctx, id)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetArchitectureDetails unreachable, falling back to embedded: %v", err)
+
 		return loadArchitectureFromEmbedded(s.embedded, id)
 	}
 
@@ -122,6 +125,7 @@ func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service,
 	svc, err := s.api.GetServiceDetails(ctx, id)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetServiceDetails unreachable, falling back to embedded: %v", err)
+
 		return loadServiceFromEmbedded(s.embedded, id)
 	}
 
@@ -132,6 +136,7 @@ func (s *apiSource) GetServiceParams(ctx context.Context, serviceID string) (map
 	schema, err := s.api.GetServiceParams(ctx, serviceID)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetServiceParams unreachable, falling back to embedded: %v", err)
+
 		return s.embedded.GetServiceParams(ctx, serviceID)
 	}
 
@@ -142,6 +147,7 @@ func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentTyp
 	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetComponentProviderParams unreachable, falling back to embedded: %v", err)
+
 		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
 	}
 
