@@ -7,6 +7,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -171,21 +172,12 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 		return fmt.Errorf("worker setup: load templates: %w", err)
 	}
 
-	// Resolve the actual podman socket path from the host environment so the
-	// worker container gets the correct CONTAINER_HOST and volume mount.
-	podmanURI, err := utils.ResolvePodmanURI()
+	argParams, err := buildArgParams(opts, gatewayAddr, token)
 	if err != nil {
-		return fmt.Errorf("worker setup: resolve podman URI: %w", err)
+		return err
 	}
-	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
 
-	values, err := tp.LoadValues(workerApp, nil, map[string]string{
-		"caddy.httpsPort":      strconv.Itoa(opts.HTTPSPort),
-		"worker.token":         token,
-		"worker.gatewayAddr":   gatewayAddr,
-		"worker.optionalFlags": getOptionalFlags(opts),
-		"worker.podman.uri":    podmanSocketPath,
-	})
+	values, err := tp.LoadValues(workerApp, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
 	}
@@ -207,6 +199,55 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	}
 
 	return nil
+}
+
+// buildArgParams resolves host-specific runtime values (podman socket, auth
+// file) and assembles the full map of template arg overrides for deployAll.
+func buildArgParams(opts Options, gatewayAddr, token string) (map[string]string, error) {
+	// Resolve the actual podman socket path from the host environment so the
+	// worker container gets the correct CONTAINER_HOST and volume mount.
+	podmanURI, err := utils.ResolvePodmanURI()
+	if err != nil {
+		return nil, fmt.Errorf("worker setup: resolve podman URI: %w", err)
+	}
+
+	authFileBase64, err := readAuthFileBase64()
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"caddy.httpsPort":               strconv.Itoa(opts.HTTPSPort),
+		"worker.token":                  token,
+		"worker.gatewayAddr":            gatewayAddr,
+		"worker.optionalFlags":          getOptionalFlags(opts),
+		"worker.podman.uri":             strings.TrimPrefix(podmanURI, "unix://"),
+		"worker.podman.authFileContent": authFileBase64,
+	}, nil
+}
+
+// readAuthFileBase64 reads the podman auth file and returns its contents
+// base64-encoded. If the file does not exist, it returns an encoded empty
+// JSON object and logs a warning.
+func readAuthFileBase64() (string, error) {
+	authFilePath, err := utils.GetAuthFilePath()
+	if err != nil {
+		return "", fmt.Errorf("worker setup: resolve auth file path: %w", err)
+	}
+
+	content, err := os.ReadFile(authFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
+			// TODO: worker join- > worker --reset-podman-auth when implemented
+			logger.Warningln("Run 'podman login' then re-run 'worker join' to update credentials.")
+			content = []byte("{}")
+		} else {
+			return "", fmt.Errorf("worker setup: read auth file %s: %w", authFilePath, err)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // renderAndDeploy renders a single pod template and deploys it.

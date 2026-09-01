@@ -13,3 +13,4 @@ worker:
   gatewayAddr: ""
   podman:
     uri: "/run/podman/podman.sock"
+    authFileContent: ""
