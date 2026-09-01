@@ -166,6 +166,8 @@ func register(ctx context.Context, client workerpb.WorkerGatewayClient, token st
 		RuntimeType:    rt.String(),
 		Metadata:       meta,
 	})
+	// TODO: When registrations fails due to "token already used" error
+	// attempt registretion without token.
 	if err != nil {
 		return "", fmt.Errorf("register RPC: %w", err)
 	}
