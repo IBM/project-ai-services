@@ -831,13 +831,6 @@ definitions:
       error:
         type: string
     type: object
-  internal_pkg_catalog_apiserver_handlers.ImagesResponse:
-    properties:
-      images:
-        items:
-          type: string
-        type: array
-    type: object
   internal_pkg_catalog_apiserver_handlers.ResourcesResponse:
     properties:
       accelerators:
@@ -1366,7 +1359,9 @@ paths:
         "200":
           description: List of container image references
           schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse'
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -1382,6 +1377,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Get architecture images
+      tags:
+      - Catalog
+  /architectures/{id}/models:
+    get:
+      description: Returns all unique model names referenced in the schemas of all
+        component dependencies across every service in the architecture
+      parameters:
+      - description: Architecture ID (e.g., 'rag')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of unique model names
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get models for an architecture
       tags:
       - Catalog
   /auth/login:
@@ -2291,7 +2322,9 @@ paths:
         "200":
           description: List of container image references
           schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ImagesResponse'
+            items:
+              type: string
+            type: array
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -2307,6 +2340,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Get service images
+      tags:
+      - Catalog
+  /services/{id}/models:
+    get:
+      description: Returns all unique model names referenced in the schema of a service's
+        component dependencies
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of unique model names
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get models for a service
       tags:
       - Catalog
   /services/{id}/params:

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -335,7 +336,7 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
-//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Service not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -357,7 +358,7 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+	c.JSON(http.StatusOK, images)
 }
 
 // GetArchitectureImages godoc
@@ -371,7 +372,7 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Architecture not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -393,12 +394,93 @@ func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+	c.JSON(http.StatusOK, images)
 }
 
-// ImagesResponse holds a list of container image references.
-type ImagesResponse struct {
-	Images []string `json:"images"`
+// GetServiceModels godoc
+//
+//	@Summary		Get models for a service
+//	@Description	Returns all unique model names referenced in the schema of a service's component dependencies
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/services/{id}/models [get]
+func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
+	id := c.Param("id")
+	excludeProviders := parseExcludeProviders(c)
+
+	models, err := h.provider.GetServiceModels(c.Request.Context(), id, excludeProviders...)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get models for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, models)
+}
+
+// GetArchitectureModels godoc
+//
+//	@Summary		Get models for an architecture
+//	@Description	Returns all unique model names referenced in the schemas of all component dependencies across every service in the architecture
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/architectures/{id}/models [get]
+func (h *CatalogHandler) GetArchitectureModels(c *gin.Context) {
+	id := c.Param("id")
+	excludeProviders := parseExcludeProviders(c)
+
+	models, err := h.provider.GetArchitectureModels(c.Request.Context(), id, excludeProviders...)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get models for architecture '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, models)
+}
+
+// parseExcludeProviders reads the comma-separated ?exclude_providers= query
+// parameter and returns a slice of provider IDs to exclude from model results.
+func parseExcludeProviders(c *gin.Context) []string {
+	raw := c.Query("exclude_providers")
+	if raw == "" {
+		return nil
+	}
+
+	var result []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+
+	return result
 }
 
 // ErrorResponse represents an error response.
