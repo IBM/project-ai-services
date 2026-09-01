@@ -81,7 +81,13 @@ class TestRegisterConnectorJob:
 
     @pytest.mark.asyncio
     async def test_add_job_fires_immediately_when_requested(self):
-        """fire_immediately=True → trigger.start_date is ~now (fires on first tick)."""
+        """fire_immediately=True → job fires at ~now via next_run_time override.
+
+        APScheduler v3 IntervalTrigger always schedules the first run at
+        start_date + N*interval, so passing start_date=now would wait a full
+        interval.  The correct approach is next_run_time=now, which overrides
+        the trigger's first computed fire time.
+        """
         mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
@@ -93,9 +99,11 @@ class TestRegisterConnectorJob:
             after = datetime.now(timezone.utc)
 
             _, kwargs = mock_sched.add_job.call_args
-            trigger = kwargs["trigger"]
-            # start_date should be ~now (within the call window)
-            assert before <= trigger.start_date <= after
+            # next_run_time must be set to ~now to trigger immediate execution
+            assert kwargs["next_run_time"] is not None
+            assert before <= kwargs["next_run_time"] <= after
+            # start_date is also ~now so the subsequent interval is anchored correctly
+            assert before <= kwargs["trigger"].start_date <= after
         finally:
             sched_mod._scheduler = original
 
