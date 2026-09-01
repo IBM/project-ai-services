@@ -1169,8 +1169,8 @@ class DatabaseStatusManager:
             if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
                 update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error only for hard failures
-        if error and job_status == JobStatus.FAILED:
+        # Set error for hard failures and completed_with_errors (when an error message is provided)
+        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
             update_params["error"] = error
 
         # Perform database update

@@ -251,11 +251,17 @@ def ingest(
 
             elif len(completed_with_errors_docs) > 0:
                 # All documents reached a terminal state, but some had table summarization errors
+                cwe_msg = (
+                    f"{len(completed_with_errors_docs)} of {total_documents} document(s) completed with errors "
+                    f"due to table summarization failures. Those documents are queryable but their table summaries "
+                    f"may be incomplete."
+                )
                 logger.info(
                     f"✅ Ingestion completed with errors, Time taken: {file_processing_time:.2f} seconds. "
-                    f"{len(completed_with_errors_docs)} document(s) completed with errors due to table summarization failures."
+                    f"{cwe_msg}"
                 )
-                status_mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS)
+                status_mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
+                                               error=cwe_msg)
 
             else:
                 # All documents completed successfully

@@ -638,6 +638,54 @@ class TestUpdateJobStatsAlreadyExists:
         assert stats["completed"] == 0
 
 
+    def test_completed_with_errors_sets_error_field(self, mock_db_manager):
+        """update_job_progress with COMPLETED_WITH_ERRORS and a non-None error writes the error."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
+                                 error="1 table failed to summarize")
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert call_kwargs.get("error") == "1 table failed to summarize"
+
+    def test_completed_with_errors_no_error_when_none(self, mock_db_manager):
+        """update_job_progress with COMPLETED_WITH_ERRORS and no error does not write an error field."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS)
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert "error" not in call_kwargs
+
+    def test_failed_still_sets_error_field(self, mock_db_manager):
+        """Regression: FAILED status still writes the error field."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["failed"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error="pipeline crashed")
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert call_kwargs.get("error") == "pipeline crashed"
+
+
+
 # ============================================================================
 # 4. api/v1/jobs.py endpoint tests (duplicate-detection paths)
 # ============================================================================
