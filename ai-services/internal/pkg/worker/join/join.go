@@ -98,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 		if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
 			return fmt.Errorf("failed to create model directory: %w", err)
 		}
-		
+
 		rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 		if err != nil {
 			return fmt.Errorf("worker join: init runtime: %w", err)

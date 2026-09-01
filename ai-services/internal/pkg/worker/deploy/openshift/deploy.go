@@ -99,7 +99,7 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerAppName, chartData, values, helmTimeout); err != nil {
+	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, helmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
 
 		return fmt.Errorf("failed to deploy worker: %w", err)
