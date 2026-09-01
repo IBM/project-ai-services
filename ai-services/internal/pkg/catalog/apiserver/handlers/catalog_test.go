@@ -313,10 +313,9 @@ func TestGetServiceImages(t *testing.T) {
 			serviceID:      "chat",
 			expectedStatus: http.StatusOK,
 			validateBody: func(t *testing.T, body []byte) {
-				var resp ImagesResponse
-				err := json.Unmarshal(body, &resp)
-				require.NoError(t, err)
-				assert.NotEmpty(t, resp.Images)
+				var images []string
+				require.NoError(t, json.Unmarshal(body, &images))
+				assert.NotEmpty(t, images)
 			},
 		},
 		{
@@ -363,10 +362,9 @@ func TestGetArchitectureImages(t *testing.T) {
 			archID:         "rag",
 			expectedStatus: http.StatusOK,
 			validateBody: func(t *testing.T, body []byte) {
-				var resp ImagesResponse
-				err := json.Unmarshal(body, &resp)
-				require.NoError(t, err)
-				assert.NotEmpty(t, resp.Images)
+				var images []string
+				require.NoError(t, json.Unmarshal(body, &images))
+				assert.NotEmpty(t, images)
 			},
 		},
 		{
@@ -413,10 +411,9 @@ func TestGetServiceModels(t *testing.T) {
 			serviceID:      "chat",
 			expectedStatus: http.StatusOK,
 			validateBody: func(t *testing.T, body []byte) {
-				var resp map[string][]string
-				require.NoError(t, json.Unmarshal(body, &resp))
-				_, hasKey := resp["models"]
-				assert.True(t, hasKey, "response must contain 'models' key")
+				var models []string
+				require.NoError(t, json.Unmarshal(body, &models))
+				assert.NotNil(t, models)
 			},
 		},
 		{
@@ -461,10 +458,9 @@ func TestGetArchitectureModels(t *testing.T) {
 			archID:         "rag",
 			expectedStatus: http.StatusOK,
 			validateBody: func(t *testing.T, body []byte) {
-				var resp map[string][]string
-				require.NoError(t, json.Unmarshal(body, &resp))
-				_, hasKey := resp["models"]
-				assert.True(t, hasKey, "response must contain 'models' key")
+				var models []string
+				require.NoError(t, json.Unmarshal(body, &models))
+				assert.NotNil(t, models)
 			},
 		},
 		{

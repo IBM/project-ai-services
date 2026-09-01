@@ -47,9 +47,9 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 		return getCatalogImagesLocal(ctx, templateID)
 	}
 
-	resp, err := appClient.GetArchitectureImages(ctx, templateID)
+	images, err := appClient.GetArchitectureImages(ctx, templateID)
 	if err == nil {
-		return resp.Images, nil
+		return images, nil
 	}
 
 	// Only retry as service when the server returned 404.
@@ -58,7 +58,7 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 		return nil, err
 	}
 
-	resp, err = appClient.GetServiceImages(ctx, templateID)
+	images, err = appClient.GetServiceImages(ctx, templateID)
 	if err != nil {
 		// Both lookups failed — the ID is not in the catalog.
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
@@ -68,7 +68,7 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 		return nil, err
 	}
 
-	return resp.Images, nil
+	return images, nil
 }
 
 // getCatalogImagesLocal collects images using the embedded-only local catalog provider.

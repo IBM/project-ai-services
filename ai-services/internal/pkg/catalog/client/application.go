@@ -27,12 +27,6 @@ const (
 	archModelsRoute         = "/api/v1/architectures/%s/models"
 )
 
-// ImagesResponse is the JSON body returned by GET /api/v1/services/:id/images
-// and GET /api/v1/architectures/:id/images.
-type ImagesResponse struct {
-	Images []string `json:"images"`
-}
-
 // HTTPError represents an HTTP error with status code.
 type HTTPError struct {
 	StatusCode int
@@ -287,8 +281,8 @@ func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, comp
 // the given service and all its component dependencies. The response always includes
 // catalog asset images (tool image and catalog infrastructure images).
 // Both embedded (built-in) and custom bundle services are supported.
-func (c *ApplicationClient) GetServiceImages(ctx context.Context, serviceID string) (*ImagesResponse, error) {
-	var result ImagesResponse
+func (c *ApplicationClient) GetServiceImages(ctx context.Context, serviceID string) ([]string, error) {
+	var result []string
 	resp, err := c.client.HTTPClient().R().
 		SetContext(ctx).
 		SetResult(&result).
@@ -304,15 +298,15 @@ func (c *ApplicationClient) GetServiceImages(ctx context.Context, serviceID stri
 		}
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 // GetArchitectureImages returns the complete list of container images required to deploy
 // the given architecture and all its services and component dependencies. The response
 // always includes catalog asset images (tool image and catalog infrastructure images).
 // Both embedded (built-in) and custom bundle architectures are supported.
-func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architectureID string) (*ImagesResponse, error) {
-	var result ImagesResponse
+func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architectureID string) ([]string, error) {
+	var result []string
 	resp, err := c.client.HTTPClient().R().
 		SetContext(ctx).
 		SetResult(&result).
@@ -328,12 +322,7 @@ func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architect
 		}
 	}
 
-	return &result, nil
-}
-
-// modelsResponse is the shape of the JSON body returned by the /models endpoints.
-type modelsResponse struct {
-	Models []string `json:"models"`
+	return result, nil
 }
 
 // GetServiceModels calls GET /api/v1/services/:id/models and returns the list of
@@ -341,7 +330,7 @@ type modelsResponse struct {
 // Pass excludeProviders to have the server omit models from those component providers
 // (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
 func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID string, excludeProviders ...string) ([]string, error) {
-	var result modelsResponse
+	var result []string
 	req := c.client.HTTPClient().R().
 		SetContext(ctx).
 		SetResult(&result)
@@ -359,7 +348,7 @@ func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID stri
 		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
-	return result.Models, nil
+	return result, nil
 }
 
 // GetArchitectureModels calls GET /api/v1/architectures/:id/models and returns the
@@ -367,7 +356,7 @@ func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID stri
 // Pass excludeProviders to have the server omit models from those component providers
 // (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
 func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architectureID string, excludeProviders ...string) ([]string, error) {
-	var result modelsResponse
+	var result []string
 	req := c.client.HTTPClient().R().
 		SetContext(ctx).
 		SetResult(&result)
@@ -385,7 +374,7 @@ func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architect
 		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
-	return result.Models, nil
+	return result, nil
 }
 
 // Made with Bob

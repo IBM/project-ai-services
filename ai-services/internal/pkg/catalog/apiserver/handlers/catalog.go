@@ -335,8 +335,8 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
-//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Param			id	path		string	true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
+//	@Success		200	{array}		string	"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Service not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -358,7 +358,7 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+	c.JSON(http.StatusOK, images)
 }
 
 // GetArchitectureImages godoc
@@ -371,8 +371,8 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{object}	ImagesResponse	"List of container image references"
+//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string	"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Architecture not found"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -394,7 +394,7 @@ func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ImagesResponse{Images: images})
+	c.JSON(http.StatusOK, images)
 }
 
 // GetServiceModels godoc
@@ -404,8 +404,8 @@ func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string				true	"Service ID (e.g., 'chat', 'digitize')"
-//	@Success		200	{object}	map[string][]string	"JSON object with a 'models' key containing the list of model names"
+//	@Param			id	path		string	true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Success		200	{array}		string	"List of unique model names"
 //	@Failure		401	{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse		"Service not found"
 //	@Failure		500	{object}	ErrorResponse		"Internal Server Error"
@@ -428,7 +428,7 @@ func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"models": models})
+	c.JSON(http.StatusOK, models)
 }
 
 // GetArchitectureModels godoc
@@ -438,8 +438,8 @@ func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string				true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{object}	map[string][]string	"JSON object with a 'models' key containing the list of model names"
+//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string	"List of unique model names"
 //	@Failure		401	{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse		"Architecture not found"
 //	@Failure		500	{object}	ErrorResponse		"Internal Server Error"
@@ -462,12 +462,7 @@ func (h *CatalogHandler) GetArchitectureModels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"models": models})
-}
-
-// ImagesResponse holds a list of container image references.
-type ImagesResponse struct {
-	Images []string `json:"images"`
+	c.JSON(http.StatusOK, models)
 }
 
 // parseExcludeProviders reads the comma-separated ?exclude_providers= query
