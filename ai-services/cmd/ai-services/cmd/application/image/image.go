@@ -61,8 +61,7 @@ func getCatalogImages(ctx context.Context, templateID string) ([]string, error) 
 	resp, err = appClient.GetServiceImages(ctx, templateID)
 	if err != nil {
 		// Both lookups failed — the ID is not in the catalog.
-		var svcErr *catalogclient.HTTPError
-		if errors.As(err, &svcErr) && svcErr.StatusCode == http.StatusNotFound {
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("template '%s' not found as a service or architecture", templateID)
 		}
 
