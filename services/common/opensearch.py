@@ -159,7 +159,7 @@ class OpensearchVectorStore(VectorStore):
             raise
 
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
-    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
+    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10, cancel_event=None):
         """Supports 2 modes of insertion with retry logic for transient failures.
 
         1. Pure embedding: pass 'chunks' and 'vectors'
@@ -170,6 +170,9 @@ class OpensearchVectorStore(VectorStore):
             vectors: Pre-computed embeddings (optional)
             embedding: Embedding instance to generate embeddings (optional)
             batch_size: Number of chunks to insert per batch
+            cancel_event: Optional threading.Event; if set between batches, insertion
+                          is aborted and False is returned. Only passed when
+                          clean_files=True so any partial inserts will be cleaned up.
 
         Returns:
             bool: True if indexing succeeded, False if it failed
@@ -200,6 +203,15 @@ class OpensearchVectorStore(VectorStore):
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
+            # Check for cancellation before each batch. cancel_event is only set
+            # when clean_files=True, so any partial inserts will be removed by the
+            # post-cancellation VDB cleanup.
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    f"Cancellation requested — aborting insert_chunks after {i} of "
+                    f"{len(chunks)} chunks for index '{self.index_name}'"
+                )
+                return False
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 

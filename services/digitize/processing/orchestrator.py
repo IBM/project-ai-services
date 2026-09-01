@@ -15,6 +15,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 from docling_core.types.doc.document import DoclingDocument
 from common.lang_utils import LanguageCodes, split_sentences, to_sentence_splitter_lang
@@ -134,7 +135,7 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=Langua
     current_chunk["source_nodes"] = []
 
 
-def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
+def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
     """
     Chunk text content from a document into smaller pieces based on token limits.
 
@@ -145,6 +146,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
+        cancel_event: Optional threading.Event; if set, chunking is aborted early.
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -172,6 +174,9 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
             current_subsubsection = None
 
             for idx, block in enumerate(data):
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info(f"Cancellation requested — aborting text chunking for '{input_path}'")
+                    raise JobCancelledError("Text chunking cancelled")
                 label = block.get("label")
                 text = block.get("text", "").strip()
                 page_no = block.get("page", 0)
@@ -237,7 +242,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         return None, None
 
 
-def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
+def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
     Called internally by chunk_single_file() for sequential processing.
@@ -249,6 +254,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
+        cancel_event: Optional threading.Event; if set, chunking is aborted early.
     """
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
@@ -264,6 +270,9 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
             tab_data_list = list(tab_data.values())
 
             for block in tab_data_list:
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info(f"Cancellation requested — aborting table chunking for '{input_path}'")
+                    raise JobCancelledError("Table chunking cancelled")
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
                 page_number = block.get('page_number')
@@ -298,7 +307,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         return None, None
 
 
-def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
+def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
     """
     Orchestrates chunking of both text and tables for a single document.
 
@@ -310,14 +319,17 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
+        cancel_event: Optional threading.Event; if set, chunking is aborted early.
     """
     t0 = time.time()
     try:
         splitter_lang = to_sentence_splitter_lang(language)
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang, cancel_event=cancel_event)
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang, cancel_event=cancel_event)
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
+    except JobCancelledError:
+        raise
     except Exception as e:
         logger.error(f"Error chunking document '{input_path}': {e}")
         return None, None, None
@@ -546,8 +558,15 @@ def process_documents(
     # can abort mid-table-summarization without waiting for all LLM calls.
     _process_stop_event = threading.Event()
 
+    # Separate stop event for the indexing path (insert_chunks).
+    # Only set when clean_files=True so that a cancelled job with clean_files=False
+    # lets any running insert_chunks call finish — avoiding stale partial VDB entries
+    # that would never be cleaned up.
+    _index_cancel_event = threading.Event()
+
     is_cancelled = False        # latched True on first cancellation; never reset
     _tasks_cancel_signalled = False  # tracks whether cancel_tasks_for_job has been called
+    _clean_files: Optional[bool] = None  # lazily resolved on first cancellation
 
     worker_count = max(1, min(WORKER_SIZE, len(input_paths)))
 
@@ -562,6 +581,18 @@ def process_documents(
                 is_cancelled = is_cancelled or bool(job_id and db_manager.is_job_cancelled(job_id))
                 if is_cancelled:
                     _process_stop_event.set()
+                    # Resolve clean_files flag once on first cancellation detection.
+                    # The index cancel event is only set when clean_files=True because
+                    # interrupting insert_chunks mid-batch without subsequent cleanup would
+                    # leave stale partial entries in the vector DB.
+                    if _clean_files is None and job_id:
+                        try:
+                            job_row = db_manager.get_job_by_id(job_id)
+                            _clean_files = bool(job_row and job_row.stats and job_row.stats.get("clean_files"))
+                        except Exception:
+                            _clean_files = False
+                    if _clean_files:
+                        _index_cancel_event.set()
                     # Signal the dispatcher to stop any pending/queued/running conversion
                     # tasks belonging to this job.  Done exactly once on first detection.
                     if not _tasks_cancel_signalled:
@@ -741,6 +772,7 @@ def process_documents(
                             txt_json, tab_json, out_path,
                             emb_endpoint, max_tokens,
                             doc_id=doc_id, language=doc_lang,
+                            cancel_event=_process_stop_event,
                         )
                         chunk_futures[c_future] = path
                     except JobCancelledError:
@@ -822,7 +854,8 @@ def process_documents(
                                     for chunk in doc_chunks:
                                         chunk["doc_id"] = doc_id
                                     index_future = indexer_executor.submit(
-                                        indexing_callback, doc_id, doc_chunks, path
+                                        indexing_callback, doc_id, doc_chunks, path,
+                                        cancel_event=_index_cancel_event,
                                     )
                                     indexing_futures[index_future] = doc_id
                                 except Exception as e:
@@ -830,6 +863,10 @@ def process_documents(
                                         f"Error submitting indexing for {doc_id}: {e}",
                                         exc_info=True,
                                     )
+                    except JobCancelledError:
+                        logger.info(f"Job {job_id} cancelled — chunking was interrupted for document: {path}")
+                        is_cancelled = True
+                        _process_stop_event.set()
                     except Exception as e:
                         if doc_id is not None:
                             logger.error(
@@ -847,8 +884,10 @@ def process_documents(
                 # --- D. Drain completed indexing futures ---
                 for fut in list(indexing_futures):
                     if not fut.done():
-                        # If cancelled, cancel queued (not-yet-running) indexing futures
-                        if is_cancelled and not fut.running():
+                        # Cancel queued (not-yet-running) futures only when clean_files=True.
+                        # When clean_files=False we let them run to completion so the document
+                        # ends up fully indexed rather than partially indexed with no cleanup.
+                        if is_cancelled and _clean_files and not fut.running():
                             fut.cancel()
                             doc_id = indexing_futures.pop(fut)
                             logger.info(f"Job {job_id} cancelled — skipping indexing for document: {doc_id}")
