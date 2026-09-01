@@ -75,6 +75,7 @@ func (s *apiWithFallback) ListArchitectures(ctx context.Context) ([]types.Archit
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API ListArchitectures failed, falling back to embedded: %v", err)
+
 			return toArchitectureSummaries(s.embedded.ListArchitectures())
 		}
 
@@ -89,6 +90,7 @@ func (s *apiWithFallback) ListServices(ctx context.Context) ([]types.ServiceSumm
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API ListServices failed, falling back to embedded: %v", err)
+
 			return toServiceSummaries(s.embedded.ListServices())
 		}
 
@@ -113,6 +115,7 @@ func (s *apiWithFallback) LoadArchitecture(ctx context.Context, id string) (*typ
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API GetArchitectureDetails failed, falling back to embedded: %v", err)
+
 			return loadArchitectureFromEmbedded(s.embedded, id)
 		}
 
@@ -233,11 +236,7 @@ func isConnectivityError(err error) bool {
 	// HTTPError is produced by our client for non-2xx responses — that is a
 	// server-side error, not a connectivity failure.
 	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
-		return false
-	}
-
-	return true
+	return !errors.As(err, &httpErr)
 }
 
 // loadArchitectureFromEmbedded wraps embedded LoadArchitecture, converting a
