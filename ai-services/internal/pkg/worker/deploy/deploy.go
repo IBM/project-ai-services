@@ -229,7 +229,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 }
 
 // getOptionalFlags builds the optional CLI flags string that is forwarded from
-// the 'worker join' command to the 'worker grpc-connect' command running inside
+// the 'worker join' command to the 'worker grpcserver' command running inside
 // the container.
 func getOptionalFlags(opts Options) string {
 	var flags string

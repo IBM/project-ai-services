@@ -95,9 +95,9 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// GrpcConnect dials the catalog gRPC worker-gateway, registers with the
+// GrpcServer dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
-func GrpcConnect(ctx context.Context, opts Options) error {
+func GrpcServer(ctx context.Context, opts Options) error {
 	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
+		return fmt.Errorf("worker grpcserver: init runtime: %w", err)
 	}
 
 	// ── Step 1: Build Caddy proxy router (Podman only) ──────────────────────
@@ -115,7 +115,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 	if opts.RuntimeType == types.RuntimeTypePodman {
 		var err error
 		if pr, err = workercaddy.New(ctx, rt); err != nil {
-			return fmt.Errorf("worker join: init local Caddy manager: %w", err)
+			return fmt.Errorf("worker grpcserver: init local Caddy manager: %w", err)
 		}
 	}
 
@@ -124,7 +124,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 
 	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("worker grpc-connect: create client for %s: %w", opts.GatewayAddr, err)
+		return fmt.Errorf("worker grpcserver: create client for %s: %w", opts.GatewayAddr, err)
 	}
 	defer func() { _ = conn.Close() }()
 

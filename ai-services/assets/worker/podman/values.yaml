@@ -8,7 +8,7 @@ worker:
   runtime: "podman"
   token: ""
   # optionalFlags covers sslCertPath, sslKeyPath, domainSuffix, and httpsPort flags that are forwarded from the
-  # 'worker join' command to the 'worker grpc-connect' command running inside the container
+  # 'worker join' command to the 'worker grpcserver' command running inside the container
   optionalFlags: ""
   gatewayAddr: ""
   podman:

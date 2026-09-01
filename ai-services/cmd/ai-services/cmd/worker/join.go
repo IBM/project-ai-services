@@ -102,7 +102,7 @@ func joinRunE(_ *cobra.Command, args []string) error {
 	return join.Run(context.Background(), opts)
 }
 
-// configureFlags registers the flags shared by the join and grpc-connect
+// configureFlags registers the flags shared by the join and grpcserver
 // commands: --token (required), --runtime, --basedir, --https-port,
 // --ssl-cert, and --ssl-key.
 func configureFlags(c *cobra.Command) {
@@ -151,8 +151,8 @@ func newJoinCmd() *cobra.Command {
 	return cmd
 }
 
-var grpcConnectCmd = &cobra.Command{
-	Use:    "grpc-connect <gateway>",
+var grpcServerCmd = &cobra.Command{
+	Use:    "grpcserver <gateway>",
 	Short:  "Connect to the catalog gRPC worker-gateway",
 	Hidden: true,
 	Args:   cobra.ExactArgs(1),
@@ -161,10 +161,10 @@ var grpcConnectCmd = &cobra.Command{
 
 		return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 	},
-	RunE: grpcConnectRunE,
+	RunE: grpcServerRunE,
 }
 
-func grpcConnectRunE(_ *cobra.Command, args []string) error {
+func grpcServerRunE(_ *cobra.Command, args []string) error {
 	opts := join.Options{
 		GatewayAddr: args[0],
 		Token:       token,
@@ -178,11 +178,11 @@ func grpcConnectRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.GrpcConnect(context.Background(), opts)
+	return join.GrpcServer(context.Background(), opts)
 }
 
-func newGrpcConnectCmd() *cobra.Command {
-	configureFlags(grpcConnectCmd)
+func newGrpcServerCmd() *cobra.Command {
+	configureFlags(grpcServerCmd)
 
-	return grpcConnectCmd
+	return grpcServerCmd
 }
