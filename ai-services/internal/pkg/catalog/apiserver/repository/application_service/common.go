@@ -27,6 +27,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// DatasourceConnector is the minimal interface used by ApplicationServiceBase for
+// post-deploy connector attachment. It exposes only ConnectDatasourcesToApplication,
+// which is the single method called after a successful deployment. This narrow interface
+// breaks the import cycle between the application_service and repository packages.
+type DatasourceConnector interface {
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+}
+
 // ValidationError represents a validation error with HTTP status code.
 type ValidationError = validators.ValidationError
 
@@ -94,6 +102,12 @@ type ApplicationServiceBase struct {
 	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
 	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
 	DeploymentRegistry *DeploymentRegistry
+
+	// DatasourceService is optional. When set, connector refs supplied in the create
+	// request are propagated to eligible Digitize services after the application reaches
+	// Running status. When nil, connector attachment is skipped (e.g. test environments
+	// where no datasource service is configured).
+	DatasourceService DatasourceConnector
 }
 
 // ListApplications retrieves a paginated list of applications with filters.
@@ -717,6 +731,76 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+
+	// Post-deploy connector attachment: once the application is Running, connect any
+	// datasource connectors that were specified in the create request.
+	// Failures here do NOT revert the Running status — the deployment succeeded; only
+	// the connector attachment is partial. Errors are logged for operator visibility.
+	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.Services)
+}
+
+// attachConnectorsPostDeploy calls ConnectDatasourcesToApplication with all unique connector
+// UUIDs found in the create request's service connector refs. It is a best-effort operation:
+// failures are logged but do not affect the application's Running status. No-op when
+// DatasourceService is nil or when no service in the request carries connector refs.
+func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, services []apimodels.Service) {
+	if s.DatasourceService == nil {
+		return
+	}
+
+	datasourceIDs := collectDatasourceIDs(ctx, services)
+	if len(datasourceIDs) == 0 {
+		return
+	}
+
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, datasourceIDs)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
+
+		return
+	}
+
+	logConnectErrors(ctx, applicationID, resp)
+}
+
+// collectDatasourceIDs returns a deduplicated slice of connector UUIDs from all service
+// connector refs in the create request. The same connector ID may appear across multiple
+// services; ConnectDatasourcesToApplication resolves eligible services internally, so each
+// unique ID needs to be passed only once.
+func collectDatasourceIDs(ctx context.Context, services []apimodels.Service) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool)
+	var ids []uuid.UUID
+
+	for _, svc := range services {
+		for _, ref := range svc.Connectors {
+			id, err := uuid.Parse(ref.ID)
+			if err != nil {
+				// Should not happen — ValidateConnectorRefs already validated UUIDs.
+				logger.WarningfCtx(ctx, "skipping unparseable connector ref ID %q: %v", ref.ID, err)
+
+				continue
+			}
+
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	return ids
+}
+
+// logConnectErrors logs any per-datasource failures returned by ConnectDatasourcesToApplication.
+func logConnectErrors(ctx context.Context, applicationID uuid.UUID, resp *apimodels.ConnectDatasourcesResponse) {
+	if resp == nil || len(resp.Errors) == 0 {
+		return
+	}
+
+	for _, connErr := range resp.Errors {
+		logger.WarningfCtx(ctx, "post-deploy connector %s failed for application %s: %s",
+			connErr.DatasourceID, applicationID, connErr.Error)
+	}
 }
 
 // GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
