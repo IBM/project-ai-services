@@ -15,6 +15,9 @@ type DatasourceServiceInterface interface {
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
 	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
+	// eligible service in a running application and removes the service_dependency record.
+	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error
 	// GetDatasource retrieves a single datasource by ID with non-sensitive metadata and
 	// connected services enriched with live sync state from each service's Digitize pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.

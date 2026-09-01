@@ -33,6 +33,8 @@ type ValidationError = validators.ValidationError
 // services that accept datasource connectors.
 type ServiceConnectorClientInterface interface {
 	Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error
+	// Disconnect calls DELETE /v1/connectors/{connectorID} on the service.
+	Disconnect(ctx context.Context, baseURL, connectorID string) error
 }
 
 // DatasourceService is the single implementation of the datasource connector business logic.
@@ -799,6 +801,92 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 		Provider:       apimodels.DatasourceProviderInfo{ID: connector.Provider, Name: providerName},
 		ServiceDetails: serviceDetails,
 	}, nil
+}
+
+// DisconnectDatasourcesFromApplication removes a single datasource connector from each
+// service it is connected to within the given application, then removes the
+// service_dependency rows.
+//
+// Flow:
+//  1. Verify the application exists — return 404 if not.
+//  2. Verify the datasource exists — return 404 if not.
+//  3. Query service_dependencies for (datasourceID, applicationID) to confirm the datasource
+//     is actually connected. Return 404 if no rows are found.
+//  4. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
+//     then remove the service_dependency row.
+func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error {
+	// Step 1: verify application exists.
+	app, err := s.appRepo.GetByID(ctx, applicationID)
+	if err != nil {
+		return fmt.Errorf("failed to load application: %w", err)
+	}
+
+	if app == nil {
+		return &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("application %s not found", applicationID),
+		}
+	}
+
+	// Step 2: verify datasource exists.
+	if _, err := s.loadConnector(ctx, datasourceID); err != nil {
+		return err
+	}
+
+	// Step 3: confirm the datasource is connected to this application.
+	linkedServices, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, datasourceID, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return fmt.Errorf("failed to query connected services: %w", err)
+	}
+
+	var appLinked []dbrepo.LinkedServiceRow
+	for _, svc := range linkedServices {
+		if svc.ApplicationID == applicationID {
+			appLinked = append(appLinked, svc)
+		}
+	}
+
+	if len(appLinked) == 0 {
+		return &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("datasource %s is not connected to application %s", datasourceID, applicationID),
+		}
+	}
+
+	return s.disconnectOneDatasource(ctx, datasourceID, appLinked)
+}
+
+// disconnectOneDatasource calls DELETE /v1/connectors/{id} on each linked service and
+// removes the service_dependency row.
+// A 404 from the downstream service is treated as success — the connector was already
+// removed (idempotency for partial-failure retries). The 404 handling lives here rather
+// than in the client so that other callers of Disconnect can choose to treat 404 as an
+// error if appropriate. DB cleanup failures are logged but do not block the caller.
+func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
+	for _, svc := range linkedServices {
+		url := extractAPIEndpointURL(svc.EndpointsJSON)
+		if url != "" {
+			if err := s.serviceClient.Disconnect(ctx, url, datasourceID.String()); err != nil {
+				// 404 means the connector is already gone on the downstream side —
+				// treat as success so we still clean up the DB row.
+				var httpErr *catalogclient.ServiceHTTPError
+				if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+					logger.InfofCtx(ctx, "connector %s not found from service %s, continuing cleanup", datasourceID, svc.ServiceCatalogID)
+				} else {
+					return &ValidationError{
+						Code:    http.StatusBadGateway,
+						Message: fmt.Sprintf("failed to disconnect datasource from service %s: %v", svc.ServiceCatalogID, err),
+					}
+				}
+			}
+		}
+
+		if err := s.svcDepRepo.RemoveDependency(ctx, svc.ServiceID, datasourceID); err != nil {
+			logger.ErrorfCtx(ctx, "failed to remove connector dependency for service %s: %v", svc.ServiceID, err)
+		}
+	}
+
+	return nil
 }
 
 // resolveLinkedEndpoint confirms that datasourceID is linked to a service belonging to

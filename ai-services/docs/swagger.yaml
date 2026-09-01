@@ -1225,6 +1225,50 @@ paths:
       tags:
       - Datasources
   /applications/{id}/datasources/{datasource_id}:
+    delete:
+      description: Removes a single datasource connector from each eligible service
+        in a running application and deletes the service_dependency record.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Datasource ID (UUID)
+        in: path
+        name: datasource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Datasource disconnected successfully
+        "400":
+          description: Invalid application or datasource ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not connected to this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "502":
+          description: Downstream Digitize service returned an error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Disconnect a datasource from an application
+      tags:
+      - Datasources
     get:
       description: Returns the catalog identity and live sync state of a datasource
         connected to the given application. Sync fields are sourced from the linked

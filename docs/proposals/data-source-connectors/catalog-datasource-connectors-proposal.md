@@ -966,40 +966,15 @@ When `PUT /api/v1/connectors/datasources/:id` is called:
 
 ### 7.4 Disconnect Flow
 
-When `DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
+When `DELETE /api/v1/applications/:id/datasources/:datasource_id` is called:
 
-1. Query `service_dependencies` where `dependency_id = datasource_id` and `dependency_type = 'connector'`, joined to `services` to filter to this application. Return `404` if no rows found.
-2. For each row, call `DELETE /v1/connectors/<dependency_id>` on its downstream Digitize pod, using the row's `dependency_id` as the `connector_id`.
-   - If the call returns `404` (connector already gone on the downstream side), treat as success and continue to the next service.
-   - If the call returns `409 Conflict` (a sync tick is currently in progress on the Digitize side), record the error for that service and continue to the next.
-   - If the call fails with any other error: record the error for that service and continue to the next — do **not** skip the remaining services.
-3. For every service whose downstream call succeeded (or returned `404`), delete the corresponding `service_dependencies` row.
-4. Return `200 OK`. If any downstream calls failed, include a `propagation_errors` array so the UI can show an inline error against each affected service. The user retriggers by re-submitting the disconnect from the UI.
-
-**Response when all disconnections succeed:**
-
-```json
-{
-  "application_id": "app-uuid-1",
-  "datasource_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-**Response when one or more disconnections fail:**
-
-```json
-{
-  "application_id": "app-uuid-1",
-  "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
-  "propagation_errors": [
-    {
-      "service_id": "svc-uuid-1",
-      "service_name": "Digitize",
-      "error": "failed to reach digitize service: connection refused"
-    }
-  ]
-}
-```
+1. Query `service_dependencies` scoped to the given `datasource_id` and filter to services belonging to `application_id`. Return `404 Not Found` with `"datasource <id> is not connected to application <id>"` if no rows match — the datasource was never connected, or was already fully disconnected.
+2. For each confirmed row, call `DELETE /v1/connectors/<datasource_id>` on its downstream Digitize pod.
+   - If the call returns `404` (connector already removed on the downstream side — e.g. a previous attempt reached the service but failed before the DB row was cleaned up), treat as success and continue. This makes the operation **idempotent**.
+   - If the service has no registered API endpoint, skip the downstream call and proceed directly to DB cleanup.
+   - If the call fails with any other non-2xx status, return `502 Bad Gateway` immediately.
+3. Delete the corresponding `service_dependencies` row. A failure here is logged but does not block the response.
+4. Return `204 No Content`.
 
 ### 7.5 Connected Services Fetch Flow
 

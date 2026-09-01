@@ -449,4 +449,57 @@ func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// DisconnectDatasourcesFromApplication godoc
+//
+//	@Summary		Disconnect a datasource from an application
+//	@Description	Removes a single datasource connector from each eligible service in a running application and deletes the service_dependency record.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path	string	true	"Application ID (UUID)"
+//	@Param			datasource_id	path	string	true	"Datasource ID (UUID)"
+//	@Success		204				"Datasource disconnected successfully"
+//	@Failure		400				{object}	ErrorResponse	"Invalid application or datasource ID"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse	"Datasource not connected to this application"
+//	@Failure		502				{object}	ErrorResponse	"Downstream Digitize service returned an error"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [delete]
+func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID: %v", err),
+		})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, datasourceID); err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to disconnect datasource from application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to disconnect datasource from application",
+		})
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // Made with Bob
