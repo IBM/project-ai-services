@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -32,139 +33,58 @@ type CatalogSource interface {
 }
 
 // NewCatalogSource builds a CatalogSource that tries the catalog API first and
-// falls back to the provided embedded catalog when a network-level error occurs.
+// falls back to the provided embedded catalog when the user is not logged in.
+// Any other client-init error (bad config, etc.) is returned to the caller.
 //
-// If the API client cannot be initialised because the user is not logged in
-// (config.ErrNotLoggedIn), no fallback is attempted — a clear error is returned
-// so the user knows they need to run `ai-services catalog login`. Only genuine
-// connectivity failures (dial errors, timeouts) trigger the fallback.
+// If the API is reachable but returns a non-connectivity error (e.g. 4xx/5xx),
+// the error is propagated so the caller sees it rather than silently falling
+// back to stale embedded data.
 //
-// embedded must not be nil; pass a *catalog.CatalogProvider(nil) from the
-// calling layer. It is consulted lazily — only when the API call fails.
+// embedded must not be nil; it is consulted lazily — only when an API call
+// fails with a connectivity error, or when the user is not logged in.
 func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSource, error) {
 	apiClient, err := NewApplicationClient(ctx)
 	if err != nil {
-		// Any client-init failure (not logged in, bad config, etc.) falls back to
-		// the embedded catalog. The templates command is a read-only display — it
-		// does not require a live server connection.
-		logger.DebugfCtx(ctx, "catalog API client unavailable, using embedded catalog: %v", err)
+		if !errors.Is(err, config.ErrNotLoggedIn) {
+			return nil, fmt.Errorf("failed to connect to catalog API: %w", err)
+		}
+
+		// No active session — fall back to embedded-only local provider.
+		logger.Warningln("Not logged in to catalog server, falling back to local embedded catalog (custom bundle items will not be included)")
 
 		return &embeddedOnlySource{embedded: embedded}, nil
 	}
 
-	return &apiWithFallback{
-		api:      apiClient,
-		embedded: embedded,
+	return &apiSource{
+		ApplicationClient: apiClient,
+		embedded:          embedded,
 	}, nil
 }
 
 // --------------------------------------------------------------------------
-// API-first with embedded fallback
+// API-first source
 // --------------------------------------------------------------------------
 
-type apiWithFallback struct {
-	api      *ApplicationClient
+// apiSource wraps ApplicationClient to satisfy CatalogSource.
+// It embeds *ApplicationClient directly — all methods except ListComponents
+// and the two renamed loaders are promoted automatically.
+// ListComponents has no API endpoint and always reads from the embedded catalog.
+// LoadArchitecture/LoadService map to the client's GetArchitectureDetails/GetServiceDetails.
+type apiSource struct {
+	*ApplicationClient
 	embedded EmbeddedCatalog
 }
 
-func (s *apiWithFallback) ListArchitectures(ctx context.Context) ([]types.ArchitectureSummary, error) {
-	summaries, err := s.api.ListArchitectures(ctx)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API ListArchitectures failed, falling back to embedded: %v", err)
-
-			return toArchitectureSummaries(s.embedded.ListArchitectures())
-		}
-
-		return nil, err
-	}
-
-	return summaries, nil
+func (s *apiSource) LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error) {
+	return s.GetArchitectureDetails(ctx, id)
 }
 
-func (s *apiWithFallback) ListServices(ctx context.Context) ([]types.ServiceSummary, error) {
-	summaries, err := s.api.ListServices(ctx)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API ListServices failed, falling back to embedded: %v", err)
-
-			return toServiceSummaries(s.embedded.ListServices())
-		}
-
-		return nil, err
-	}
-
-	return summaries, nil
+func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service, error) {
+	return s.GetServiceDetails(ctx, id)
 }
 
-func (s *apiWithFallback) ListComponents(ctx context.Context) ([]types.Component, error) {
-	// No API endpoint for listing components — always use embedded catalog.
-	comps, err := s.embedded.ListComponents()
-	if err != nil {
-		return nil, fmt.Errorf("list components: %w", err)
-	}
-
-	return comps, nil
-}
-
-func (s *apiWithFallback) LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error) {
-	arch, err := s.api.GetArchitectureDetails(ctx, id)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API GetArchitectureDetails failed, falling back to embedded: %v", err)
-
-			return loadArchitectureFromEmbedded(s.embedded, id)
-		}
-
-		return nil, err
-	}
-
-	return arch, nil
-}
-
-func (s *apiWithFallback) LoadService(ctx context.Context, id string) (*types.Service, error) {
-	svc, err := s.api.GetServiceDetails(ctx, id)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API GetServiceDetails failed, falling back to embedded: %v", err)
-
-			return loadServiceFromEmbedded(s.embedded, id)
-		}
-
-		return nil, err
-	}
-
-	return svc, nil
-}
-
-func (s *apiWithFallback) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
-	schema, err := s.api.GetServiceParams(ctx, serviceID)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API GetServiceParams failed, falling back to embedded: %v", err)
-
-			return s.embedded.GetServiceParams(ctx, serviceID)
-		}
-
-		return nil, err
-	}
-
-	return schema, nil
-}
-
-func (s *apiWithFallback) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
-	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID)
-	if err != nil {
-		if isConnectivityError(err) {
-			logger.DebugfCtx(ctx, "API GetComponentProviderParams failed, falling back to embedded: %v", err)
-
-			return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
-		}
-
-		return nil, err
-	}
-
-	return schema, nil
+func (s *apiSource) ListComponents(_ context.Context) ([]types.Component, error) {
+	return listComponentsFromEmbedded(s.embedded)
 }
 
 // --------------------------------------------------------------------------
@@ -198,20 +118,31 @@ func (s *embeddedOnlySource) ListServices(_ context.Context) ([]types.ServiceSum
 }
 
 func (s *embeddedOnlySource) ListComponents(_ context.Context) ([]types.Component, error) {
-	comps, err := s.embedded.ListComponents()
-	if err != nil {
-		return nil, fmt.Errorf("list components: %w", err)
-	}
-
-	return comps, nil
+	return listComponentsFromEmbedded(s.embedded)
 }
 
 func (s *embeddedOnlySource) LoadArchitecture(_ context.Context, id string) (*types.Architecture, error) {
-	return loadArchitectureFromEmbedded(s.embedded, id)
+	arch, err := s.embedded.LoadArchitecture(id)
+	if err != nil {
+		return nil, err
+	}
+	if arch == nil {
+		return nil, fmt.Errorf("architecture '%s' not found", id)
+	}
+
+	return arch, nil
 }
 
 func (s *embeddedOnlySource) LoadService(_ context.Context, id string) (*types.Service, error) {
-	return loadServiceFromEmbedded(s.embedded, id)
+	svc, err := s.embedded.LoadService(id)
+	if err != nil {
+		return nil, err
+	}
+	if svc == nil {
+		return nil, fmt.Errorf("service '%s' not found", id)
+	}
+
+	return svc, nil
 }
 
 func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
@@ -226,46 +157,15 @@ func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, com
 // Helpers
 // --------------------------------------------------------------------------
 
-// isConnectivityError returns true for errors that indicate the API server is
-// unreachable (network dial errors, timeouts, connection refused). API-level
-// errors such as 4xx/5xx are not connectivity errors and should be propagated.
-func isConnectivityError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// HTTPError is produced by our client for non-2xx responses — that is a
-	// server-side error, not a connectivity failure.
-	var httpErr *HTTPError
-
-	return !errors.As(err, &httpErr)
-}
-
-// loadArchitectureFromEmbedded wraps embedded LoadArchitecture, converting a
-// nil result into a proper error so callers never receive (nil, nil).
-func loadArchitectureFromEmbedded(e EmbeddedCatalog, id string) (*types.Architecture, error) {
-	arch, err := e.LoadArchitecture(id)
+// listComponentsFromEmbedded is shared by apiSource and embeddedOnlySource —
+// components have no API endpoint so both always read from the embedded catalog.
+func listComponentsFromEmbedded(e EmbeddedCatalog) ([]types.Component, error) {
+	comps, err := e.ListComponents()
 	if err != nil {
-		return nil, err
-	}
-	if arch == nil {
-		return nil, fmt.Errorf("architecture '%s' not found", id)
+		return nil, fmt.Errorf("list components: %w", err)
 	}
 
-	return arch, nil
-}
-
-// loadServiceFromEmbedded wraps embedded LoadService, converting a nil result
-// into a proper error so callers never receive (nil, nil).
-func loadServiceFromEmbedded(e EmbeddedCatalog, id string) (*types.Service, error) {
-	svc, err := e.LoadService(id)
-	if err != nil {
-		return nil, err
-	}
-	if svc == nil {
-		return nil, fmt.Errorf("service '%s' not found", id)
-	}
-
-	return svc, nil
+	return comps, nil
 }
 
 // toArchitectureSummaries converts []Architecture to []ArchitectureSummary,
@@ -303,12 +203,13 @@ func toServiceSummaries(svcs []types.Service, err error) ([]types.ServiceSummary
 	summaries := make([]types.ServiceSummary, len(svcs))
 	for i, s := range svcs {
 		summaries[i] = types.ServiceSummary{
-			ID:           s.ID,
-			Name:         s.Name,
-			Description:  s.Description,
-			CertifiedBy:  s.CertifiedBy,
-			Standalone:   s.Standalone,
-			Dependencies: s.Dependencies,
+			ID:            s.ID,
+			Name:          s.Name,
+			Description:   s.Description,
+			CertifiedBy:   s.CertifiedBy,
+			Architectures: s.Architectures,
+			Standalone:    s.Standalone,
+			Dependencies:  s.Dependencies,
 		}
 	}
 

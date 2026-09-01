@@ -40,8 +40,8 @@ func NewParametersCmd() *cobra.Command {
 				return fmt.Errorf("failed to load embedded catalog: %w", err)
 			}
 
-			// NewCatalogSource tries the API first, falls back to embedded assets.
-			// Auth errors (not logged in) are propagated directly.
+			// NewCatalogSource tries the API first, falls back to the embedded
+			// catalog when the user is not logged in.
 			source, err := catalogClient.NewCatalogSource(cmd.Context(), embedded)
 			if err != nil {
 				return err
@@ -90,10 +90,11 @@ func displayArchitectureParameters(ctx context.Context, source catalogClient.Cat
 	// Track displayed components to avoid duplicates
 	displayedComponents := make(map[string]bool)
 
-	// Display parameters for each service in the architecture
+	// Display parameters for each service in the architecture.
+	// Log a warning if a service fails so the user knows output may be incomplete.
 	for _, svcRef := range services {
 		if err := displayServiceInArchitecture(ctx, source, svcRef.ID, displayedComponents); err != nil {
-			continue
+			logger.Warningf("skipping parameters for service '%s': %v", svcRef.ID, err)
 		}
 	}
 

@@ -114,9 +114,8 @@ func init() {
 }
 
 // listCatalogTemplates lists architectures, services, and components from the catalog.
-// It always tries the API first and falls back to the embedded catalog when the API
-// is unreachable. Auth errors (not logged in) are returned as-is so the user
-// knows to run 'ai-services catalog login'.
+// It always tries the API first and falls back to the embedded catalog when the
+// API is unreachable or the user is not logged in.
 func listCatalogTemplates(cmd *cobra.Command) error {
 	embedded, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
