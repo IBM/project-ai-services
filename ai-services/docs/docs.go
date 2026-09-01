@@ -2488,17 +2488,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
             "type": "object",
             "properties": {
@@ -2510,6 +2499,10 @@ const docTemplate = `{
                     "description": "ApplicationName is the human-readable display name of the owning application.",
                     "type": "string"
                 },
+                "catalog_id": {
+                    "description": "CatalogID is the catalog identifier of the owning application (e.g. \"rag\").",
+                    "type": "string"
+                },
                 "err_msg": {
                     "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
                     "type": "string"
@@ -2518,16 +2511,12 @@ const docTemplate = `{
                     "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
                     "type": "string"
                 },
-                "service": {
-                    "description": "Service contains the catalog identity (id + resolved name) of the owning application.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
-                        }
-                    ]
+                "name": {
+                    "description": "Name is the resolved display name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
+                    "type": "string"
                 },
                 "sync_status": {
-                    "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "description": "SyncStatus is the current sync state sourced from the downstream service pod.\nSet to \"unknown\" when the pod is unreachable.",
                     "type": "string"
                 }
             }
@@ -2722,7 +2711,7 @@ const docTemplate = `{
                     ]
                 },
                 "services": {
-                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each service's Digitize pod.",
+                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
