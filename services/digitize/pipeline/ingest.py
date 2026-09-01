@@ -48,7 +48,7 @@ def create_indexing_handler(
         emb_model_dict['max_model_len']
     )
 
-    def index_document_chunks(doc_id: str, chunks: list, path: str) -> bool:
+    def index_document_chunks(doc_id: str, chunks: list, path: str, cancel_event=None) -> bool:
         """
         Index a single document's chunks immediately after chunking completes.
 
@@ -56,6 +56,8 @@ def create_indexing_handler(
             doc_id: Document ID
             chunks: List of chunk dictionaries
             path: Original file path
+            cancel_event: Optional threading.Event; if set and clean_files=True, each
+                          inter-batch boundary inside insert_chunks will abort early.
 
         Returns:
             bool: True if indexing succeeded, False otherwise
@@ -69,7 +71,7 @@ def create_indexing_handler(
             indexing_start_time = time.time()
 
             # Index the chunks
-            success = vector_store.insert_chunks(chunks, embedding=embedder)
+            success = vector_store.insert_chunks(chunks, embedding=embedder, cancel_event=cancel_event)
             indexing_time = time.time() - indexing_start_time
 
             if not success:

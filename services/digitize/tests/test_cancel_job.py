@@ -1569,3 +1569,621 @@ class TestMakeDbCancelCheck:
             dm_mod.db_manager = original
 
         assert result is False
+
+
+# ===========================================================================
+# 8. chunk_text / chunk_tables / chunk_single_file — cancel_event support
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestChunkTextCancelEvent:
+    """chunk_text respects a cancel_event threading.Event."""
+
+    def test_cancel_event_not_set_processes_all_blocks(self, tmp_path):
+        """With cancel_event unset, all blocks are chunked normally."""
+        from digitize.processing.orchestrator import chunk_text
+        import json, threading
+
+        data = [
+            {"label": "text", "text": "Hello world", "page": 1},
+            {"label": "text", "text": "Second block", "page": 2},
+        ]
+        input_file = tmp_path / "doc-1_text.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()  # not set
+
+        with (
+            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
+            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
+            patch("digitize.processing.orchestrator.get_header_level", return_value=(1, "h")),
+            patch("digitize.processing.orchestrator.flush_chunk"),
+        ):
+            result_path, elapsed = chunk_text(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-1", cancel_event=event,
+            )
+
+        assert result_path is not None
+        assert elapsed is not None
+
+    def test_cancel_event_set_before_first_block_returns_none(self, tmp_path):
+        """cancel_event already set → chunk_text returns (None, None).
+
+        chunk_text catches all exceptions internally; the JobCancelledError is
+        surfaced only by chunk_single_file which re-raises it.
+        """
+        from digitize.processing.orchestrator import chunk_text
+        import json, threading
+
+        data = [{"label": "text", "text": "Hello", "page": 1}]
+        input_file = tmp_path / "doc-2_text.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()
+        event.set()  # already cancelled
+
+        with (
+            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
+            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
+            patch("digitize.processing.orchestrator.flush_chunk"),
+        ):
+            result_path, elapsed = chunk_text(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-2", cancel_event=event,
+            )
+
+        assert result_path is None
+        assert elapsed is None
+
+    def test_cancel_event_set_mid_loop_returns_none(self, tmp_path):
+        """cancel_event set mid-loop → chunk_text returns (None, None).
+
+        Uses section_header blocks to trigger flush_chunk inside the loop — that
+        is the only place within the loop body where flush_chunk is called, so it
+        is the only reliable way to set the event before the *next* iteration's
+        cancel check fires.
+        """
+        from digitize.processing.orchestrator import chunk_text
+        import json, threading
+
+        # section_header triggers flush_chunk mid-loop; the cancel check at the
+        # top of the following iteration will then see the event as set.
+        data = [
+            {"label": "section_header", "text": "Chapter 1", "page": 1, "font_size": 16},
+            {"label": "text", "text": "Some content", "page": 1},
+            {"label": "section_header", "text": "Chapter 2", "page": 2, "font_size": 16},
+            {"label": "text", "text": "More content", "page": 2},
+        ]
+        input_file = tmp_path / "doc-3_text.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()
+        flush_count = {"n": 0}
+
+        # Set the event on the first flush_chunk call (first section_header).
+        # The cancel check at the top of the next iteration fires True.
+        def set_on_first_flush(*args, **kwargs):
+            flush_count["n"] += 1
+            if flush_count["n"] == 1:
+                event.set()
+
+        with (
+            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
+            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
+            patch("digitize.processing.orchestrator.get_header_level", return_value=(1, "Chapter 1")),
+            patch("digitize.processing.orchestrator.flush_chunk", side_effect=set_on_first_flush),
+        ):
+            result_path, elapsed = chunk_text(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-3", cancel_event=event,
+            )
+
+        assert result_path is None
+        assert elapsed is None
+
+    def test_no_cancel_event_processes_normally(self, tmp_path):
+        """cancel_event=None (default) behaves identically to before — no change."""
+        from digitize.processing.orchestrator import chunk_text
+        import json
+
+        data = [{"label": "text", "text": "Only block", "page": 1}]
+        input_file = tmp_path / "doc-4_text.json"
+        input_file.write_text(json.dumps(data))
+
+        with (
+            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
+            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
+            patch("digitize.processing.orchestrator.flush_chunk"),
+        ):
+            result_path, elapsed = chunk_text(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-4",
+            )
+
+        assert result_path is not None
+
+
+@pytest.mark.unit
+class TestChunkTablesCancelEvent:
+    """chunk_tables respects a cancel_event threading.Event."""
+
+    def test_cancel_event_not_set_processes_all_tables(self, tmp_path):
+        """With cancel_event unset, all tables are chunked normally."""
+        from digitize.processing.orchestrator import chunk_tables
+        import json, threading
+
+        data = {
+            "t1": {"caption": "Table 1", "summary": "Summary one", "page_number": 1},
+            "t2": {"caption": "Table 2", "summary": "Summary two", "page_number": 2},
+        }
+        input_file = tmp_path / "doc-5_tables.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()  # not set
+
+        with patch("digitize.processing.orchestrator.count_tokens", return_value=10):
+            result_path, elapsed = chunk_tables(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-5", cancel_event=event,
+            )
+
+        assert result_path is not None
+
+    def test_cancel_event_set_before_first_table_returns_none(self, tmp_path):
+        """cancel_event already set → chunk_tables returns (None, None).
+
+        Like chunk_text, chunk_tables catches all exceptions internally; the
+        JobCancelledError is surfaced only by chunk_single_file.
+        """
+        from digitize.processing.orchestrator import chunk_tables
+        import json, threading
+
+        data = {"t1": {"caption": "Table 1", "summary": "Sum", "page_number": 1}}
+        input_file = tmp_path / "doc-6_tables.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()
+        event.set()
+
+        with patch("digitize.processing.orchestrator.count_tokens", return_value=5):
+            result_path, elapsed = chunk_tables(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-6", cancel_event=event,
+            )
+
+        assert result_path is None
+        assert elapsed is None
+
+    def test_cancel_event_set_mid_loop_returns_none(self, tmp_path):
+        """cancel_event set after first table → chunk_tables returns (None, None)."""
+        from digitize.processing.orchestrator import chunk_tables
+        import json, threading
+
+        data = {
+            "t1": {"caption": "T1", "summary": "S1", "page_number": 1},
+            "t2": {"caption": "T2", "summary": "S2", "page_number": 2},
+        }
+        input_file = tmp_path / "doc-7_tables.json"
+        input_file.write_text(json.dumps(data))
+
+        event = threading.Event()
+        call_count = {"n": 0}
+
+        # Set the event after count_tokens is first called (first table visited).
+        # The cancel check at the top of the next iteration fires True.
+        def set_after_first(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] >= 1:
+                event.set()
+            return 5
+
+        with patch("digitize.processing.orchestrator.count_tokens", side_effect=set_after_first):
+            result_path, elapsed = chunk_tables(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-7", cancel_event=event,
+            )
+
+        assert result_path is None
+        assert elapsed is None
+
+    def test_no_cancel_event_processes_normally(self, tmp_path):
+        """cancel_event=None (default) — no change in behaviour."""
+        from digitize.processing.orchestrator import chunk_tables
+        import json
+
+        data = {"t1": {"caption": "T1", "summary": "Sum", "page_number": 1}}
+        input_file = tmp_path / "doc-8_tables.json"
+        input_file.write_text(json.dumps(data))
+
+        with patch("digitize.processing.orchestrator.count_tokens", return_value=5):
+            result_path, elapsed = chunk_tables(
+                str(input_file), str(tmp_path), emb_endpoint="emb",
+                doc_id="doc-8",
+            )
+
+        assert result_path is not None
+
+
+@pytest.mark.unit
+class TestChunkSingleFileCancelEvent:
+    """chunk_single_file forwards cancel_event and re-raises JobCancelledError."""
+
+    def test_cancel_event_set_propagates_as_job_cancelled_error(self, tmp_path):
+        """When chunk_text raises JobCancelledError, chunk_single_file re-raises it."""
+        from digitize.processing.orchestrator import chunk_single_file
+        import threading
+
+        event = threading.Event()
+        event.set()
+
+        with (
+            patch(
+                "digitize.processing.orchestrator.chunk_text",
+                side_effect=JobCancelledError("cancelled"),
+            ),
+            patch("digitize.processing.orchestrator.chunk_tables"),
+        ):
+            with pytest.raises(JobCancelledError):
+                chunk_single_file(
+                    "txt.json", "tab.json", str(tmp_path),
+                    emb_endpoint="emb", doc_id="doc-9",
+                    cancel_event=event,
+                )
+
+    def test_cancel_event_forwarded_to_chunk_text_and_chunk_tables(self, tmp_path):
+        """cancel_event is forwarded to both chunk_text and chunk_tables."""
+        from digitize.processing.orchestrator import chunk_single_file
+        import threading
+
+        event = threading.Event()
+
+        txt_result = tmp_path / "doc-10_text_chunks.json"
+        tab_result = tmp_path / "doc-10_table_chunks.json"
+
+        with (
+            patch(
+                "digitize.processing.orchestrator.chunk_text",
+                return_value=(str(txt_result), 0.5),
+            ) as mock_chunk_text,
+            patch(
+                "digitize.processing.orchestrator.chunk_tables",
+                return_value=(str(tab_result), 0.3),
+            ) as mock_chunk_tables,
+        ):
+            chunk_single_file(
+                "txt.json", "tab.json", str(tmp_path),
+                emb_endpoint="emb", doc_id="doc-10",
+                cancel_event=event,
+            )
+
+        # Verify cancel_event was forwarded to both inner calls
+        assert mock_chunk_text.call_args.kwargs.get("cancel_event") is event
+        assert mock_chunk_tables.call_args.kwargs.get("cancel_event") is event
+
+
+# ===========================================================================
+# 9. OpenSearch insert_chunks — cancel_event between batches
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestOpenSearchInsertChunksCancelEvent:
+    """insert_chunks aborts between batches when cancel_event is set."""
+
+    def _make_opensearch(self):
+        from common.opensearch import OpensearchVectorStore
+        inst = OpensearchVectorStore.__new__(OpensearchVectorStore)
+        inst.index_name = "test-index"
+        inst.client = MagicMock()
+        inst.client.indices.exists = Mock(return_value=True)
+        return inst
+
+    def test_cancel_event_not_set_inserts_all_batches(self):
+        """All batches are inserted when cancel_event is not set."""
+        import threading
+
+        inst = self._make_opensearch()
+        inst._setup_index = Mock()
+
+        chunks = [{"page_content": f"chunk {i}", "filename": "f.pdf"} for i in range(5)]
+        embedder = Mock()
+        embedder.embed_documents = Mock(return_value=[[0.1] * 4] * 5)
+
+        event = threading.Event()  # not set
+
+        with patch("common.opensearch.helpers.bulk", return_value=(5, [])):
+            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
+
+        assert result is True
+
+    def test_cancel_event_set_aborts_before_first_batch(self):
+        """cancel_event already set → returns False before any bulk insert."""
+        import threading
+
+        inst = self._make_opensearch()
+        inst._setup_index = Mock()
+
+        chunks = [{"page_content": f"chunk {i}", "filename": "f.pdf"} for i in range(4)]
+        embedder = Mock()
+        embedder.embed_documents = Mock(return_value=[[0.1] * 4] * 4)
+
+        event = threading.Event()
+        event.set()
+
+        with patch("common.opensearch.helpers.bulk") as mock_bulk:
+            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
+
+        assert result is False
+        mock_bulk.assert_not_called()
+
+    def test_cancel_event_set_between_batches_aborts_mid_insert(self):
+        """cancel_event set after the first batch → second batch is not inserted."""
+        import threading
+
+        inst = self._make_opensearch()
+        inst._setup_index = Mock()
+
+        chunks = [{"page_content": f"chunk {i}", "filename": "f.pdf"} for i in range(4)]
+        embedder = Mock()
+        embedder.embed_documents = Mock(return_value=[[0.1] * 4] * 4)
+
+        event = threading.Event()
+        bulk_call_count = {"n": 0}
+
+        def fake_bulk(*args, **kwargs):
+            bulk_call_count["n"] += 1
+            event.set()  # set after first batch so second is cancelled
+            return (2, [])
+
+        with patch("common.opensearch.helpers.bulk", side_effect=fake_bulk):
+            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
+
+        assert result is False
+        assert bulk_call_count["n"] == 1  # only first batch executed
+
+    def test_no_cancel_event_inserts_all_batches(self):
+        """cancel_event=None (default) — full insert as before."""
+        inst = self._make_opensearch()
+        inst._setup_index = Mock()
+
+        chunks = [{"page_content": f"chunk {i}", "filename": "f.pdf"} for i in range(3)]
+        embedder = Mock()
+        embedder.embed_documents = Mock(return_value=[[0.1] * 4] * 3)
+
+        with patch("common.opensearch.helpers.bulk", return_value=(3, [])):
+            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2)
+
+        assert result is True
+
+
+# ===========================================================================
+# 10. process_documents — _index_cancel_event gated by clean_files
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestOrchestratorIndexCancelEventCleanFilesGating:
+    """_index_cancel_event is only set (and queued futures only cancelled) when
+    clean_files=True.  When clean_files=False a running insert_chunks call is
+    let to finish so no partial VDB entries are stranded.
+    """
+
+    def _base_setup(self):
+        """Return commonly shared futures and task stub."""
+        task = _make_task_stub("t-1", "completed", result_path="conv.json")
+
+        proc_fut: Future = Future()
+        proc_fut.set_result(
+            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en")
+        )
+
+        chunk_fut: Future = Future()
+        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 2.5))
+
+        return task, proc_fut, chunk_fut
+
+    def test_pending_index_future_cancelled_when_clean_files_true(self):
+        """clean_files=True → pending (not-yet-running) index future IS cancelled."""
+        from digitize.processing.orchestrator import process_documents
+
+        task, proc_fut, chunk_fut = self._base_setup()
+
+        pending_index_fut: Future = Future()  # PENDING — cancellable
+
+        cancel_calls = {"n": 0}
+
+        def is_cancelled(job_id):
+            cancel_calls["n"] += 1
+            return cancel_calls["n"] >= 5
+
+        mock_db = Mock()
+        mock_db.get_conversion_tasks_by_job_id = Mock(return_value=[task])
+        mock_db.is_job_cancelled = Mock(side_effect=is_cancelled)
+        mock_db.cancel_tasks_for_job = Mock()
+        mock_db.get_conversion_task = Mock(return_value=task)
+        # clean_files=True
+        mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": True}))
+
+        submit_calls = {"n": 0}
+
+        def tpe_submit(*args, **kwargs):
+            n = submit_calls["n"]
+            submit_calls["n"] += 1
+            if n == 0:
+                return proc_fut
+            if n == 1:
+                return chunk_fut
+            return pending_index_fut
+
+        with (
+            patch("digitize.processing.orchestrator.db_manager", mock_db),
+            patch("digitize.processing.orchestrator.get_status_manager", return_value=Mock()),
+            patch("digitize.processing.orchestrator.ContextAwareThreadPoolExecutor") as mock_tpe,
+            patch("digitize.processing.orchestrator.count_chunks", return_value=3),
+            patch("digitize.processing.orchestrator.merge_chunked_documents", return_value=[]),
+            patch("digitize.processing.orchestrator.time.sleep"),
+        ):
+            tpe_inst = MagicMock()
+            tpe_inst.__enter__ = Mock(return_value=tpe_inst)
+            tpe_inst.__exit__ = Mock(return_value=False)
+            tpe_inst.submit = Mock(side_effect=tpe_submit)
+            mock_tpe.return_value = tpe_inst
+
+            with pytest.raises(JobCancelledError):
+                process_documents(
+                    input_paths=["fake.pdf"],
+                    out_path="/tmp/out",
+                    llm_model="m", llm_endpoint="e",
+                    emb_endpoint="emb",
+                    max_tokens=512,
+                    job_id="job-cancel-clean-true",
+                    doc_id_dict={"fake.pdf": "doc-1"},
+                    indexing_callback=lambda doc_id, chunks, path, **kw: True,
+                )
+
+        assert pending_index_fut.cancelled(), "pending future must be cancelled when clean_files=True"
+
+    def test_running_index_future_not_cancelled_when_clean_files_false(self):
+        """clean_files=False → a RUNNING index future is NOT cancelled; it completes.
+
+        Uses the same gate pattern as TestOrchestratorCancellationAtIndexingStage:
+        a RUNNING future that only resolves after cancel is first detected, so the
+        poll loop definitely sees it as RUNNING when _clean_files=False is evaluated.
+        The key assertion is that the future completes (not cancelled).
+        """
+        from digitize.processing.orchestrator import process_documents
+
+        task, proc_fut, chunk_fut = self._base_setup()
+
+        cancel_seen = threading.Event()
+        running_index_fut: Future = Future()
+        running_index_fut.set_running_or_notify_cancel()  # → RUNNING
+
+        def _resolve_after_cancel():
+            cancel_seen.wait(timeout=5)
+            try:
+                running_index_fut.set_result(True)
+            except Exception:
+                pass
+
+        threading.Thread(target=_resolve_after_cancel, daemon=True).start()
+
+        cancel_calls = {"n": 0}
+
+        def is_cancelled(job_id):
+            cancel_calls["n"] += 1
+            if cancel_calls["n"] >= 3:
+                cancel_seen.set()
+                return True
+            return False
+
+        mock_db = Mock()
+        mock_db.get_conversion_tasks_by_job_id = Mock(return_value=[task])
+        mock_db.is_job_cancelled = Mock(side_effect=is_cancelled)
+        mock_db.cancel_tasks_for_job = Mock()
+        mock_db.get_conversion_task = Mock(return_value=task)
+        # clean_files=False — index cancel event must NOT be set
+        mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
+
+        submit_calls = {"n": 0}
+
+        def tpe_submit(*args, **kwargs):
+            n = submit_calls["n"]
+            submit_calls["n"] += 1
+            if n == 0:
+                return proc_fut
+            if n == 1:
+                return chunk_fut
+            return running_index_fut
+
+        with (
+            patch("digitize.processing.orchestrator.db_manager", mock_db),
+            patch("digitize.processing.orchestrator.get_status_manager", return_value=Mock()),
+            patch("digitize.processing.orchestrator.ContextAwareThreadPoolExecutor") as mock_tpe,
+            patch("digitize.processing.orchestrator.count_chunks", return_value=3),
+            patch("digitize.processing.orchestrator.merge_chunked_documents", return_value=[]),
+            patch("digitize.processing.orchestrator.time.sleep"),
+        ):
+            tpe_inst = MagicMock()
+            tpe_inst.__enter__ = Mock(return_value=tpe_inst)
+            tpe_inst.__exit__ = Mock(return_value=False)
+            tpe_inst.submit = Mock(side_effect=tpe_submit)
+            mock_tpe.return_value = tpe_inst
+
+            with pytest.raises(JobCancelledError):
+                process_documents(
+                    input_paths=["fake.pdf"],
+                    out_path="/tmp/out",
+                    llm_model="m", llm_endpoint="e",
+                    emb_endpoint="emb",
+                    max_tokens=512,
+                    job_id="job-cancel-clean-false",
+                    doc_id_dict={"fake.pdf": "doc-1"},
+                    indexing_callback=lambda doc_id, chunks, path, **kw: True,
+                )
+
+        assert not running_index_fut.cancelled(), "future must NOT be cancelled when clean_files=False"
+
+    def test_index_cancel_event_passed_to_indexing_callback(self):
+        """The cancel_event kwarg passed to indexing_callback is the _index_cancel_event,
+        and it is only set when clean_files=True."""
+        from digitize.processing.orchestrator import process_documents
+        import threading
+
+        task, proc_fut, chunk_fut = self._base_setup()
+
+        received_events: list = []
+        index_fut: Future = Future()
+        index_fut.set_result(True)
+
+        mock_db = Mock()
+        mock_db.get_conversion_tasks_by_job_id = Mock(return_value=[task])
+        mock_db.is_job_cancelled = Mock(return_value=False)
+        mock_db.cancel_tasks_for_job = Mock()
+        mock_db.get_conversion_task = Mock(return_value=task)
+
+        submit_calls = {"n": 0}
+
+        def tpe_submit(fn, *args, **kwargs):
+            n = submit_calls["n"]
+            submit_calls["n"] += 1
+            if n == 0:
+                return proc_fut
+            if n == 1:
+                return chunk_fut
+            # Capture the cancel_event passed to the indexing_callback submit
+            received_events.append(kwargs.get("cancel_event"))
+            return index_fut
+
+        with (
+            patch("digitize.processing.orchestrator.db_manager", mock_db),
+            patch("digitize.processing.orchestrator.get_status_manager", return_value=Mock()),
+            patch("digitize.processing.orchestrator.ContextAwareThreadPoolExecutor") as mock_tpe,
+            patch("digitize.processing.orchestrator.count_chunks", return_value=2),
+            patch("digitize.processing.orchestrator.merge_chunked_documents", return_value=[]),
+            patch("digitize.processing.orchestrator.time.sleep"),
+        ):
+            tpe_inst = MagicMock()
+            tpe_inst.__enter__ = Mock(return_value=tpe_inst)
+            tpe_inst.__exit__ = Mock(return_value=False)
+            tpe_inst.submit = Mock(side_effect=tpe_submit)
+            mock_tpe.return_value = tpe_inst
+
+            process_documents(
+                input_paths=["fake.pdf"],
+                out_path="/tmp/out",
+                llm_model="m", llm_endpoint="e",
+                emb_endpoint="emb",
+                max_tokens=512,
+                job_id="job-event-capture",
+                doc_id_dict={"fake.pdf": "doc-1"},
+                indexing_callback=lambda doc_id, chunks, path, **kw: True,
+            )
+
+        assert len(received_events) == 1
+        event = received_events[0]
+        assert isinstance(event, threading.Event), "cancel_event must be a threading.Event"
+        # On a non-cancelled job the index cancel event must NOT be set
+        assert not event.is_set(), "_index_cancel_event must be clear on a healthy run"
