@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/project-ai-services/ai-services/assets"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/spf13/cobra"
@@ -48,18 +48,28 @@ func models(template string) ([]string, error) {
 	return helpers.ListModels(template, "")
 }
 
-// getCatalogModels is a helper that creates a catalog provider and collects models.
-// excludeComponentProviders is a variadic parameter that allows excluding specific component provider by ID.
-func getCatalogModels(ctx context.Context, templateID string, excludeComponentProviders ...string) ([]string, error) {
-	provider, err := catalog.NewCatalogProvider(nil)
+// getCatalogModels calls the running catalog API to retrieve models for a
+// service or architecture template. It tries the service endpoint first, then
+// the architecture endpoint.
+// excludeProviders is forwarded to the server as the ?exclude_providers= query
+// param (e.g. pass "watsonx" to omit watsonx models during download).
+func getCatalogModels(ctx context.Context, templateID string, excludeProviders ...string) ([]string, error) {
+	appClient, err := client.NewApplicationClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+		return nil, fmt.Errorf("failed to connect to catalog API: %w", err)
 	}
 
-	models, err := provider.GetCatalogModels(ctx, templateID, excludeComponentProviders...)
-	if err != nil {
-		return nil, err
+	// Try service endpoint first.
+	apiModels, err := appClient.GetServiceModels(ctx, templateID, excludeProviders...)
+	if err == nil {
+		return apiModels, nil
 	}
 
-	return models, nil
+	// Fall through to architecture endpoint.
+	apiModels, err = appClient.GetArchitectureModels(ctx, templateID, excludeProviders...)
+	if err == nil {
+		return apiModels, nil
+	}
+
+	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
 }

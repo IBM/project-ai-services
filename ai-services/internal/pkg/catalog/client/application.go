@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -22,6 +23,8 @@ const (
 	compProviderParamsRoute = "/api/v1/components/%s/providers/%s/params"
 	svcImagesRoute          = "/api/v1/services/%s/images"
 	archImagesRoute         = "/api/v1/architectures/%s/images"
+	svcModelsRoute          = "/api/v1/services/%s/models"
+	archModelsRoute         = "/api/v1/architectures/%s/models"
 )
 
 // ImagesResponse is the JSON body returned by GET /api/v1/services/:id/images
@@ -326,6 +329,63 @@ func (c *ApplicationClient) GetArchitectureImages(ctx context.Context, architect
 	}
 
 	return &result, nil
+}
+
+// modelsResponse is the shape of the JSON body returned by the /models endpoints.
+type modelsResponse struct {
+	Models []string `json:"models"`
+}
+
+// GetServiceModels calls GET /api/v1/services/:id/models and returns the list of
+// unique model names referenced by the service's component dependencies.
+// Pass excludeProviders to have the server omit models from those component providers
+// (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
+func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID string, excludeProviders ...string) ([]string, error) {
+	var result modelsResponse
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if len(excludeProviders) > 0 {
+		req.SetQueryParam("exclude_providers", strings.Join(excludeProviders, ","))
+	}
+
+	resp, err := req.Get(fmt.Sprintf(svcModelsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service models: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result.Models, nil
+}
+
+// GetArchitectureModels calls GET /api/v1/architectures/:id/models and returns the
+// list of unique model names referenced across all services in the architecture.
+// Pass excludeProviders to have the server omit models from those component providers
+// (e.g. "watsonx"). Maps to the ?exclude_providers= query parameter.
+func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architectureID string, excludeProviders ...string) ([]string, error) {
+	var result modelsResponse
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if len(excludeProviders) > 0 {
+		req.SetQueryParam("exclude_providers", strings.Join(excludeProviders, ","))
+	}
+
+	resp, err := req.Get(fmt.Sprintf(archModelsRoute, architectureID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture models: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result.Models, nil
 }
 
 // Made with Bob
