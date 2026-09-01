@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -99,7 +101,10 @@ func joinRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.Run(context.Background(), opts)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	return join.Run(ctx, opts)
 }
 
 // configureFlags registers the flags shared by the join and grpcserver
@@ -151,8 +156,8 @@ func newJoinCmd() *cobra.Command {
 	return cmd
 }
 
-var grpcServerCmd = &cobra.Command{
-	Use:    "grpcserver <gateway>",
+var grpcStreamCmd = &cobra.Command{
+	Use:    "grpcstream <gateway>",
 	Short:  "Connect to the catalog gRPC worker-gateway",
 	Hidden: true,
 	Args:   cobra.ExactArgs(1),
@@ -161,10 +166,10 @@ var grpcServerCmd = &cobra.Command{
 
 		return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 	},
-	RunE: grpcServerRunE,
+	RunE: grpcStreamRunE,
 }
 
-func grpcServerRunE(_ *cobra.Command, args []string) error {
+func grpcStreamRunE(_ *cobra.Command, args []string) error {
 	opts := join.Options{
 		GatewayAddr: args[0],
 		Token:       token,
@@ -178,11 +183,14 @@ func grpcServerRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.GrpcServer(context.Background(), opts)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	return join.RunGrpcStream(ctx, opts)
 }
 
-func newGrpcServerCmd() *cobra.Command {
-	configureFlags(grpcServerCmd)
+func newGrpcStreamCmd() *cobra.Command {
+	configureFlags(grpcStreamCmd)
 
-	return grpcServerCmd
+	return grpcStreamCmd
 }

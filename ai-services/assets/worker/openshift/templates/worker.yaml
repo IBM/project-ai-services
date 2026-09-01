@@ -28,7 +28,7 @@ spec:
           command:
             - /usr/bin/ai-services
             - worker
-            - grpcserver
+            - grpcstream
             - "{{ .Values.worker.gatewayAddr }}"
             - --token={{ .Values.worker.token }}
             - --runtime={{ .Values.worker.runtime }}

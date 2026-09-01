@@ -1,9 +1,8 @@
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.292
+  image: icr.io/ai-services-cicd/ai-services:v0.0.304
   runtime: "openshift"
-  adminPasswordHash: ""
-  # @generate:password length=32, special=false
-  dbEncryptionKey: ""
+  token: ""
+  gatewayAddr: ""
   resources:
     requests:
       memory: "1Gi"
