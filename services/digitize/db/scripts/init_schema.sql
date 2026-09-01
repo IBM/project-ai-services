@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS document_checksum (
     doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
+-- Schema for APScheduler job store
+CREATE SCHEMA IF NOT EXISTS scheduler;
+
 -- Connector tables
 CREATE TABLE IF NOT EXISTS connectors (
     id                      TEXT        PRIMARY KEY,
