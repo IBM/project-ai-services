@@ -18,7 +18,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.51
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.52
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -52,7 +52,7 @@ postgres:
 
 instruct:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
@@ -74,7 +74,7 @@ embedding:
 
 reranker:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
   model:
     # @hidden
     name: BAAI/bge-reranker-v2-m3

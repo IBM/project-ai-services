@@ -1,6 +1,6 @@
 version: "2"
 run:
-  go: "1.23"
+  go: "1.26"
   build-tags:
     - exclude_graphdriver_btrfs containers_image_openpgp remote
 linters:

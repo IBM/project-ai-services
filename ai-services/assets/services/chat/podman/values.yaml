@@ -11,3 +11,6 @@ backend:
     numChunksPostReranker: 3
     rerank: true
     systemPrompt: ""
+mcp:
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.1
+  port: "5001"

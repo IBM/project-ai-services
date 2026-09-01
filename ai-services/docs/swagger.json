@@ -356,6 +356,85 @@
                 }
             }
         },
+        "/applications/{id}/datasources": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 207 with per-datasource errors when one or more fail.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Connect datasources to application",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "List of datasource IDs to connect",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "All datasources connected successfully"
+                    },
+                    "207": {
+                        "description": "One or more datasources failed to connect",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Application or datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "No eligible running service found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/applications/{id}/ps": {
             "get": {
                 "security": [
@@ -2098,6 +2177,33 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest": {
+            "type": "object",
+            "required": [
+                "datasource_ids"
+            ],
+            "properties": {
+                "datasource_ids": {
+                    "description": "DatasourceIDs is the list of datasource connector UUIDs to connect.",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError"
+                    }
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
             "type": "object",
             "properties": {
@@ -2211,6 +2317,17 @@
             "type": "object",
             "properties": {
                 "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError": {
+            "type": "object",
+            "properties": {
+                "datasource_id": {
+                    "type": "string"
+                },
+                "error": {
                     "type": "string"
                 }
             }

@@ -19,6 +19,7 @@ import (
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 const (
@@ -36,6 +37,10 @@ const (
 	errMsgPodNotFound = "Pod not found or error: %v"
 )
 
+// errWorkerDisconnected is returned by createRuntime when an app's worker is not
+// connected. syncApplication checks it via errors.Is to set the application status.
+var errWorkerDisconnected = errors.New("worker not connected")
+
 // ResourceCounts tracks expected resource counts and names from templates.
 type ResourceCounts struct {
 	Pods        int
@@ -51,9 +56,10 @@ type SyncService struct {
 	serviceDepsRepo dbrepo.ServiceDependencyRepository
 	syncInterval    time.Duration
 	stopChan        chan struct{}
-	syncMutex       sync.Mutex  // Prevents overlapping sync cycles
-	isSyncing       bool        // Tracks if a sync is currently running
-	runtimeSync     RuntimeSync // Runtime-specific sync backend
+	syncMutex       sync.Mutex            // Prevents overlapping sync cycles
+	isSyncing       bool                  // Tracks if a sync is currently running
+	runtimeSync     RuntimeSync           // Runtime-specific sync backend
+	workerRegistry  stream.WorkerRegistry // nil on servers with no remote workers
 }
 
 // newRuntimeSync constructs the appropriate RuntimeSync for the configured runtime type.
@@ -76,6 +82,7 @@ func NewSyncService(
 	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	syncInterval time.Duration,
 	catalogProvider *catalogpkg.CatalogProvider,
+	reg stream.WorkerRegistry,
 ) (*SyncService, error) {
 	if syncInterval == 0 {
 		syncInterval = DefaultSyncInterval
@@ -94,6 +101,7 @@ func NewSyncService(
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
 		runtimeSync:     runtimeSync,
+		workerRegistry:  reg,
 	}, nil
 }
 
@@ -182,8 +190,14 @@ func (s *SyncService) performSync(ctx context.Context) {
 // 2. Sync services
 // 3. Update application status based on collected errors.
 func (s *SyncService) syncApplication(ctx context.Context, app *models.Application) error {
-	// Initialize runtime client in the application namespace.
-	rt, err := vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
+	// Initialize runtime client.
+	// For remote worker apps resolve a RemoteRuntime via the worker registry;
+	// for local apps use the local runtime factory.
+	rt, err := s.createRuntime(ctx, app)
+	if errors.Is(err, errWorkerDisconnected) {
+		return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -231,6 +245,43 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	logger.InfofCtx(ctx, "Completed sync for application: %s", app.Name)
 
 	return nil
+}
+
+// createRuntime returns the appropriate runtime.Runtime for the given application.
+// When the app has a WorkerID and the worker is connected, a RemoteRuntime is
+// returned. Returns errWorkerDisconnected (not a hard error) when the worker is
+// absent from the registry or its status is not ready.
+// TODO: in future, set the application status to Error with message
+// "orphaned: worker was deregistered" when worker_id is NULL — this happens
+// because the ON DELETE SET NULL migration nulls worker_id on all applications
+// assigned to a deregistered worker.
+func (s *SyncService) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
+	// TODO: Once remote runtime is enabled by default this check is not needed
+	// and the last return line must be deleted.
+	if app.WorkerID != nil {
+		if s.workerRegistry == nil {
+			return nil, errWorkerDisconnected
+		}
+
+		workerName, ok := s.workerRegistry.WorkerNameByID(*app.WorkerID)
+		if !ok {
+			return nil, errWorkerDisconnected
+		}
+
+		if !s.workerRegistry.IsWorkerConnected(ctx, workerName) {
+			return nil, fmt.Errorf("worker %q not connected: %w", workerName, errWorkerDisconnected)
+		}
+
+		rtStr, _ := s.workerRegistry.WorkerRuntimeType(workerName)
+		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.workerRegistry)
+		if err != nil {
+			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+		}
+
+		return rt, nil
+	}
+
+	return vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
 }
 
 // syncAllComponents syncs all components for an application.

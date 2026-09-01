@@ -16,6 +16,24 @@ definitions:
     - provider_id
     - version
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest:
+    properties:
+      datasource_ids:
+        description: DatasourceIDs is the list of datasource connector UUIDs to connect.
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - datasource_ids
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError'
+        type: array
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo:
     properties:
       id:
@@ -110,6 +128,13 @@ definitions:
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateDatasourceResponse:
     properties:
       id:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError:
+    properties:
+      datasource_id:
+        type: string
+      error:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
@@ -1083,6 +1108,60 @@ paths:
       summary: Update application
       tags:
       - Applications
+  /applications/{id}/datasources:
+    put:
+      consumes:
+      - application/json
+      description: Links one or more datasource connectors to each eligible (Digitize)
+        service in a running application. Each datasource is processed independently.
+        Returns 204 when all succeed; returns 207 with per-datasource errors when
+        one or more fail.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: List of datasource IDs to connect
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: All datasources connected successfully
+        "207":
+          description: One or more datasources failed to connect
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Application or datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: No eligible running service found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Connect datasources to application
+      tags:
+      - Datasources
   /applications/{id}/ps:
     get:
       description: Retrieves the process status and runtime information for an application

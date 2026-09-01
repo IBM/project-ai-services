@@ -348,6 +348,35 @@ func (r *Registry) WorkerMetadata(workerName string) (map[string]string, bool) {
 	return entry.Metadata, true
 }
 
+// WorkerID returns the database UUID assigned to the named worker at registration
+// time. Returns (uuid.Nil, false) if the worker is not currently connected.
+func (r *Registry) WorkerID(workerName string) (uuid.UUID, bool) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerName]
+	r.mu.RUnlock()
+	if !ok {
+		return uuid.Nil, false
+	}
+
+	return entry.DBID, true
+}
+
+// WorkerNameByID returns the name of the worker whose DBID matches id.
+// Scans the in-memory map under a read lock — O(n) but n is tiny in practice.
+// Returns ("", false) if no connected worker has that ID.
+func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for name, entry := range r.workers {
+		if entry.DBID == id {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
 // IsWorkerConnected checks the in-memory cache first, then confirms status=ready
 // in the DB. Returns false if the worker is absent from the cache, not found in
 // the DB, or has any status other than ready.
