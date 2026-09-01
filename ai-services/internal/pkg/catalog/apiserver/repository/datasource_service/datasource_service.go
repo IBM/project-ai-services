@@ -571,7 +571,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, SensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
 // sendToService POSTs the connector payload to a single eligible service and records the

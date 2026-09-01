@@ -15,8 +15,8 @@ import (
 	"time"
 
 	catalogpkg "github.com/project-ai-services/ai-services/internal/pkg/catalog"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
