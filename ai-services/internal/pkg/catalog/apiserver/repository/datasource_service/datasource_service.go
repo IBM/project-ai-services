@@ -225,7 +225,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 }
 
 // GetDatasourceServices returns the list of services connected to the given datasource,
-// enriched with live sync state from each service's Digitize pod.
+// enriched with live sync state from each downstream service pod.
 //
 // Flow:
 //  1. Verify the datasource exists — returns 404 when it does not.

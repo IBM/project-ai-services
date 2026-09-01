@@ -129,7 +129,7 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 // GetDatasourceServices godoc
 //
 //	@Summary		Get connected services for a datasource
-//	@Description	Returns the list of services currently connected to the given datasource, each enriched with live sync state fetched from its Digitize pod. Sync-state fetch failures degrade gracefully — the service entry is still returned with sync_status set to "unknown".
+//	@Description	Returns the list of services currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the service entry is still returned with sync_status set to "unknown".
 //	@Tags			Datasources
 //	@Produce		json
 //	@Security		BearerAuth

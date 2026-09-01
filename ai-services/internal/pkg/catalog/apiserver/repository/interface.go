@@ -37,7 +37,7 @@ type DatasourceServiceInterface interface {
 	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
 
 	// GetDatasourceServices returns the list of services currently connected to a datasource,
-	// each enriched with live sync state from its Digitize pod.
+	// each enriched with live sync state from its downstream service pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.
 	GetDatasourceServices(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceServicesResponse, error)
 }
