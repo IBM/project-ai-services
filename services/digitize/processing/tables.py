@@ -290,7 +290,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         raw_markdown = table.export_to_markdown(doc=converted_doc)
         caption = table.caption_text(doc=converted_doc)
 
-        if not caption:
+        if not caption and is_docx:
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
         # Clean the markdown to fix parser glitches and recover hidden captions

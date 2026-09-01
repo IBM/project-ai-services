@@ -239,7 +239,6 @@ def recover_table_caption_from_body_context(converted_doc, table_ix: int, search
         logger.debug(f"recover_table_caption_from_body_context: {target_ref} -> section header fallback '{section_header}'")
         return section_header
 
-    logger.debug(f"recover_table_caption_from_body_context: {target_ref} -> no caption found")
     return ""
 
 def estimate_docx_page_count(docx_path: str) -> int:
