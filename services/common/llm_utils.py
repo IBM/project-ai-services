@@ -134,6 +134,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             idx = futures[future]
             try:
                 results[idx] = future.result()
+                logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
             except Exception as e:
                 error_msg = f"Failed to process table {idx}: {str(e)}"
                 logger.error(error_msg)
