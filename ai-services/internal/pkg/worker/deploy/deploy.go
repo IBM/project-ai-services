@@ -107,7 +107,6 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error
 	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
 
 	var existingResources []string
-	deployed := true
 	for _, label := range labels {
 		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
 		if err != nil {
@@ -117,15 +116,13 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime) (bool, []string, error
 		for _, p := range pods {
 			existingResources = append(existingResources, p.Name)
 		}
-		if len(pods) == 0 {
-			// Set deployed to false when pod is not present for the given label.
-			deployed = false
-		}
 	}
 
-	logger.InfofCtx(ctx, "existingResource: ", existingResources)
+	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
 
-	return deployed, existingResources, nil
+	const workerResourceCount = 2
+	
+	return len(existingResources) == workerResourceCount, existingResources, nil
 }
 
 // ─── internal ────────────────────────────────────────────────────────────────
@@ -234,7 +231,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 func getOptionalFlags(opts Options) string {
 	var flags string
 	if opts.SSLCertPath != "" && opts.SSLKeyPath != "" {
-		flags += fmt.Sprintf("--ssl-cert %s --ssl-key %s ", opts.SSLCertPath, opts.SSLKeyPath)
+		flags += fmt.Sprintf("--ssl-cert '%s' --ssl-key '%s' ", opts.SSLCertPath, opts.SSLKeyPath)
 	}
 	if opts.DomainName != "" {
 		flags += fmt.Sprintf("--domain-name %s ", opts.DomainName)
@@ -242,5 +239,6 @@ func getOptionalFlags(opts Options) string {
 	if opts.HTTPSPort > 0 {
 		flags += fmt.Sprintf("--https-port %d", opts.HTTPSPort)
 	}
+	
 	return flags
 }

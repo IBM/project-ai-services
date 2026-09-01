@@ -130,7 +130,7 @@ func GrpcConnect(ctx context.Context, opts Options) error {
 
 	client := workerpb.NewWorkerGatewayClient(conn)
 
-	// ── Step 3: Register + stream loop ──────────────────────────────────────-
+	// ── Step 3: Register + stream loop ───────────────────────────────────────
 	meta := map[string]string{
 		workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
 		workerconstants.MetaKeyDomainSuffix: domainSuffix,
@@ -229,7 +229,7 @@ func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRou
 		return fmt.Errorf("initial heartbeat: %w", err)
 	}
 
-	logger.InfofCtx(ctx, "CommandStream open for worker %q — press Ctrl-C to stop.\n", workerName)
+	logger.InfofCtx(ctx, "CommandStream open for worker %q \n", workerName)
 
 	// Two concurrent activities:
 	//   • recv goroutine: read Commands from the gateway and handle them.

@@ -3,10 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -175,6 +172,7 @@ func grpcConnectRunE(_ *cobra.Command, args []string) error {
 		Setup: workerdeploy.Options{
 			BaseDir:     baseDir,
 			HTTPSPort:   httpsPort,
+			DomainName:  domainName,
 			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
 			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
 		},
