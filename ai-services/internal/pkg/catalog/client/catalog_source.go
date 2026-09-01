@@ -130,6 +130,7 @@ func (s *apiWithFallback) LoadService(ctx context.Context, id string) (*types.Se
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API GetServiceDetails failed, falling back to embedded: %v", err)
+
 			return loadServiceFromEmbedded(s.embedded, id)
 		}
 
@@ -144,6 +145,7 @@ func (s *apiWithFallback) GetServiceParams(ctx context.Context, serviceID string
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API GetServiceParams failed, falling back to embedded: %v", err)
+
 			return s.embedded.GetServiceParams(ctx, serviceID)
 		}
 
@@ -158,6 +160,7 @@ func (s *apiWithFallback) GetComponentProviderParams(ctx context.Context, compon
 	if err != nil {
 		if isConnectivityError(err) {
 			logger.DebugfCtx(ctx, "API GetComponentProviderParams failed, falling back to embedded: %v", err)
+
 			return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
 		}
 
@@ -236,6 +239,7 @@ func isConnectivityError(err error) bool {
 	// HTTPError is produced by our client for non-2xx responses — that is a
 	// server-side error, not a connectivity failure.
 	var httpErr *HTTPError
+
 	return !errors.As(err, &httpErr)
 }
 
