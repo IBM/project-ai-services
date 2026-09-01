@@ -158,7 +158,14 @@ func (h *CatalogHandler) GetServiceDetails(c *gin.Context) {
 func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 	architectureID := c.Param("id")
 
-	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID)
+	// runtime is optional; defaults to the server's local runtime when absent.
+	// Pass ?runtime=openshift to get deploy options scoped to an OpenShift worker.
+	rt := c.Query("runtime")
+	if rt == "" {
+		rt = string(vars.RuntimeFactory.GetRuntimeType())
+	}
+
+	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for architecture '%s': %v", architectureID, err),
@@ -186,7 +193,14 @@ func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	serviceID := c.Param("id")
 
-	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID)
+	// runtime is optional; defaults to the server's local runtime when absent.
+	// Pass ?runtime=openshift to get deploy options scoped to an OpenShift worker.
+	rt := c.Query("runtime")
+	if rt == "" {
+		rt = string(vars.RuntimeFactory.GetRuntimeType())
+	}
+
+	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for service '%s': %v", serviceID, err),
@@ -217,7 +231,7 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 	componentType := c.Param("component_type")
 	providerID := c.Param("provider_id")
 
-	schema, err := h.provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID)
+	schema, err := h.provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", componentType, providerID, err),
@@ -314,7 +328,7 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 	serviceID := c.Param("id")
 
-	schema, err := h.provider.GetServiceParams(c.Request.Context(), serviceID)
+	schema, err := h.provider.GetServiceParams(c.Request.Context(), serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for service '%s': %v", serviceID, err),

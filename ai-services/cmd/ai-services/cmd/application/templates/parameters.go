@@ -10,6 +10,7 @@ import (
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -68,7 +69,7 @@ func displayServiceParameters(ctx context.Context, source catalogClient.CatalogS
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := source.GetServiceParams(ctx, serviceID)
+	schema, err := provider.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -104,7 +105,7 @@ func displayServiceInArchitecture(ctx context.Context, source catalogClient.Cata
 	}
 
 	// Display service parameters
-	schema, err := source.GetServiceParams(ctx, serviceID)
+	schema, err := provider.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -139,7 +140,7 @@ func displayComponentsParameters(ctx context.Context, source catalogClient.Catal
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := source.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID)
+				schema, err := provider.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID, string(vars.RuntimeFactory.GetRuntimeType()))
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}
