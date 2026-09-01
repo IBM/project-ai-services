@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
     error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
+    sync_message            TEXT,
     CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
 );
 

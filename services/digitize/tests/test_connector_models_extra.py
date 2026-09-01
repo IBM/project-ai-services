@@ -218,9 +218,25 @@ class TestConnectorListItem:
             sync_status="up to date",
             error=None,
             total_files=42,
+            sync_message=None,
         )
         assert item.total_files == 42
         assert item.last_sync_at is None
+        assert item.sync_message is None
+
+    def test_construction_with_sync_message(self):
+        item = ConnectorListItem(
+            id="c1",
+            name="my-conn",
+            type="s3",
+            attached_at="2024-01-01T00:00:00Z",
+            last_sync_at=None,
+            sync_status="syncing",
+            error=None,
+            total_files=42,
+            sync_message="Processing 3/10 files",
+        )
+        assert item.sync_message == "Processing 3/10 files"
 
 
 class TestConnectorDetailResponse:
@@ -237,9 +253,11 @@ class TestConnectorDetailResponse:
             error=None,
             connection_details={"host": "sftp.example.com"},
             total_files=10,
+            sync_message=None,
         )
         assert resp.sync_interval_seconds == 300
         assert resp.connection_details["host"] == "sftp.example.com"
+        assert resp.sync_message is None
 
 
 class TestSyncLogItem:

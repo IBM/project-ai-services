@@ -226,6 +226,7 @@ class ConnectorListItem(BaseModel):
     sync_status: str
     error: Optional[str]
     total_files: int
+    sync_message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -238,6 +239,7 @@ class ConnectorListItem(BaseModel):
                 "sync_status": "up to date",
                 "error": None,
                 "total_files": 15,
+                "sync_message": None,
             }
         }
     }
@@ -257,6 +259,7 @@ class ConnectorDetailResponse(BaseModel):
     error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int
+    sync_message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -277,6 +280,7 @@ class ConnectorDetailResponse(BaseModel):
                     "remote_path": "/exports",
                 },
                 "total_files": 15,
+                "sync_message": None,
             }
         }
     }

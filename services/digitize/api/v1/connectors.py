@@ -509,6 +509,7 @@ async def list_connectors(
                 sync_status=c.sync_status,
                 error=c.error,
                 total_files=c.total_files,
+                sync_message=c.sync_message,
             )
             for c in connectors
         ]
@@ -568,6 +569,7 @@ async def get_connector(connector_id: str):
             error=connector.error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
+            sync_message=connector.sync_message,
         )
     except HTTPException as exc:
         message = f"Failed to get connector {connector_id!r}: {extract_http_error_message(exc)}"

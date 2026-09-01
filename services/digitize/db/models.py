@@ -207,6 +207,7 @@ class Connector(Base):
     sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     sync_logs: Mapped[List["ConnectorSyncLog"]] = relationship(

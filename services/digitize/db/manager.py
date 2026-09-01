@@ -878,7 +878,7 @@ class DatabaseManager:
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
                     connector.last_sync_at, connector.sync_status,
-                    connector.error, connector.total_files,
+                    connector.error, connector.total_files, connector.sync_message,
                 )
                 session.expunge(connector)
                 return connector
@@ -951,7 +951,7 @@ class DatabaseManager:
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
                         c.attached_at, c.last_sync_at, c.sync_status,
-                        c.error, c.total_files,
+                        c.error, c.total_files, c.sync_message,
                     )
                     session.expunge(c)
                 logger.debug(f"Listed {len(connectors)} connector(s)")
@@ -989,7 +989,7 @@ class DatabaseManager:
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
                         c.attached_at, c.last_sync_at, c.sync_status,
-                        c.error, c.total_files,
+                        c.error, c.total_files, c.sync_message,
                     )
                     session.expunge(c)
                 logger.debug(
@@ -1375,6 +1375,7 @@ class DatabaseManager:
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),
                     "sync_status": connector_sync_status,
+                    "sync_message": None,
                 }
                 if status == SyncLogStatus.COMPLETED:
                     values["error"] = None
@@ -1442,7 +1443,8 @@ class DatabaseManager:
     @staticmethod
     def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
         """
-        Atomically increment completed_files by *count* on the identified sync-log row.
+        Atomically increment completed_files by *count* on the identified sync-log row,
+        then write a "Processing x/y files" sync_message on the connector row.
 
         Uses a SQL expression (completed_files + count) so concurrent calls do
         not race against each other.  Returns True if the row was found and
@@ -1459,14 +1461,25 @@ class DatabaseManager:
                     .values(
                         completed_files=ConnectorSyncLog.completed_files + count
                     )
+                    .returning(
+                        ConnectorSyncLog.completed_files,
+                        ConnectorSyncLog.new_files,
+                    )
                 )
-                result = session.execute(stmt)
-                updated = result.rowcount > 0
-                if not updated:
+                row = session.execute(stmt).one_or_none()
+                if row is None:
                     logger.warning(
                         f"Sync log connector={connector_id!r} seq={seq} not found for completed_files increment"
                     )
-                return updated
+                    return False
+                completed, new_files = row
+                sync_message = f"Processing {completed}/{new_files} files"
+                session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(sync_message=sync_message)
+                )
+                return True
         except SQLAlchemyError as e:
             logger.error(
                 f"DB error in increment_completed_files(connector={connector_id!r}, seq={seq}): {e}",
@@ -2165,6 +2178,7 @@ class DatabaseManager:
                     .values(
                         sync_status=ConnectorStatus.OUT_OF_SYNC,
                         error=error,
+                        sync_message=None,
                     )
                     .returning(Connector.id)
                 )
@@ -2205,6 +2219,12 @@ class DatabaseManager:
                     )
                     .returning(ConnectorSyncLog.seq)
                 ).one_or_none()
+                if result is not None:
+                    session.execute(
+                        update(Connector)
+                        .where(Connector.id == connector_id)
+                        .values(sync_message=None)
+                    )
                 return result is not None
         except SQLAlchemyError as e:
             logger.error(
