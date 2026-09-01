@@ -6,6 +6,7 @@ retrieval, and bulk deletion helpers.
 """
 import asyncio
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from common.misc_utils import get_logger
@@ -273,6 +274,63 @@ async def enqueue_conversion_tasks(
         )
 
     db_manager.create_conversion_tasks_batch(tasks)
+
+
+async def launch_ingest_pipeline(
+    job_id: str,
+    doc_id_dict: dict,
+    file_checksum_dict: Optional[dict] = None,
+    staging_dir: Optional[Path] = None,
+) -> None:
+    """
+    Fire-and-forget coroutine that drives the ingestion pipeline for *job_id*.
+
+    Runs the blocking ``ingest()`` call in a thread so the asyncio event loop
+    stays free.  Cleans up the staging directory when done regardless of outcome.
+
+    This is the single shared implementation used by both:
+    - ``api/v1/jobs.py`` — for user-submitted ingestion jobs, and
+    - ``connectors/sync_tick.py`` — for connector-sourced ingestion batches.
+
+    Parameters
+    ----------
+    job_id:
+        The job whose conversion_tasks rows the pipeline should poll and
+        process.
+    doc_id_dict:
+        Mapping of ``filename → doc_id`` as returned by
+        ``initialize_job_state()``.
+    file_checksum_dict:
+        Optional ``filename → md5-hex`` map used for deduplication.  Pass
+        the connector's ``filename_to_checksum`` dict here when calling from
+        ``sync_tick.py``.
+    staging_dir:
+        The staging directory to clean up after the pipeline finishes.
+        Defaults to ``settings.digitize.staging_dir / job_id`` (the path
+        used for user jobs).  Pass ``batch_dir`` when calling from
+        ``sync_tick.py`` (connector batches live under a different subtree).
+    """
+    from digitize.models import DocStatus, JobStatus
+    from digitize.utils.db import get_status_manager
+
+    resolved: Path = staging_dir if staging_dir is not None else settings.digitize.staging_dir / job_id
+
+    try:
+        logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
+        from digitize.pipeline.ingest import ingest
+        await asyncio.to_thread(ingest, resolved, job_id, doc_id_dict, file_checksum_dict)
+        logger.info(f"Ingestion pipeline for job {job_id} completed successfully")
+    except Exception as exc:
+        logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr = get_status_manager(job_id)
+        status_mgr.update_job_progress(
+            "",
+            DocStatus.FAILED,
+            JobStatus.FAILED,
+            error=f"Error occurred while processing ingestion pipeline: {exc}",
+        )
+    finally:
+        cleanup_staging_directory(resolved.name, resolved.parent)
 
 
 async def stage_upload_files(
