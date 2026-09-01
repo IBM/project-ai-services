@@ -1017,11 +1017,10 @@ When `GET /api/v1/applications/:id/datasources/:datasource_id` is called:
 
 1. Verify the application exists by `applicationID` — return `404` if not found.
 2. Verify the datasource connector exists by `datasourceID` — return `404` if not found.
-3. Call `GetLinkedServiceEndpoints(datasourceID, 'connector')` to fetch all service rows linked to this datasource, then filter the result in-memory by `applicationID`. Return `404` if no matching rows are found — meaning the datasource is not connected to this application.
+3. Call `GetLinkedServiceEndpoints(datasourceID, 'connector')` and scan the result for the first row whose `applicationID` matches. Capture the API endpoint URL from that row's `endpoints` JSONB column at the same time and break. Return `404` if no matching row is found — meaning the datasource is not connected to this application.
 4. Resolve `provider.name` via `catalogProvider.LoadConnector(connectorType, provider)`; fall back to the stored provider ID if the catalog entry is missing.
-5. Extract the API endpoint URL from the first matching service row's `endpoints` JSONB column.
-6. Call `GET /v1/connectors/<datasourceID>` on the linked service using the resolved endpoint URL. If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
-7. Return the merged response: catalog identity fields at the top level, live sync fields nested under `service_details`.
+5. Call `GET /v1/connectors/<datasourceID>` on the linked service using the endpoint URL captured in step 3. If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
+6. Return the merged response: catalog identity fields at the top level, live sync fields nested under `service_details`.
 
 ---
 

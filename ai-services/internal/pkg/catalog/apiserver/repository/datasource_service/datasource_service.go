@@ -714,14 +714,13 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 // Flow:
 //  1. Verify the application exists — returns 404 if not found.
 //  2. Verify the datasource connector exists — returns 404 if not found.
-//  3. Query service_dependencies for all rows linked to this datasource and filter
-//     in-memory by applicationID. Returns 404 when no matching row exists — meaning
-//     the datasource is not connected to this application.
+//  3. Scan service_dependencies rows for this datasource; on the first row whose
+//     applicationID matches, capture the endpoint URL and break. Returns 404 when
+//     no matching row is found — meaning the datasource is not connected to this application.
 //  4. Resolve provider display name via CatalogProvider.LoadConnector; falls back to the
 //     stored provider ID so the response is never blocked by a missing catalog entry.
-//  5. Extract the API endpoint URL from the first matching service row's EndpointsJSON.
-//  6. Call fetchServiceSyncDetails to fetch live sync state from the connected service.
-//     Degrades gracefully to sync_status="unknown" when the service is unreachable.
+//  5. Fetch live sync state using the captured endpoint URL; degrades gracefully to
+//     sync_status="unknown" when the service is unreachable.
 func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error) {
 	// Step 1: verify the application exists.
 	app, err := s.appRepo.GetByID(ctx, applicationID)
@@ -749,23 +748,27 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
 	}
 
-	// Step 3: confirm the datasource is linked to a service in this application.
-	// GetLinkedServiceEndpoints issues a single JOIN query across service_dependencies →
-	// services → applications; the result set is small (one row per linked service), so
-	// filtering in-memory avoids an extra DB round-trip.
+	// Step 3: confirm the datasource is linked to a service in this application and
+	// capture the endpoint URL in the same pass. A datasource can appear at most once
+	// per application, so we break as soon as the matching row is found.
 	allRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, datasourceID, dbmodels.DependencyTypeConnector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query linked services for datasource %s: %w", datasourceID, err)
 	}
 
-	var appRows []dbrepo.LinkedServiceRow
+	var baseURL string
+	linked := false
+
 	for _, row := range allRows {
 		if row.ApplicationID == applicationID {
-			appRows = append(appRows, row)
+			baseURL = extractAPIEndpointURL(row.EndpointsJSON)
+			linked = true
+
+			break
 		}
 	}
 
-	if len(appRows) == 0 {
+	if !linked {
 		return nil, &ValidationError{
 			Code:    http.StatusNotFound,
 			Message: "datasource not connected to this application",
@@ -778,10 +781,8 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 		providerName = catalogConn.Name
 	}
 
-	// Step 5: extract the API endpoint URL from the first matching service row.
-	baseURL := extractAPIEndpointURL(appRows[0].EndpointsJSON)
-
-	// Step 6: fetch live sync state from the connected service; degrades gracefully on failure.
+	// Step 5: fetch live sync state using the endpoint URL captured in step 3.
+	// Degrades gracefully to sync_status="unknown" when the service is unreachable.
 	serviceDetails := fetchServiceSyncDetails(ctx, datasourceID, baseURL)
 
 	return &apimodels.GetApplicationDatasourceResponse{
