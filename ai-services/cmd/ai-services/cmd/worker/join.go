@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -79,21 +78,12 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 }
 
 func joinRunE(_ *cobra.Command, args []string) error {
-	aiServicesDir, err := utils.ValidateBaseDir(baseDir)
-	if err != nil {
-		return fmt.Errorf("invalid base directory %q: %w", baseDir, err)
-	}
-
-	if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
-		return fmt.Errorf("failed to create model directory: %w", err)
-	}
-
 	opts := join.Options{
 		GatewayAddr: args[0],
 		Token:       token,
 		RuntimeType: types.RuntimeType(runtimeType),
 		Setup: workerdeploy.Options{
-			BaseDir:     aiServicesDir,
+			BaseDir:     baseDir,
 			HTTPSPort:   httpsPort,
 			DomainName:  domainName,
 			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),

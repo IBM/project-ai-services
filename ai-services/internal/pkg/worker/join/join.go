@@ -20,6 +20,7 @@ package join
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -89,6 +90,15 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	switch opts.RuntimeType {
 	case types.RuntimeTypePodman:
+		aiServicesDir, err := utils.ValidateBaseDir(opts.Setup.BaseDir)
+		if err != nil {
+			return fmt.Errorf("invalid base directory %q: %w", opts.Setup.BaseDir, err)
+		}
+
+		if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
+			return fmt.Errorf("failed to create model directory: %w", err)
+		}
+		
 		rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 		if err != nil {
 			return fmt.Errorf("worker join: init runtime: %w", err)
