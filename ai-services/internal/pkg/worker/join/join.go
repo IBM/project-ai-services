@@ -160,7 +160,7 @@ func RunGrpcStream(ctx context.Context, opts Options) error {
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", opts.RuntimeType)
 	}
-	
+
 	return nil
 }
 
