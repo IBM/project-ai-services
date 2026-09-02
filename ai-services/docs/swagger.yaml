@@ -174,6 +174,32 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
+    properties:
+      id:
+        description: ID is the UUID of the datasource connector.
+        type: string
+      message:
+        description: Message contains a human-readable description of the current
+          status (omitted when empty).
+        type: string
+      name:
+        description: Name is the unique human-readable label for this connector.
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+        description: Provider contains the provider ID and its resolved display name.
+      service_details:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ServiceSyncDetails'
+        description: ServiceDetails contains live sync state fetched from the linked
+          service.
+      status:
+        description: 'Status is the catalog-side connectivity health: "connected"
+          or "offline".'
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse:
     properties:
       created_at:
@@ -248,6 +274,30 @@ definitions:
     - catalog_id
     - components
     - version
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ServiceSyncDetails:
+    properties:
+      err_msg:
+        description: |-
+          ErrMsg is populated when the connected service was unreachable or returned an error.
+          Omitted from the JSON response when empty (i.e. when the service was reachable).
+        type: string
+      last_sync_at:
+        description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
+          or null when unavailable.
+        type: string
+      last_sync_error:
+        description: LastSyncError is the error string from the last failed sync,
+          or null on success.
+        type: string
+      sync_status:
+        description: SyncStatus is the current sync state from the service. Set to
+          "unknown" when unreachable.
+        type: string
+      total_files:
+        description: TotalFiles is the total number of files known to the connector,
+          or null when unavailable.
+        type: integer
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest:
     properties:
@@ -1164,6 +1214,51 @@ paths:
       security:
       - BearerAuth: []
       summary: Connect datasources to application
+      tags:
+      - Datasources
+  /applications/{id}/datasources/{datasource_id}:
+    get:
+      description: Returns the catalog identity and live sync state of a datasource
+        connected to the given application. Sync fields are sourced from the linked
+        service and degrade gracefully to sync_status "unknown" when the service is
+        unreachable.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Datasource connector ID (UUID)
+        in: path
+        name: datasource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource status
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse'
+        "400":
+          description: Invalid UUID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not connected to this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get datasource status for an application
       tags:
       - Datasources
   /applications/{id}/ps:
