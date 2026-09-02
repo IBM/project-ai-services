@@ -477,13 +477,10 @@ Returns paginated execution history from `connector_sync_logs` (`limit` default 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `limit` | integer | `50` | Max records to return (capped at 200). Ignored when `latest=true`. |
-| `offset` | integer | `0` | Pagination offset. Ignored when `latest=true`. |
-| `latest` | boolean | `false` | When `true`, bypasses pagination and returns only the single most-recent sync log entry as a **plain object** (not a list). Uses `get_latest_sync_log()` (`ORDER BY seq DESC LIMIT 1`). Returns `404` if no sync has ever run for the connector. |
+| `limit` | integer | `50` | Max records to return (capped at 200). |
+| `offset` | integer | `0` | Pagination offset. |
 
-When `latest=true` the response shape is the same single-entry object as `GET /v1/connectors/{connector_id}/syncs/{sync_seq}` — not a list wrapper. Returns `404` if no sync has ever run for the connector.
-
-**`SyncLogItem` / `SyncLogDetailResponse` fields:**
+**`SyncLogItem` fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -497,9 +494,7 @@ When `latest=true` the response shape is the same single-entry object as `GET /v
 | `status` | `"started"` \| `"cancel pending"` \| `"completed"` \| `"failed"` \| `"cancelled"` | Sync log status. |
 | `error` | string | Error message if the tick failed or was cancelled; empty string `""` otherwise. |
 
-**Response shapes:**
-
-*Default (paginated) — `200 OK` `SyncLogResponse`:*
+**`200 OK` — `SyncLogResponse`:**
 ```json
 {
   "total": 2,
@@ -521,45 +516,35 @@ When `latest=true` the response shape is the same single-entry object as `GET /v
 }
 ```
 
-*`latest=true` — `200 OK` `SyncLogDetailResponse` (plain object, not a list):*
-```json
-{
-  "seq": 2,
-  "started_at": "2025-01-16T08:00:00Z",
-  "finished_at": null,
-  "total_files": 18,
-  "new_files": 5,
-  "completed_files": 2,
-  "removed_files": 0,
-  "status": "started",
-  "error": ""
-}
-```
-
-The Swagger UI 200 response schema is declared as `oneOf: [SyncLogResponse, SyncLogDetailResponse]` with named examples for `paginated`, `latest`, and `in_progress` states.
-
 | HTTP Code | Meaning |
 |-----------|---------|
-| `200 OK` | Paginated history or single-entry latest returned. |
-| `404 Not Found` | Connector not found, or `latest=true` and no sync has ever run. |
+| `200 OK` | Paginated history returned. |
+| `404 Not Found` | Connector not found. |
 | `500 Internal Server Error` | Unexpected DB error. |
 
 #### `GET /v1/connectors/{connector_id}/syncs/{sync_seq}`
-Returns a single `SyncLogDetailResponse` identified by its sequence number. Returns `404` if the connector or the specific `sync_seq` does not exist.
+Returns a single sync log entry identified by its sequence number, wrapped in a `SyncLogResponse` envelope. Returns `404` if the connector or the specific `sync_seq` does not exist.
 
-**`200 OK` — `SyncLogDetailResponse`** (field schema identical to table above).
+**`200 OK` — `SyncLogResponse`** (`total=1`, `limit=1`, `offset=0`, `items` contains the single entry):
 
 ```json
 {
-  "seq": 1,
-  "started_at": "2025-01-15T10:30:00Z",
-  "finished_at": "2025-01-15T10:30:15Z",
-  "total_files": 15,
-  "new_files": 3,
-  "completed_files": 3,
-  "removed_files": 0,
-  "status": "completed",
-  "error": ""
+  "total": 1,
+  "limit": 1,
+  "offset": 0,
+  "items": [
+    {
+      "seq": 1,
+      "started_at": "2025-01-15T10:30:00Z",
+      "finished_at": "2025-01-15T10:30:15Z",
+      "total_files": 15,
+      "new_files": 3,
+      "completed_files": 3,
+      "removed_files": 0,
+      "status": "completed",
+      "error": ""
+    }
+  ]
 }
 ```
 
@@ -686,7 +671,7 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 | `get_sync_log()` → `get_sync_log()` | Single sync-log row by `(connector_id, seq)`. |
 | `get_sync_log_status()` → `get_sync_log_status()` | Minimal `SELECT status` for `(connector_id, seq)`. Used by `_check_interrupt_call`. |
 | `list_sync_logs()` → `get_sync_logs()` + `count_sync_logs()` | Paginated log history. Returns `(items, total_count)`. |
-| `get_latest_sync_log()` → `get_latest_sync_log()` | Returns the single most-recent log row for a connector (`ORDER BY seq DESC LIMIT 1`). Returns `None` if no rows exist. Used by `GET /v1/connectors/{cid}/syncs?latest=true`. |
+| `get_latest_sync_log()` → `get_latest_sync_log()` | Returns the single most-recent log row for a connector (`ORDER BY seq DESC LIMIT 1`). Returns `None` if no rows exist. |
 | `reset_syncing_connectors()` → `reset_syncing_connectors()` | Bulk `UPDATE connectors SET status='out of sync' WHERE status='syncing'`. Returns list of affected IDs. Used on startup crash recovery. |
 | `close_open_sync_log()` → `close_open_sync_log()` | Closes the open sync-log row (`started` \| `cancel pending`) to `failed` with error string. Used on startup crash recovery. |
 
