@@ -546,6 +546,14 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
+	// Fetch pod/container status for vars_file.yaml-driven status population
+	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
+	if err != nil {
+		logger.Warningf("Failed to get application pods for next steps: %v\n", err)
+	}
+
+	rt := vars.RuntimeFactory.GetRuntimeType()
+
 	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
@@ -553,7 +561,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		params := map[string]string{}
 		params["SERVICE_NAME"] = service.Type
 
-		// Add endpoint URLs to params
+		// Populate endpoint URLs from the service endpoints stored in the DB
 		for _, endpoint := range service.Endpoints {
 			urlType, urlTypeOk := endpoint["type"].(string)
 			url, urlOk := endpoint["url"].(string)
@@ -567,6 +575,13 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
 
 			continue
+		}
+
+		// Populate status params generically from vars_file.yaml
+		if appPS != nil {
+			if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, appPS.Name, rt); err != nil {
+				logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
+			}
 		}
 
 		tmpls, err := parseStepsTemplates(rawFiles)

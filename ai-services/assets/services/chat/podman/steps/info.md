@@ -11,7 +11,7 @@ Day N:
 {{- end }}
 
 {{- if ne .API_URL "" }}
-{{- if eq .API_STATUS "running" }}
+{{- if eq .BACKEND_STATUS "running" }}
 
 - {{ .SERVICE_NAME }} API is available to use at {{ .API_URL }}.
 {{- else }}

@@ -8,13 +8,13 @@ import (
 	"text/template"
 
 	"github.com/spf13/cobra"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -117,10 +117,7 @@ func printServicesInfo(ctx context.Context, appClient *catalogClient.Application
 		params := map[string]string{}
 		params["SERVICE_NAME"] = service.Type
 
-		uiStatus, apiStatus := getContainerStatus(appPS.Services, service.CatalogID, rt)
-		params["UI_STATUS"] = uiStatus
-		params["API_STATUS"] = apiStatus
-
+		// Populate endpoint URLs from the service endpoints stored in the DB
 		for _, endpoint := range service.Endpoints {
 			urlType, urlTypeOk := endpoint["type"].(string)
 			url, urlOk := endpoint["url"].(string)
@@ -132,6 +129,11 @@ func printServicesInfo(ctx context.Context, appClient *catalogClient.Application
 		rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, rt.String())
 		if err != nil {
 			return fmt.Errorf("failed to load service steps for '%s': %w", service.CatalogID, err)
+		}
+
+		// Populate status params generically from vars_file.yaml
+		if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, appPS.Name, rt); err != nil {
+			logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
 		}
 
 		tmpls, err := parseStepsTemplates(rawFiles)
@@ -170,72 +172,80 @@ func parseStepsTemplates(rawFiles map[string]string) (map[string]*template.Templ
 	return tmpls, nil
 }
 
-func getContainerStatus(services []catalogTypes.Pod, catalogID string, rt types.RuntimeType) (string, string) {
-	switch rt {
-	case types.RuntimeTypePodman:
-		return printPodmanContainerStatus(services, catalogID)
-	case types.RuntimeTypeOpenShift:
-		return printOpenshiftPodStatus(services, catalogID)
-	default:
-		return "", ""
-	}
+// varsFileContainers is the minimal shape of vars_file.yaml needed for status resolution.
+type varsFileContainers struct {
+	Containers []struct {
+		Name   string `yaml:"name"`
+		Format string `yaml:"format"`
+		Alias  string `yaml:"alias"`
+	} `yaml:"containers"`
 }
 
-func printPodmanContainerStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
-	uiStatus, apiStatus := "", ""
-	for _, servicePod := range services {
-		if strings.HasPrefix(servicePod.PodName, catalogID) {
-			for _, podContainer := range servicePod.Containers {
-				// TODO: Set the container status in info.md generically
-				uiContainerName := fmt.Sprintf("%s-ui", servicePod.PodName)
-				apiContainerName := ""
-				if strings.Contains(podContainer.Name, "backend-server") {
-					apiContainerName = podContainer.Name
-				} else {
-					apiContainerName = fmt.Sprintf("%s-%s-api", servicePod.PodName, catalogID)
-				}
-
-				if podContainer.Name == uiContainerName && podContainer.Healthy {
-					uiStatus = "running"
-				}
-				if podContainer.Name == apiContainerName && podContainer.Healthy {
-					apiStatus = "running"
-				}
-			}
-		}
+// populateStatusFromVarsFile reads the containers section of vars_file.yaml, renders each
+// name template (supports {{ .AppName }} for Podman), then looks up status from appPods:
+//   - Podman: matches the rendered name against pod container names
+//   - OpenShift: matches the rendered name as a pod-name prefix
+//
+// For each match with Format ".Status", alias → "running" (healthy) or "" is set in params.
+func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]string, appPods []catalogTypes.Pod, appName string, rt types.RuntimeType) error {
+	raw, ok := rawFiles["vars_file.yaml"]
+	if !ok {
+		return nil
 	}
 
-	return uiStatus, apiStatus
-}
+	// Render the vars_file template so {{ .AppName }} is resolved (Podman uses this)
+	var rendered bytes.Buffer
+	tmpl, err := template.New("vars").Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse vars_file.yaml: %w", err)
+	}
+	if err := tmpl.Execute(&rendered, map[string]string{"AppName": appName}); err != nil {
+		return fmt.Errorf("execute vars_file.yaml: %w", err)
+	}
 
-/*
-1. For each service fetch all labels
-2. See if that service has ai-services.io/component-type label
-3. If yes, check if value is api or ui
-4. Update status accordingly.
-*/
-func printOpenshiftPodStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
-	uiStatus, apiStatus := "", ""
+	var vf varsFileContainers
+	if err := yaml.Unmarshal(rendered.Bytes(), &vf); err != nil {
+		return fmt.Errorf("unmarshal vars_file.yaml: %w", err)
+	}
 
-	for _, service := range services {
-		if !strings.HasPrefix(service.PodName, catalogID) {
+	for _, c := range vf.Containers {
+		// Only handle ".Status" format entries — those drive a status alias
+		if strings.TrimSpace(c.Format) != ".Status" {
 			continue
 		}
+		alias := strings.ReplaceAll(c.Alias, "-", "_")
+		params[alias] = resolveContainerStatus(c.Name, appPods, rt)
+	}
 
-		component := service.Labels[constants.ComponentLabelKey]
-		switch component {
-		case "ui":
-			if service.Healthy {
-				uiStatus = "running"
+	return nil
+}
+
+// resolveContainerStatus returns "running" when the named container/pod is healthy,
+// using a runtime-appropriate lookup strategy derived from vars_file.yaml entries.
+//
+//   - Podman: name is the full container name (e.g. "myapp--chat-bot-ui"); matched
+//     against Pod.Containers[].Name inside all pods.
+//   - OpenShift: name is a pod-name prefix (e.g. "digitize-ui"); matched against
+//     Pod.PodName with a HasPrefix check, healthy at the pod level.
+func resolveContainerStatus(name string, appPods []catalogTypes.Pod, rt types.RuntimeType) string {
+	switch rt {
+	case types.RuntimeTypePodman:
+		for _, pod := range appPods {
+			for _, c := range pod.Containers {
+				if c.Name == name && c.Healthy {
+					return "running"
+				}
 			}
-		case "api":
-			if service.Healthy {
-				apiStatus = "running"
+		}
+	case types.RuntimeTypeOpenShift:
+		for _, pod := range appPods {
+			if strings.HasPrefix(pod.PodName, name) && pod.Healthy {
+				return "running"
 			}
 		}
 	}
 
-	return uiStatus, apiStatus
+	return ""
 }
 
 func printInfo(tmpls map[string]*template.Template, params map[string]string) error {

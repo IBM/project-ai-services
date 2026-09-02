@@ -1,0 +1,14 @@
+pods:
+  - name: "{{ .AppName }}--extract-api"
+    format: "index .Ports \"9500/tcp\" 0"
+    default: ""
+    alias: EXTRACT_API_PORT
+
+containers:
+  - name: "{{ .AppName }}--extract-api-extract-api"
+    format: ".Status"
+    alias: EXTRACT_API_STATUS
+
+hosts:
+  - fetch: HOST_IP
+    type: ip
