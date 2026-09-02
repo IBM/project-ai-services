@@ -581,7 +581,7 @@ Returns the list of applications currently connected to a datasource, enriched w
       "id": "app-uuid-1",
       "name": "My RAG App",
       "catalog_id": "rag",
-      "display_name": "Digital Assistants",
+      "type": "Digital Assistants",
       "sync_status": "up to date",
       "last_sync_at": "2026-06-01T11:00:00Z"
     },
@@ -589,7 +589,7 @@ Returns the list of applications currently connected to a datasource, enriched w
       "id": "app-uuid-2",
       "name": "My Summarise App",
       "catalog_id": "rag",
-      "display_name": "Digital Assistants",
+      "type": "Digital Assistants",
       "sync_status": "out of sync",
       "last_sync_at": "2026-06-01T09:00:00Z"
     }
@@ -597,16 +597,16 @@ Returns the list of applications currently connected to a datasource, enriched w
 }
 ```
 
-| Field                          | Source                                            | Description                                                                                                   |
-| ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `datasource_id`                | path param                                        | The datasource component UUID                                                                                 |
-| `applications[].id`            | catalog (`applications.id`)                       | ID of the application                                                                                         |
-| `applications[].name`          | catalog (`applications.name`)                     | Display name of the application                                                                               |
-| `applications[].catalog_id`    | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
-| `applications[].display_name`  | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to `catalog_id` when entry cannot be loaded       |
-| `applications[].sync_status`   | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
-| `applications[].last_sync_at`  | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
-| `applications[].err_msg`       | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
+| Field                         | Source                                            | Description                                                                                                   |
+| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `datasource_id`               | path param                                        | The datasource component UUID                                                                                 |
+| `applications[].id`           | catalog (`applications.id`)                       | ID of the application                                                                                         |
+| `applications[].name`         | catalog (`applications.name`)                     | Display name of the application                                                                               |
+| `applications[].catalog_id`   | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
+| `applications[].type`         | catalog (`LoadArchitecture` / `LoadService`)      | Resolved catalog type name of the owning application; falls back to `catalog_id` when entry cannot be loaded  |
+| `applications[].sync_status`  | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
+| `applications[].last_sync_at` | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
+| `applications[].err_msg`      | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
 
 **Response `404 Not Found`:**
 

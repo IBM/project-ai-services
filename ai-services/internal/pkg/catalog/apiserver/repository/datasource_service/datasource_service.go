@@ -390,25 +390,25 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
 		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
 
-		// Resolve the display name from catalog metadata; fall back to catalog_id.
-		displayName := row.ApplicationCatalogID
+		// Resolve the type name from catalog metadata; fall back to catalog_id.
+		typeName := row.ApplicationCatalogID
 		if row.ApplicationDeploymentType == string(dbmodels.DeploymentTypeArchitectures) {
 			if arch, err := s.catalogProvider.LoadArchitecture(row.ApplicationCatalogID); err == nil {
-				displayName = arch.Name
+				typeName = arch.Name
 			}
 		} else {
 			if svc, err := s.catalogProvider.LoadService(row.ApplicationCatalogID); err == nil {
-				displayName = svc.Name
+				typeName = svc.Name
 			}
 		}
 
 		item := apimodels.ConnectedApplicationItem{
-			ID:          row.ApplicationID.String(),
-			Name:        row.ApplicationName,
-			CatalogID:   row.ApplicationCatalogID,
-			DisplayName: displayName,
-			SyncStatus:  syncStatus,
-			LastSyncAt:  lastSyncAt,
+			ID:         row.ApplicationID.String(),
+			Name:       row.ApplicationName,
+			CatalogID:  row.ApplicationCatalogID,
+			Type:       typeName,
+			SyncStatus: syncStatus,
+			LastSyncAt: lastSyncAt,
 		}
 		if syncErr != "" {
 			item.ErrMsg = syncErr

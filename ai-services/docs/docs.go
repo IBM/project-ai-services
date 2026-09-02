@@ -2560,10 +2560,6 @@ const docTemplate = `{
                     "description": "CatalogID is the catalog identifier of the owning application (e.g. \"rag\").",
                     "type": "string"
                 },
-                "display_name": {
-                    "description": "DisplayName is the resolved display name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
-                    "type": "string"
-                },
                 "err_msg": {
                     "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
                     "type": "string"
@@ -2582,6 +2578,10 @@ const docTemplate = `{
                 },
                 "sync_status": {
                     "description": "SyncStatus is the current sync state sourced from the downstream service pod.\nSet to \"unknown\" when the pod is unreachable.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the resolved catalog type name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
                     "type": "string"
                 }
             }

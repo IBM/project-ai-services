@@ -141,9 +141,9 @@ type ConnectedApplicationItem struct {
 	Name string `json:"name"`
 	// CatalogID is the catalog identifier of the owning application (e.g. "rag").
 	CatalogID string `json:"catalog_id"`
-	// DisplayName is the resolved display name of the owning application (e.g. "Digital Assistants").
+	// Type is the resolved catalog type name of the owning application (e.g. "Digital Assistants").
 	// Falls back to CatalogID when the catalog entry cannot be loaded.
-	DisplayName string `json:"display_name"`
+	Type string `json:"type"`
 	// SyncStatus is the current sync state sourced from the downstream service pod.
 	// Set to "unknown" when the pod is unreachable.
 	SyncStatus string `json:"sync_status"`
