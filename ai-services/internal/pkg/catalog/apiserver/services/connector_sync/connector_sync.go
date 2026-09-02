@@ -36,8 +36,8 @@ const (
 // ConnectionTester for each connector's provider.
 type ConnectorSyncJob struct {
 	connectorRepo   dbrepo.ConnectorRepository
-	catalogProvider *catalogpkg.CatalogProvider
 	testers         map[string]datasourceservice.ConnectionTester
+	sensitiveFields map[string]map[string]bool // provider → sensitive field set; pre-computed at construction
 	encryptionKey   string
 	syncInterval    time.Duration
 	stopChan        chan struct{}
@@ -49,9 +49,8 @@ type ConnectorSyncJob struct {
 //
 // testers is a map from provider ID to its ConnectionTester implementation
 // (e.g. "object_storage" → objectStorageTester, "file_system" → fileSystemTester).
-// catalogProvider is used to load each provider's schema.json at sync time so that
-// sensitive fields are derived via datasourceservice.SensitiveFieldsFromSchema — the
-// same source of truth used by DatasourceService — rather than being hardcoded.
+// catalogProvider is used once at construction to load each provider's schema.json and
+// pre-compute the set of sensitive fields per provider via catalogutils.SensitiveFieldsFromSchema.
 // encryptionKey is the AES-256 key used to decrypt sensitive credential fields before
 // passing them to TestConnection; it must be the same key used at create/update time.
 // syncInterval controls how often the job runs; pass 0 to use DefaultConnectorSyncInterval.
@@ -66,10 +65,32 @@ func NewConnectorSyncJob(
 		syncInterval = DefaultConnectorSyncInterval
 	}
 
+	// Pre-compute sensitive fields for each registered provider once at startup.
+	// The schema is static — it never changes while the process is running.
+	sensitiveFields := make(map[string]map[string]bool, len(testers))
+	for providerID := range testers {
+		rawSchema, err := catalogProvider.GetConnectorProviderParams(context.Background(), catalogconstants.ConnectorTypeDatasource, providerID)
+		if err != nil {
+			logger.WarningfCtx(context.Background(), "ConnectorSyncJob: failed to load schema for provider %q, sensitive fields will be empty: %v", providerID, err)
+			sensitiveFields[providerID] = map[string]bool{}
+
+			continue
+		}
+
+		schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
+		if err != nil {
+			logger.WarningfCtx(context.Background(), "ConnectorSyncJob: failed to parse schema for provider %q, sensitive fields will be empty: %v", providerID, err)
+			sensitiveFields[providerID] = map[string]bool{}
+
+			continue
+		}
+		sensitiveFields[providerID] = catalogutils.SensitiveFieldsFromSchema(schema)
+	}
+
 	return &ConnectorSyncJob{
 		connectorRepo:   connectorRepo,
-		catalogProvider: catalogProvider,
 		testers:         testers,
+		sensitiveFields: sensitiveFields,
 		encryptionKey:   encryptionKey,
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
@@ -152,9 +173,8 @@ func (j *ConnectorSyncJob) performSync(ctx context.Context) {
 // syncConnector runs TestConnection for a single connector and writes the result
 // back to the database via UpdateStatus.
 //
-// Sensitive credential fields are identified via datasourceservice.SensitiveFieldsFromSchema
-// applied to the provider's schema.json — the same source of truth used by DatasourceService
-// at create/update time — then decrypted in-memory. Decrypted values are never logged.
+// Sensitive credential fields are decrypted in-memory using the set pre-computed at
+// construction from the provider's schema.json. Decrypted values are never logged.
 func (j *ConnectorSyncJob) syncConnector(ctx context.Context, c dbmodels.Connector) {
 	tester, ok := j.testers[c.Provider]
 	if !ok {
@@ -171,26 +191,9 @@ func (j *ConnectorSyncJob) syncConnector(ctx context.Context, c dbmodels.Connect
 		return
 	}
 
-	// Load the provider schema and derive sensitive fields using the shared helper so
-	// the set of encrypted fields is always consistent with create/update.
-	rawSchema, err := j.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, c.Provider)
-	if err != nil {
-		logger.ErrorfCtx(ctx, "Connector sync: failed to load schema for provider %q (connector %s): %v", c.Provider, c.ID, err)
-
-		return
-	}
-
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		logger.ErrorfCtx(ctx, "Connector sync: failed to parse schema for provider %q (connector %s): %v", c.Provider, c.ID, err)
-
-		return
-	}
-
-	sensitiveFields := datasourceservice.SensitiveFieldsFromSchema(schema)
-
-	// Decrypt sensitive fields in-memory; values are never forwarded to any caller.
-	decrypted, err := catalogutils.DecryptSensitiveFields(full.Metadata, sensitiveFields, j.encryptionKey)
+	// Decrypt sensitive fields in-memory using the pre-computed set for this provider;
+	// values are never forwarded to any caller.
+	decrypted, err := catalogutils.DecryptSensitiveFields(full.Metadata, j.sensitiveFields[c.Provider], j.encryptionKey)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Connector sync: failed to decrypt credentials for connector %s: %v", c.ID, err)
 

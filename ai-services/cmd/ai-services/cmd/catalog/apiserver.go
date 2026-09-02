@@ -71,23 +71,20 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
-// newConnectorSyncJob creates and starts a ConnectorSyncJob wired with all registered
-// provider testers. Extracted to keep buildAPIServerOptions within the line-length limit.
-func newConnectorSyncJob(ctx context.Context, connectorRepo repository.ConnectorRepository, catalogProvider *catalog.CatalogProvider) *connectorsync.ConnectorSyncJob {
-	// Initialize connector sync job for periodic datasource connectivity heartbeats.
-	job := connectorsync.NewConnectorSyncJob(
+// newConnectorSyncJob constructs a ConnectorSyncJob wired with all registered provider
+// testers. The caller is responsible for calling Start. Extracted to keep
+// buildAPIServerOptions within the line-length limit.
+func newConnectorSyncJob(connectorRepo repository.ConnectorRepository, catalogProvider *catalog.CatalogProvider, encryptionKey string) *connectorsync.ConnectorSyncJob {
+	return connectorsync.NewConnectorSyncJob(
 		connectorRepo,
 		catalogProvider,
 		map[string]datasourceservice.ConnectionTester{
 			constants.DatasourceProviderObjectStorage: datasourceservice.NewObjectStorageTester(),
 			constants.DatasourceProviderFileSystem:    datasourceservice.NewFileSystemTester(),
 		},
-		os.Getenv(constants.DBEncryptionKeyEnv),
+		encryptionKey,
 		connectorsync.DefaultConnectorSyncInterval,
 	)
-	job.Start(ctx)
-
-	return job
 }
 
 // startBackgroundServices starts the background sync services and returns a cleanup
@@ -101,6 +98,7 @@ func startBackgroundServices(
 	connectorRepo repository.ConnectorRepository,
 	catalogProvider *catalog.CatalogProvider,
 	workerReg *workerregistry.Registry,
+	encryptionKey string,
 ) (func(context.Context), error) {
 	// Initialize sync service for background DB-Pod synchronization.
 	// workerReg is passed so the sync service can use a RemoteRuntime for apps
@@ -111,7 +109,8 @@ func startBackgroundServices(
 	}
 	syncService.Start(ctx)
 
-	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo, catalogProvider)
+	connectorSyncJob := newConnectorSyncJob(connectorRepo, catalogProvider, encryptionKey)
+	connectorSyncJob.Start(ctx)
 
 	return func(ctx context.Context) {
 		syncService.Stop(ctx)
@@ -123,6 +122,8 @@ func startBackgroundServices(
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
 func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int, manageiqURL string, manageiqInsecure bool) (apiserver.APIServerOptions, func(), error) {
+	encryptionKey := os.Getenv(constants.DBEncryptionKeyEnv)
+
 	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
 	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
 	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
@@ -149,7 +150,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	workerRepo := repository.NewWorkerRepository(pool)
 	workerReg := workerregistry.New(workerRepo)
 
-	stopBackgroundServices, err := startBackgroundServices(ctx, appRepo, svcRepo, compRepo, svcDepRepo, connectorRepo, catalogProvider, workerReg)
+	stopBackgroundServices, err := startBackgroundServices(ctx, appRepo, svcRepo, compRepo, svcDepRepo, connectorRepo, catalogProvider, workerReg, encryptionKey)
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, err
 	}
