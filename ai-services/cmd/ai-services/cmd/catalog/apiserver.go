@@ -74,8 +74,9 @@ func getOrGenerateSecretKey() (string, error) {
 // newConnectorSyncJob constructs a ConnectorSyncJob wired with all registered provider
 // testers. The caller is responsible for calling Start. Extracted to keep
 // buildAPIServerOptions within the line-length limit.
-func newConnectorSyncJob(connectorRepo repository.ConnectorRepository, catalogProvider *catalog.CatalogProvider, encryptionKey string) *connectorsync.ConnectorSyncJob {
+func newConnectorSyncJob(ctx context.Context, connectorRepo repository.ConnectorRepository, catalogProvider *catalog.CatalogProvider, encryptionKey string) *connectorsync.ConnectorSyncJob {
 	return connectorsync.NewConnectorSyncJob(
+		ctx,
 		connectorRepo,
 		catalogProvider,
 		map[string]datasourceservice.ConnectionTester{
@@ -109,7 +110,7 @@ func startBackgroundServices(
 	}
 	syncService.Start(ctx)
 
-	connectorSyncJob := newConnectorSyncJob(connectorRepo, catalogProvider, encryptionKey)
+	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo, catalogProvider, encryptionKey)
 	connectorSyncJob.Start(ctx)
 
 	return func(ctx context.Context) {

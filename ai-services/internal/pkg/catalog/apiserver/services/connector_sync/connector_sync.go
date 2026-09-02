@@ -28,6 +28,10 @@ const (
 	// DefaultConnectorSyncInterval is the default period between ConnectorSyncJob cycles.
 	// The job tests connectivity for every record in the connectors table on each tick.
 	DefaultConnectorSyncInterval = 5 * time.Minute
+
+	// connectorSyncSkew is the initial delay before the first sync run to avoid
+	// overlapping with the application sync service.
+	connectorSyncSkew = 10 * time.Second
 )
 
 // ConnectorSyncJob is a background job that periodically calls TestConnection for
@@ -55,6 +59,7 @@ type ConnectorSyncJob struct {
 // passing them to TestConnection; it must be the same key used at create/update time.
 // syncInterval controls how often the job runs; pass 0 to use DefaultConnectorSyncInterval.
 func NewConnectorSyncJob(
+	ctx context.Context,
 	connectorRepo dbrepo.ConnectorRepository,
 	catalogProvider *catalogpkg.CatalogProvider,
 	testers map[string]datasourceservice.ConnectionTester,
@@ -69,9 +74,9 @@ func NewConnectorSyncJob(
 	// The schema is static — it never changes while the process is running.
 	sensitiveFields := make(map[string]map[string]bool, len(testers))
 	for providerID := range testers {
-		rawSchema, err := catalogProvider.GetConnectorProviderParams(context.Background(), catalogconstants.ConnectorTypeDatasource, providerID)
+		rawSchema, err := catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, providerID)
 		if err != nil {
-			logger.WarningfCtx(context.Background(), "ConnectorSyncJob: failed to load schema for provider %q, sensitive fields will be empty: %v", providerID, err)
+			logger.WarningfCtx(ctx, "ConnectorSyncJob: failed to load schema for provider %q, sensitive fields will be empty: %v", providerID, err)
 			sensitiveFields[providerID] = map[string]bool{}
 
 			continue
@@ -79,7 +84,7 @@ func NewConnectorSyncJob(
 
 		schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 		if err != nil {
-			logger.WarningfCtx(context.Background(), "ConnectorSyncJob: failed to parse schema for provider %q, sensitive fields will be empty: %v", providerID, err)
+			logger.WarningfCtx(ctx, "ConnectorSyncJob: failed to parse schema for provider %q, sensitive fields will be empty: %v", providerID, err)
 			sensitiveFields[providerID] = map[string]bool{}
 
 			continue
@@ -118,6 +123,15 @@ func (j *ConnectorSyncJob) syncLoop(ctx context.Context) {
 			logger.ErrorfCtx(ctx, "Panic recovered in connector sync goroutine: %v", r)
 		}
 	}()
+
+	// Introduce a small skew at startup to stagger it with the application sync service.
+	select {
+	case <-time.After(connectorSyncSkew):
+	case <-j.stopChan:
+		return
+	case <-ctx.Done():
+		return
+	}
 
 	ticker := time.NewTicker(j.syncInterval)
 	defer ticker.Stop()
@@ -167,7 +181,7 @@ func (j *ConnectorSyncJob) performSync(ctx context.Context) {
 		j.syncConnector(ctx, c)
 	}
 
-	logger.DebuglnCtx(ctx, "Completed connector sync cycle")
+	logger.InfolnCtx(ctx, "Completed connector sync cycle")
 }
 
 // syncConnector runs TestConnection for a single connector and writes the result
