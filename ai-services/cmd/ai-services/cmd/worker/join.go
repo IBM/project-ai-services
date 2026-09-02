@@ -131,12 +131,6 @@ func configureFlags(c *cobra.Command) {
 // It provisions the worker node for the given runtime type and returns once
 // the deployment is complete.
 //
-// For Podman workers it initialises the Podman runtime and runs the full
-// workerpodman.Setup (Caddy proxy, model storage, etc.).
-//
-// For OpenShift workers it installs or upgrades the worker Helm chart via
-// workeropenshift.DeployWorker, which brings up the gRPC stream pod.
-//
 // After Run returns successfully, RunGrpcStream should be called to open
 // the long-lived CommandStream to the catalog control plane.
 func configureWorker(ctx context.Context, gatewayAddr string) error {
