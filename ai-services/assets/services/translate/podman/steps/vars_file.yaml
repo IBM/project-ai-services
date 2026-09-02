@@ -1,14 +1,4 @@
-pods:
-  - name: "{{ .AppName }}--translate-api"
-    format: "index .Ports \"9000/tcp\" 0"
-    default: ""
-    alias: TRANSLATE_API_PORT
-
 containers:
   - name: "{{ .AppName }}--translate-api-translate-api"
     format: ".Status"
-    alias: TRANSLATE_API_STATUS
-
-hosts:
-  - fetch: HOST_IP
-    type: ip
+    alias: API_STATUS
