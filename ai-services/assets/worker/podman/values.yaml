@@ -4,7 +4,7 @@ caddy:
   httpsPort: ""
 
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.306
+  image: icr.io/ai-services-cicd/ai-services:v0.0.307
   runtime: "podman"
   token: ""
   # optionalFlags covers basedir, sslCertPath, sslKeyPath, domainSuffix, and httpsPort flags that are forwarded from the
