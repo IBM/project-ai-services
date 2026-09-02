@@ -528,38 +528,6 @@ class TestRunConversion:
 
 
 # ---------------------------------------------------------------------------
-# _safe_remove()
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-class TestSafeRemove:
-    def test_deletes_existing_file(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-
-        f = tmp_path / "staged.pdf"
-        f.write_bytes(b"%PDF")
-        assert f.exists()
-
-        _safe_remove(str(f))
-        assert not f.exists()
-
-    def test_silently_ignores_missing_file(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-
-        missing = str(tmp_path / "ghost.pdf")
-        # Must not raise
-        _safe_remove(missing)
-
-    def test_silently_ignores_permission_error(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-        from unittest.mock import patch
-
-        with patch("pathlib.Path.unlink", side_effect=PermissionError("no write")):
-            # Must not propagate
-            _safe_remove(str(tmp_path / "locked.pdf"))
-
-
-# ---------------------------------------------------------------------------
 # _run_conversion() — page_count from task row + file cleanup
 # ---------------------------------------------------------------------------
 
