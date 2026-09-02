@@ -175,7 +175,6 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
 
         invalid_files = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
-
         await _delete_orphans(connector_id, orphan_checksums)
 
         if invalid_files:

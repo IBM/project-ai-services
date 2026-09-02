@@ -661,58 +661,6 @@ class TestListSyncLogs:
 
 
 # ===========================================================================
-# get_latest_sync_log
-# ===========================================================================
-
-class TestGetLatestSyncLog:
-    def _make_log(self, seq: int) -> MagicMock:
-        log = MagicMock()
-        log.connector_id = CONNECTOR_ID
-        log.seq = seq
-        log.started_at = _NOW
-        log.finished_at = None
-        log.total_files = 5
-        log.new_files = 2
-        log.removed_files = 0
-        log.status = SyncLogStatus.COMPLETED
-        log.error = ""
-        return log
-
-    def test_returns_latest_log(self):
-        log = self._make_log(seq=7)
-        session = MagicMock()
-        session.scalars.return_value.one_or_none.return_value = log
-
-        from digitize.utils.db import get_latest_sync_log
-        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_latest_sync_log(CONNECTOR_ID)
-
-        assert result is log
-        session.expunge.assert_called_once_with(log)
-
-    def test_returns_none_when_no_rows(self):
-        session = MagicMock()
-        session.scalars.return_value.one_or_none.return_value = None
-
-        from digitize.utils.db import get_latest_sync_log
-        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_latest_sync_log(CONNECTOR_ID)
-
-        assert result is None
-
-    def test_returns_none_on_db_error(self):
-        session = MagicMock()
-        session.scalars.side_effect = SQLAlchemyError("timeout")
-
-        from digitize.utils.db import get_latest_sync_log
-        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_latest_sync_log(CONNECTOR_ID)
-
-        assert result is None
-
-
-
-# ===========================================================================
 # set_document_metadata
 # ===========================================================================
 

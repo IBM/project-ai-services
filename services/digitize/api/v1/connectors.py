@@ -787,22 +787,19 @@ async def cancel_sync(connector_id: str, sync_seq: int):
 
 @router.get(
     "/{connector_id}/syncs",
+    response_model=SyncLogResponse,
     responses={
-        200: {"description": "Paginated sync log, or a single sync log entry when latest=true"},
         404: http_error_responses[404],
         500: http_error_responses[500],
     },
     summary="Get sync log for a connector",
-    description=(
-        "Returns paginated sync log for a connector, newest first. "
-        "Pass `latest=true` to skip pagination and return only the single most-recent entry."
-    ),
+    description="Returns paginated sync log for a connector, newest first.",
+    response_description="Paginated sync log",
 )
 async def get_sync_history(
     connector_id: str,
-    latest: bool = Query(False, description="Return only the most-recent sync log entry"),
-    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200). Ignored when latest=true."),
-    offset: int = Query(0, ge=0, description="Zero-based offset. Ignored when latest=true."),
+    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)."),
+    offset: int = Query(0, ge=0, description="Zero-based offset for pagination."),
 ):
     """Retrieve a paginated history of sync runs for a specific connector."""
     try:
@@ -811,25 +808,6 @@ async def get_sync_history(
             APIError.raise_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
-            )
-
-        if latest:
-            log = db_ops.get_latest_sync_log(connector_id)
-            if log is None:
-                APIError.raise_error(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    f"No sync history found for connector {connector_id!r}",
-                )
-            return SyncLogDetailResponse(
-                seq=log.seq,
-                started_at=get_utc_timestamp(log.started_at) or "",
-                finished_at=get_utc_timestamp(log.finished_at),
-                total_files=log.total_files,
-                new_files=log.new_files,
-                completed_files=log.completed_files,
-                removed_files=log.removed_files,
-                status=log.status,
-                error=log.error or "",
             )
 
         logs, total = db_ops.list_sync_logs(connector_id, limit=limit, offset=offset)

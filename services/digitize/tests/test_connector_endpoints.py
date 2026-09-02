@@ -604,61 +604,6 @@ class TestSyncLog:
         )
         assert response.status_code == 422  # FastAPI validation error
 
-    def test_latest_returns_single_entry(self, connector_test_client, monkeypatch):
-        log = _make_sync_log(seq=5)
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
-            Mock(return_value=_make_connector()),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_latest_sync_log",
-            Mock(return_value=log),
-        )
-        response = connector_test_client.get(
-            f"/v1/connectors/{CONNECTOR_ID}/syncs?latest=true"
-        )
-        assert response.status_code == 200
-        data = response.json()
-        # Must be a plain object, not a list
-        assert isinstance(data, dict)
-        assert data["seq"] == 5
-        assert data["status"] == SyncLogStatus.COMPLETED
-
-    def test_latest_returns_404_when_no_syncs(self, connector_test_client, monkeypatch):
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
-            Mock(return_value=_make_connector()),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_latest_sync_log",
-            Mock(return_value=None),
-        )
-        response = connector_test_client.get(
-            f"/v1/connectors/{CONNECTOR_ID}/syncs?latest=true"
-        )
-        assert response.status_code == 404
-
-    def test_latest_does_not_call_list_sync_logs(self, connector_test_client, monkeypatch):
-        log = _make_sync_log(seq=3)
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_connector_by_id",
-            Mock(return_value=_make_connector()),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.get_latest_sync_log",
-            Mock(return_value=log),
-        )
-        list_mock = Mock(return_value=([], 0))
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_sync_logs",
-            list_mock,
-        )
-        connector_test_client.get(
-            f"/v1/connectors/{CONNECTOR_ID}/syncs?latest=true"
-        )
-        list_mock.assert_not_called()
-
-
 class TestGetSync:
     def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
         log = _make_sync_log(seq=3)
