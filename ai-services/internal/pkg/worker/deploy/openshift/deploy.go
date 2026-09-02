@@ -13,6 +13,7 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
+	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 )
 
 var (
@@ -30,7 +31,7 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
 	// Step 1: Load the Chart from assets/worker/openshift
-	chartData, err := loadChart(ctx, tp, workerconstants.WorkerAppTemplate)
+	chartData, err := helmutils.LoadChart(ctx, tp, workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return err
 	}
@@ -49,23 +50,6 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 	return nil
 }
 
-// loadChart loads the named Helm chart from the embedded template provider.
-// It shows a spinner during the operation and returns the parsed chart data
-// or an error if the chart cannot be found or parsed.
-func loadChart(ctx context.Context, tp templates.Template, name string) (chart.Charter, error) {
-	s := spinner.New("Loading the Helm chart for worker...")
-
-	s.Start(ctx)
-	chart, err := tp.LoadChart(name)
-	if err != nil {
-		s.Fail("failed to load the Helm chart")
-
-		return nil, fmt.Errorf("failed to load the chart: %w", err)
-	}
-	s.Stop("Loaded the Helm chart successfully")
-
-	return chart, nil
-}
 
 // prepareValues builds the Helm values map for the worker chart.
 // It generates the argument parameters from the gateway address and token,
