@@ -179,17 +179,21 @@ func parseStepsTemplates(rawFiles map[string]string) (map[string]*template.Templ
 // varsFileContainers is the minimal shape of vars_file.yaml needed for status resolution.
 type varsFileContainers struct {
 	Containers []struct {
-		Name   string `yaml:"name"`
-		Format string `yaml:"format"`
-		Alias  string `yaml:"alias"`
+		Name     string `yaml:"name"`
+		Workload string `yaml:"workload"`
+		Format   string `yaml:"format"`
+		Alias    string `yaml:"alias"`
 	} `yaml:"containers"`
 }
 
 // populateStatusFromVarsFile reads the containers section of vars_file.yaml, renders each
-// name template, then looks up status from appPods:
-//   - Podman: name renders to "{catalogID}-{instanceSlug}-{containerName}";
-//     matched exactly against Pod.Containers[].Name.
-//   - OpenShift: name is a plain pod-name prefix (e.g. "digitize-ui"); matched against Pod.PodName.
+// name template with InstanceSlug, then resolves container health from appPods.
+//
+// Podman: name is the full rendered container name (e.g. "chat-bot-{slug}-ui"), matched
+// exactly against PodContainer.Name. The workload field is ignored.
+//
+// OpenShift: workload is the deployment name (e.g. "chat-bot-ui"); pod.PodName is
+// prefix-matched against workload and container name is exact-matched against c.Name.
 //
 // For each entry with Format ".Status", alias → "running" (healthy) or "" is set in params.
 func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]string, appPods []catalogTypes.Pod, instanceSlug string, rt types.RuntimeType) error {
@@ -219,21 +223,20 @@ func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]st
 			continue
 		}
 		alias := strings.ReplaceAll(c.Alias, "-", "_")
-		params[alias] = resolveContainerStatus(c.Name, appPods, rt)
+		params[alias] = resolveContainerStatus(c.Name, c.Workload, appPods, rt)
 	}
 
 	return nil
 }
 
-// resolveContainerStatus returns "running" when the named container/pod is healthy,
-// using a runtime-appropriate lookup strategy derived from vars_file.yaml entries.
+// resolveContainerStatus returns "running" when the named container is healthy.
 //
-//   - Podman: name is the full container name after template rendering
-//     (e.g. "custom-chatbot-abc123-custom-chatbot"); matched exactly against
-//     Pod.Containers[].Name.
-//   - OpenShift: name is a pod-name prefix (e.g. "digitize-ui"); matched against
-//     Pod.PodName with a HasPrefix check, healthy at the pod level.
-func resolveContainerStatus(name string, appPods []catalogTypes.Pod, rt types.RuntimeType) string {
+// Podman: name is the full container name matched exactly against PodContainer.Name.
+//
+// OpenShift: workload is the deployment name; pod.PodName must have the workload as a
+// prefix (OCP pod names are "{workload}-{replicaSetHash}-{podHash}"), and container
+// name is exact-matched against PodContainer.Name (ContainerStatus.Name from pod spec).
+func resolveContainerStatus(name, workload string, appPods []catalogTypes.Pod, rt types.RuntimeType) string {
 	switch rt {
 	case types.RuntimeTypePodman:
 		for _, pod := range appPods {
@@ -245,8 +248,12 @@ func resolveContainerStatus(name string, appPods []catalogTypes.Pod, rt types.Ru
 		}
 	case types.RuntimeTypeOpenShift:
 		for _, pod := range appPods {
-			if strings.HasPrefix(pod.PodName, name) && pod.Healthy {
-				return "running"
+			if strings.HasPrefix(pod.PodName, workload+"-") {
+				for _, c := range pod.Containers {
+					if c.Name == name && c.Healthy {
+						return "running"
+					}
+				}
 			}
 		}
 	}

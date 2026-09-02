@@ -1,4 +1,4 @@
 containers:
-  - name: "extract-{{ .InstanceSlug }}-extract-api"
+  - name: "extract-api-{{ .InstanceSlug }}-extract-api"
     format: ".Status"
     alias: API_STATUS

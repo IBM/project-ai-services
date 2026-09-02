@@ -1,8 +1,8 @@
 containers:
-  - name: "digitize-{{ .InstanceSlug }}-digitize-ui"
+  - name: "digitize-{{ .InstanceSlug }}-ui"
     format: ".Status"
     alias: UI_STATUS
 
-  - name: "digitize-{{ .InstanceSlug }}-digitize-backend-server"
+  - name: "digitize-{{ .InstanceSlug }}-backend-server"
     format: ".Status"
     alias: API_STATUS

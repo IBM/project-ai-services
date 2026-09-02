@@ -1,4 +1,4 @@
 containers:
-  - name: "summarize-{{ .InstanceSlug }}-summarize-api"
+  - name: "summarize-api-{{ .InstanceSlug }}-summarize-api"
     format: ".Status"
     alias: API_STATUS
