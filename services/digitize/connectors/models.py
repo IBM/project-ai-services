@@ -375,36 +375,6 @@ class SyncLogResponse(BaseModel):
     }
 
 
-class SyncLogDetailResponse(BaseModel):
-    """Single sync-log item returned by GET /v1/connectors/{connector_id}/syncs/{sync_seq}."""
-
-    seq: int
-    started_at: str
-    finished_at: Optional[str]
-    total_files: int
-    new_files: int
-    completed_files: int
-    removed_files: int
-    status: str
-    error: str
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "seq": 1,
-                "started_at": "2025-01-15T10:30:00Z",
-                "finished_at": "2025-01-15T10:30:15Z",
-                "total_files": 15,
-                "new_files": 3,
-                "completed_files": 3,
-                "removed_files": 0,
-                "status": "completed",
-                "error": "",
-            }
-        }
-    }
-
-
 class SyncTriggerResponse(BaseModel):
     """Response body for POST /v1/connectors/{connector_id}/sync."""
 

@@ -38,7 +38,6 @@ from digitize.connectors.models import (
     ConnectorListItem,
     ConnectorStatus,
     ConnectorUpdateRequest,
-    SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
     SyncLogStatus,
@@ -303,20 +302,29 @@ class TestSyncTriggerResponse:
             SyncTriggerResponse()
 
 
-class TestSyncLogDetailResponse:
-    def test_construction(self):
-        resp = SyncLogDetailResponse(
-            seq=3,
-            started_at="2024-01-01T00:00:00Z",
-            finished_at=None,
-            total_files=0,
-            new_files=0,
-            completed_files=0,
-            removed_files=0,
-            status="failed",
-            error="something went wrong",
+class TestSyncLogDetailEndpointShape:
+    def test_single_item_in_list_envelope(self):
+        resp = SyncLogResponse(
+            total=1,
+            limit=1,
+            offset=0,
+            items=[
+                SyncLogItem(
+                    seq=3,
+                    started_at="2024-01-01T00:00:00Z",
+                    finished_at=None,
+                    total_files=0,
+                    new_files=0,
+                    completed_files=0,
+                    removed_files=0,
+                    status="failed",
+                    error="something went wrong",
+                )
+            ],
         )
-        assert resp.status == "failed"
-        assert resp.error == "something went wrong"
+        assert resp.total == 1
+        assert len(resp.items) == 1
+        assert resp.items[0].status == "failed"
+        assert resp.items[0].error == "something went wrong"
 
 # Made with Bob

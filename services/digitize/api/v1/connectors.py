@@ -31,7 +31,6 @@ from digitize.connectors.models import (
     ConnectorListItem,
     ConnectorListResponse,
     ConnectorUpdateRequest,
-    SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
     ConnectorStatus,
@@ -850,7 +849,7 @@ async def get_sync_history(
 
 @router.get(
     "/{connector_id}/syncs/{sync_seq}",
-    response_model=SyncLogDetailResponse,
+    response_model=SyncLogResponse,
     responses={
         404: http_error_responses[404],
         500: http_error_responses[500],
@@ -876,16 +875,23 @@ async def get_sync(connector_id: str, sync_seq: int):
                 f"Sync {sync_seq} not found for connector {connector_id!r}",
             )
 
-        return SyncLogDetailResponse(
-            seq=log.seq,
-            started_at=get_utc_timestamp(log.started_at) or "",
-            finished_at=get_utc_timestamp(log.finished_at),
-            total_files=log.total_files,
-            new_files=log.new_files,
-            completed_files=log.completed_files,
-            removed_files=log.removed_files,
-            status=log.status,
-            error=log.error or "",
+        return SyncLogResponse(
+            total=1,
+            limit=1,
+            offset=0,
+            items=[
+                SyncLogItem(
+                    seq=log.seq,
+                    started_at=get_utc_timestamp(log.started_at) or "",
+                    finished_at=get_utc_timestamp(log.finished_at),
+                    total_files=log.total_files,
+                    new_files=log.new_files,
+                    completed_files=log.completed_files,
+                    removed_files=log.removed_files,
+                    status=log.status,
+                    error=log.error or "",
+                )
+            ],
         )
 
     except HTTPException as exc:

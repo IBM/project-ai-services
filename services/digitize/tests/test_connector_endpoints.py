@@ -620,9 +620,12 @@ class TestGetSync:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["seq"] == 3
-        assert data["status"] == SyncLogStatus.COMPLETED
-        assert data["total_files"] == 42
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["seq"] == 3
+        assert item["status"] == SyncLogStatus.COMPLETED
+        assert item["total_files"] == 42
 
     def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
