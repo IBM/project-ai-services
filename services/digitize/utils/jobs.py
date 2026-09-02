@@ -9,7 +9,7 @@ import uuid
 from typing import Optional
 
 from common.misc_utils import get_logger
-from digitize.db.models import ConversionTaskStatus
+from digitize.db.models import ConversionTaskStatus, JobSource
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -107,6 +107,7 @@ def initialize_job_state(
     output_format: OutputFormat,
     documents_info: list[str],
     job_name: Optional[str] = None,
+    source: JobSource = JobSource.USER,
     already_exists_files: Optional[list] = None,   # list[AlreadyExistsFile]
 ) -> dict[str, str]:
     """
@@ -121,6 +122,7 @@ def initialize_job_state(
         output_format: Output format for documents
         documents_info: List of filenames to be processed
         job_name: Optional human-readable name for the job
+        source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
         already_exists_files: Optional list of AlreadyExistsFile entries that were
                               stripped from the batch before staging.
 
@@ -143,7 +145,8 @@ def initialize_job_state(
         operation=operation,
         submitted_at=submitted_at,
         documents_info=all_filenames,
-        job_name=job_name
+        job_name=job_name,
+        source=source,
     )
 
     # Now create document metadata in both database and file system
@@ -155,7 +158,8 @@ def initialize_job_state(
             job_id=job_id,
             output_format=output_format,
             operation=operation,
-            submitted_at=submitted_at
+            submitted_at=submitted_at,
+            source=source.value,
         )
     logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
@@ -180,6 +184,7 @@ def initialize_job_state(
                 submitted_at=submitted_at,
                 initial_status=DocStatus.ALREADY_EXISTS,
                 completed_at=submitted_at,
+                source=source.value,
                 extra_metadata={
                     "existing_doc_id": skipped.existing_doc_id,
                     "existing_doc_name": skipped.existing_doc_name,

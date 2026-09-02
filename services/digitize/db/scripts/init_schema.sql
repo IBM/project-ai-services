@@ -6,13 +6,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_name VARCHAR(500),
     operation VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'user',
     submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,  -- When user submitted the job (UTC)
     completed_at TIMESTAMP WITH TIME ZONE,           -- When job finished processing (UTC)
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
     CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')),
-    CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization'))
+    CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization')),
+    CONSTRAINT chk_job_source CHECK (source IN ('user', 'connector'))
 );
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -21,6 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     name VARCHAR(500) NOT NULL,
     type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'user',
     output_format VARCHAR(10) NOT NULL,
     submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,  -- When user submitted the document as part of job (UTC)
     completed_at TIMESTAMP WITH TIME ZONE,           -- When document finished processing (UTC)
@@ -29,6 +32,7 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
     CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
+    CONSTRAINT chk_doc_source CHECK (source IN ('user', 'connector')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
 );
 
@@ -60,9 +64,9 @@ CREATE TABLE IF NOT EXISTS connectors (
     sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
     attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_sync_at            TIMESTAMPTZ,
-    sync_status             TEXT        NOT NULL DEFAULT 'up to date',
-    error                   TEXT,
+    status                  TEXT        NOT NULL DEFAULT 'up to date',
     total_files             INTEGER     NOT NULL DEFAULT 0,
+    message                 TEXT,
     CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
 );
 
@@ -88,6 +92,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_logs (
     finished_at      TIMESTAMPTZ,
     total_files      INTEGER     NOT NULL DEFAULT 0,
     new_files        INTEGER     NOT NULL DEFAULT 0,
+    completed_files   INTEGER     NOT NULL DEFAULT 0,
     removed_files    INTEGER     NOT NULL DEFAULT 0,
     status           TEXT        NOT NULL DEFAULT 'started',
     error            TEXT        NOT NULL DEFAULT '',

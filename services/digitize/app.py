@@ -187,7 +187,7 @@ async def _connector_scheduler_lifespan():
             connectors = list_connectors()
             registered_count = 0
             for connector in connectors:
-                if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+                if connector.status == ConnectorStatus.DELETE_PENDING:
                     logger.info(
                         f"Connector crash recovery: found connector {connector.id!r} "
                         "in 'delete pending' status. Re-triggering delete procedure."

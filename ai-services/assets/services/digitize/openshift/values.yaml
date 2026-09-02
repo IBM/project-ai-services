@@ -1,5 +1,5 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.53
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.54
   log_level: "INFO"
   database: "digitize_metadata"
   numShards: 1

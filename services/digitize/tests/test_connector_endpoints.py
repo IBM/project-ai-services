@@ -88,8 +88,8 @@ def _make_connector(
     c.sync_interval_seconds = 300
     c.attached_at = _NOW
     c.last_sync_at = _NOW
-    c.sync_status = sync_status
-    c.error = None
+    c.status = sync_status
+    c.message = None
     c.total_files = 42
     return c
 
@@ -102,6 +102,7 @@ def _make_sync_log(seq: int = 1) -> MagicMock:
     log.finished_at = _NOW
     log.total_files = 42
     log.new_files = 2
+    log.completed_files = 2
     log.removed_files = 0
     log.status = SyncLogStatus.COMPLETED
     log.error = ""
@@ -449,16 +450,32 @@ class TestRunTeardown:
 # ===========================================================================
 
 class TestListConnectors:
-    def test_returns_200_with_list(self, connector_test_client, monkeypatch):
+    def test_returns_200_with_paginated_envelope(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[_make_connector()]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([_make_connector()], 1)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 1
-        assert data[0]["id"] == CONNECTOR_ID
+        assert data["total"] == 1
+        assert data["limit"] == 50
+        assert data["offset"] == 0
+        assert len(data["items"]) == 1
+        assert data["items"][0]["id"] == CONNECTOR_ID
+
+    def test_pagination_params_forwarded(self, connector_test_client, monkeypatch):
+        mock = Mock(return_value=([_make_connector()], 5))
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            mock,
+        )
+        response = connector_test_client.get("/v1/connectors?limit=10&offset=2")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 10
+        assert data["offset"] == 2
+        mock.assert_called_once_with(limit=10, offset=2)
 
     def test_never_returns_secret_fields(self, connector_test_client, monkeypatch):
         c = _make_connector()
@@ -468,20 +485,22 @@ class TestListConnectors:
             "private_key": "ENCRYPTED_PRIVATE_KEY",
         }
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[c]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([c], 1)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert "private_key" not in str(response.json())
 
     def test_returns_empty_list(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connectors",
-            Mock(return_value=[]),
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            Mock(return_value=([], 0)),
         )
         response = connector_test_client.get("/v1/connectors")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data["total"] == 0
+        assert data["items"] == []
 
 
 # ===========================================================================
@@ -585,7 +604,6 @@ class TestSyncLog:
         )
         assert response.status_code == 422  # FastAPI validation error
 
-
 class TestGetSync:
     def test_returns_200_with_sync_detail(self, connector_test_client, monkeypatch):
         log = _make_sync_log(seq=3)
@@ -602,9 +620,12 @@ class TestGetSync:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["seq"] == 3
-        assert data["status"] == SyncLogStatus.COMPLETED
-        assert data["total_files"] == 42
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["seq"] == 3
+        assert item["status"] == SyncLogStatus.COMPLETED
+        assert item["total_files"] == 42
 
     def test_returns_404_when_sync_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(
