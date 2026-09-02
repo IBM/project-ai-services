@@ -3571,6 +3571,12 @@ const docTemplate = `{
                 "certified_by": {
                     "type": "string"
                 },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference"
+                    }
+                },
                 "description": {
                     "type": "string"
                 },

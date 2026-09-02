@@ -4,12 +4,13 @@ caddy:
   httpsPort: ""
 
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.285
+  image: icr.io/ai-services-cicd/ai-services:v0.0.305
   runtime: "podman"
   token: ""
-  # optionalFlags covers sslCertPath, sslKeyPath, domainSuffix, and httpsPort flags that are forwarded from the
+  # optionalFlags covers basedir, sslCertPath, sslKeyPath, domainSuffix, and httpsPort flags that are forwarded from the
   # 'worker join' command to the 'worker grpcserver' command running inside the container
   optionalFlags: ""
   gatewayAddr: ""
   podman:
     uri: "/run/podman/podman.sock"
+    authFileContent: ""
