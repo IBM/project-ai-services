@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -13,40 +14,57 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// GetCatalogImages collects all unique images from a service or architecture template.
-// This is the main entry point for catalog-based image collection from CLI or API.
-func (p *CatalogProvider) GetCatalogImages(ctx context.Context, templateID string) ([]string, error) {
-	allImages := make(map[string]bool)
+// ErrCatalogItemNotFound is returned by GetArchitectureImages and GetServiceImages
+// when the requested ID does not exist in the catalog.
+var ErrCatalogItemNotFound = errors.New("catalog item not found")
 
-	// Include catalog asset images (tool image used for housekeeping tasks)
-	allImages[vars.ToolImage] = true
+// GetArchitectureImages returns all container images required to deploy an architecture.
+// Fails immediately with ErrCatalogItemNotFound if id is not a known architecture.
+// The response always includes catalog asset images (tool image and catalog infrastructure images).
+func (p *CatalogProvider) GetArchitectureImages(ctx context.Context, id string) ([]string, error) {
+	arch, err := p.LoadArchitecture(id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: architecture '%s'", ErrCatalogItemNotFound, id)
+	}
 
-	// Include catalog infrastructure images (catalog service itself)
+	allImages := p.initBaseImages()
+
 	if err := p.addCatalogInfrastructureImages(ctx, allImages); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to collect catalog infrastructure images: %v", err)
 	}
 
-	// Try to load as architecture first
-	arch, err := p.LoadArchitecture(templateID)
-	if err == nil {
-		if err := p.collectArchitectureImages(ctx, arch.Services, allImages); err != nil {
-			return nil, err
-		}
-
-		return utils.ExtractMapKeys(allImages), nil
+	if err := p.collectArchitectureImages(ctx, arch.Services, allImages); err != nil {
+		return nil, err
 	}
 
-	// Try to load as service
-	service, err := p.LoadService(templateID)
-	if err == nil {
-		if err := p.collectServiceWithDependencies(ctx, templateID, service.Dependencies, allImages); err != nil {
-			return nil, err
-		}
+	return utils.ExtractMapKeys(allImages), nil
+}
 
-		return utils.ExtractMapKeys(allImages), nil
+// GetServiceImages returns all container images required to deploy a service and its dependencies.
+// Fails immediately with ErrCatalogItemNotFound if id is not a known service.
+// The response always includes catalog asset images (tool image and catalog infrastructure images).
+func (p *CatalogProvider) GetServiceImages(ctx context.Context, id string) ([]string, error) {
+	service, err := p.LoadService(id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: service '%s'", ErrCatalogItemNotFound, id)
 	}
 
-	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
+	allImages := p.initBaseImages()
+
+	if err := p.addCatalogInfrastructureImages(ctx, allImages); err != nil {
+		logger.ErrorfCtx(ctx, "Failed to collect catalog infrastructure images: %v", err)
+	}
+
+	if err := p.collectServiceWithDependencies(ctx, id, service.Dependencies, allImages); err != nil {
+		return nil, err
+	}
+
+	return utils.ExtractMapKeys(allImages), nil
+}
+
+// initBaseImages returns a map pre-seeded with the catalog tool image.
+func (p *CatalogProvider) initBaseImages() map[string]bool {
+	return map[string]bool{vars.ToolImage: true}
 }
 
 // addCatalogInfrastructureImages adds images from the catalog service templates.

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
+    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization'))
 );
 
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS documents (
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed', 'already_exists')),
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
 );
@@ -41,6 +41,14 @@ CREATE TABLE IF NOT EXISTS document_checksum (
     checksum      TEXT        PRIMARY KEY,
     doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
 );
+
+-- Schema for APScheduler job store
+-- APScheduler v3 SQLAlchemyJobStore attempts to auto-create its job store table
+-- (default: 'apscheduler_jobs') under the 'scheduler' schema, but it cannot auto-create
+-- the schema itself, which would cause an error on startup if the schema doesn't exist.
+-- The job store is initialized in services/digitize/app.py via
+-- SQLAlchemyJobStore(engine=db_engine, tableschema="scheduler")
+CREATE SCHEMA IF NOT EXISTS scheduler;
 
 -- Connector tables
 CREATE TABLE IF NOT EXISTS connectors (

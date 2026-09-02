@@ -8,7 +8,10 @@ const (
 	LocalWorkerName = "Local"
 
 	// WorkerProxyLabel is the pod label set by deploy.Setup; used by deploy (idempotency) and uninstall (lookup).
-	WorkerProxyLabel = "ai-services.io/component=worker-proxy"
+	WorkerProxyLabel = "ai-services.io/component=proxy"
+
+	// WorkerPodLabel is the pod label set to identify worker pod deployed or not.
+	WorkerPodLabel = "ai-services.io/component=worker"
 
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
@@ -20,4 +23,14 @@ const (
 	MetaKeyBaseDir      = "basedir"
 	MetaKeyDomainSuffix = "domainSuffix"
 	MetaKeyHTTPSPort    = "httpsPort"
+
+	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
+	// ArgParamWorkerOptionalFlags, ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile
+	// are template value-override keys used when deploying worker pods.
+	ArgParamCaddyHTTPSPort      = "caddy.httpsPort"
+	ArgParamWorkerToken         = "worker.token"
+	ArgParamWorkerGatewayAddr   = "worker.gatewayAddr"
+	ArgParamWorkerOptionalFlags = "worker.optionalFlags"
+	ArgParamWorkerPodmanURI     = "worker.podman.uri"
+	ArgParamWorkerAuthFile      = "worker.podman.authFileContent"
 )

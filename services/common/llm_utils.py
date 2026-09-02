@@ -59,6 +59,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
     """Combined function to summarize and classify a table in a single LLM call.
 
     Returns tuple: (summary, decision).
+    Raises on failure so that the retry decorator and the caller can handle it.
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -115,16 +116,24 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
 
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
-        return "No summary.", False
+        raise
 
 def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
     """Combined function to summarize and classify tables using a single prompt.
 
-    Returns tuple: (summaries, decisions).
+    Returns tuple: (summaries, decisions, failures).
+    failures is a dict mapping table index to error message for failed tables.
+    Table failures are non-fatal: failed tables use fallback values and processing continues.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
-    results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
+    if not all_prompts:
+        return [], [], {}
+
+    results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
+    summaries: list[str] = []
+    decisions: list[bool] = []
+    failures: dict[int, str] = {}
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
@@ -134,23 +143,21 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
                                    desc=f"Summarizing and classifying tables of '{doc_path}'"):
             idx = futures[future]
-            results[idx] = future.result()
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                error_msg = f"Failed to process table {idx}: {str(e)}"
+                logger.error(error_msg)
+                results[idx] = ("No summary.", False)
+                failures[idx] = error_msg
 
-    # Separate summaries and decisions with proper None handling
-    summaries: list[str] = []
-    decisions: list[bool] = []
+    # Unpack results in index order. Every slot starts as the fallback
+    # and is overwritten either by a successful future or left as-is on failure.
+    for summary, decision in results:
+        summaries.append(summary)
+        decisions.append(decision)
 
-    for result in results:
-        if result is not None:
-            summary, decision = result
-            summaries.append(summary)
-            decisions.append(decision)
-        else:
-            # Default values for failed futures
-            summaries.append("No summary.")
-            decisions.append(False)
-
-    return summaries, decisions
+    return summaries, decisions, failures
 
 def get_vllm_headers(api_key: str | None = None):
     """Get headers for vLLM API calls, including auth if provided.

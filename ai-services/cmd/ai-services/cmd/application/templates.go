@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	appTemplates "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -113,25 +114,30 @@ func init() {
 }
 
 // listCatalogTemplates lists architectures, services, and components from the catalog.
+// It always tries the API first and falls back to the embedded catalog when the
+// API is unreachable or the user is not logged in.
 func listCatalogTemplates(cmd *cobra.Command) error {
-	// Create catalog provider
-	provider, err := catalog.NewCatalogProvider(nil)
+	embedded, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
+		return fmt.Errorf("failed to load embedded catalog: %w", err)
 	}
 
-	// Get all data
-	architectures, err := provider.ListArchitectures()
+	source, err := catalogClient.NewCatalogSource(cmd.Context(), embedded)
+	if err != nil {
+		return err
+	}
+
+	architectures, err := source.ListArchitectures(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("failed to list architectures: %w", err)
 	}
 
-	services, err := provider.ListServices()
+	services, err := source.ListServices(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("failed to list services: %w", err)
 	}
 
-	components, err := provider.ListComponents()
+	components, err := source.ListComponents(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("failed to list components: %w", err)
 	}
@@ -155,7 +161,7 @@ func listCatalogTemplates(cmd *cobra.Command) error {
 }
 
 // displayArchitectureWithServiceList displays an architecture with just the list of service IDs.
-func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
+func displayArchitectureWithServiceList(arch catalogTypes.ArchitectureSummary) {
 	logger.Infof("- %s (%s)", arch.ID, arch.Name)
 	if arch.Description != "" {
 		logger.Infof("  Description: %s", arch.Description)
@@ -164,14 +170,14 @@ func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
 	// Display list of services in this architecture
 	if len(arch.Services) > 0 {
 		logger.Infoln("  Services:")
-		for _, svcRef := range arch.Services {
-			logger.Infof("     - %s", svcRef.ID)
+		for _, svcID := range arch.Services {
+			logger.Infof("     - %s", svcID)
 		}
 	}
 }
 
 // displayServiceWithComponents displays a service with its metadata and required components.
-func displayServiceWithComponents(svc catalogTypes.Service, components []catalogTypes.Component) {
+func displayServiceWithComponents(svc catalogTypes.ServiceSummary, components []catalogTypes.Component) {
 	logger.Infof("- %s (%s)", svc.ID, svc.Name)
 	if svc.Description != "" {
 		logger.Infof("  Description: %s", svc.Description)

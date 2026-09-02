@@ -18,6 +18,7 @@ dependencies:
   - id: llm
 
 standalone: true
+accepts_datasource: true
 
 # About field containing detailed service information
 about:

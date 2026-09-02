@@ -82,6 +82,22 @@ type Options struct {
 //   - Call Register with the bootstrap token.
 //   - Open CommandStream and hold it, retrying on transient failures.
 func Run(ctx context.Context, opts Options) error {
+	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
+	}
+
+	// Setup worker node
+	if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
+		return fmt.Errorf("worker join: setup: %w", err)
+	}
+
+	return nil
+}
+
+// GrpcServer dials the catalog gRPC worker-gateway, registers with the
+// bootstrap token, and holds the CommandStream open.
+func GrpcServer(ctx context.Context, opts Options) error {
 	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
 	if err != nil {
 		return err
@@ -89,22 +105,17 @@ func Run(ctx context.Context, opts Options) error {
 
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
+		return fmt.Errorf("worker grpcserver: init runtime: %w", err)
 	}
 
-	// ── Step 1: Setup worker node ────────────────────────────────────────────
-	if err := workerdeploy.Setup(ctx, rt, opts.Setup); err != nil {
-		return fmt.Errorf("worker join: setup: %w", err)
-	}
-
-	// ── Step 1b: Build Caddy proxy router (Podman only) ──────────────────────
+	// ── Step 1: Build Caddy proxy router (Podman only) ──────────────────────
 	// Must happen after Setup so the Caddy pod is running and its admin port
 	// is discoverable. For OpenShift workers routes are managed natively.
 	var pr *workercaddy.ProxyRouter
 	if opts.RuntimeType == types.RuntimeTypePodman {
 		var err error
 		if pr, err = workercaddy.New(ctx, rt); err != nil {
-			return fmt.Errorf("worker join: init local Caddy manager: %w", err)
+			return fmt.Errorf("worker grpcserver: init local Caddy manager: %w", err)
 		}
 	}
 
@@ -113,7 +124,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("worker join: create client for %s: %w", opts.GatewayAddr, err)
+		return fmt.Errorf("worker grpcserver: create client for %s: %w", opts.GatewayAddr, err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -155,6 +166,8 @@ func register(ctx context.Context, client workerpb.WorkerGatewayClient, token st
 		RuntimeType:    rt.String(),
 		Metadata:       meta,
 	})
+	// TODO: When registrations fails due to "token already used" error
+	// attempt registretion without token.
 	if err != nil {
 		return "", fmt.Errorf("register RPC: %w", err)
 	}
@@ -218,7 +231,7 @@ func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRou
 		return fmt.Errorf("initial heartbeat: %w", err)
 	}
 
-	logger.InfofCtx(ctx, "CommandStream open for worker %q — press Ctrl-C to stop.\n", workerName)
+	logger.InfofCtx(ctx, "CommandStream open for worker %q \n", workerName)
 
 	// Two concurrent activities:
 	//   • recv goroutine: read Commands from the gateway and handle them.

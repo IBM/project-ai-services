@@ -382,10 +382,10 @@ Five additional catalog-read endpoints are added under the authenticated `v1` ca
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/services/:id/images` | Return image metadata for a service. |
+| `GET` | `/api/v1/services/:id/images` | Return the complete list of container images required to deploy a service and all its component dependencies (both embedded and custom bundle services). The response includes catalog asset images (tool image and catalog infrastructure images). Returns `404` if `:id` is not a known service. |
+| `GET` | `/api/v1/architectures/:id/images` | Return the complete list of container images required to deploy an architecture and all its services and component dependencies (both embedded and custom bundle architectures). The response includes catalog asset images (tool image and catalog infrastructure images). Returns `404` if `:id` is not a known architecture. |
 | `GET` | `/api/v1/services/:id/models` | Return model metadata for a service. |
 | `GET` | `/api/v1/services/:id/md` | Return the service's Markdown description. |
-| `GET` | `/api/v1/architectures/:id/images` | Return image metadata for an architecture. |
 | `GET` | `/api/v1/architectures/:id/models` | Return model metadata for an architecture. |
 
 #### 6.2.1 Create Bundle — `POST /api/v1/catalog/bundles`

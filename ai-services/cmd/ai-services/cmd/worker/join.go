@@ -3,10 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -102,50 +99,90 @@ func joinRunE(_ *cobra.Command, args []string) error {
 		},
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return join.Run(ctx, opts)
+	return join.Run(context.Background(), opts)
 }
 
-func newJoinCmd() *cobra.Command {
-	cmd.Flags().StringVar(&token, "token", "",
+// configureFlags registers the flags shared by the join and grpcserver
+// commands: --token (required), --runtime, --basedir, --https-port,
+// --ssl-cert, and --ssl-key.
+func configureFlags(c *cobra.Command) {
+	c.Flags().StringVar(&token, "token", "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
-	_ = cmd.MarkFlagRequired("token")
+	_ = c.MarkFlagRequired("token")
 
-	cmdcommon.ConfigureRuntimeFlag(cmd, &runtimeType)
+	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
-	cmd.Flags().StringVar(&baseDir, "basedir", "",
+	c.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 
-	cmd.Flags().IntVar(&httpsPort, "https-port", defaultJoinHTTPSPort,
+	c.Flags().IntVar(&httpsPort, "https-port", defaultJoinHTTPSPort,
 		"Custom HTTPS port to expose the service endpoints externally.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n")
 
-	cmd.Flags().StringVar(&domainName, "domain-name", "",
+	c.Flags().StringVar(&domainName, "domain-name", "",
 		"Custom domain name for self-signed certificates.\n"+
 			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
 			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and this flag is ignored.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --domain-name example.com\n")
 
-	cmd.Flags().StringVar(&sslCertPath, "ssl-cert", "",
+	c.Flags().StringVar(&sslCertPath, "ssl-cert", "",
 		"Path to user-provided SSL certificate (optional).\n"+
 			"Must be used together with --ssl-key.\n"+
 			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-cert /path/to/cert.pem\n")
 
-	cmd.Flags().StringVar(&sslKeyPath, "ssl-key", "",
+	c.Flags().StringVar(&sslKeyPath, "ssl-key", "",
 		"Path to user-provided SSL private key (optional).\n"+
 			"Must be used together with --ssl-cert.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-key /path/to/key.pem\n")
+}
+
+func newJoinCmd() *cobra.Command {
+	configureFlags(cmd)
 
 	return cmd
+}
+
+var grpcServerCmd = &cobra.Command{
+	Use:    "grpcserver <gateway>",
+	Short:  "Connect to the catalog gRPC worker-gateway",
+	Hidden: true,
+	Args:   cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
+
+		return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+	},
+	RunE: grpcServerRunE,
+}
+
+func grpcServerRunE(_ *cobra.Command, args []string) error {
+	opts := join.Options{
+		GatewayAddr: args[0],
+		Token:       token,
+		RuntimeType: types.RuntimeType(runtimeType),
+		Setup: workerdeploy.Options{
+			BaseDir:     baseDir,
+			HTTPSPort:   httpsPort,
+			DomainName:  domainName,
+			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+		},
+	}
+
+	return join.GrpcServer(context.Background(), opts)
+}
+
+func newGrpcServerCmd() *cobra.Command {
+	configureFlags(grpcServerCmd)
+
+	return grpcServerCmd
 }

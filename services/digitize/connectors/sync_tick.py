@@ -269,7 +269,7 @@ async def _wait_for_job(job_id: str, connector_id: str, sync_seq: int) -> None:
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
     """
-    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.FAILED.value}
+    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
         interrupt = _check_interrupt_call(connector_id, sync_seq)
@@ -387,7 +387,7 @@ async def _process_new_files(
             await _wait_for_job(job_id, connector_id, sync_seq)
 
             job_stats = get_job_document_stats(job_id)
-            for doc in job_stats["completed_docs"]:
+            for doc in job_stats["completed_docs"] + job_stats["completed_with_errors_docs"]:
                 checksum = doc_id_to_checksum.get(doc["id"])
                 if checksum is not None:
                     add_connector_checksum_entry(connector_id, checksum, doc["id"])
