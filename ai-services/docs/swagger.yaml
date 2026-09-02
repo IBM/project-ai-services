@@ -34,32 +34,31 @@ definitions:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError'
         type: array
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem:
     properties:
-      application_id:
-        description: ApplicationID is the UUID of the application that owns this service.
-        type: string
-      application_name:
-        description: ApplicationName is the human-readable display name of the owning
-          application.
-        type: string
       catalog_id:
         description: CatalogID is the catalog identifier of the owning application
           (e.g. "rag").
+        type: string
+      display_name:
+        description: |-
+          DisplayName is the resolved display name of the owning application (e.g. "Digital Assistants").
+          Falls back to CatalogID when the catalog entry cannot be loaded.
         type: string
       err_msg:
         description: |-
           ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
           no endpoint registered). Empty on success.
         type: string
+      id:
+        description: ID is the UUID of the application that owns this service.
+        type: string
       last_sync_at:
         description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
           or null when unavailable.
         type: string
       name:
-        description: |-
-          Name is the resolved display name of the owning application (e.g. "Digital Assistants").
-          Falls back to CatalogID when the catalog entry cannot be loaded.
+        description: Name is the human-readable display name of the owning application.
         type: string
       sync_status:
         description: |-
@@ -127,6 +126,19 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse:
+    properties:
+      applications:
+        description: |-
+          Applications lists every application currently connected to this datasource,
+          enriched with live sync state from each downstream service pod.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem'
+        type: array
+      datasource_id:
+        description: DatasourceID is the UUID of the queried datasource connector.
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError:
     properties:
       datasource_id:
@@ -171,19 +183,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse:
-    properties:
-      datasource_id:
-        description: DatasourceID is the UUID of the queried datasource connector.
-        type: string
-      services:
-        description: |-
-          Services lists every service currently connected to this datasource,
-          enriched with live sync state from each downstream service pod.
-        items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem'
-        type: array
-    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
     properties:
       id:
@@ -212,6 +211,13 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse:
     properties:
+      applications:
+        description: |-
+          Applications lists every application currently connected to this datasource,
+          enriched with live sync state from each downstream service pod.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem'
+        type: array
       created_at:
         description: CreatedAt is the creation timestamp.
         type: string
@@ -235,13 +241,6 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
         description: Provider contains the provider ID and its resolved display name.
-      services:
-        description: |-
-          Services lists every service currently connected to this datasource,
-          enriched with live sync state from each downstream service pod.
-        items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem'
-        type: array
       status:
         description: Status is the current connectivity status ("connected" or "offline").
         type: string
@@ -254,16 +253,15 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError:
     properties:
-      application_id:
-        description: ApplicationID is the UUID of the application whose Digitize service
-          could not be updated.
-        type: string
-      application_name:
-        description: ApplicationName is the display name of that application, for
-          UI rendering.
-        type: string
       error:
         description: Error is the human-readable reason the propagation failed.
+        type: string
+      id:
+        description: ID is the UUID of the application whose Digitize service could
+          not be updated.
+        type: string
+      name:
+        description: Name is the display name of that application, for UI rendering.
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
@@ -2241,12 +2239,12 @@ paths:
       summary: Update datasource credentials
       tags:
       - Datasources
-  /datasources/{id}/services:
+  /datasources/{id}/applications:
     get:
-      description: Returns the list of services currently connected to the given datasource,
-        each enriched with live sync state fetched from its downstream service pod.
-        Sync-state fetch failures degrade gracefully — the service entry is still
-        returned with sync_status set to "unknown".
+      description: Returns the list of applications currently connected to the given
+        datasource, each enriched with live sync state fetched from its downstream
+        service pod. Sync-state fetch failures degrade gracefully — the application
+        entry is still returned with sync_status set to "unknown".
       parameters:
       - description: Datasource UUID
         in: path
@@ -2257,9 +2255,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: Connected services with live sync state
+          description: Connected applications with live sync state
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse'
         "400":
           description: Invalid UUID format
           schema:
@@ -2278,7 +2276,7 @@ paths:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get connected services for a datasource
+      summary: Get connected applications for a datasource
       tags:
       - Datasources
   /resources:

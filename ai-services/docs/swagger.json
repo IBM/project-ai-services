@@ -1949,21 +1949,21 @@
                 }
             }
         },
-        "/datasources/{id}/services": {
+        "/datasources/{id}/applications": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the list of services currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the service entry is still returned with sync_status set to \"unknown\".",
+                "description": "Returns the list of applications currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the application entry is still returned with sync_status set to \"unknown\".",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Datasources"
                 ],
-                "summary": "Get connected services for a datasource",
+                "summary": "Get connected applications for a datasource",
                 "parameters": [
                     {
                         "type": "string",
@@ -1975,9 +1975,9 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Connected services with live sync state",
+                        "description": "Connected applications with live sync state",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse"
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse"
                         }
                     },
                     "400": {
@@ -2547,23 +2547,23 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem": {
             "type": "object",
             "properties": {
-                "application_id": {
-                    "description": "ApplicationID is the UUID of the application that owns this service.",
-                    "type": "string"
-                },
-                "application_name": {
-                    "description": "ApplicationName is the human-readable display name of the owning application.",
-                    "type": "string"
-                },
                 "catalog_id": {
                     "description": "CatalogID is the catalog identifier of the owning application (e.g. \"rag\").",
                     "type": "string"
                 },
+                "display_name": {
+                    "description": "DisplayName is the resolved display name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
+                    "type": "string"
+                },
                 "err_msg": {
                     "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the application that owns this service.",
                     "type": "string"
                 },
                 "last_sync_at": {
@@ -2571,7 +2571,7 @@
                     "type": "string"
                 },
                 "name": {
-                    "description": "Name is the resolved display name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
+                    "description": "Name is the human-readable display name of the owning application.",
                     "type": "string"
                 },
                 "sync_status": {
@@ -2653,6 +2653,22 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse": {
+            "type": "object",
+            "properties": {
+                "applications": {
+                    "description": "Applications lists every application currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem"
+                    }
+                },
+                "datasource_id": {
+                    "description": "DatasourceID is the UUID of the queried datasource connector.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError": {
             "type": "object",
             "properties": {
@@ -2721,22 +2737,6 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceServicesResponse": {
-            "type": "object",
-            "properties": {
-                "datasource_id": {
-                    "description": "DatasourceID is the UUID of the queried datasource connector.",
-                    "type": "string"
-                },
-                "services": {
-                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
-                    }
-                }
-            }
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse": {
             "type": "object",
             "properties": {
@@ -2777,6 +2777,13 @@
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse": {
             "type": "object",
             "properties": {
+                "applications": {
+                    "description": "Applications lists every application currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem"
+                    }
+                },
                 "created_at": {
                     "description": "CreatedAt is the creation timestamp.",
                     "type": "string"
@@ -2806,13 +2813,6 @@
                         }
                     ]
                 },
-                "services": {
-                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
-                    }
-                },
                 "status": {
                     "description": "Status is the current connectivity status (\"connected\" or \"offline\").",
                     "type": "string"
@@ -2830,16 +2830,16 @@
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError": {
             "type": "object",
             "properties": {
-                "application_id": {
-                    "description": "ApplicationID is the UUID of the application whose Digitize service could not be updated.",
-                    "type": "string"
-                },
-                "application_name": {
-                    "description": "ApplicationName is the display name of that application, for UI rendering.",
-                    "type": "string"
-                },
                 "error": {
                     "description": "Error is the human-readable reason the propagation failed.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the application whose Digitize service could not be updated.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the display name of that application, for UI rendering.",
                     "type": "string"
                 }
             }

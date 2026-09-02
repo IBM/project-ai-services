@@ -201,10 +201,10 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 
 	sensitiveFields := sensitiveFieldsFromSchema(schema)
 
-	// Steps 3–4: fetch linked services and enrich each with live Digitize sync state.
-	services, err := s.buildConnectedServices(ctx, id)
+	// Steps 3–4: fetch linked applications and enrich each with live Digitize sync state.
+	applications, err := s.buildConnectedApplications(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build connected services for datasource %s: %w", id, err)
+		return nil, fmt.Errorf("failed to build connected applications for datasource %s: %w", id, err)
 	}
 
 	return &apimodels.GetDatasourceResponse{
@@ -215,23 +215,23 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 			ID:   connector.Provider,
 			Name: providerName,
 		},
-		Status:    string(connector.Status),
-		Message:   connector.Message,
-		Metadata:  catalogutils.StripSensitiveFields(connector.Metadata, sensitiveFields),
-		Services:  services,
-		CreatedAt: connector.CreatedAt,
-		UpdatedAt: connector.UpdatedAt,
+		Status:       string(connector.Status),
+		Message:      connector.Message,
+		Metadata:     catalogutils.StripSensitiveFields(connector.Metadata, sensitiveFields),
+		Applications: applications,
+		CreatedAt:    connector.CreatedAt,
+		UpdatedAt:    connector.UpdatedAt,
 	}, nil
 }
 
-// GetDatasourceServices returns the list of services connected to the given datasource,
+// GetDatasourceApplications returns the list of applications connected to the given datasource,
 // enriched with live sync state from each downstream service pod.
 //
 // Flow:
 //  1. Verify the datasource exists — returns 404 when it does not.
-//  2. Delegate entirely to buildConnectedServices, which issues the single DB join query
-//     and fetches live sync state per service.
-func (s *DatasourceService) GetDatasourceServices(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceServicesResponse, error) {
+//  2. Delegate entirely to buildConnectedApplications, which issues the single DB join query
+//     and fetches live sync state per application.
+func (s *DatasourceService) GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error) {
 	// Step 1: existence check — fetch without credentials (no metadata needed here).
 	if _, err := s.connectorRepo.GetByID(ctx, id, false); err != nil {
 		if err == dbrepo.ErrConnectorNotFound {
@@ -244,15 +244,15 @@ func (s *DatasourceService) GetDatasourceServices(ctx context.Context, id uuid.U
 		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
 	}
 
-	// Step 2: build the enriched services list, reusing the shared helper.
-	services, err := s.buildConnectedServices(ctx, id)
+	// Step 2: build the enriched applications list, reusing the shared helper.
+	applications, err := s.buildConnectedApplications(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build connected services for datasource %s: %w", id, err)
+		return nil, fmt.Errorf("failed to build connected applications for datasource %s: %w", id, err)
 	}
 
-	return &apimodels.DatasourceServicesResponse{
+	return &apimodels.DatasourceApplicationsResponse{
 		DatasourceID: id.String(),
-		Services:     services,
+		Applications: applications,
 	}, nil
 }
 
@@ -375,48 +375,48 @@ func (s *DatasourceService) connectorToResponse(c *dbmodels.Connector, connected
 // here from EndpointsJSON. A DB query failure is propagated to the caller.
 // Sync-state fetch failures per service are non-fatal: ErrMsg is set on the item so the
 // caller receives full context without the connector record being blocked.
-func (s *DatasourceService) buildConnectedServices(ctx context.Context, connectorID uuid.UUID) ([]apimodels.ConnectedServiceItem, error) {
+func (s *DatasourceService) buildConnectedApplications(ctx context.Context, connectorID uuid.UUID) ([]apimodels.ConnectedApplicationItem, error) {
 	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(
 		ctx,
 		connectorID,
 		dbmodels.DependencyTypeConnector,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query linked services: %w", err)
+		return nil, fmt.Errorf("failed to query linked applications: %w", err)
 	}
 
-	services := make([]apimodels.ConnectedServiceItem, 0, len(linkedRows))
+	applications := make([]apimodels.ConnectedApplicationItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
 		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
 		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
 
 		// Resolve the display name from catalog metadata; fall back to catalog_id.
-		name := row.ApplicationCatalogID
+		displayName := row.ApplicationCatalogID
 		if row.ApplicationDeploymentType == string(dbmodels.DeploymentTypeArchitectures) {
 			if arch, err := s.catalogProvider.LoadArchitecture(row.ApplicationCatalogID); err == nil {
-				name = arch.Name
+				displayName = arch.Name
 			}
 		} else {
 			if svc, err := s.catalogProvider.LoadService(row.ApplicationCatalogID); err == nil {
-				name = svc.Name
+				displayName = svc.Name
 			}
 		}
 
-		item := apimodels.ConnectedServiceItem{
-			ApplicationID:   row.ApplicationID.String(),
-			ApplicationName: row.ApplicationName,
-			CatalogID:       row.ApplicationCatalogID,
-			Name:            name,
-			SyncStatus:      syncStatus,
-			LastSyncAt:      lastSyncAt,
+		item := apimodels.ConnectedApplicationItem{
+			ID:          row.ApplicationID.String(),
+			Name:        row.ApplicationName,
+			CatalogID:   row.ApplicationCatalogID,
+			DisplayName: displayName,
+			SyncStatus:  syncStatus,
+			LastSyncAt:  lastSyncAt,
 		}
 		if syncErr != "" {
 			item.ErrMsg = syncErr
 		}
-		services = append(services, item)
+		applications = append(applications, item)
 	}
 
-	return services, nil
+	return applications, nil
 }
 
 // encryptSensitiveFields returns a copy of params where every key listed in
@@ -889,9 +889,9 @@ func (s *DatasourceService) propagateCredentials(
 		logger.WarningfCtx(ctx, "failed to query linked service endpoints for datasource %s: %v", datasourceID, err)
 
 		return []apimodels.PropagationError{{
-			ApplicationID:   "",
-			ApplicationName: "unknown",
-			Error:           fmt.Sprintf("failed to query linked service endpoints: %v", err),
+			ID:    "",
+			Name:  "unknown",
+			Error: fmt.Sprintf("failed to query linked service endpoints: %v", err),
 		}}
 	}
 
@@ -908,9 +908,9 @@ func (s *DatasourceService) propagateCredentials(
 		baseURL := extractAPIEndpointURL(svc.EndpointsJSON)
 		if baseURL == "" {
 			propErrors = append(propErrors, apimodels.PropagationError{
-				ApplicationID:   svc.ApplicationID.String(),
-				ApplicationName: svc.ApplicationName,
-				Error:           "service has no reachable endpoint",
+				ID:    svc.ApplicationID.String(),
+				Name:  svc.ApplicationName,
+				Error: "service has no reachable endpoint",
 			})
 
 			continue
@@ -918,9 +918,9 @@ func (s *DatasourceService) propagateCredentials(
 
 		if err := catalogclient.NewServiceClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
-				ApplicationID:   svc.ApplicationID.String(),
-				ApplicationName: svc.ApplicationName,
-				Error:           err.Error(),
+				ID:    svc.ApplicationID.String(),
+				Name:  svc.ApplicationName,
+				Error: err.Error(),
 			})
 		}
 	}

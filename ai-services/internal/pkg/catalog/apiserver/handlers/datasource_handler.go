@@ -126,21 +126,21 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetDatasourceServices godoc
+// GetDatasourceApplications godoc
 //
-//	@Summary		Get connected services for a datasource
-//	@Description	Returns the list of services currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the service entry is still returned with sync_status set to "unknown".
+//	@Summary		Get connected applications for a datasource
+//	@Description	Returns the list of applications currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the application entry is still returned with sync_status set to "unknown".
 //	@Tags			Datasources
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string								true	"Datasource UUID"
-//	@Success		200	{object}	models.DatasourceServicesResponse	"Connected services with live sync state"
-//	@Failure		400	{object}	ErrorResponse						"Invalid UUID format"
-//	@Failure		401	{object}	ErrorResponse						"Unauthorized"
-//	@Failure		404	{object}	ErrorResponse						"Datasource not found"
-//	@Failure		500	{object}	ErrorResponse						"Internal Server Error"
-//	@Router			/datasources/{id}/services [get]
-func (h *DatasourceHandler) GetDatasourceServices(c *gin.Context) {
+//	@Param			id	path		string									true	"Datasource UUID"
+//	@Success		200	{object}	models.DatasourceApplicationsResponse	"Connected applications with live sync state"
+//	@Failure		400	{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse							"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/datasources/{id}/applications [get]
+func (h *DatasourceHandler) GetDatasourceApplications(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -150,7 +150,7 @@ func (h *DatasourceHandler) GetDatasourceServices(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.datasourceSvc.GetDatasourceServices(c.Request.Context(), id)
+	resp, err := h.datasourceSvc.GetDatasourceApplications(c.Request.Context(), id)
 	if err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
@@ -158,9 +158,9 @@ func (h *DatasourceHandler) GetDatasourceServices(c *gin.Context) {
 			return
 		}
 
-		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource services: %v", err)
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource applications: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: "Failed to get datasource services",
+			Error: "Failed to get datasource applications",
 		})
 
 		return

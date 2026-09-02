@@ -27,7 +27,7 @@
    - 6.5 [Delete Datasource](#65-delete-datasource)
    - 6.6 [Get Provider Input Schema](#66-get-provider-input-schema)
    - 6.7 [List Providers for a Connector Type](#67-list-providers-for-a-connector-type)
-   - 6.8 [Get Connected Services for Datasource](#68-get-connected-services-for-datasource)
+   - 6.8 [Get Connected Applications for Datasource](#68-get-connected-applications-for-datasource)
    - 6.10 [Connect Datasource to Application](#610-connect-datasource-to-application)
    - 6.11 [Disconnect Datasource from Application](#611-disconnect-datasource-from-application)
    - 6.12 [Get Datasource Status for Application](#612-get-datasource-status-for-application)
@@ -230,7 +230,7 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 | `POST`   | `/datasources`                                              | Create a new datasource (validates connectivity first)                                                   |
 | `PUT`    | `/datasources/:id`                                          | Update datasource credentials                                                                            |
 | `DELETE` | `/datasources/:id`                                          | Delete a datasource (only if not connected to any application)                                           |
-| `GET`    | `/datasources/:id/services`                                 | List all services connected to a datasource with sync status                                             |
+| `GET`    | `/datasources/:id/applications`                             | List all applications connected to a datasource with sync status                                         |
 | `GET`    | `/connectors/:connector_type/providers/:provider_id/params` | Get the input schema for a provider (use `connector_type=datasource`)                                    |
 | `GET`    | `/connectors[?type=datasource]`                             | List all supported datasource provider types (use `type=datasource` to filter for datasources)           |
 
@@ -296,7 +296,7 @@ Query parameters:
 
 **`GET /api/v1/datasources/:id`**
 
-**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and a `services` array listing all connected services enriched with live sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
+**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and an `applications` array listing all connected applications enriched with live sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
 
 **Response `404 Not Found`:**
 
@@ -563,33 +563,33 @@ Returns all registered providers for the given connector type, discovered from t
 { "error": "connector type not found: datasource" }
 ```
 
-### 6.8 Get Connected Services for Datasource
+### 6.8 Get Connected Applications for Datasource
 
-**`GET /api/v1/datasources/:id/services`**
+**`GET /api/v1/datasources/:id/applications`**
 
-Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each downstream service pod.
+Returns the list of applications currently connected to a datasource, enriched with live sync status fetched from each downstream service pod.
 
-> **Note:** The `services` array shape is identical in both `GET /api/v1/datasources/:id` and `GET /api/v1/datasources/:id/services`.
+> **Note:** The `applications` array shape is identical in both `GET /api/v1/datasources/:id` and `GET /api/v1/datasources/:id/applications`.
 
 **Response `200 OK`:**
 
 ```json
 {
   "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
-  "services": [
+  "applications": [
     {
-      "application_id": "app-uuid-1",
-      "application_name": "My RAG App",
+      "id": "app-uuid-1",
+      "name": "My RAG App",
       "catalog_id": "rag",
-      "name": "Digital Assistants",
+      "display_name": "Digital Assistants",
       "sync_status": "up to date",
       "last_sync_at": "2026-06-01T11:00:00Z"
     },
     {
-      "application_id": "app-uuid-2",
-      "application_name": "My Summarise App",
+      "id": "app-uuid-2",
+      "name": "My Summarise App",
       "catalog_id": "rag",
-      "name": "Digital Assistants",
+      "display_name": "Digital Assistants",
       "sync_status": "out of sync",
       "last_sync_at": "2026-06-01T09:00:00Z"
     }
@@ -597,16 +597,16 @@ Returns the list of services currently connected to a datasource, enriched with 
 }
 ```
 
-| Field                         | Source                                            | Description                                                                                                   |
-| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `datasource_id`               | path param                                        | The datasource component UUID                                                                                 |
-| `services[].application_id`   | catalog (`applications.id`)                       | ID of the application the service belongs to                                                                  |
-| `services[].application_name` | catalog (`applications.name`)                     | Display name of the application                                                                               |
-| `services[].catalog_id`       | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
-| `services[].name`             | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to `catalog_id` when entry cannot be loaded       |
-| `services[].sync_status`      | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
-| `services[].last_sync_at`     | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
-| `services[].err_msg`          | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
+| Field                          | Source                                            | Description                                                                                                   |
+| ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `datasource_id`                | path param                                        | The datasource component UUID                                                                                 |
+| `applications[].id`            | catalog (`applications.id`)                       | ID of the application                                                                                         |
+| `applications[].name`          | catalog (`applications.name`)                     | Display name of the application                                                                               |
+| `applications[].catalog_id`    | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
+| `applications[].display_name`  | catalog (`LoadArchitecture` / `LoadService`)      | Resolved display name of the owning application; falls back to `catalog_id` when entry cannot be loaded       |
+| `applications[].sync_status`   | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
+| `applications[].last_sync_at`  | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
+| `applications[].err_msg`       | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
 
 **Response `404 Not Found`:**
 
