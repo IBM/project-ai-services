@@ -2254,6 +2254,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef": {
+            "type": "object",
+            "required": [
+                "id",
+                "type"
+            ],
+            "properties": {
+                "id": {
+                    "description": "ID is the UUID from the connectors table.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the connector kind (e.g. \"datasource\").",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
@@ -2480,6 +2497,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
+                    }
+                },
+                "connectors": {
+                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (accepts_datasource) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef"
                     }
                 },
                 "params": {

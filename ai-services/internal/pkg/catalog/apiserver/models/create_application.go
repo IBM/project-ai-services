@@ -16,9 +16,9 @@ type CreateApplicationRequest struct {
 // Connectors is an optional field for attaching pre-registered connector records
 // (e.g. datasource connectors) to this service. Components is unchanged.
 type Service struct {
-	CatalogID  string         `json:"catalog_id" binding:"required"`
-	Version    string         `json:"version" binding:"required"`
-	Components []Component    `json:"components" binding:"required,dive"`
+	CatalogID  string      `json:"catalog_id" binding:"required"`
+	Version    string      `json:"version" binding:"required"`
+	Components []Component `json:"components" binding:"required,dive"`
 	// Connectors lists pre-registered connector records to attach to this service
 	// after the application reaches Running status. Each entry is validated against
 	// the service's catalog YAML (accepts_datasource) and the connectors table before

@@ -99,11 +99,11 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 	}
 
 	deployOptionsService := &types.DeployOptionsService{
-		ID:                service.ID,
-		Name:              service.Name,
-		Version:           serviceVersion,
-		Components:        components,
-		Resources:         resources,
+		ID:         service.ID,
+		Name:       service.Name,
+		Version:    serviceVersion,
+		Components: components,
+		Resources:  resources,
 		// Copy accepts_datasource from the catalog YAML so the UI knows whether to
 		// render a connector picker for this service.
 		AcceptsDatasource: service.AcceptsDatasource,

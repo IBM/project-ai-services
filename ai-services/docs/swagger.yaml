@@ -70,6 +70,18 @@ definitions:
           Set to "unknown" when the Digitize pod is unreachable.
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef:
+    properties:
+      id:
+        description: ID is the UUID from the connectors table.
+        type: string
+      type:
+        description: Type is the connector kind (e.g. "datasource").
+        type: string
+    required:
+    - id
+    - type
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
       catalog_id:
@@ -237,6 +249,15 @@ definitions:
       components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
+        type: array
+      connectors:
+        description: |-
+          Connectors lists pre-registered connector records to attach to this service
+          after the application reaches Running status. Each entry is validated against
+          the service's catalog YAML (accepts_datasource) and the connectors table before
+          deployment begins. Omitting this field (or passing an empty list) is valid.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef'
         type: array
       params:
         additionalProperties: {}
