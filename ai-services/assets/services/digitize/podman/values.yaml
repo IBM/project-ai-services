@@ -6,7 +6,7 @@ digitize:
   dbEncryptionKey: ""
 
 digitizeUi:
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.31
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.32
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-5
