@@ -1483,7 +1483,7 @@ def update_connector_total_files(connector_id: str, total_files: int) -> None:
     db_manager.update_connector(connector_id=connector_id, total_files=total_files)
 
 
-def set_connector_error(connector_id: str, error: Optional[str]) -> None:
+def set_connector_message(connector_id: str, error: Optional[str]) -> None:
     """Persist or clear a message on the connector row (best-effort; logs on failure).
 
     Pass ``None`` to clear a previously set message.

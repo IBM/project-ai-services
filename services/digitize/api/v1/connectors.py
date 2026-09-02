@@ -357,7 +357,7 @@ async def _run_teardown(connector_id: str) -> None:
 
         if deletion_errors:
             error_msg = f"Failed to delete connector, error: {'; '.join(deletion_errors)}"
-            db_ops.set_connector_error(connector_id, error_msg)
+            db_ops.set_connector_message(connector_id, error_msg)
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
@@ -375,7 +375,7 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
-        db_ops.set_connector_error(connector_id, f"Unexpected error during teardown: {exc}")
+        db_ops.set_connector_message(connector_id, f"Unexpected error during teardown: {exc}")
 
 
 def _remove_checksums(
