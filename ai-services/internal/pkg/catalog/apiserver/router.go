@@ -63,10 +63,15 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/architectures", catalog.ListArchitectures)
 		g.GET("/architectures/:id", catalog.GetArchitectureDetails)
 		g.GET("/architectures/:id/deploy-options", catalog.GetArchitectureDeployOptions)
+		g.GET("/architectures/:id/images", catalog.GetArchitectureImages)
+		g.GET("/architectures/:id/models", catalog.GetArchitectureModels)
 		g.GET("/services", catalog.ListServices)
 		g.GET("/services/:id", catalog.GetServiceDetails)
 		g.GET("/services/:id/deploy-options", catalog.GetServiceDeployOptions)
 		g.GET("/services/:id/params", catalog.GetServiceParams)
+		g.GET("/services/:id/images", catalog.GetServiceImages)
+		g.GET("/services/:id/models", catalog.GetServiceModels)
+		g.GET("/services/:id/steps", catalog.GetServiceSteps)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)
@@ -105,6 +110,10 @@ func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandl
 		g.GET("/:id/ps", h.ApplicationPS)
 		// PUT /api/v1/applications/:id/datasources — connect one or more datasources to application
 		g.PUT("/:id/datasources", datasourceH.ConnectDatasourcesToApplication)
+		// GET /api/v1/applications/:id/datasources/:datasource_id — get datasource status for application
+		g.GET("/:id/datasources/:datasource_id", datasourceH.GetApplicationDatasource)
+		// DELETE /api/v1/applications/:id/datasources/:datasource_id — disconnect a single datasource from application
+		g.DELETE("/:id/datasources/:datasource_id", datasourceH.DisconnectDatasourcesFromApplication)
 	}
 }
 
@@ -125,6 +134,7 @@ func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler
 		g.POST("", h.CreateDatasource)
 		g.GET("", h.ListDatasources)
 		g.GET("/:id", h.GetDatasource)
+		g.GET("/:id/applications", h.GetDatasourceApplications)
 		g.PUT("/:id", h.UpdateDatasource)
 		g.DELETE("/:id", h.DeleteDatasource)
 	}

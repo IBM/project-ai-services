@@ -16,7 +16,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -445,27 +444,26 @@ func checkApplicationExists(ctx context.Context, appClient *catalogClient.Applic
 }
 
 // buildCatalogPayload builds the catalog API payload for the given template.
+// It uses CatalogSource so that custom bundle templates (not in the embedded catalog)
+// are resolved via the catalog API.
 func buildCatalogPayload(ctx context.Context, appName string) (*apiModels.CreateApplicationRequest, error) {
-	// Initialize catalog provider
-	provider, err := catalog.NewCatalogProvider(nil)
+	source, err := catalogClient.NewCatalogSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+		return nil, fmt.Errorf("failed to initialise catalog source: %w", err)
 	}
 
-	// Determine if template is architecture or service
-	isArchitecture := provider.ArchitectureExists(templateName)
-	isService := provider.ServiceExists(templateName)
-
-	if !isArchitecture && !isService {
-		return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
+	// Try architecture first; fall through to service on not-found.
+	arch, err := source.LoadArchitecture(ctx, templateName)
+	if err == nil {
+		return buildArchitecturePayload(ctx, source, arch, appName)
 	}
 
-	// Build the payload
-	if isArchitecture {
-		return buildArchitecturePayload(ctx, provider, templateName, appName)
+	svc, err := source.LoadService(ctx, templateName)
+	if err == nil {
+		return buildServicePayload(ctx, svc.ID, appName)
 	}
 
-	return buildServicePayload(ctx, templateName, appName)
+	return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
@@ -548,11 +546,6 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	catalogProvider, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
-	}
-
 	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
@@ -569,27 +562,37 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 			}
 		}
 
-		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
+		rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, runtimeType)
 		if err != nil {
 			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
 
 			continue
 		}
 
-		err = printNextStepsMD(tmpls, params, application.Name, runtimeType)
+		tmpls, err := parseStepsTemplates(rawFiles)
+		if err != nil {
+			logger.Warningf("Failed to parse next steps templates for service '%s': %v\n", service.CatalogID, err)
+
+			continue
+		}
+
+		err = printNextStepsMD(tmpls, params)
 		if err != nil {
 			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
 		}
 	}
 
+	// Print the info command regardless of whether any service has next.md
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, runtimeType)
+
 	return nil
 }
 
 // printNextStepsMD renders and prints the next.md template for a service.
-func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName, runtime string) error {
+func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string) error {
 	tmpl, ok := tmpls["next.md"]
 	if !ok {
-		// next.md doesn't exist for this service, return nil
+		// next.md doesn't exist for this service, skip
 		return nil
 	}
 
@@ -605,20 +608,11 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 		logger.Infoln(value)
 	}
 
-	// Print the info command for all services
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", appName, runtime)
-
 	return nil
 }
 
 // buildArchitecturePayload builds the payload for an architecture deployment.
-func buildArchitecturePayload(ctx context.Context, provider *catalog.CatalogProvider, archID, appName string) (*apiModels.CreateApplicationRequest, error) {
-	// Load architecture metadata
-	arch, err := provider.LoadArchitecture(archID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load architecture: %w", err)
-	}
-
+func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource, arch *catalogTypes.Architecture, appName string) (*apiModels.CreateApplicationRequest, error) {
 	// Create application client for API calls
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
@@ -626,7 +620,7 @@ func buildArchitecturePayload(ctx context.Context, provider *catalog.CatalogProv
 	}
 
 	// Get deploy options for the architecture
-	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, archID)
+	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -656,7 +650,7 @@ func buildArchitecturePayload(ctx context.Context, provider *catalog.CatalogProv
 	}
 
 	return &apiModels.CreateApplicationRequest{
-		CatalogID:  archID,
+		CatalogID:  arch.ID,
 		Name:       appName,
 		Services:   services,
 		Version:    arch.Version,
@@ -673,7 +667,7 @@ func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiMo
 	}
 
 	// Get deploy options for the service
-	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID)
+	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -958,7 +952,7 @@ func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent,
 // User-provided params override defaults.
 func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
 	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %w", err)
 	}

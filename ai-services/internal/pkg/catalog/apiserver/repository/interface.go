@@ -15,6 +15,9 @@ type DatasourceServiceInterface interface {
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
 	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
+	// eligible service in a running application and removes the service_dependency record.
+	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error
 	// GetDatasource retrieves a single datasource by ID with non-sensitive metadata and
 	// connected services enriched with live sync state from each service's Digitize pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.
@@ -35,6 +38,17 @@ type DatasourceServiceInterface interface {
 	// A 200 is returned even when propagation to some Digitize services fails; in that case,
 	// the response body contains a non-empty PropagationErrors list.
 	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
+
+	// GetDatasourceApplications returns the list of applications currently connected to a datasource,
+	// each enriched with live sync state from its downstream service pod.
+	// Returns a *ValidationError with code 404 when the connector does not exist.
+	GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error)
+
+	// GetApplicationDatasource returns the catalog identity and live Digitize sync state for
+	// a datasource that is connected to the given application.
+	// Returns a *ValidationError with code 404 when no service_dependencies row links
+	// datasourceID to any service of applicationID.
+	GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

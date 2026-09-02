@@ -375,7 +375,7 @@ func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, co
 	}
 
 	// Load component schema to determine which fields are sensitive
-	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
@@ -881,7 +881,7 @@ func (s *ApplicationServiceBase) addServiceResources(
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 ) error {
-	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
 	}
@@ -935,7 +935,7 @@ func (s *ApplicationServiceBase) processComponentResources(
 		return fmt.Errorf("failed to get component %s: %w", componentID, err)
 	}
 
-	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 	}

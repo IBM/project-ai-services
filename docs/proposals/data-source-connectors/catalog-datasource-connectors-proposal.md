@@ -27,7 +27,7 @@
    - 6.5 [Delete Datasource](#65-delete-datasource)
    - 6.6 [Get Provider Input Schema](#66-get-provider-input-schema)
    - 6.7 [List Providers for a Connector Type](#67-list-providers-for-a-connector-type)
-   - 6.8 [Get Connected Services for Datasource](#68-get-connected-services-for-datasource)
+   - 6.8 [Get Connected Applications for Datasource](#68-get-connected-applications-for-datasource)
    - 6.10 [Connect Datasource to Application](#610-connect-datasource-to-application)
    - 6.11 [Disconnect Datasource from Application](#611-disconnect-datasource-from-application)
    - 6.12 [Get Datasource Status for Application](#612-get-datasource-status-for-application)
@@ -230,7 +230,7 @@ All routes are under `/api/v1` and protected by the existing `AuthMiddleware`.
 | `POST`   | `/datasources`                                              | Create a new datasource (validates connectivity first)                                                   |
 | `PUT`    | `/datasources/:id`                                          | Update datasource credentials                                                                            |
 | `DELETE` | `/datasources/:id`                                          | Delete a datasource (only if not connected to any application)                                           |
-| `GET`    | `/datasources/:id/services`                                 | List all services connected to a datasource with sync status                                             |
+| `GET`    | `/datasources/:id/applications`                             | List all applications connected to a datasource with sync status                                         |
 | `GET`    | `/connectors/:connector_type/providers/:provider_id/params` | Get the input schema for a provider (use `connector_type=datasource`)                                    |
 | `GET`    | `/connectors[?type=datasource]`                             | List all supported datasource provider types (use `type=datasource` to filter for datasources)           |
 
@@ -296,7 +296,7 @@ Query parameters:
 
 **`GET /api/v1/datasources/:id`**
 
-**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and a `services` array listing all connected services enriched with live Digitize sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
+**Response `200 OK`:** Single datasource object with non-sensitive `metadata` fields, the `provider` object `{"id": "...", "name": "..."}`, and an `applications` array listing all connected applications enriched with live sync state (see §6.8 for the shape of each entry). The `connected_services` count field is **not** included on the single-get response — use the list endpoint for counts.
 
 **Response `404 Not Found`:**
 
@@ -563,33 +563,33 @@ Returns all registered providers for the given connector type, discovered from t
 { "error": "connector type not found: datasource" }
 ```
 
-### 6.8 Get Connected Services for Datasource
+### 6.8 Get Connected Applications for Datasource
 
-**`GET /api/v1/datasources/:id/services`**
+**`GET /api/v1/datasources/:id/applications`**
 
-Returns the list of services currently connected to a datasource, enriched with live sync status fetched from each service's Digitize pod.
+Returns the list of applications currently connected to a datasource, enriched with live sync status fetched from each downstream service pod.
+
+> **Note:** The `applications` array shape is identical in both `GET /api/v1/datasources/:id` and `GET /api/v1/datasources/:id/applications`.
 
 **Response `200 OK`:**
 
 ```json
 {
   "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
-  "services": [
+  "applications": [
     {
-      "service_id": "svc-uuid-1",
-      "service_name": "Digitize",
-      "service_type": "digitize",
-      "application_id": "app-uuid-1",
-      "application_name": "My RAG App",
+      "id": "app-uuid-1",
+      "name": "My RAG App",
+      "catalog_id": "rag",
+      "type": "Digital Assistants",
       "sync_status": "up to date",
       "last_sync_at": "2026-06-01T11:00:00Z"
     },
     {
-      "service_id": "svc-uuid-2",
-      "service_name": "Digitize",
-      "service_type": "digitize",
-      "application_id": "app-uuid-2",
-      "application_name": "My Summarise App",
+      "id": "app-uuid-2",
+      "name": "My Summarise App",
+      "catalog_id": "rag",
+      "type": "Digital Assistants",
       "sync_status": "out of sync",
       "last_sync_at": "2026-06-01T09:00:00Z"
     }
@@ -597,16 +597,16 @@ Returns the list of services currently connected to a datasource, enriched with 
 }
 ```
 
-| Field                         | Source                                       | Description                                                                                                  |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `datasource_id`               | path param                                   | The datasource component UUID                                                                                |
-| `services[].service_id`       | catalog (`services.id`)                      | ID of the connected service                                                                                  |
-| `services[].service_name`     | catalog (`services.name`)                    | Display name of the service                                                                                  |
-| `services[].service_type`     | catalog (`services.type`)                    | Catalog type of the service, e.g. `"digitize"`                                                               |
-| `services[].application_id`   | catalog (`applications.id`)                  | ID of the application the service belongs to                                                                 |
-| `services[].application_name` | catalog (`applications.name`)                | Display name of the application                                                                              |
-| `services[].sync_status`      | Digitize (`GET /v1/connectors/:connectorid`) | Current sync state for this service: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
-| `services[].last_sync_at`     | Digitize (`GET /v1/connectors/:connectorid`) | Timestamp of the last completed sync for this service, or `null`                                             |
+| Field                         | Source                                            | Description                                                                                                   |
+| ----------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `datasource_id`               | path param                                        | The datasource component UUID                                                                                 |
+| `applications[].id`           | catalog (`applications.id`)                       | ID of the application                                                                                         |
+| `applications[].name`         | catalog (`applications.name`)                     | Display name of the application                                                                               |
+| `applications[].catalog_id`   | catalog (`applications.catalog_id`)               | Catalog ID of the owning application (e.g. `"rag"`)                                                          |
+| `applications[].type`         | catalog (`LoadArchitecture` / `LoadService`)      | Resolved catalog type name of the owning application; falls back to `catalog_id` when entry cannot be loaded  |
+| `applications[].sync_status`  | downstream service (`GET /v1/connectors/:id`)     | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`, `"unknown"`     |
+| `applications[].last_sync_at` | downstream service (`GET /v1/connectors/:id`)     | Timestamp of the last completed sync, or `null` when unreachable or never synced                              |
+| `applications[].err_msg`      | catalog (internal)                                | Non-empty when sync state could not be fetched (e.g. service unreachable). Omitted on success.                |
 
 **Response `404 Not Found`:**
 
@@ -679,45 +679,64 @@ Removes the link from `service_dependencies` and calls `DELETE /v1/connectors/:c
 
 **`GET /api/v1/applications/:id/datasources/:datasource_id`**
 
-The catalog backend resolves the `connector_id` from `service_dependencies`, fetches the datasource record from `components`, and calls `GET /v1/connectors/:connectorid` on each linked Digitize service pod. The response merges the Digitize sync fields at the top level with catalog identity fields nested under a `datasource` object. `provider_name` is resolved from the provider registry using `components.provider`.
+The catalog backend resolves the link from `service_dependencies`, fetches the datasource record from the `connectors` table, and calls `GET /v1/connectors/:connectorid` on the linked service. The response returns catalog identity fields at the top level and nests live sync fields under a `service_details` object. `provider` is returned as an object with `id` and `name`; `provider.name` is resolved from the provider registry using `connectors.provider`.
 
 **Response `200 OK`:**
 
 ```json
 {
-  "connector_id": "550e8400-e29b-41d4-a716-446655440000",
-  "sync_status": "up to date",
-  "total_files": 150,
-  "new_files": 2,
-  "removed_files": 0,
-  "failed_files": 8,
-  "last_sync_at": "2026-06-01T11:00:00Z",
-  "last_sync_error": null,
-  "datasource": {
-    "name": "My S3 Bucket",
-    "type": "datasource",
-    "provider": "object_storage",
-    "provider_name": "Object storage",
-    "status": "connected"
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My S3 Bucket",
+  "status": "connected",
+  "message": "",
+  "provider": {
+    "id": "object_storage",
+    "name": "Object storage"
+  },
+  "service_details": {
+    "sync_status": "up to date",
+    "total_files": 150,
+    "last_sync_at": "2026-06-01T11:00:00Z",
+    "last_sync_error": null
   }
 }
 ```
 
-| Field                      | Source                                    | Description                                                                                 |
-| -------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `connector_id`             | Digitize (echoed from `connectors.id`)    | The connector UUID used as the Digitize connector ID                                        |
-| `sync_status`              | Digitize                                  | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
-| `total_files`              | Digitize                                  | Total files known to the connector                                                          |
-| `new_files`                | Digitize                                  | Files added since the last tick                                                             |
-| `removed_files`            | Digitize                                  | Files removed since the last tick                                                           |
-| `failed_files`             | Digitize                                  | Files that failed to process in the last tick                                               |
-| `last_sync_at`             | Digitize                                  | Timestamp of the last completed sync                                                        |
-| `last_sync_error`          | Digitize                                  | Error string from the last failed sync, or `null`                                           |
-| `datasource.name`          | catalog (`connectors.name`)               | User-supplied display name of the datasource                                                |
-| `datasource.type`          | catalog (`connectors.type`)               | Always `"datasource"`                                                                       |
-| `datasource.provider`      | catalog (`connectors.provider`)           | Provider identifier, e.g. `"object_storage"`, `"file_system"`                               |
-| `datasource.provider_name` | catalog (`CatalogProvider.LoadConnector`) | Human-readable provider name from `metadata.yaml`, e.g. `"Object storage"`, `"File system"` |
-| `datasource.status`        | catalog (`connectors.status`)             | Catalog-side connectivity health: `"connected"` or `"offline"`                              |
+**Response `200 OK` — when the connected service is unreachable (graceful degradation):**
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My S3 Bucket",
+  "status": "connected",
+  "message": "",
+  "provider": {
+    "id": "object_storage",
+    "name": "Object storage"
+  },
+  "service_details": {
+    "sync_status": "unknown",
+    "total_files": null,
+    "last_sync_at": null,
+    "last_sync_error": null,
+    "err_msg": "failed to fetch sync state: connection refused"
+  }
+}
+```
+
+| Field                             | Source                                    | Description                                                                                  |
+| --------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `id`                              | catalog (`connectors.id`)                 | UUID of the datasource connector                                                             |
+| `name`                            | catalog (`connectors.name`)               | User-supplied display name of the datasource                                                 |
+| `status`                          | catalog (`connectors.status`)             | Catalog-side connectivity health: `"connected"` or `"offline"`                               |
+| `message`                         | catalog (`connectors.message`)            | Human-readable description of the current status; omitted when empty                         |
+| `provider.id`                     | catalog (`connectors.provider`)           | Provider identifier, e.g. `"object_storage"`, `"file_system"`                                |
+| `provider.name`                   | catalog (`CatalogProvider.LoadConnector`) | Human-readable provider name from `metadata.yaml`; falls back to `provider.id` on miss       |
+| `service_details.sync_status`     | connected service                         | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`; `"unknown"` when unreachable |
+| `service_details.total_files`     | connected service                         | Total files known to the connector; `null` when service is unreachable                       |
+| `service_details.last_sync_at`    | connected service                         | Timestamp of the last completed sync; `null` when service is unreachable                     |
+| `service_details.last_sync_error` | connected service                         | Error string from the last failed sync, or `null` on success                                 |
+| `service_details.err_msg`         | catalog (internal)                        | Populated when the service was unreachable or returned an error; omitted on success          |
 
 **Response `404 Not Found`:** Returned if the datasource is not connected to this application (no row in `service_dependencies`).
 
@@ -947,59 +966,36 @@ When `PUT /api/v1/connectors/datasources/:id` is called:
 
 ### 7.4 Disconnect Flow
 
-When `DELETE /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
+When `DELETE /api/v1/applications/:id/datasources/:datasource_id` is called:
 
-1. Query `service_dependencies` where `dependency_id = datasource_id` and `dependency_type = 'connector'`, joined to `services` to filter to this application. Return `404` if no rows found.
-2. For each row, call `DELETE /v1/connectors/<dependency_id>` on its downstream Digitize pod, using the row's `dependency_id` as the `connector_id`.
-   - If the call returns `404` (connector already gone on the downstream side), treat as success and continue to the next service.
-   - If the call returns `409 Conflict` (a sync tick is currently in progress on the Digitize side), record the error for that service and continue to the next.
-   - If the call fails with any other error: record the error for that service and continue to the next — do **not** skip the remaining services.
-3. For every service whose downstream call succeeded (or returned `404`), delete the corresponding `service_dependencies` row.
-4. Return `200 OK`. If any downstream calls failed, include a `propagation_errors` array so the UI can show an inline error against each affected service. The user retriggers by re-submitting the disconnect from the UI.
-
-**Response when all disconnections succeed:**
-
-```json
-{
-  "application_id": "app-uuid-1",
-  "datasource_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-**Response when one or more disconnections fail:**
-
-```json
-{
-  "application_id": "app-uuid-1",
-  "datasource_id": "550e8400-e29b-41d4-a716-446655440000",
-  "propagation_errors": [
-    {
-      "service_id": "svc-uuid-1",
-      "service_name": "Digitize",
-      "error": "failed to reach digitize service: connection refused"
-    }
-  ]
-}
-```
+1. Query `service_dependencies` scoped to the given `datasource_id` and filter to services belonging to `application_id`. Return `404 Not Found` with `"datasource <id> is not connected to application <id>"` if no rows match — the datasource was never connected, or was already fully disconnected.
+2. For each confirmed row, call `DELETE /v1/connectors/<datasource_id>` on its downstream Digitize pod.
+   - If the call returns `404` (connector already removed on the downstream side — e.g. a previous attempt reached the service but failed before the DB row was cleaned up), treat as success and continue. This makes the operation **idempotent**.
+   - If the service has no registered API endpoint, skip the downstream call and proceed directly to DB cleanup.
+   - If the call fails with any other non-2xx status, return `502 Bad Gateway` immediately.
+3. Delete the corresponding `service_dependencies` row. A failure here is logged but does not block the response.
+4. Return `204 No Content`.
 
 ### 7.5 Connected Services Fetch Flow
 
-When `GET /api/v1/connectors/datasources/:id/services` is called:
+When `GET /api/v1/datasources/:id/services` is called:
 
 1. Return `404` if no record exists in `connectors` for the given `id`.
-2. Query `service_dependencies` where `dependency_id = id` and `dependency_type = 'connector'`, joined with `services` and `applications`, collecting `application_id`, `application_name`, `catalog_id`, and the `endpoints` JSONB column.
-3. For each linked service, call `GET /v1/connectors/<dependency_id>` on its downstream Digitize pod, using `dependency_id` as the `connector_id`. Extract `sync_status` and `last_sync_at` from the response.
-4. If the Digitize call fails for a service, set `sync_status: null` and `last_sync_at: null` for that entry and continue — do not fail the entire request.
+2. Query `service_dependencies` where `dependency_id = id` and `dependency_type = 'connector'`, joined with `services` and `applications`, collecting `application_id`, `application_name`, `catalog_id`, `deployment_type`, and the `endpoints` JSONB column.
+3. For each linked service, extract the `"api"`-typed endpoint URL from `endpoints`, then call `GET /v1/connectors/<id>` on the downstream service pod. Extract `sync_status` and `last_sync_at` from the response. Resolve the application display name from catalog metadata using `catalog_id` + `deployment_type`.
+4. If the downstream service call fails for a service entry, set `sync_status` to `"unknown"` and `last_sync_at` to `null`, and populate `err_msg` with the reason — do not fail the entire request.
 5. Return the assembled list.
 
 ### 7.6 Application-Scoped Status Fetch Flow
 
-When `GET /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
+When `GET /api/v1/applications/:id/datasources/:datasource_id` is called:
 
-1. Query `service_dependencies` where `dependency_id = datasource_id` and `dependency_type = 'connector'`, joined to `services` to filter to this application. Return `404` if no rows found.
-2. Fetch the datasource record from the `connectors` table using `datasource_id`. Resolve `provider_name` via `catalogProvider.LoadConnector(connectorType, provider)`.
-3. For each row, call `GET /v1/connectors/<dependency_id>` on its downstream Digitize pod, using `dependency_id` as the `connector_id`.
-4. Merge the Digitize sync fields at the top level and nest the catalog identity fields (`name`, `type`, `provider`, `provider_name`, `status`) under a `datasource` key.
+1. Verify the application exists by `applicationID` — return `404` if not found.
+2. Verify the datasource connector exists by `datasourceID` — return `404` if not found.
+3. Call `GetLinkedServiceEndpoints(datasourceID, 'connector')` and scan the result for the first row whose `applicationID` matches. Capture the API endpoint URL from that row's `endpoints` JSONB column at the same time and break. Return `404` if no matching row is found — meaning the datasource is not connected to this application.
+4. Resolve `provider.name` via `catalogProvider.LoadConnector(connectorType, provider)`; fall back to the stored provider ID if the catalog entry is missing.
+5. Call `GET /v1/connectors/<datasourceID>` on the linked service using the endpoint URL captured in step 3. If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
+6. Return the merged response: catalog identity fields at the top level, live sync fields nested under `service_details`.
 
 ---
 

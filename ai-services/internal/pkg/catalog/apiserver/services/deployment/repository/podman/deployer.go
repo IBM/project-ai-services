@@ -452,7 +452,7 @@ func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Com
 		return nil, nil, nil, fmt.Errorf("failed to load component from catalog: %w", err)
 	}
 
-	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
+	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component runtime metadata: %w", err)
 	}
@@ -646,7 +646,7 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	logger.InfofCtx(ctx, "Service %s loaded: %s\n", service.ID, service.Name)
 
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
-	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
+	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata: %w", err)
 	}
