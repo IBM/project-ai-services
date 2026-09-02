@@ -350,7 +350,10 @@ func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID stri
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil
@@ -376,7 +379,10 @@ func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architect
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil

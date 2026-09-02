@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -159,9 +160,8 @@ func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentTyp
 // --------------------------------------------------------------------------
 
 // EmbeddedCatalog is the subset of catalog.CatalogProvider that CatalogSource
-// uses as its fallback. Accepting an interface keeps this package free of a
-// direct import of the catalog package (which itself imports catalog/client
-// types), avoiding a tight coupling.
+// uses as its fallback. Accepting an interface rather than the concrete
+// *catalog.CatalogProvider keeps the dependency minimal and eases testing.
 type EmbeddedCatalog interface {
 	ListArchitectures() ([]types.Architecture, error)
 	ListServices() ([]types.Service, error)
@@ -247,49 +247,29 @@ func loadServiceFromEmbedded(e EmbeddedCatalog, id string) (*types.Service, erro
 	return svc, nil
 }
 
-// toArchitectureSummaries converts []Architecture to []ArchitectureSummary,
-// extracting only the fields needed for CLI list display.
+// toArchitectureSummaries converts []Architecture to []ArchitectureSummary.
 func toArchitectureSummaries(archs []types.Architecture, err error) ([]types.ArchitectureSummary, error) {
 	if err != nil {
 		return nil, err
 	}
 
 	summaries := make([]types.ArchitectureSummary, len(archs))
-	for i, a := range archs {
-		svcIDs := make([]string, len(a.Services))
-		for j, s := range a.Services {
-			svcIDs[j] = s.ID
-		}
-		summaries[i] = types.ArchitectureSummary{
-			ID:          a.ID,
-			Name:        a.Name,
-			Description: a.Description,
-			CertifiedBy: a.CertifiedBy,
-			Services:    svcIDs,
-		}
+	for i := range archs {
+		summaries[i] = catalog.ToArchitectureSummary(&archs[i])
 	}
 
 	return summaries, nil
 }
 
-// toServiceSummaries converts []Service to []ServiceSummary, including
-// Dependencies so the CLI can display required components.
+// toServiceSummaries converts []Service to []ServiceSummary.
 func toServiceSummaries(svcs []types.Service, err error) ([]types.ServiceSummary, error) {
 	if err != nil {
 		return nil, err
 	}
 
 	summaries := make([]types.ServiceSummary, len(svcs))
-	for i, s := range svcs {
-		summaries[i] = types.ServiceSummary{
-			ID:            s.ID,
-			Name:          s.Name,
-			Description:   s.Description,
-			CertifiedBy:   s.CertifiedBy,
-			Architectures: s.Architectures,
-			Standalone:    s.Standalone,
-			Dependencies:  s.Dependencies,
-		}
+	for i := range svcs {
+		summaries[i] = catalog.ToServiceSummary(&svcs[i])
 	}
 
 	return summaries, nil
