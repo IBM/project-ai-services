@@ -229,18 +229,17 @@ func (c *ApplicationClient) CreateApplication(ctx context.Context, req *models.C
 
 // GetServiceDeployOptions retrieves deploy options for a specific service.
 // It returns available providers and dependency rules for the service and its components.
-// runtimeType is optional; when non-empty it is appended as ?runtime=<runtimeType> so the
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
 // server returns schemas and resource specs for that runtime (e.g. "podman" or "openshift").
 func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, serviceID, runtimeType string) (*types.DeployOptionsService, error) {
 	var result types.DeployOptionsService
-	url := fmt.Sprintf(svcDeployOptionsRoute, serviceID)
-	if runtimeType != "" {
-		url += "?runtime=" + runtimeType
-	}
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(url)
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(svcDeployOptionsRoute, serviceID))
 	if err != nil {
 		return nil, fmt.Errorf("get service deploy options: %w", err)
 	}
@@ -254,18 +253,17 @@ func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, service
 
 // GetArchitectureDeployOptions retrieves deploy options for an architecture.
 // It returns available providers and dependency rules for all services in the architecture.
-// runtimeType is optional; when non-empty it is appended as ?runtime=<runtimeType> so the
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
 // server returns schemas and resource specs for that runtime (e.g. "podman" or "openshift").
 func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, architectureID, runtimeType string) (*types.DeployOptionsArchitecture, error) {
 	var result types.DeployOptionsArchitecture
-	url := fmt.Sprintf(archDeployOptionsRoute, architectureID)
-	if runtimeType != "" {
-		url += "?runtime=" + runtimeType
-	}
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(url)
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(archDeployOptionsRoute, architectureID))
 	if err != nil {
 		return nil, fmt.Errorf("get architecture deploy options: %w", err)
 	}
