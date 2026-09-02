@@ -11,16 +11,19 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
 )
 
-var helmTimeout = 3 * time.Minute
+var (
+	defaultHelmTimeout = 10 * time.Minute
+)
 
 // DeployWorker orchestrates the full deployment of the worker gRPC stream pod on OpenShift.
 // It loads the Helm chart from the embedded assets, prepares the chart values using the
 // provided gateway address and authentication token, and installs or upgrades the Helm
 // release in the worker namespace.
-func DeployWorker(ctx context.Context, gatewayAddr string, token string) error {
+func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) error {
 	namespace := workerconstants.WorkerAppName
 	logger.Infof("Deploying worker grpc stream to OpenShift in namespace '%s'\n", namespace)
 
@@ -33,7 +36,7 @@ func DeployWorker(ctx context.Context, gatewayAddr string, token string) error {
 	}
 
 	// Step 2: Prepare values with argument parameters
-	values, err := prepareValues(tp, gatewayAddr, token)
+	values, err := prepareValues(tp, opts)
 	if err != nil {
 		return err
 	}
@@ -67,11 +70,11 @@ func loadChart(ctx context.Context, tp templates.Template, name string) (chart.C
 // prepareValues builds the Helm values map for the worker chart.
 // It generates the argument parameters from the gateway address and token,
 // then merges them with the chart's default values via the template provider.
-func prepareValues(tp templates.Template, gatewayAddr string, token string) (map[string]any, error) {
+func prepareValues(tp templates.Template, opts workertypes.OpenshiftWorkerOptions) (map[string]any, error) {
 	// Generate argument parameters
 	argParams := map[string]string{
-		"worker.token":       token,
-		"worker.gatewayAddr": gatewayAddr,
+		workerconstants.ArgParamWorkerToken:       opts.Token,
+		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
 	}
 
 	// Load values from chart with overrides
@@ -99,7 +102,7 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, helmTimeout); err != nil {
+	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, defaultHelmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
 
 		return fmt.Errorf("failed to deploy worker: %w", err)

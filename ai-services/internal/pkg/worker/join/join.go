@@ -20,8 +20,6 @@ package join
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -32,13 +30,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
-	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
+	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
 const (
@@ -55,128 +50,9 @@ const (
 	retryBackoffFactor = 2
 )
 
-// Options carries everything needed to join a worker to the catalog control plane.
-type Options struct {
-	// GatewayAddr is the host:port of the catalog gRPC worker-gateway,
-	// e.g. "catalog.example.com:9090".
-	GatewayAddr string
-
-	// Token is the single-use bootstrap token issued by
-	// `ai-services catalog worker register`.
-	Token string
-
-	// RuntimeType is the execution environment of this worker node
-	// ("podman" or "openshift"). Sent to the control plane during Register.
-	RuntimeType types.RuntimeType
-
-	// Setup holds the options for setting up this worker node (Caddy proxy,
-	// model storage, etc.). Setup runs before the gRPC handshake so the
-	// worker is ready to serve routes as soon as it connects.
-	Setup workerdeploy.Options
-}
-
-// Run handles the deploy/setup phase of the worker join workflow.
-// It provisions the worker node for the given runtime type and returns once
-// the deployment is complete.
-//
-// For Podman workers it initialises the Podman runtime and runs the full
-// workerdeploy.Setup (Caddy proxy, model storage, etc.).
-//
-// For OpenShift workers it installs or upgrades the worker Helm chart via
-// workeropenshift.DeployWorker, which brings up the gRPC stream pod.
-//
-// After Run returns successfully, RunGrpcStream should be called to open
-// the long-lived CommandStream to the catalog control plane.
-func Run(ctx context.Context, opts Options) error {
-	switch opts.RuntimeType {
-	case types.RuntimeTypePodman:
-		aiServicesDir, err := utils.ValidateBaseDir(opts.Setup.BaseDir)
-		if err != nil {
-			return fmt.Errorf("invalid base directory %q: %w", opts.Setup.BaseDir, err)
-		}
-
-		if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
-			return fmt.Errorf("failed to create model directory: %w", err)
-		}
-
-		rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
-		if err != nil {
-			return fmt.Errorf("worker join: init runtime: %w", err)
-		}
-
-		// Setup worker node
-		if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
-			return fmt.Errorf("worker join: setup: %w", err)
-		}
-	case types.RuntimeTypeOpenShift:
-		if err := workeropenshift.DeployWorker(ctx, opts.GatewayAddr, opts.Token); err != nil {
-			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", opts.RuntimeType)
-	}
-
-	return nil
-}
-
-// RunGrpcStream starts the long-lived gRPC CommandStream for the worker.
-// It is called inside the worker pod after the deploy step (Run) has completed.
-//
-// For Podman workers it computes the domain suffix from the TLS credentials,
-// builds the metadata map that the control plane needs to route traffic back to
-// this node, and initialises the Podman runtime before opening the stream.
-//
-// For OpenShift workers it initialises the runtime scoped to the worker
-// namespace and opens the stream with an empty metadata map, since routing is
-// handled natively by the platform.
-func RunGrpcStream(ctx context.Context, opts Options) error {
-	switch opts.RuntimeType {
-	case types.RuntimeTypePodman:
-		domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-		if err != nil {
-			return err
-		}
-		meta := map[string]string{
-			workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
-			workerconstants.MetaKeyDomainSuffix: domainSuffix,
-			workerconstants.MetaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
-		}
-
-		rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
-		}
-
-		// ── Build Caddy proxy router (Podman only) ──────────────────────
-		// Must happen after Setup so the Caddy pod is running and its admin port
-		// is discoverable. For OpenShift workers routes are managed natively.
-		pr, err := workercaddy.New(ctx, rt)
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
-		}
-
-		if err := startGrpcStream(ctx, rt, pr, opts, meta); err != nil {
-			return fmt.Errorf("worker grpcstream: setup: %w", err)
-		}
-	case types.RuntimeTypeOpenShift:
-		rt, err := runtime.CreateRuntime(opts.RuntimeType, workerconstants.WorkerAppName)
-		if err != nil {
-			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
-		}
-
-		if err := startGrpcStream(ctx, rt, nil, opts, map[string]string{}); err != nil {
-			return fmt.Errorf("worker grpcstream: setup: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", opts.RuntimeType)
-	}
-
-	return nil
-}
-
-// startGrpcStream dials the catalog gRPC worker-gateway, registers with the
+// StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
-func startGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts Options, meta map[string]string) error {
+func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions, meta map[string]string) error {
 	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 

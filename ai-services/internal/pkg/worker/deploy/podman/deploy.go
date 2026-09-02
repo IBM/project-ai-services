@@ -22,9 +22,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -66,7 +68,7 @@ type Options struct {
 	SSLKeyPath string
 }
 
-// Setup writes prerequisite config files, checks whether the worker proxy
+// DeployWorker writes prerequisite config files, checks whether the worker proxy
 // pod is already running, and deploys all worker pods defined in
 // assets/worker/<runtime>/metadata.yaml podTemplateExecutions.
 //
@@ -74,8 +76,21 @@ type Options struct {
 // template. Pods are only deployed if not already running — once up, their
 // configuration is considered immutable.
 // TODO: Need a way to implement certificate rotation in future.
-func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr string, token string) error {
+func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
+	aiServicesDir, err := utils.ValidateBaseDir(opts.Setup.BaseDir)
+	if err != nil {
+		return fmt.Errorf("invalid base directory %q: %w", opts.Setup.BaseDir, err)
+	}
+
+	if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
+		return fmt.Errorf("failed to create model directory: %w", err)
+	}
+
+	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
+	}
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
@@ -90,11 +105,11 @@ func Setup(ctx context.Context, rt runtime.Runtime, opts Options, gatewayAddr st
 		return nil
 	}
 
-	if err := writeCaddyfile(opts.BaseDir); err != nil {
+	if err := writeCaddyfile(opts.Setup.BaseDir); err != nil {
 		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, tp, opts, existingResource, gatewayAddr, token); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
 		return err
 	}
 
@@ -159,7 +174,7 @@ func writeCaddyfile(baseDir string) error {
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts Options, existingResources []string, gatewayAddr string, token string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
@@ -170,7 +185,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 		return fmt.Errorf("worker setup: load templates: %w", err)
 	}
 
-	argParams, err := buildArgParams(opts, gatewayAddr, token)
+	argParams, err := buildArgParams(opts)
 	if err != nil {
 		return err
 	}
@@ -181,8 +196,8 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	}
 
 	params := map[string]any{
-		"BaseDir":         opts.BaseDir,
-		"AppName":         WorkerAppName,
+		"BaseDir":         opts.Setup.BaseDir,
+		"AppName":         workerconstants.WorkerAppName,
 		"AppTemplateName": workerApp,
 		"Version":         appMetadata.Version,
 		"Values":          values,
@@ -201,7 +216,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 
 // buildArgParams resolves host-specific runtime values (podman socket, auth
 // file) and assembles the full map of template arg overrides for deployAll.
-func buildArgParams(opts Options, gatewayAddr, token string) (map[string]string, error) {
+func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, error) {
 	// Resolve the actual podman socket path from the host environment so the
 	// worker container gets the correct CONTAINER_HOST and volume mount.
 	podmanURI, err := utils.ResolvePodmanURI()
@@ -215,10 +230,10 @@ func buildArgParams(opts Options, gatewayAddr, token string) (map[string]string,
 	}
 
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:      strconv.Itoa(opts.HTTPSPort),
-		workerconstants.ArgParamWorkerToken:         token,
-		workerconstants.ArgParamWorkerGatewayAddr:   gatewayAddr,
-		workerconstants.ArgParamWorkerOptionalFlags: getOptionalFlags(opts),
+		workerconstants.ArgParamCaddyHTTPSPort:      strconv.Itoa(opts.Setup.HTTPSPort),
+		workerconstants.ArgParamWorkerToken:         opts.Token,
+		workerconstants.ArgParamWorkerGatewayAddr:   opts.GatewayAddr,
+		workerconstants.ArgParamWorkerOptionalFlags: getOptionalFlags(opts.Setup),
 		workerconstants.ArgParamWorkerPodmanURI:     strings.TrimPrefix(podmanURI, "unix://"),
 		workerconstants.ArgParamWorkerAuthFile:      authFileBase64,
 	}, nil
@@ -284,7 +299,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 // getOptionalFlags builds the optional CLI flags string that is forwarded from
 // the 'worker join' command to the 'worker grpcserver' command running inside
 // the container.
-func getOptionalFlags(opts Options) string {
+func getOptionalFlags(opts workertypes.Options) string {
 	var flags string
 	if opts.BaseDir != "" {
 		flags += fmt.Sprintf("--basedir '%s' ", opts.BaseDir)
