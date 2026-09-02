@@ -9,7 +9,7 @@ import uuid
 from typing import Optional
 
 from common.misc_utils import get_logger
-from digitize.db.models import ConversionTaskStatus
+from digitize.db.models import ConversionTaskStatus, JobSource
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -42,10 +42,12 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists, excludes completed_with_errors)
+        - completed_with_errors_docs: List of docs with status completed_with_errors
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents
+        - completed_count: Number of completed documents (includes already_exists, excludes completed_with_errors)
+        - completed_with_errors_count: Number of completed_with_errors documents
     """
     from digitize.models import DocStatus
 
@@ -59,17 +61,24 @@ def get_job_document_stats(job_id: str) -> dict:
 
         documents = job_data.get("documents", [])
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
-        completed_docs = [
+        _terminal_ok = (
+            DocStatus.COMPLETED.value,
+            DocStatus.ALREADY_EXISTS.value,
+        )
+        completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
+        completed_with_errors_docs = [
             doc for doc in documents
-            if doc.get("status") in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+            if doc.get("status") == DocStatus.COMPLETED_WITH_ERRORS.value
         ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
+            "completed_with_errors_docs": completed_with_errors_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
-            "completed_count": len(completed_docs)
+            "completed_count": len(completed_docs),
+            "completed_with_errors_count": len(completed_with_errors_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
@@ -98,6 +107,7 @@ def initialize_job_state(
     output_format: OutputFormat,
     documents_info: list[str],
     job_name: Optional[str] = None,
+    source: JobSource = JobSource.USER,
     already_exists_files: Optional[list] = None,   # list[AlreadyExistsFile]
 ) -> dict[str, str]:
     """
@@ -112,6 +122,7 @@ def initialize_job_state(
         output_format: Output format for documents
         documents_info: List of filenames to be processed
         job_name: Optional human-readable name for the job
+        source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
         already_exists_files: Optional list of AlreadyExistsFile entries that were
                               stripped from the batch before staging.
 
@@ -134,7 +145,8 @@ def initialize_job_state(
         operation=operation,
         submitted_at=submitted_at,
         documents_info=all_filenames,
-        job_name=job_name
+        job_name=job_name,
+        source=source,
     )
 
     # Now create document metadata in both database and file system
@@ -146,7 +158,8 @@ def initialize_job_state(
             job_id=job_id,
             output_format=output_format,
             operation=operation,
-            submitted_at=submitted_at
+            submitted_at=submitted_at,
+            source=source.value,
         )
     logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
@@ -171,6 +184,7 @@ def initialize_job_state(
                 submitted_at=submitted_at,
                 initial_status=DocStatus.ALREADY_EXISTS,
                 completed_at=submitted_at,
+                source=source.value,
                 extra_metadata={
                     "existing_doc_id": skipped.existing_doc_id,
                     "existing_doc_name": skipped.existing_doc_name,

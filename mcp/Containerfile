@@ -3,7 +3,7 @@
 # ============================================================================
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
 
-ARG GO_VERSION=1.25.3
+ARG GO_VERSION=1.26.6
 
 WORKDIR /go/src/github.com/project-ai-services/mcp
 
@@ -32,13 +32,6 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 COPY --from=builder /go/src/github.com/project-ai-services/mcp/bin/ai-services-mcp /usr/bin/ai-services-mcp
 
 USER 1001
-
-EXPOSE 3000
-
-ENV PORT=3000
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -fsS http://localhost:${PORT}/health || exit 1
 
 ENTRYPOINT ["/usr/bin/ai-services-mcp"]
 CMD ["--help"]

@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -321,6 +324,219 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, schema)
+}
+
+// GetServiceImages godoc
+//
+//	@Summary		Get service images
+//	@Description	Returns the complete list of container images required to deploy a service and all its component dependencies.
+//	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
+//	@Description	and the catalog infrastructure images for the catalog service itself).
+//	@Description	Both embedded (built-in) and custom bundle services are supported.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize', 'summarize')"
+//	@Success		200	{array}		string			"List of container image references"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/services/{id}/images [get]
+func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
+	id := c.Param("id")
+
+	images, err := h.provider.GetServiceImages(c.Request.Context(), id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get images for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, images)
+}
+
+// GetArchitectureImages godoc
+//
+//	@Summary		Get architecture images
+//	@Description	Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.
+//	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
+//	@Description	and the catalog infrastructure images for the catalog service itself).
+//	@Description	Both embedded (built-in) and custom bundle architectures are supported.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string			"List of container image references"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/architectures/{id}/images [get]
+func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
+	id := c.Param("id")
+
+	images, err := h.provider.GetArchitectureImages(c.Request.Context(), id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get images for architecture '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, images)
+}
+
+// GetServiceModels godoc
+//
+//	@Summary		Get models for a service
+//	@Description	Returns all unique model names referenced in the schema of a service's component dependencies
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/services/{id}/models [get]
+func (h *CatalogHandler) GetServiceModels(c *gin.Context) {
+	id := c.Param("id")
+	excludeProviders := parseExcludeProviders(c)
+
+	models, err := h.provider.GetServiceModels(c.Request.Context(), id, excludeProviders...)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get models for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, models)
+}
+
+// GetArchitectureModels godoc
+//
+//	@Summary		Get models for an architecture
+//	@Description	Returns all unique model names referenced in the schemas of all component dependencies across every service in the architecture
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string			true	"Architecture ID (e.g., 'rag')"
+//	@Success		200	{array}		string			"List of unique model names"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/architectures/{id}/models [get]
+func (h *CatalogHandler) GetArchitectureModels(c *gin.Context) {
+	id := c.Param("id")
+	excludeProviders := parseExcludeProviders(c)
+
+	models, err := h.provider.GetArchitectureModels(c.Request.Context(), id, excludeProviders...)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get models for architecture '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, models)
+}
+
+// parseExcludeProviders reads the comma-separated ?exclude_providers= query
+// parameter and returns a slice of provider IDs to exclude from model results.
+func parseExcludeProviders(c *gin.Context) []string {
+	raw := c.Query("exclude_providers")
+	if raw == "" {
+		return nil
+	}
+
+	var result []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+
+	return result
+}
+
+// GetServiceSteps godoc
+//
+//	@Summary		Get steps files for a service
+//	@Description	Returns all files under the service's steps directory for the requested runtime
+//	@Description	(e.g. info.md, next.md, vars_file.yaml). Both embedded and custom bundle services
+//	@Description	are supported. The response is a JSON object keyed by filename with the raw file
+//	@Description	content as a string value.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string				true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Param			runtime	query		string				false	"Runtime type: 'podman' or 'openshift' (default: podman)"
+//	@Success		200		{object}	map[string]string	"Map of filename to raw file content"
+//	@Failure		400		{object}	ErrorResponse		"Invalid runtime value"
+//	@Failure		401		{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse		"Service not found"
+//	@Failure		500		{object}	ErrorResponse		"Internal Server Error"
+//	@Router			/services/{id}/steps [get]
+func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
+	id := c.Param("id")
+
+	runtimeParam := c.DefaultQuery("runtime", string(runtimeTypes.RuntimeTypePodman))
+	rt := runtimeTypes.RuntimeType(runtimeParam)
+
+	if !rt.Valid() {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid runtime %q: must be 'podman' or 'openshift'", runtimeParam),
+		})
+
+		return
+	}
+
+	files, err := h.provider.GetServiceSteps(id, rt)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get steps for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	// Convert []byte values to strings for JSON serialisation.
+	result := make(map[string]string, len(files))
+	for name, content := range files {
+		result[name] = string(content)
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // ErrorResponse represents an error response.

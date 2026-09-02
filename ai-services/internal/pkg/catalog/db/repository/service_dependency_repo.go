@@ -17,6 +17,8 @@ import (
 type LinkedServiceRow struct {
 	// ServiceID is the DB UUID of the linked service.
 	ServiceID uuid.UUID
+	// ServiceCatalogID is the catalog_id of the service itself (e.g. "digitize").
+	ServiceCatalogID string
 	// ApplicationID is the DB UUID of the application that owns the service.
 	ApplicationID uuid.UUID
 	// ApplicationName is the display name of the application.
@@ -26,6 +28,8 @@ type LinkedServiceRow struct {
 	// ApplicationDeploymentType is the deployment_type of the owning application
 	// ("architectures" or "services"), used to resolve the display name from catalog metadata.
 	ApplicationDeploymentType string
+	// URL is the first api-type endpoint URL for this service (empty when none registered).
+	URL string
 	// EndpointsJSON is the raw JSONB value of the services.endpoints column.
 	// Consumers parse this to extract the endpoint URL relevant to their use case.
 	EndpointsJSON json.RawMessage
@@ -225,7 +229,7 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 // are linked.
 func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error) {
 	query := `
-		SELECT sd.service_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
+		SELECT sd.service_id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
 		FROM service_dependencies sd
 		INNER JOIN services     s ON s.id = sd.service_id
 		INNER JOIN applications a ON a.id = s.app_id
@@ -243,7 +247,7 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	for rows.Next() {
 		var row LinkedServiceRow
 
-		if err := rows.Scan(&row.ServiceID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
+		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan linked service row: %w", err)
 		}
 

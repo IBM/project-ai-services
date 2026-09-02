@@ -6,6 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -27,7 +28,15 @@ func NewDatasourceService(
 
 	validator := validators.NewConnectorValidator(provider)
 
-	return datasourceservice.NewDatasourceService(connectorRepo, appRepo, svcDepRepo, validator, provider, encryptionKey), nil
+	return datasourceservice.NewDatasourceService(
+		connectorRepo,
+		appRepo,
+		svcDepRepo,
+		validator,
+		provider,
+		catalogclient.NewServiceClient(""),
+		encryptionKey,
+	), nil
 }
 
 // Made with Bob

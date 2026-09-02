@@ -1,15 +1,18 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.51
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.54
   log_level: "INFO"
   database: "digitize_metadata"
   # @generate:password length=32, special=false
   dbEncryptionKey: ""
 
 digitizeUi:
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.31
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.32
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-5
   username: "postgres"
   # @generate:password
   password: ""
+mcp:
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.1
+  port: "4002"

@@ -36,11 +36,11 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), tokenMgr, blacklist)
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
-	datasourceHandler := handlers.NewDatasourceHandler(datasourceSvc)
+	datasourceH := handlers.NewDatasourceHandler(datasourceSvc)
 	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(), auth)
-	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceHandler, auth)
+	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceH, auth)
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
-	registerDatasourceRoutes(v1, datasourceHandler, auth)
+	registerDatasourceRoutes(v1, datasourceH, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 
 	return router
@@ -63,10 +63,15 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/architectures", catalog.ListArchitectures)
 		g.GET("/architectures/:id", catalog.GetArchitectureDetails)
 		g.GET("/architectures/:id/deploy-options", catalog.GetArchitectureDeployOptions)
+		g.GET("/architectures/:id/images", catalog.GetArchitectureImages)
+		g.GET("/architectures/:id/models", catalog.GetArchitectureModels)
 		g.GET("/services", catalog.ListServices)
 		g.GET("/services/:id", catalog.GetServiceDetails)
 		g.GET("/services/:id/deploy-options", catalog.GetServiceDeployOptions)
 		g.GET("/services/:id/params", catalog.GetServiceParams)
+		g.GET("/services/:id/images", catalog.GetServiceImages)
+		g.GET("/services/:id/models", catalog.GetServiceModels)
+		g.GET("/services/:id/steps", catalog.GetServiceSteps)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)
@@ -105,6 +110,10 @@ func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandl
 		g.GET("/:id/ps", h.ApplicationPS)
 		// GET /api/v1/applications/:id/datasources — list datasources linked to this application
 		g.GET("/:id/datasources", datasourceH.ListApplicationDatasources)
+		// PUT /api/v1/applications/:id/datasources — connect one or more datasources to application
+		g.PUT("/:id/datasources", datasourceH.ConnectDatasourcesToApplication)
+		// GET /api/v1/applications/:id/datasources/:datasource_id — get datasource status for application
+		g.GET("/:id/datasources/:datasource_id", datasourceH.GetApplicationDatasource)
 	}
 }
 

@@ -64,6 +64,24 @@ definitions:
     - provider_id
     - version
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest:
+    properties:
+      datasource_ids:
+        description: DatasourceIDs is the list of datasource connector UUIDs to connect.
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - datasource_ids
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError'
+        type: array
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo:
     properties:
       id:
@@ -160,6 +178,13 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceConnectionError:
+    properties:
+      datasource_id:
+        type: string
+      error:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
     properties:
       data:
@@ -195,6 +220,32 @@ definitions:
       type:
         type: string
       updated_at:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
+    properties:
+      id:
+        description: ID is the UUID of the datasource connector.
+        type: string
+      message:
+        description: Message contains a human-readable description of the current
+          status (omitted when empty).
+        type: string
+      name:
+        description: Name is the unique human-readable label for this connector.
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+        description: Provider contains the provider ID and its resolved display name.
+      service_details:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ServiceSyncDetails'
+        description: ServiceDetails contains live sync state fetched from the linked
+          service.
+      status:
+        description: 'Status is the catalog-side connectivity health: "connected"
+          or "offline".'
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse:
@@ -271,6 +322,30 @@ definitions:
     - catalog_id
     - components
     - version
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ServiceSyncDetails:
+    properties:
+      err_msg:
+        description: |-
+          ErrMsg is populated when the connected service was unreachable or returned an error.
+          Omitted from the JSON response when empty (i.e. when the service was reachable).
+        type: string
+      last_sync_at:
+        description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
+          or null when unavailable.
+        type: string
+      last_sync_error:
+        description: LastSyncError is the error string from the last failed sync,
+          or null on success.
+        type: string
+      sync_status:
+        description: SyncStatus is the current sync state from the service. Set to
+          "unknown" when unreachable.
+        type: string
+      total_files:
+        description: TotalFiles is the total number of files known to the connector,
+          or null when unavailable.
+        type: integer
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.UpdateDatasourceRequest:
     properties:
@@ -764,6 +839,10 @@ definitions:
         type: array
       certified_by:
         type: string
+      dependencies:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference'
+        type: array
       description:
         type: string
       id:
@@ -1180,6 +1259,104 @@ paths:
       summary: List application datasources
       tags:
       - Applications
+    put:
+      consumes:
+      - application/json
+      description: Links one or more datasource connectors to each eligible (Digitize)
+        service in a running application. Each datasource is processed independently.
+        Returns 204 when all succeed; returns 207 with per-datasource errors when
+        one or more fail.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: List of datasource IDs to connect
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: All datasources connected successfully
+        "207":
+          description: One or more datasources failed to connect
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectDatasourcesResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Application or datasource not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: No eligible running service found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Connect datasources to application
+      tags:
+      - Datasources
+  /applications/{id}/datasources/{datasource_id}:
+    get:
+      description: Returns the catalog identity and live sync state of a datasource
+        connected to the given application. Sync fields are sourced from the linked
+        service and degrade gracefully to sync_status "unknown" when the service is
+        unreachable.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Datasource connector ID (UUID)
+        in: path
+        name: datasource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource status
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse'
+        "400":
+          description: Invalid UUID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource not connected to this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get datasource status for an application
+      tags:
+      - Datasources
   /applications/{id}/ps:
     get:
       description: Retrieves the process status and runtime information for an application
@@ -1343,6 +1520,81 @@ paths:
       security:
       - BearerAuth: []
       summary: Get architecture deploy options
+      tags:
+      - Catalog
+  /architectures/{id}/images:
+    get:
+      description: |-
+        Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.
+        The response always includes catalog asset images (the tool image used for housekeeping tasks
+        and the catalog infrastructure images for the catalog service itself).
+        Both embedded (built-in) and custom bundle architectures are supported.
+      parameters:
+      - description: Architecture ID (e.g., 'rag')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of container image references
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get architecture images
+      tags:
+      - Catalog
+  /architectures/{id}/models:
+    get:
+      description: Returns all unique model names referenced in the schemas of all
+        component dependencies across every service in the architecture
+      parameters:
+      - description: Architecture ID (e.g., 'rag')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of unique model names
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get models for an architecture
       tags:
       - Catalog
   /auth/login:
@@ -2193,6 +2445,81 @@ paths:
       summary: Get service deploy options
       tags:
       - Catalog
+  /services/{id}/images:
+    get:
+      description: |-
+        Returns the complete list of container images required to deploy a service and all its component dependencies.
+        The response always includes catalog asset images (the tool image used for housekeeping tasks
+        and the catalog infrastructure images for the catalog service itself).
+        Both embedded (built-in) and custom bundle services are supported.
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize', 'summarize')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of container image references
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get service images
+      tags:
+      - Catalog
+  /services/{id}/models:
+    get:
+      description: Returns all unique model names referenced in the schema of a service's
+        component dependencies
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of unique model names
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get models for a service
+      tags:
+      - Catalog
   /services/{id}/params:
     get:
       description: Retrieves the configuration schema (JSON Schema) for a specific
@@ -2232,6 +2559,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Get service parameters
+      tags:
+      - Catalog
+  /services/{id}/steps:
+    get:
+      description: |-
+        Returns all files under the service's steps directory for the requested runtime
+        (e.g. info.md, next.md, vars_file.yaml). Both embedded and custom bundle services
+        are supported. The response is a JSON object keyed by filename with the raw file
+        content as a string value.
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize')
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'Runtime type: ''podman'' or ''openshift'' (default: podman)'
+        in: query
+        name: runtime
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Map of filename to raw file content
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid runtime value
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get steps files for a service
       tags:
       - Catalog
   /workers:

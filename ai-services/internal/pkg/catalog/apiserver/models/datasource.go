@@ -112,11 +112,52 @@ type ConnectedServiceInfo struct {
 	Name string `json:"name"`
 }
 
-// ConnectorSyncState holds the sync fields returned by the Digitize pod's
+// ConnectorSyncState holds the sync fields returned by the connected service's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
-	SyncStatus string  `json:"sync_status"`
+	SyncStatus    string  `json:"sync_status"`
+	TotalFiles    *int    `json:"total_files"`
+	LastSyncAt    *string `json:"last_sync_at"`
+	LastSyncError *string `json:"last_sync_error"`
+}
+
+// ServiceSyncDetails holds the live sync state fetched from the connected service for a
+// single linked service. Fields map directly to what the downstream connector API returns.
+// ErrMsg is populated when the sync state could not be fetched; omitted on success.
+// This matches the err_msg pattern used in ConnectedServiceItem.
+type ServiceSyncDetails struct {
+	// SyncStatus is the current sync state from the service. Set to "unknown" when unreachable.
+	SyncStatus string `json:"sync_status"`
+	// TotalFiles is the total number of files known to the connector, or null when unavailable.
+	TotalFiles *int `json:"total_files"`
+	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
+	// LastSyncError is the error string from the last failed sync, or null on success.
+	LastSyncError *string `json:"last_sync_error"`
+	// ErrMsg is populated when the connected service was unreachable or returned an error.
+	// Omitted from the JSON response when empty (i.e. when the service was reachable).
+	ErrMsg string `json:"err_msg,omitempty"`
+}
+
+// GetApplicationDatasourceResponse is the response body for
+// GET /api/v1/applications/:id/datasources/:datasource_id.
+// Catalog identity fields (id, name, status, provider) are sourced from the connectors
+// table; live sync fields are nested under service_details and sourced from the linked
+// service. When the service is unreachable, service_details degrades gracefully:
+// sync_status = "unknown", all numeric/timestamp fields = null, err_msg populated.
+type GetApplicationDatasourceResponse struct {
+	// ID is the UUID of the datasource connector.
+	ID string `json:"id"`
+	// Name is the unique human-readable label for this connector.
+	Name string `json:"name"`
+	// Status is the catalog-side connectivity health: "connected" or "offline".
+	Status string `json:"status"`
+	// Message contains a human-readable description of the current status (omitted when empty).
+	Message string `json:"message,omitempty"`
+	// Provider contains the provider ID and its resolved display name.
+	Provider DatasourceProviderInfo `json:"provider"`
+	// ServiceDetails contains live sync state fetched from the linked service.
+	ServiceDetails ServiceSyncDetails `json:"service_details"`
 }
 
 // DigitizeConnectorItem is one entry returned by GET /v1/connectors on the Digitize pod.
@@ -246,6 +287,33 @@ type ListApplicationDatasourcesRequest struct {
 	ApplicationID string
 	Page          int
 	PageSize      int
+}
+
+// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
+type ConnectDatasourceRequest struct {
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
+	ConnectionDetails map[string]any `json:"connection_details"`
+}
+
+// ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.
+type ConnectDatasourcesRequest struct {
+	// DatasourceIDs is the list of datasource connector UUIDs to connect.
+	DatasourceIDs []string `json:"datasource_ids" binding:"required,min=1"`
+}
+
+// DatasourceConnectionError is a per-datasource error entry in a ConnectDatasourcesResponse.
+type DatasourceConnectionError struct {
+	DatasourceID string `json:"datasource_id"`
+	Error        string `json:"error"`
+}
+
+// ConnectDatasourcesResponse is returned when one or more datasources fail to connect.
+// On full success the handler returns 204 No Content with no body.
+type ConnectDatasourcesResponse struct {
+	Errors []DatasourceConnectionError `json:"errors"`
 }
 
 // Made with Bob
