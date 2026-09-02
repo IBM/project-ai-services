@@ -1482,9 +1482,11 @@ def finalize_sync_log_and_update_connector(
     return True
 
 
-def update_connector_total_files(connector_id: str, total_files: int) -> None:
-    """Update the total_files count on the connectors table for *connector_id*."""
-    db_manager.update_connector(connector_id=connector_id, total_files=total_files)
+def update_connector_total_files_and_message(
+    connector_id: str, total_files: int, message: str
+) -> None:
+    """Update total_files and message on the connector row in a single DB call."""
+    db_manager.update_connector(connector_id=connector_id, total_files=total_files, message=message)
 
 
 def set_connector_message(connector_id: str, error: Optional[str]) -> None:

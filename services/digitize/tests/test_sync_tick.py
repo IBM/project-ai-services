@@ -502,7 +502,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
@@ -522,7 +522,7 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
@@ -705,7 +705,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
@@ -728,7 +728,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
@@ -761,7 +761,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_maybe_cancel), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner):

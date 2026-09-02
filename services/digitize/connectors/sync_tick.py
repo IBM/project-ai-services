@@ -56,8 +56,7 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
-    set_connector_message,
-    update_connector_total_files,
+    update_connector_total_files_and_message,
     update_sync_log,
 )
 from digitize.db.models import JobSource
@@ -171,8 +170,7 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
             removed_files=len(orphan_checksums),
         )
 
-        update_connector_total_files(connector_id, total_files)
-        set_connector_message(connector_id, f"{new_files} new files found")
+        update_connector_total_files_and_message(connector_id, total_files, f"{new_files} new files found")
 
         invalid_files = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
