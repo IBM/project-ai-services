@@ -19,6 +19,10 @@ const (
 	WorkerAppName         = "ai-services"
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
+	WorkerCaddyPodName    = "ai-services--caddy"
+
+	WorkerPodmanAuthSecretName = "podman-auth-secret"
+	WorkerVolumeLabel          = "ai-services.io/volume"
 
 	// BaseDirEnvVar is injected into the Caddy container at deploy time; read back by uninstall.
 	BaseDirEnvVar = "AI_SERVICES_BASE_DIR"

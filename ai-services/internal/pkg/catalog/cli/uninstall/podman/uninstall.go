@@ -254,7 +254,7 @@ func deleteVolumes(ctx context.Context, rt *podman.PodmanClient, volumeNames []s
 
 		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
-			if catalogUtils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
 
 				continue

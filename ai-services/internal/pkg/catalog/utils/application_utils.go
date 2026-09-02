@@ -122,20 +122,6 @@ func GenerateInstanceSlug(id string) string {
 	return hexHash[:10]
 }
 
-// IsNotFoundError checks if an error indicates a resource was not found.
-// Returns true for "no such pod", "no such secret", "no such volume" errors.
-func IsNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-
-	return strings.Contains(errMsg, "no such pod") ||
-		strings.Contains(errMsg, "no pod with name or ID") ||
-		strings.Contains(errMsg, "no such secret") ||
-		strings.Contains(errMsg, "no such volume")
-}
-
 // CalculateComponentHash creates a unique hash for a component configuration.
 // Components with same type, provider, and params will have the same hash.
 func CalculateComponentHash(componentType string, providerID string, params map[string]any) string {

@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // PodmanDeletion handles application deletion operations.
@@ -175,7 +176,7 @@ func (s *PodmanDeletion) deletePods(ctx context.Context, pods []runtimeTypes.Pod
 	for _, pod := range pods {
 		if err := s.rt.DeletePod(ctx, pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
 
 				continue
@@ -281,7 +282,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 	for volumeName := range volumesToDelete {
 		if err := s.rt.DeleteVolume(ctx, volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
 
 				continue
@@ -335,7 +336,7 @@ func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runti
 	for secretName := range secretsToDelete {
 		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)
 
 				continue

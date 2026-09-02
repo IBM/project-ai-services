@@ -1,11 +1,4 @@
-// Package uninstall removes all worker-node components deployed by
-// `worker join`: the Caddy reverse-proxy pod and the on-disk worker data
-// directory (Caddyfile, caddy state, etc.).
-//
-// It is intentionally scoped to what `worker join` created.  Application pods
-// deployed on the worker by the catalog are the operator's responsibility and
-// are not touched here.
-package uninstall
+package podman
 
 import (
 	"context"
@@ -19,27 +12,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
-// Options carries the parameters needed to uninstall a worker node.
-type Options struct {
-	// RuntimeType is the local runtime (podman / openshift).
-	RuntimeType types.RuntimeType
-
-	// AutoYes skips the interactive confirmation prompt.
-	AutoYes bool
-}
-
 // Uninstall removes all worker components deployed by `worker join`.
-func Uninstall(ctx context.Context, opts Options) error {
+func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
 		return fmt.Errorf("worker uninstall: init runtime: %w", err)
 	}
 
-	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {workerconstants.WorkerProxyLabel},
-	})
+	pods, err := getWorkerPodList(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("worker uninstall: list pods: %w", err)
 	}
@@ -52,7 +35,7 @@ func Uninstall(ctx context.Context, opts Options) error {
 
 	logger.Warningln("Ensure no application pods are running on this worker before uninstalling, as they will become unreachable and will need to be deleted manually.")
 
-	if ok, err := confirmUninstall(ctx, pods, opts.AutoYes); err != nil || !ok {
+	if ok, err := workerutils.ConfirmUninstall(ctx, pods, opts.AutoYes); err != nil || !ok {
 		return err
 	}
 
@@ -76,7 +59,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 
 	var baseDir string
 
-	config, err := getWorkerCaddyPodConfig(ctx, rt, pods[0].ID)
+	config, err := getWorkerCaddyPodConfig(ctx, rt, pods)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()
@@ -84,7 +67,19 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 		baseDir = config.BaseDir
 	}
 
+	volumesToDelete := fetchVolumesToDelete(pods)
+
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)
+
+	secretsToDelete := []string{workerconstants.WorkerPodmanAuthSecretName}
+	if err := deleteSecrets(ctx, rt, secretsToDelete); err != nil {
+		return err
+	}
+
+	// Delete volumes (only those without skip-cleanup label)
+	if err := deleteVolumes(ctx, rt, volumesToDelete); err != nil {
+		return err
+	}
 
 	if err := deletePods(ctx, rt, pods); err != nil {
 		return err
@@ -94,11 +89,31 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 
 	return removeDataDir(ctx, workerDataPath)
 }
+func fetchVolumesToDelete(pods []types.Pod) []string {
+	volumesToDelete := []string{}
+	for _, pod := range pods {
+		if volumeNames, ok := pod.Labels[workerconstants.WorkerVolumeLabel]; ok && volumeNames != "" {
+			volumes := strings.Split(volumeNames, ",")
+			volumesToDelete = append(volumesToDelete, volumes...)
+		}
+	}
+	
+	return volumesToDelete
+}
 
 // getWorkerCaddyPodConfig retrieves worker Caddy pod configuration by inspecting
 // the running pod and its containers. It extracts the AI_SERVICES_BASE_DIR
 // environment variable injected by caddy.yaml.tmpl at deploy time.
-func getWorkerCaddyPodConfig(ctx context.Context, rt runtime.Runtime, podID string) (*WorkerCaddyConfig, error) {
+func getWorkerCaddyPodConfig(ctx context.Context, rt runtime.Runtime, pods []types.Pod) (*WorkerCaddyConfig, error) {
+	podID := ""
+	for _, pod := range pods {
+		if pod.Name == workerconstants.WorkerCaddyPodName {
+			podID = pod.ID
+		}
+	}
+	if podID == "" {
+		return nil, fmt.Errorf("no pod found with name '%s'", workerconstants.WorkerCaddyPodName)
+	}
 	pInfo, err := rt.InspectPod(ctx, podID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect pod %s: %w", podID, err)
@@ -125,29 +140,20 @@ func extractConfigFromEnv(env map[string]string, config *WorkerCaddyConfig) {
 	}
 }
 
-// confirmUninstall prints the pod list and prompts the user when autoYes is false.
-// Returns (false, nil) when the user declines, (true, nil) when confirmed.
-func confirmUninstall(ctx context.Context, pods []types.Pod, autoYes bool) (bool, error) {
-	if autoYes {
-		return true, nil
+func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
+	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
+
+	var podList []types.Pod
+	for _, label := range labels {
+		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
+		if err != nil {
+			return nil, err
+		}
+
+		podList = append(podList, pods...)
 	}
-
-	logger.InfolnCtx(ctx, "The following worker pods will be deleted:")
-
-	for _, p := range pods {
-		logger.InfofCtx(ctx, "  -> %s\n", p.Name)
-	}
-
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
-	if err != nil {
-		return false, fmt.Errorf("worker uninstall: confirmation: %w", err)
-	}
-
-	if !confirmed {
-		logger.InfolnCtx(ctx, "Uninstall cancelled.")
-	}
-
-	return confirmed, nil
+	
+	return podList, nil
 }
 
 // deletePods force-deletes every pod in the list and aggregates any errors.
@@ -168,6 +174,60 @@ func deletePods(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error
 
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to delete pods:\n%s", strings.Join(errs, "\n"))
+	}
+
+	return nil
+}
+
+// deleteSecrets removes the specified secrets.
+func deleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) error {
+	for _, secret := range secrets {
+		exists, err := rt.SecretExists(ctx, workerconstants.WorkerPodmanAuthSecretName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if err := rt.DeleteSecret(ctx, secret); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// deleteVolumes removes the specified volumes.
+func deleteVolumes(ctx context.Context, rt runtime.Runtime, volumeNames []string) error {
+	if len(volumeNames) == 0 {
+		// Just return if there are no volumes to delete.
+		return nil
+	}
+
+	logger.Infof("Deleting %d volume(s)\n", len(volumeNames))
+
+	var errors []string
+	for _, volumeName := range volumeNames {
+		logger.Infof("Deleting volume: %s\n", volumeName)
+
+		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
+			// Ignore "not found" errors - volume already deleted or never existed
+			if utils.IsNotFoundError(err) {
+				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
+
+				continue
+			}
+
+			errors = append(errors, fmt.Sprintf("volume %s: %v", volumeName, err))
+
+			continue
+		}
+
+		logger.Infof("Successfully deleted volume: %s\n", volumeName)
+	}
+
+	// Aggregate errors at the end
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to remove volumes: \n%s", strings.Join(errors, "\n"))
 	}
 
 	return nil
