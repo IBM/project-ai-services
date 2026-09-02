@@ -138,9 +138,10 @@ func (p *CatalogProvider) getServiceVersion(serviceID, runtimeType string) strin
 }
 
 // addServiceSchemaIfPresent adds schema URL to service if it has non-empty properties.
+// The URL includes ?runtime= so the UI fetches the correct runtime-specific schema.
 func (p *CatalogProvider) addServiceSchemaIfPresent(ctx context.Context, deployOptionsService *types.DeployOptionsService, serviceID, runtimeType string) {
 	if schema, err := p.GetServiceParams(ctx, serviceID, runtimeType); err == nil && hasNonEmptyProperties(schema) {
-		deployOptionsService.Schema = fmt.Sprintf("/api/v1/services/%s/params", serviceID)
+		deployOptionsService.Schema = fmt.Sprintf("/api/v1/services/%s/params?runtime=%s", serviceID, runtimeType)
 	}
 }
 
@@ -194,9 +195,10 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 		Resources:  resources,
 	}
 
-	// Only add schema if the service has non-empty schema properties
+	// Only add schema if the service has non-empty schema properties.
+	// Include ?runtime= so the UI fetches the correct runtime-specific schema.
 	if schema, err := p.GetServiceParams(ctx, serviceID, runtimeType); err == nil && hasNonEmptyProperties(schema) {
-		deployOptions.Schema = fmt.Sprintf("/api/v1/services/%s/params", serviceID)
+		deployOptions.Schema = fmt.Sprintf("/api/v1/services/%s/params?runtime=%s", serviceID, runtimeType)
 	}
 
 	return deployOptions, nil
@@ -271,9 +273,10 @@ func (p *CatalogProvider) buildProvider(ctx context.Context, comp types.Componen
 		Resources:   resources,
 	}
 
-	// Only add schema if the schema file has non-empty properties
+	// Only add schema if the schema file has non-empty properties.
+	// Include ?runtime= so the UI fetches the correct runtime-specific schema.
 	if schema, err := p.GetComponentProviderParams(ctx, componentType, comp.ID, runtimeType); err == nil && hasNonEmptyProperties(schema) {
-		provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
+		provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params?runtime=%s", componentType, comp.ID, runtimeType)
 	}
 
 	return provider
