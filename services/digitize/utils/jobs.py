@@ -42,11 +42,11 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status (includes completed_with_errors and already_exists)
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists, excludes completed_with_errors)
         - completed_with_errors_docs: List of docs with status completed_with_errors
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents (includes completed_with_errors and already_exists)
+        - completed_count: Number of completed documents (includes already_exists, excludes completed_with_errors)
         - completed_with_errors_count: Number of completed_with_errors documents
     """
     from digitize.models import DocStatus
@@ -63,7 +63,6 @@ def get_job_document_stats(job_id: str) -> dict:
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
         _terminal_ok = (
             DocStatus.COMPLETED.value,
-            DocStatus.COMPLETED_WITH_ERRORS.value,
             DocStatus.ALREADY_EXISTS.value,
         )
         completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]

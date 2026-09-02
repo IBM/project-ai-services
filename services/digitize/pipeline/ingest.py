@@ -221,9 +221,10 @@ def ingest(
             completed_docs = doc_stats["completed_docs"]
             completed_with_errors_docs = doc_stats["completed_with_errors_docs"]
 
-            pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
+            all_terminal_docs = len(completed_docs) + len(completed_with_errors_docs)
+            pct = (all_terminal_docs / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
-                f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
+                f"Ingestion summary: {all_terminal_docs}/{total_documents} files ingested "
                 f"({pct:.2f}% of total documents)"
             )
 
@@ -284,6 +285,7 @@ def ingest(
                 doc_stats = get_job_document_stats(job_id)
                 processed_doc_ids = set(
                     [doc["id"] for doc in doc_stats["completed_docs"]] +
+                    [doc["id"] for doc in doc_stats["completed_with_errors_docs"]] +
                     [doc["id"] for doc in doc_stats["failed_docs"]]
                 )
 

@@ -534,8 +534,8 @@ class TestGetJobMessagePopulation:
 
 @pytest.mark.unit
 class TestUpdateDocMetadataChecksumRegistration:
-    """update_doc_metadata must call upsert_file_checksum when status=COMPLETED
-    and file_hash is present in the update."""
+    """update_doc_metadata must call upsert_file_checksum when status is COMPLETED
+    or COMPLETED_WITH_ERRORS and file_hash is present in the update."""
 
     def test_checksum_upserted_on_completed_with_file_hash(self, mock_db_manager):
         mock_db_manager.get_document_by_id.return_value = Mock(
@@ -578,6 +578,21 @@ class TestUpdateDocMetadataChecksumRegistration:
         })
 
         mock_db_manager.upsert_file_checksum.assert_not_called()
+
+    def test_checksum_upserted_on_completed_with_errors_with_file_hash(self, mock_db_manager):
+        mock_db_manager.get_document_by_id.return_value = Mock(
+            doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
+        )
+        mock_db_manager.update_document.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_doc_metadata("doc-1", {
+            "status": DocStatus.COMPLETED_WITH_ERRORS,
+            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+        })
+
+        mock_db_manager.upsert_file_checksum.assert_called_once_with("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "doc-1")
 
 
 @pytest.mark.unit
