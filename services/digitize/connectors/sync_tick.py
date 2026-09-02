@@ -284,6 +284,7 @@ async def _wait_for_job(
     or a stop-sync request is issued during the wait.
     """
     _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
+    prev_completed_count = 0
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
         interrupt = _check_interrupt_call(connector_id, sync_seq)
