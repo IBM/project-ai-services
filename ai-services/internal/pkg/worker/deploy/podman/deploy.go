@@ -78,14 +78,6 @@ type Options struct {
 // TODO: Need a way to implement certificate rotation in future.
 func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) error {
 	logger.InfolnCtx(ctx, "Setting up worker node...")
-	aiServicesDir, err := utils.ValidateBaseDir(opts.Setup.BaseDir)
-	if err != nil {
-		return fmt.Errorf("invalid base directory %q: %w", opts.Setup.BaseDir, err)
-	}
-
-	if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
-		return fmt.Errorf("failed to create model directory: %w", err)
-	}
 
 	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
 	if err != nil {
@@ -297,7 +289,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 }
 
 // getOptionalFlags builds the optional CLI flags string that is forwarded from
-// the 'worker join' command to the 'worker grpcserver' command running inside
+// the 'worker join' command to the 'worker grpcstream' command running inside
 // the container.
 func getOptionalFlags(opts workertypes.Options) string {
 	var flags string
