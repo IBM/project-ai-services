@@ -10,7 +10,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	appTemplates "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -117,12 +116,7 @@ func init() {
 // It always tries the API first and falls back to the embedded catalog when the
 // API is unreachable or the user is not logged in.
 func listCatalogTemplates(cmd *cobra.Command) error {
-	embedded, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		return fmt.Errorf("failed to load embedded catalog: %w", err)
-	}
-
-	source, err := catalogClient.NewCatalogSource(cmd.Context(), embedded)
+	source, err := catalogClient.NewCatalogSource(cmd.Context())
 	if err != nil {
 		return err
 	}

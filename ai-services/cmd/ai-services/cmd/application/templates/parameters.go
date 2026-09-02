@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -35,14 +34,9 @@ func NewParametersCmd() *cobra.Command {
 				return fmt.Errorf("--template flag is required")
 			}
 
-			embedded, err := catalog.NewCatalogProvider(nil)
-			if err != nil {
-				return fmt.Errorf("failed to load embedded catalog: %w", err)
-			}
-
 			// NewCatalogSource tries the API first, falls back to the embedded
 			// catalog when the user is not logged in.
-			source, err := catalogClient.NewCatalogSource(cmd.Context(), embedded)
+			source, err := catalogClient.NewCatalogSource(cmd.Context())
 			if err != nil {
 				return err
 			}

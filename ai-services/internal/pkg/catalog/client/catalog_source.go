@@ -44,16 +44,18 @@ type CatalogSource interface {
 }
 
 // NewCatalogSource builds a CatalogSource that tries the catalog API first and
-// falls back to the provided embedded catalog when the user is not logged in.
+// falls back to the local embedded catalog when the user is not logged in.
 // Any other client-init error (bad config, etc.) is returned to the caller.
 //
 // If the API is reachable but returns a non-connectivity error (e.g. 4xx/5xx),
 // the error is propagated so the caller sees it rather than silently falling
 // back to stale embedded data.
-//
-// embedded must not be nil; it is consulted lazily — only when an API call
-// fails with a connectivity error, or when the user is not logged in.
-func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSource, error) {
+func NewCatalogSource(ctx context.Context) (CatalogSource, error) {
+	embedded, err := newEmbeddedCatalog()
+	if err != nil {
+		return nil, err
+	}
+
 	apiClient, err := NewApplicationClient(ctx)
 	if err != nil {
 		if !errors.Is(err, config.ErrNotLoggedIn) {
@@ -70,6 +72,18 @@ func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSou
 		api:      apiClient,
 		embedded: embedded,
 	}, nil
+}
+
+// newEmbeddedCatalog creates a local CatalogProvider with no bundle DB.
+// It is the embedded fallback used when the catalog API is unreachable or
+// the user is not logged in.
+func newEmbeddedCatalog() (EmbeddedCatalog, error) {
+	provider, err := catalog.NewCatalogProvider(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedded catalog provider: %w", err)
+	}
+
+	return provider, nil
 }
 
 // --------------------------------------------------------------------------
