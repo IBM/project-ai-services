@@ -163,17 +163,3 @@ END
 $$;
 
 -- Note: Using postgres superuser, no additional grants needed
-
--- Schema migrations — idempotent ALTER statements to update existing databases.
--- These run on every init and are safe to re-execute.
-
--- Add 'completed_with_errors' to job and document status constraints.
-ALTER TABLE jobs
-    DROP CONSTRAINT IF EXISTS chk_job_status,
-    ADD CONSTRAINT chk_job_status
-        CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed'));
-
-ALTER TABLE documents
-    DROP CONSTRAINT IF EXISTS chk_doc_status,
-    ADD CONSTRAINT chk_doc_status
-        CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists'));
