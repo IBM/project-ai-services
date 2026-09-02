@@ -473,7 +473,10 @@ func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID stri
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get service params: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil
