@@ -1283,13 +1283,13 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set status=SYNCING on the connector row."""
+        """Set status=SYNCING and clear message on the connector row."""
         try:
             with get_db_session() as session:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(status=ConnectorStatus.SYNCING)
+                    .values(status=ConnectorStatus.SYNCING, message=None)
                 )
         except SQLAlchemyError as e:
             logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)

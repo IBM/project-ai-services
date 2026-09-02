@@ -487,6 +487,27 @@ class TestInsertSyncLog:
         # Two DB calls: INSERT log row + UPDATE connector status
         assert session.execute.call_count == 2
 
+    def test_clears_message_on_open_sync(self):
+        """Opening a sync log must clear the message field on the connector row."""
+        session = MagicMock()
+        insert_result = MagicMock()
+        insert_result.scalar_one.return_value = 1
+        update_result = MagicMock()
+        session.execute.side_effect = [insert_result, update_result]
+
+        from digitize.utils.db import init_sync_log_and_update_connector
+        from digitize.db.models import Connector
+        from sqlalchemy import update as sa_update
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            init_sync_log_and_update_connector(CONNECTOR_ID)
+
+        # Inspect the UPDATE statement sent to the connector row (second execute call)
+        update_call_args = session.execute.call_args_list[1]
+        stmt = update_call_args[0][0]  # first positional arg
+        compiled = stmt.compile(compile_kwargs={"literal_binds": True})
+        assert "message" in str(compiled).lower()
+
     def test_does_not_accept_seq_parameter(self):
         """seq must not be an accepted parameter — it is auto-generated."""
         from digitize.utils.db import init_sync_log_and_update_connector
