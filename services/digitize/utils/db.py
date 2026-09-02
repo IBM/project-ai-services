@@ -778,12 +778,18 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
-                completed=sum(1 for job in exported_jobs if job.status == JobStatus.COMPLETED.value),
+                completed=sum(
+                    1 for job in exported_jobs
+                    if job.status in (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value)
+                ),
                 failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
             ),
             documents=ExportEntitySummary(
                 total_exported=len(exported_documents),
-                completed=sum(1 for doc in exported_documents if doc.status == DocStatus.COMPLETED.value),
+                completed=sum(
+                    1 for doc in exported_documents
+                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+                ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
         ),
@@ -1084,11 +1090,11 @@ class DatabaseStatusManager:
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
-                # Register the checksum once the document is marked COMPLETED so
-                # that future uploads of the same content are caught via the
-                # document_checksum table.
+                # Register the checksum when the document reaches any terminal success
+                # state (COMPLETED or COMPLETED_WITH_ERRORS) so future re-uploads of
+                # the same content are de-duplicated via document_checksum.
                 if (
-                    update_params.get("status") == DocStatus.COMPLETED
+                    update_params.get("status") in [DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS]
                     and "file_hash" in metadata_fields
                 ):
                     db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
@@ -1124,14 +1130,17 @@ class DatabaseStatusManager:
         # Get all documents for this job to recalculate stats
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
-        # Recalculate statistics
-        # ALREADY_EXISTS is a terminal resolved state — count it with completed.
+        # Recalculate statistics.
+        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
+        # count them with completed.
+        _terminal_ok = (
+            DocStatus.COMPLETED.value,
+            DocStatus.ALREADY_EXISTS.value,
+            DocStatus.COMPLETED_WITH_ERRORS.value,
+        )
         stats = {
             "total_documents": len(documents),
-            "completed": sum(
-                1 for d in documents
-                if d.status in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
-            ),
+            "completed": sum(1 for d in documents if d.status in _terminal_ok),
             "failed": sum(1 for d in documents if d.status == DocStatus.FAILED.value),
             "in_progress": sum(
                 1 for d in documents if d.status in [
@@ -1139,19 +1148,20 @@ class DatabaseStatusManager:
                     DocStatus.IN_PROGRESS.value,
                     DocStatus.DIGITIZED.value,
                     DocStatus.PROCESSED.value,
-                    DocStatus.CHUNKED.value
+                    DocStatus.CHUNKED.value,
                 ]
-            )
+            ),
         }
 
         # Prepare job update parameters
         update_params: Dict[str, Any] = {
             "status": job_status,
-            "stats": stats
+            "stats": stats,
         }
 
-        # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+        # Set completed_at for all terminal job states
+        _terminal_job = (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED)
+        if job_status in _terminal_job:
             total_docs = stats["total_documents"]
             completed_docs = stats["completed"]
             failed_docs = stats["failed"]
@@ -1159,8 +1169,8 @@ class DatabaseStatusManager:
             if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
                 update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error if provided
-        if error and job_status == JobStatus.FAILED:
+        # Set error for hard failures and completed_with_errors (when an error message is provided)
+        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
             update_params["error"] = error
 
         # Perform database update
@@ -1198,7 +1208,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name", "had_table_failures"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
