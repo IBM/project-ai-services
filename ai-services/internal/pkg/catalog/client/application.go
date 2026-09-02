@@ -276,14 +276,17 @@ func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, ar
 }
 
 // GetComponentProviderParams retrieves the parameter schema for a specific component provider.
-// runtimeType is currently unused by the params endpoint (it has no ?runtime= param) but is
-// accepted to satisfy the CatalogSource / EmbeddedCatalog interfaces.
-func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID, _ string) (map[string]any, error) {
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns the schema for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
 	var result map[string]any
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
 	if err != nil {
 		return nil, fmt.Errorf("get component provider params: %w", err)
 	}
@@ -474,14 +477,17 @@ func (c *ApplicationClient) GetServiceDetails(ctx context.Context, serviceID str
 }
 
 // GetServiceParams retrieves the parameter schema for a specific service from the catalog API.
-// runtimeType is currently unused by the params endpoint (it has no ?runtime= param) but is
-// accepted to satisfy the CatalogSource / EmbeddedCatalog interfaces.
-func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID, _ string) (map[string]any, error) {
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns the schema for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
 	var result map[string]any
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(fmt.Sprintf(svcParamsRoute, serviceID))
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(svcParamsRoute, serviceID))
 	if err != nil {
 		return nil, fmt.Errorf("get service params: %w", err)
 	}
