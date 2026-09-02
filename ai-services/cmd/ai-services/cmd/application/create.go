@@ -620,7 +620,7 @@ func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource
 	}
 
 	// Get deploy options for the architecture
-	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, archID, "")
+	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
