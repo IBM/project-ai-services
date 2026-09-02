@@ -266,39 +266,23 @@ async def create_job(
             file_contents,
         )
 
-        # 7 & 8. Create DB rows and enqueue conversion tasks.
-        # If either step fails the staged files must be removed — the pipeline
-        # will never run to clean them up because no asyncio task is created yet.
-        try:
-            doc_id_dict = dg_util.initialize_job_state(
-                job_id, operation, output_format, filenames, job_name,
-                already_exists_files=already_exists_files,
-            )
+        # 7, 8 & 9. Create DB rows, enqueue conversion tasks, launch pipeline.
+        doc_id_dict = await dg_util.initialize_and_launch(
+            job_id=job_id,
+            operation=operation,
+            output_format=output_format,
+            filenames=filenames,
+            staging_dir=settings.digitize.staging_dir / job_id,
+            quota=quota,
+            queued_for_op=queued_for_op,
+            job_name=job_name,
+            already_exists_files=already_exists_files,
+            file_checksum_dict=file_checksum_dict,
+        )
 
-            await dg_util.enqueue_conversion_tasks(
-                job_id=job_id,
-                op_key=op_key,
-                filenames=filenames,
-                doc_id_dict=doc_id_dict,
-                staging_dir=settings.digitize.staging_dir / job_id,
-                output_format=output_format,
-                quota=quota,
-                queued_for_op=queued_for_op,
-            )
-        except Exception:
-            logger.error(
-                f"Job {job_id}: DB initialisation or enqueue failed — "
-                f"removing {len(filenames)} staged file(s)",
-            )
-            cleanup_staging_directory(job_id, settings.digitize.staging_dir)
-            raise
-
-        # 9. Launch the pipeline as a fire-and-forget asyncio task.
-        #    The pipeline polls conversion_tasks and drives post-conversion work.
+        # Digitization jobs need a separate pipeline task (not launch_ingest_pipeline).
         if operation == models.OperationType.DIGITIZATION:
             asyncio.create_task(_run_digitize(job_id, doc_id_dict))
-        else:
-            asyncio.create_task(dg_util.launch_ingest_pipeline(job_id, doc_id_dict, file_checksum_dict))
 
         logger.info(
             f"Job {job_id} accepted — {len(filenames)} file(s), "

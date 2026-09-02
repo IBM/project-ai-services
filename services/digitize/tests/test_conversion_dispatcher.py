@@ -77,16 +77,18 @@ class TestTryClaimIfFits:
         from digitize.workers import conversion_dispatcher as mod
 
         with patch.object(mod.db_manager, "peek_head", return_value=None):
-            result = mod._try_claim_if_fits("ingestion", available=4)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=4)
+        assert task is None
+        assert hol is False  # empty queue — not HOL-blocked
 
     def test_returns_none_when_head_too_large(self):
         from digitize.workers import conversion_dispatcher as mod
 
         head = _make_task(is_large=True)  # weight 2
         with patch.object(mod.db_manager, "peek_head", return_value=head):
-            result = mod._try_claim_if_fits("ingestion", available=1)  # only 1 free
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=1)  # only 1 free
+        assert task is None
+        assert hol is True  # head exists but can't fit — HOL-blocked
 
     def test_claims_normal_task_when_capacity_available(self):
         from digitize.workers import conversion_dispatcher as mod
@@ -95,8 +97,9 @@ class TestTryClaimIfFits:
         claimed = _make_task(is_large=False)
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head", return_value=claimed):
-            result = mod._try_claim_if_fits("digitization", available=2)
-        assert result is claimed
+            task, hol = mod._try_claim_if_fits("digitization", available=2)
+        assert task is claimed
+        assert hol is False
 
     def test_claims_large_task_when_2_units_free(self):
         from digitize.workers import conversion_dispatcher as mod
@@ -105,18 +108,20 @@ class TestTryClaimIfFits:
         claimed = _make_task(is_large=True)
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head", return_value=claimed):
-            result = mod._try_claim_if_fits("ingestion", available=2)
-        assert result is claimed
+            task, hol = mod._try_claim_if_fits("ingestion", available=2)
+        assert task is claimed
+        assert hol is False
 
     def test_head_of_line_blocking_does_not_skip(self):
-        """Large head present → nothing behind it is skipped, returns None."""
+        """Large head present → nothing behind it is skipped, returns (None, True)."""
         from digitize.workers import conversion_dispatcher as mod
 
         head = _make_task(is_large=True)  # needs 2 units
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head") as mock_claim:
-            result = mod._try_claim_if_fits("ingestion", available=1)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=1)
+        assert task is None
+        assert hol is True
         mock_claim.assert_not_called()  # claim_head must never be called
 
     def test_zero_budget_returns_none(self):
@@ -124,8 +129,9 @@ class TestTryClaimIfFits:
 
         head = _make_task(is_large=False)  # weight 1
         with patch.object(mod.db_manager, "peek_head", return_value=head):
-            result = mod._try_claim_if_fits("ingestion", available=0)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=0)
+        assert task is None
+        assert hol is True  # head exists but zero budget — HOL-blocked
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +168,8 @@ def _make_create_task_mock():
 @pytest.mark.unit
 class TestDispatchLoop:
 
-    def test_turn_advances_unconditionally_when_task_claimed(self):
-        """_op_turn increments every tick regardless of whether a task was dispatched."""
+    def test_turn_advances_when_task_claimed(self):
+        """_op_turn increments when a task is successfully dispatched."""
         import digitize.workers.conversion_dispatcher as mod
         mod._op_turn = 0   # start at U-ING
 
@@ -174,7 +180,7 @@ class TestDispatchLoop:
 
         try:
             async def _run():
-                with patch.object(mod, "_try_claim_if_fits", return_value=task_t), \
+                with patch.object(mod, "_try_claim_if_fits", return_value=(task_t, False)), \
                      patch.object(mod.db_manager, "promote_pending", return_value=0), \
                      patch.object(mod, "_dispatch_one", new_callable=AsyncMock), \
                      patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -184,24 +190,24 @@ class TestDispatchLoop:
                     except asyncio.CancelledError:
                         pass
 
-                # One tick fired from turn=0 → must now be 1
+                # Task claimed on turn=0 → turn must advance to 1
                 assert mod._op_turn == 1
 
             asyncio.run(_run())
         finally:
             _set_semaphore_available(mod, original_available)
 
-    def test_turn_advances_unconditionally_when_blocked(self):
-        """_op_turn advances even when nothing was dispatched (HOL block)."""
+    def test_turn_advances_when_queue_empty(self):
+        """_op_turn advances when the queue is empty (not HOL-blocked)."""
         import digitize.workers.conversion_dispatcher as mod
         mod._op_turn = 0
 
         original_available = mod.conversion_semaphore._available
-        _set_semaphore_available(mod, 1)  # only 1 slot — large task will be blocked
+        _set_semaphore_available(mod, 4)
 
         try:
             async def _run():
-                with patch.object(mod, "_try_claim_if_fits", return_value=None), \
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, False)), \
                      patch.object(mod.db_manager, "promote_pending", return_value=0), \
                      patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                     mock_sleep.side_effect = asyncio.CancelledError()
@@ -210,8 +216,34 @@ class TestDispatchLoop:
                     except asyncio.CancelledError:
                         pass
 
-                # Turn still advances even though nothing ran
+                # Empty queue on turn=0 → turn still advances to 1
                 assert mod._op_turn == 1
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+    def test_turn_held_when_hol_blocked(self):
+        """_op_turn does NOT advance when the lane is HOL-blocked."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 0
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 1)  # only 1 slot — large head can't fit
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, True)), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+                # HOL-blocked on turn=0 → turn must stay at 0
+                assert mod._op_turn == 0
 
             asyncio.run(_run())
         finally:
@@ -226,7 +258,7 @@ class TestDispatchLoop:
 
         def _mock_claim(op, avail, connector_id=None):
             claims.append((op, connector_id))
-            return None
+            return None, False
 
         original_available = mod.conversion_semaphore._available
         _set_semaphore_available(mod, 4)
@@ -257,7 +289,7 @@ class TestDispatchLoop:
 
         def _mock_claim(op, avail, connector_id=None):
             claims.append((op, connector_id))
-            return None
+            return None, False
 
         original_available = mod.conversion_semaphore._available
         _set_semaphore_available(mod, 4)
@@ -289,7 +321,7 @@ class TestDispatchLoop:
 
         def _mock_claim(op, avail, connector_id=None):
             claims.append((op, connector_id))
-            return None
+            return None, False
 
         original_available = mod.conversion_semaphore._available
         _set_semaphore_available(mod, 4)
@@ -327,7 +359,7 @@ class TestDispatchLoop:
         try:
             async def _run():
                 with patch.object(mod, "_try_claim_if_fits",
-                                   side_effect=lambda op, avail, connector_id=None: claims.append((op, connector_id)) or None), \
+                                   side_effect=lambda op, avail, connector_id=None: claims.append((op, connector_id)) or (None, False)), \
                      patch.object(mod.db_manager, "get_connector_ids_with_queued_tasks",
                                    return_value=[]), \
                      patch.object(mod.db_manager, "promote_pending", return_value=0), \
@@ -356,7 +388,7 @@ class TestDispatchLoop:
 
         try:
             async def _run():
-                with patch.object(mod, "_try_claim_if_fits", return_value=None), \
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, False)), \
                      patch.object(mod.db_manager, "promote_pending",
                                    side_effect=lambda op, q: promote_calls.append(op) or 0), \
                      patch("asyncio.create_task", new=_make_create_task_mock()), \
