@@ -239,26 +239,33 @@ func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]st
 func resolveContainerStatus(name, workload string, appPods []catalogTypes.Pod, rt types.RuntimeType) string {
 	switch rt {
 	case types.RuntimeTypePodman:
-		for _, pod := range appPods {
-			for _, c := range pod.Containers {
-				if c.Name == name && c.Healthy {
-					return "running"
-				}
-			}
+		if isContainerHealthyInPods(name, appPods, "") {
+			return "running"
 		}
 	case types.RuntimeTypeOpenShift:
-		for _, pod := range appPods {
-			if strings.HasPrefix(pod.PodName, workload+"-") {
-				for _, c := range pod.Containers {
-					if c.Name == name && c.Healthy {
-						return "running"
-					}
-				}
-			}
+		if isContainerHealthyInPods(name, appPods, workload+"-") {
+			return "running"
 		}
 	}
 
 	return ""
+}
+
+// isContainerHealthyInPods reports whether the named container is healthy in any pod
+// whose PodName has the given prefix (use an empty prefix to match all pods).
+func isContainerHealthyInPods(name string, pods []catalogTypes.Pod, podPrefix string) bool {
+	for _, pod := range pods {
+		if podPrefix != "" && !strings.HasPrefix(pod.PodName, podPrefix) {
+			continue
+		}
+		for _, c := range pod.Containers {
+			if c.Name == name && c.Healthy {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func printInfo(tmpls map[string]*template.Template, params map[string]string) error {
