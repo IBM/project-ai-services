@@ -47,7 +47,6 @@ func NewPodmanDeletion(
 // When keepData is true, preserves underlying data (pods, volumes, orphaned components).
 // When keepData is false, deletes all data including application data directory.
 func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
-	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
 		common.HandleStepError(ctx, s.appRepo, appID, "failed to get Caddy proxy manager for app", err)

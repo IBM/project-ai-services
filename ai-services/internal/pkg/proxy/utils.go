@@ -1,33 +1,12 @@
 package proxy
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
-
-// GetCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func GetCaddyAdminPort(ctx context.Context, rt runtime.Runtime, podName string) (string, error) {
-	pod, err := rt.InspectPod(ctx, podName)
-	if err != nil {
-		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
-	}
-
-	// Get port mappings from the Ports field
-	// Ports is a map[string][]string where key is "containerPort/protocol" and value is list of host ports
-	// Example: {"2019/tcp": ["37249"], "443/tcp": ["39341"]}
-	for containerPort, hostPorts := range pod.Ports {
-		// Check if this is the admin API port (2019)
-		if strings.HasPrefix(containerPort, "2019/") && len(hostPorts) > 0 {
-			return hostPorts[0], nil
-		}
-	}
-
-	return "", fmt.Errorf("admin port mapping not found in pod ports")
-}
 
 // RouteEntryParts represents the parsed components of a route entry.
 type RouteEntryParts struct {
@@ -76,30 +55,30 @@ func ParseRouteEntry(routeEntry string) (*RouteEntryParts, error) {
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
 // The annotation format is: "port:subdomain:type, port:subdomain:type, ...".
 // Example: "8081:catalog-ui:ui, 8080:catalog-api:api".
-// The domainSuffix is pre-computed (e.g., "example.com" or "192.168.1.100.nip.io").
-func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) ([]Route, error) {
+// DOMAIN_SUFFIX is read from env and combined with each subdomain to form the full Domain.
+func BuildRoutesFromAnnotation(routesAnnotation, podName string) ([]Route, error) {
 	if routesAnnotation == "" {
 		return nil, nil
 	}
 
+	domainSuffix := utils.GetEnv(DomainSuffixEnvVar, "")
+	if domainSuffix == "" {
+		return nil, fmt.Errorf("%s environment variable not set", DomainSuffixEnvVar)
+	}
+
 	routes := []Route{}
 
-	// Parse routes annotation (format: "port:subdomain:type, port:subdomain:type, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
 		r = strings.TrimSpace(r)
 		if r == "" {
 			continue
 		}
 
-		// Parse the route entry using shared helper
 		parts, err := ParseRouteEntry(r)
 		if err != nil {
 			return nil, err
 		}
 
-		// Build route - use pod name as upstream since containers are in the same pod
-		// Domain is simply: subdomain.domainSuffix
-		// Route ID uses just the subdomain since subdomains are already globally unique
 		route := Route{
 			ID:       parts.Subdomain,
 			Domain:   fmt.Sprintf("%s.%s", parts.Subdomain, domainSuffix),

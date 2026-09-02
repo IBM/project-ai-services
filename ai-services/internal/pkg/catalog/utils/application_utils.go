@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -111,17 +110,6 @@ func UpdateComponentStatus(ctx context.Context, componentRepo dbrepo.ComponentRe
 	}
 
 	return nil
-}
-
-// BuildExternalURL constructs an HTTPS URL from a domain and optional port.
-// If the port is not the default HTTPS port (443), it appends the port to the URL.
-func BuildExternalURL(domain string, httpsPort string) string {
-	url := fmt.Sprintf("https://%s", domain)
-	if httpsPort != constants.DefaultHTTPSPort {
-		url = url + ":" + httpsPort
-	}
-
-	return url
 }
 
 // GenerateInstanceSlug creates a short slug from an ID using SHA256 hash.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -33,6 +35,17 @@ func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, ca
 		return nil, fmt.Errorf("failed to create proxy manager: %w", err)
 	}
 
+	// DOMAIN_SUFFIX and CADDY_HTTPS_PORT are not
+	// set in the process environment. Set them now so RegisterRoute can build
+	// the correct ExternalURL from them.
+	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, runtime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
+	}
+
+	_ = os.Setenv(proxy.DomainSuffixEnvVar, caddyCtx.GetDomainSuffix())
+	_ = os.Setenv(proxy.CaddyHTTPSPortEnvVar, httpsPort)
+
 	// Build route domains map
 	routeDomains := make(map[string]string)
 
@@ -42,7 +55,7 @@ func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, ca
 		logger.Debugf("Registering routes for pod: %s\n", info.PodName)
 
 		// Register routes and get the built routes back
-		routes, err := proxy.RegisterRoutesForAppAndReturn(ctx, constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
+		routes, err := proxy.RegisterRoutesForAppAndReturn(ctx, constants.CatalogAppName, proxyManager, info.RoutesAnnotation, info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 
@@ -62,38 +75,40 @@ func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, ca
 	return routeDomains, nil
 }
 
-// GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
-// Accepts pre-extracted route infos from templates.
-func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, string, error) {
-	// Create proxy manager
+// GetCatalogRouteInfo retrieves route for the catalog service by querying
+// Caddy for existing routes.
+func GetCatalogRouteInfo(ctx context.Context, caddyCtx *Context, runtime *podman.PodmanClient, routeInfos []TemplateRouteInfo) (map[string]string, error) {
 	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create proxy manager: %w", err)
+		return nil, fmt.Errorf("failed to create proxy manager: %w", err)
 	}
 
-	// Build route domains map by querying Caddy
-	routeDomains := make(map[string]string)
-	for _, info := range routeInfos {
-		processRouteInfo(ctx, info, proxyManager, routeDomains)
-	}
-
-	// Get Caddy HTTPS port
+	// Set CADDY_HTTPS_PORT from the live Caddy pod so GetRouteByID can build
+	// the correct ExternalURL even when called outside of configure (where the
+	// env var was not pre-set by RegisterCatalogRoutes).
 	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, runtime)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
+		return nil, fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
 	}
 
-	return routeDomains, httpsPort, nil
+	_ = os.Setenv(proxy.CaddyHTTPSPortEnvVar, httpsPort)
+
+	routeURLs := make(map[string]string)
+	for _, info := range routeInfos {
+		processRouteInfo(ctx, info, proxyManager, routeURLs)
+	}
+
+	return routeURLs, nil
 }
 
 // Helper functions for route processing
 
-// createRouteVariableName creates a standardized environment variable name from a subdomain.
-// Converts "catalog-ui" to "CATALOG_UI_DOMAIN".
+// createRouteVariableName creates a standardized key from a subdomain.
+// Converts "catalog-ui" to "CATALOG_UI_ROUTE".
 func createRouteVariableName(subdomain string) string {
 	sanitized := strings.ReplaceAll(subdomain, "-", "_")
 
-	return strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitized))
+	return strings.ToUpper(fmt.Sprintf("%s_ROUTE", sanitized))
 }
 
 // extractSubdomainFromDomain extracts the subdomain from a full domain.
@@ -107,13 +122,24 @@ func extractSubdomainFromDomain(domain string) string {
 	return ""
 }
 
-// addRoutesToDomainMap adds routes to the domain map with standardized variable names.
+// addRoutesToDomainMap stores each route's ExternalURL in the domain map under
+// a standardised key derived from the subdomain (e.g. "CATALOG_API_URL").
+// The full URL is used directly so callers don't need a separate HTTPS port.
 func addRoutesToDomainMap(routes []proxy.Route, routeDomains map[string]string) {
 	for _, route := range routes {
-		subdomain := extractSubdomainFromDomain(route.Domain)
+		if route.ExternalURL == "" {
+			continue
+		}
+
+		parsed, err := url.Parse(route.ExternalURL)
+		if err != nil || parsed.Hostname() == "" {
+			continue
+		}
+
+		subdomain := extractSubdomainFromDomain(parsed.Hostname())
 		if subdomain != "" {
 			varName := createRouteVariableName(subdomain)
-			routeDomains[varName] = route.Domain
+			routeDomains[varName] = route.ExternalURL
 		}
 	}
 }
@@ -132,12 +158,10 @@ func parseRouteEntry(routeEntry, podName string) string {
 	return parts.Subdomain
 }
 
-// processRouteInfo processes route information and populates the routeDomains map.
-// Queries Caddy for each route and adds it to the map with a standardized variable name.
-func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
-	// Parse routes annotation to extract subdomains
-	// Format: "port:subdomain:type, port:subdomain:type, ..."
-	// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
+// processRouteInfo queries Caddy for each route and adds its ExternalURL
+// to the routeURLs map under a standardised key (e.g. "CATALOG_API_URL").
+// ExternalURL is now populated by GetRouteByID directly.
+func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeURLs map[string]string) {
 	for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {
 		subdomain := parseRouteEntry(strings.TrimSpace(routeEntry), info.PodName)
 		if subdomain == "" {
@@ -155,7 +179,7 @@ func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager 
 
 		// Use standardized variable name creation
 		varName := createRouteVariableName(subdomain)
-		routeDomains[varName] = actualRoute.Domain
+		routeURLs[varName] = actualRoute.ExternalURL
 	}
 }
 

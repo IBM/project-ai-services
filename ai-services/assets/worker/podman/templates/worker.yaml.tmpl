@@ -24,7 +24,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          exec /usr/bin/ai-services worker grpcstream {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }} {{ .Values.worker.optionalFlags }}
+          exec /usr/bin/ai-services worker grpcstream {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }}
       env:
         - name: AI_SERVICES_LOG_LEVEL
           value: "info"
@@ -36,6 +36,12 @@ spec:
           value: "/run/containers/auth.json"
         - name: AI_SERVICES_BASE_DIR
           value: "{{ .BaseDir }}"
+        - name: CADDY_ADMIN_URL
+          value: "{{ .CaddyAdminURL }}"
+        - name: CADDY_HTTPS_PORT
+          value: "{{ .Values.caddy.httpsPort }}"
+        - name: DOMAIN_SUFFIX
+          value: "{{ .DomainSuffix }}"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}
