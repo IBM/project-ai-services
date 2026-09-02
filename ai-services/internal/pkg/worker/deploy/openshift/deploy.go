@@ -10,10 +10,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
-	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 )
 
 var (
@@ -49,7 +49,6 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 
 	return nil
 }
-
 
 // prepareValues builds the Helm values map for the worker chart.
 // It generates the argument parameters from the gateway address and token,
