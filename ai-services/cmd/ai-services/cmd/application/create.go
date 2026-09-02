@@ -952,7 +952,7 @@ func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent,
 // User-provided params override defaults.
 func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
 	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %w", err)
 	}

@@ -38,9 +38,11 @@ type CatalogSource interface {
 	// LoadService returns the full details of a single service.
 	LoadService(ctx context.Context, id string) (*types.Service, error)
 	// GetServiceParams returns the JSON schema for a service's parameters.
-	GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error)
+	// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+	GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error)
 	// GetComponentProviderParams returns the JSON schema for a component provider's parameters.
-	GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error)
+	// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+	GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error)
 }
 
 // NewCatalogSource builds a CatalogSource that tries the catalog API first and
@@ -147,23 +149,23 @@ func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service,
 	return svc, err
 }
 
-func (s *apiSource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
-	schema, err := s.api.GetServiceParams(ctx, serviceID)
+func (s *apiSource) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
+	schema, err := s.api.GetServiceParams(ctx, serviceID, runtimeType)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetServiceParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetServiceParams(ctx, serviceID)
+		return s.embedded.GetServiceParams(ctx, serviceID, runtimeType)
 	}
 
 	return schema, err
 }
 
-func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
-	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID)
+func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
+	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetComponentProviderParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
+		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
 	}
 
 	return schema, err
@@ -182,8 +184,8 @@ type EmbeddedCatalog interface {
 	ListComponents() ([]types.Component, error)
 	LoadArchitecture(id string) (*types.Architecture, error)
 	LoadService(id string) (*types.Service, error)
-	GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error)
-	GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error)
+	GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error)
+	GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error)
 }
 
 type embeddedOnlySource struct {
@@ -210,12 +212,12 @@ func (s *embeddedOnlySource) LoadService(_ context.Context, id string) (*types.S
 	return loadServiceFromEmbedded(s.embedded, id)
 }
 
-func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
-	return s.embedded.GetServiceParams(ctx, serviceID)
+func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
+	return s.embedded.GetServiceParams(ctx, serviceID, runtimeType)
 }
 
-func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
-	return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
+func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
+	return s.embedded.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
 }
 
 // --------------------------------------------------------------------------

@@ -69,7 +69,7 @@ func displayServiceParameters(ctx context.Context, source catalogClient.CatalogS
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := provider.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
+	schema, err := source.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -105,7 +105,7 @@ func displayServiceInArchitecture(ctx context.Context, source catalogClient.Cata
 	}
 
 	// Display service parameters
-	schema, err := provider.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
+	schema, err := source.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -140,7 +140,7 @@ func displayComponentsParameters(ctx context.Context, source catalogClient.Catal
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := provider.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID, string(vars.RuntimeFactory.GetRuntimeType()))
+				schema, err := source.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID, string(vars.RuntimeFactory.GetRuntimeType()))
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}

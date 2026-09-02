@@ -730,6 +730,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -737,6 +743,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid runtime parameter",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2164,6 +2176,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2171,6 +2189,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid runtime parameter",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {

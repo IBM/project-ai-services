@@ -149,20 +149,22 @@ func (h *CatalogHandler) GetServiceDetails(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{object}	types.DeployOptionsArchitecture
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
-//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id		path		string	true	"Architecture ID (e.g., 'rag')"
+//	@Param			runtime	query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200		{object}	types.DeployOptionsArchitecture
+//	@Failure		400		{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures/{id}/deploy-options [get]
 func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 	architectureID := c.Param("id")
 
-	// runtime is optional; defaults to the server's local runtime when absent.
-	// Pass ?runtime=openshift to get deploy options scoped to an OpenShift worker.
-	rt := c.Query("runtime")
-	if rt == "" {
-		rt = string(vars.RuntimeFactory.GetRuntimeType())
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
 	}
 
 	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID, rt)
@@ -184,20 +186,22 @@ func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Service ID (e.g., 'digitize', 'chat')"
-//	@Success		200	{object}	types.DeployOptionsService
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse	"Service not found"
-//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id		path		string	true	"Service ID (e.g., 'digitize', 'chat')"
+//	@Param			runtime	query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200		{object}	types.DeployOptionsService
+//	@Failure		400		{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse	"Service not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services/{id}/deploy-options [get]
 func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	serviceID := c.Param("id")
 
-	// runtime is optional; defaults to the server's local runtime when absent.
-	// Pass ?runtime=openshift to get deploy options scoped to an OpenShift worker.
-	rt := c.Query("runtime")
-	if rt == "" {
-		rt = string(vars.RuntimeFactory.GetRuntimeType())
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
 	}
 
 	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID, rt)
@@ -556,6 +560,24 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// resolveRuntimeParam validates the optional ?runtime= query parameter.
+// When raw is empty, the server's local runtime is returned.
+// When raw is non-empty, it must be "podman" or "openshift"; any other value
+// returns an error so the handler can respond with HTTP 400.
+func resolveRuntimeParam(raw string) (string, error) {
+	if raw == "" {
+		return string(vars.RuntimeFactory.GetRuntimeType()), nil
+	}
+
+	rt := runtimeTypes.RuntimeType(raw)
+	if !rt.Valid() {
+		return "", fmt.Errorf("invalid runtime %q: must be %q or %q",
+			raw, runtimeTypes.RuntimeTypePodman, runtimeTypes.RuntimeTypeOpenShift)
+	}
+
+	return string(rt), nil
 }
 
 // Made with Bob

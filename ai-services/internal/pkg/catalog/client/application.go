@@ -278,7 +278,9 @@ func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, ar
 }
 
 // GetComponentProviderParams retrieves the parameter schema for a specific component provider.
-func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
+// runtimeType is currently unused by the params endpoint (it has no ?runtime= param) but is
+// accepted to satisfy the CatalogSource / EmbeddedCatalog interfaces.
+func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID, _ string) (map[string]any, error) {
 	var result map[string]any
 	resp, err := c.client.HTTPClient().R().
 		SetContext(ctx).
@@ -474,7 +476,9 @@ func (c *ApplicationClient) GetServiceDetails(ctx context.Context, serviceID str
 }
 
 // GetServiceParams retrieves the parameter schema for a specific service from the catalog API.
-func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
+// runtimeType is currently unused by the params endpoint (it has no ?runtime= param) but is
+// accepted to satisfy the CatalogSource / EmbeddedCatalog interfaces.
+func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID, _ string) (map[string]any, error) {
 	var result map[string]any
 	resp, err := c.client.HTTPClient().R().
 		SetContext(ctx).
