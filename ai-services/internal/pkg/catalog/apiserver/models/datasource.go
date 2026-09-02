@@ -85,7 +85,7 @@ type DatasourceProviderInfo struct {
 // ConnectorSyncState holds the sync fields returned by the downstream service pod's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
-	SyncStatus string  `json:"sync_status"`
+	SyncStatus string  `json:"status"`
 	TotalFiles *int    `json:"total_files"`
 	LastSyncAt *string `json:"last_sync_at"`
 	Message    string  `json:"message,omitempty"`
@@ -138,7 +138,7 @@ type GetApplicationDatasourceResponse struct {
 // removed from the downstream API.
 type ConnectorItem struct {
 	ID         string  `json:"id"`
-	SyncStatus string  `json:"sync_status"`
+	SyncStatus string  `json:"status"`
 	LastSyncAt *string `json:"last_sync_at"`
 	TotalFiles int     `json:"total_files"`
 	Message    string  `json:"message,omitempty"`
