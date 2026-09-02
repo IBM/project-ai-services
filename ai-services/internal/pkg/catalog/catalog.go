@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -1099,6 +1100,11 @@ func (p *CatalogProvider) GetServiceSteps(serviceID string, runtime runtimeTypes
 	itemFS, err := p.getItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
+	// do early return if steps folder is not present
+	if _, err = fs.Stat(itemFS, stepsPath); errors.Is(err, fs.ErrNotExist) {
+		return map[string][]byte{}, nil
 	}
 
 	files := make(map[string][]byte)
