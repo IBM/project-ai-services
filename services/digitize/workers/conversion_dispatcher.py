@@ -81,17 +81,6 @@ def _try_claim_if_fits(operation: str, available: int) -> ConversionTask | None:
 
     return db_manager.claim_head(operation)
 
-
-def _safe_remove(file_path: str) -> None:
-    """Delete a file best-effort — logs but never raises."""
-    try:
-        p = Path(file_path)
-        if p.exists():
-            p.unlink()
-    except Exception as exc:
-        logger.warning(f"Could not remove cached file {file_path!r}: {exc}")
-
-
 async def _run_conversion(task: ConversionTask, weight: int) -> None:
     """
     Execute a single conversion task inside the shared process pool.
