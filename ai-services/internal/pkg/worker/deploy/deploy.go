@@ -217,12 +217,12 @@ func buildArgParams(opts Options, gatewayAddr, token string) (map[string]string,
 	}
 
 	return map[string]string{
-		"caddy.httpsPort":               strconv.Itoa(opts.HTTPSPort),
-		"worker.token":                  token,
-		"worker.gatewayAddr":            gatewayAddr,
-		"worker.optionalFlags":          getOptionalFlags(opts),
-		"worker.podman.uri":             strings.TrimPrefix(podmanURI, "unix://"),
-		"worker.podman.authFileContent": authFileBase64,
+		workerconstants.ArgParamCaddyHTTPSPort:      strconv.Itoa(opts.HTTPSPort),
+		workerconstants.ArgParamWorkerToken:         token,
+		workerconstants.ArgParamWorkerGatewayAddr:   gatewayAddr,
+		workerconstants.ArgParamWorkerOptionalFlags: getOptionalFlags(opts),
+		workerconstants.ArgParamWorkerPodmanURI:     strings.TrimPrefix(podmanURI, "unix://"),
+		workerconstants.ArgParamWorkerAuthFile:      authFileBase64,
 	}, nil
 }
 
