@@ -1,5 +1,6 @@
 # Service identification
 id: chat
+version: "1.0.0"
 name: "Question and answer"
 description: "Provides accurate, context-aware responses to user queries. Enables automated customer support, knowledge base interactions, and conversational assistance across various domains."
 type: service
