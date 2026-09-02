@@ -1079,4 +1079,52 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 	return templates, nil
 }
 
+// GetServiceSteps returns the raw contents of every file under <runtime>/steps/ for
+// the given service, keyed by filename (e.g. "info.md", "next.md", "vars_file.yaml").
+// runtime must be a valid RuntimeType ("podman" or "openshift").
+// Both embedded and custom bundle services are supported.
+// Returns ErrCatalogItemNotFound when the service ID is unknown.
+func (p *CatalogProvider) GetServiceSteps(serviceID string, runtime runtimeTypes.RuntimeType) (map[string][]byte, error) {
+	if !p.ServiceExists(serviceID) {
+		return nil, fmt.Errorf("%w: service '%s'", ErrCatalogItemNotFound, serviceID)
+	}
+
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	stepsPath := filepath.Join(servicePath, string(runtime), "steps")
+
+	itemFS, err := p.getItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
+	files := make(map[string][]byte)
+
+	err = fs.WalkDir(itemFS, stepsPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		data, err := fs.ReadFile(itemFS, path)
+		if err != nil {
+			return fmt.Errorf("failed to read steps file %s: %w", path, err)
+		}
+
+		files[d.Name()] = data
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk steps directory: %w", err)
+	}
+
+	return files, nil
+}
+
 // Made with Bob

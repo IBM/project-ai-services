@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -481,6 +482,61 @@ func parseExcludeProviders(c *gin.Context) []string {
 	}
 
 	return result
+}
+
+// GetServiceSteps godoc
+//
+//	@Summary		Get steps files for a service
+//	@Description	Returns all files under the service's steps directory for the requested runtime
+//	@Description	(e.g. info.md, next.md, vars_file.yaml). Both embedded and custom bundle services
+//	@Description	are supported. The response is a JSON object keyed by filename with the raw file
+//	@Description	content as a string value.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string				true	"Service ID (e.g., 'chat', 'digitize')"
+//	@Param			runtime	query		string				false	"Runtime type: 'podman' or 'openshift' (default: podman)"
+//	@Success		200		{object}	map[string]string	"Map of filename to raw file content"
+//	@Failure		400		{object}	ErrorResponse		"Invalid runtime value"
+//	@Failure		401		{object}	ErrorResponse		"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse		"Service not found"
+//	@Failure		500		{object}	ErrorResponse		"Internal Server Error"
+//	@Router			/services/{id}/steps [get]
+func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
+	id := c.Param("id")
+
+	runtimeParam := c.DefaultQuery("runtime", string(runtimeTypes.RuntimeTypePodman))
+	rt := runtimeTypes.RuntimeType(runtimeParam)
+
+	if !rt.Valid() {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid runtime %q: must be 'podman' or 'openshift'", runtimeParam),
+		})
+
+		return
+	}
+
+	files, err := h.provider.GetServiceSteps(id, rt)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, catalog.ErrCatalogItemNotFound) {
+			status = http.StatusNotFound
+		}
+
+		c.JSON(status, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get steps for service '%s': %v", id, err),
+		})
+
+		return
+	}
+
+	// Convert []byte values to strings for JSON serialisation.
+	result := make(map[string]string, len(files))
+	for name, content := range files {
+		result[name] = string(content)
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // ErrorResponse represents an error response.

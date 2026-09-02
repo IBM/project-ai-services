@@ -30,6 +30,7 @@ const (
 	servicesRoute           = "/api/v1/services"
 	getServiceRoute         = "/api/v1/services/%s"
 	svcParamsRoute          = "/api/v1/services/%s/params"
+	svcStepsRoute           = "/api/v1/services/%s/steps"
 )
 
 // HTTPError represents an HTTP error with status code.
@@ -473,6 +474,35 @@ func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID stri
 
 	if resp.IsError() {
 		return nil, fmt.Errorf("get service params: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetServiceSteps calls GET /api/v1/services/:id/steps and returns all files under
+// the service's steps directory keyed by filename (e.g. "info.md", "next.md", "vars_file.yaml").
+// runtime selects which runtime's steps to return ("podman" or "openshift");
+// when empty the server defaults to "podman".
+func (c *ApplicationClient) GetServiceSteps(ctx context.Context, serviceID, runtime string) (map[string]string, error) {
+	var result map[string]string
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if runtime != "" {
+		req.SetQueryParam("runtime", runtime)
+	}
+
+	resp, err := req.Get(fmt.Sprintf(svcStepsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service steps: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil

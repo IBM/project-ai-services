@@ -71,6 +71,7 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/services/:id/params", catalog.GetServiceParams)
 		g.GET("/services/:id/images", catalog.GetServiceImages)
 		g.GET("/services/:id/models", catalog.GetServiceModels)
+		g.GET("/services/:id/steps", catalog.GetServiceSteps)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)

@@ -548,11 +548,6 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	catalogProvider, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
-	}
-
 	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
@@ -569,9 +564,16 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 			}
 		}
 
-		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
+		rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, runtimeType)
 		if err != nil {
 			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
+
+			continue
+		}
+
+		tmpls, err := parseStepsTemplates(rawFiles)
+		if err != nil {
+			logger.Warningf("Failed to parse next steps templates for service '%s': %v\n", service.CatalogID, err)
 
 			continue
 		}

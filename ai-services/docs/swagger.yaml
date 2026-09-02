@@ -2465,6 +2465,53 @@ paths:
       summary: Get service parameters
       tags:
       - Catalog
+  /services/{id}/steps:
+    get:
+      description: |-
+        Returns all files under the service's steps directory for the requested runtime
+        (e.g. info.md, next.md, vars_file.yaml). Both embedded and custom bundle services
+        are supported. The response is a JSON object keyed by filename with the raw file
+        content as a string value.
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize')
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'Runtime type: ''podman'' or ''openshift'' (default: podman)'
+        in: query
+        name: runtime
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Map of filename to raw file content
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid runtime value
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get steps files for a service
+      tags:
+      - Catalog
   /workers:
     get:
       description: Returns all registered workers and their current status from the
