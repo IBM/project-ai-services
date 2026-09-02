@@ -86,7 +86,6 @@ Creates a connector, encrypts secrets at rest, persists configuration. Returns `
 | `secret_access_key` | **Yes** | Secret access key (encrypted at rest) |
 | `prefix` | No | Key prefix filter |
 | `delimiter` | No | Key delimiter |
-| `download_concurrency` | No | Parallel download threads |
 | `verify_ssl` | No | TLS verification toggle (default `true`) |
 
 #### Example Request Bodies
@@ -355,6 +354,68 @@ Returns full connector detail including `connection_details` (secrets stripped),
 
 ### 3.5 Sync Endpoints — `/v1/connectors/{connector_id}/syncs`
 
+#### `POST /v1/connectors/{connector_id}/syncs`
+Triggers an immediate manual sync tick. Implemented via the shared `dispatch_sync(connector_id)` helper (also used by the scheduler).
+- Guards: returns `404` if connector not found; raises `SyncLocked` (→ `409`) if connector is `DELETE_PENDING` or if the active sync-log row is already `CANCEL_PENDING`.
+- `CANCEL_PENDING` check: reads `get_active_sync_seq()` first; if a row exists, calls `get_sync_log_status(connector_id, active_seq)` — raises `SyncLocked` only if that status is `CANCEL_PENDING`.
+- If lock acquired via `try_acquire_sync_lock`: calls `init_sync_log_and_update_connector` **synchronously in the caller** (no polling, also clears `message=None`), dispatches `asyncio.create_task(run_tick(connector_id, sync_seq))`, and returns `202 Accepted` with `{"sync_seq": <n>}` immediately.
+- If lock unavailable (already syncing): reads `get_active_sync_seq()` and returns `202 Accepted` with the existing seq (idempotent — no duplicate tick started).
+
+```text
+POST /v1/connectors/{connector_id}/syncs  →  dispatch_sync(connector_id)
+  │
+  ├─ 1. get_connector_by_id() → SyncNotFound (404) if not found
+  ├─ 2. connector.status == DELETE_PENDING → SyncLocked (409)
+  ├─ 3. get_active_sync_seq()
+  │      └─ if active_seq exists: get_sync_log_status(connector_id, active_seq)
+  │           if CANCEL_PENDING → SyncLocked (409)
+  ├─ 4. try_acquire_sync_lock(connector_id)
+  │      ├─ Acquired → init_sync_log_and_update_connector()  (sets status=SYNCING, clears message=None)
+  │      │             asyncio.create_task(run_tick(connector_id, sync_seq))
+  │      └─ Not acquired (already syncing) → get_active_sync_seq()
+  │           None → RuntimeError (should not happen under normal operation)
+  └─ 5. Return 202 Accepted { "sync_seq": <seq> }
+```
+
+**`202 Accepted` — `SyncTriggerResponse`:**
+```json
+{
+  "sync_seq": 3
+}
+```
+
+| HTTP Code | Meaning |
+|-----------|---------|
+| `202 Accepted` | Sync dispatched (or already in progress — idempotent). |
+| `404 Not Found` | Connector does not exist. |
+| `409 Conflict` | Connector is `DELETE_PENDING` or a cancellation is already in progress (`CANCEL_PENDING`). |
+| `500 Internal Server Error` | Unexpected DB error. |
+
+#### `GET /v1/connectors/{connector_id}/syncs/{sync_seq}`
+Returns a single sync log entry identified by its sequence number as a `SyncLogItem` object. Returns `404` if the connector or the specific `sync_seq` does not exist.
+
+**`200 OK` — `SyncLogItem`:**
+
+```json
+{
+  "seq": 1,
+  "started_at": "2025-01-15T10:30:00Z",
+  "finished_at": "2025-01-15T10:30:15Z",
+  "total_files": 15,
+  "new_files": 3,
+  "completed_files": 3,
+  "removed_files": 0,
+  "status": "completed",
+  "error": ""
+}
+```
+
+| HTTP Code | Meaning |
+|-----------|---------|
+| `200 OK` | Sync log entry returned. |
+| `404 Not Found` | Connector or `sync_seq` does not exist. |
+| `500 Internal Server Error` | Unexpected DB error. |
+
 #### `GET /v1/connectors/{connector_id}/syncs`
 Returns paginated execution history from `connector_sync_logs` (`limit` default 50, max 200, `offset` 0). Results ordered newest first.
 
@@ -396,28 +457,7 @@ Returns paginated execution history from `connector_sync_logs` (`limit` default 
       "removed_files": 1,
       "status": "completed",
       "error": ""
-    }
-  ]
-}
-```
-
-| HTTP Code | Meaning |
-|-----------|---------|
-| `200 OK` | Paginated history returned. |
-| `404 Not Found` | Connector not found. |
-| `500 Internal Server Error` | Unexpected DB error. |
-
-#### `GET /v1/connectors/{connector_id}/syncs/{sync_seq}`
-Returns a single sync log entry identified by its sequence number, wrapped in a `SyncLogResponse` envelope. Returns `404` if the connector or the specific `sync_seq` does not exist.
-
-**`200 OK` — `SyncLogResponse`** (`total=1`, `limit=1`, `offset=0`, `items` contains the single entry):
-
-```json
-{
-  "total": 1,
-  "limit": 1,
-  "offset": 0,
-  "items": [
+    },
     {
       "seq": 1,
       "started_at": "2025-01-15T10:30:00Z",
@@ -435,45 +475,8 @@ Returns a single sync log entry identified by its sequence number, wrapped in a 
 
 | HTTP Code | Meaning |
 |-----------|---------|
-| `200 OK` | Sync log entry returned. |
-| `404 Not Found` | Connector or `sync_seq` does not exist. |
-| `500 Internal Server Error` | Unexpected DB error. |
-
-#### `POST /v1/connectors/{connector_id}/syncs`
-Triggers an immediate manual sync tick. Implemented via the shared `dispatch_sync(connector_id)` helper (also used by the scheduler).
-- Guards: returns `404` if connector not found; raises `SyncLocked` (→ `409`) if connector is `DELETE_PENDING` or if the active sync-log row is already `CANCEL_PENDING`.
-- `CANCEL_PENDING` check: reads `get_active_sync_seq()` first; if a row exists, calls `get_sync_log_status(connector_id, active_seq)` — raises `SyncLocked` only if that status is `CANCEL_PENDING`.
-- If lock acquired via `try_acquire_sync_lock`: calls `init_sync_log_and_update_connector` **synchronously in the caller** (no polling, also clears `message=None`), dispatches `asyncio.create_task(run_tick(connector_id, sync_seq))`, and returns `202 Accepted` with `{"sync_seq": <n>}` immediately.
-- If lock unavailable (already syncing): reads `get_active_sync_seq()` and returns `202 Accepted` with the existing seq (idempotent — no duplicate tick started).
-
-```text
-POST /v1/connectors/{connector_id}/syncs  →  dispatch_sync(connector_id)
-  │
-  ├─ 1. get_connector_by_id() → SyncNotFound (404) if not found
-  ├─ 2. connector.status == DELETE_PENDING → SyncLocked (409)
-  ├─ 3. get_active_sync_seq()
-  │      └─ if active_seq exists: get_sync_log_status(connector_id, active_seq)
-  │           if CANCEL_PENDING → SyncLocked (409)
-  ├─ 4. try_acquire_sync_lock(connector_id)
-  │      ├─ Acquired → init_sync_log_and_update_connector()  (sets status=SYNCING, clears message=None)
-  │      │             asyncio.create_task(run_tick(connector_id, sync_seq))
-  │      └─ Not acquired (already syncing) → get_active_sync_seq()
-  │           None → RuntimeError (should not happen under normal operation)
-  └─ 5. Return 202 Accepted { "sync_seq": <seq> }
-```
-
-**`202 Accepted` — `SyncTriggerResponse`:**
-```json
-{
-  "sync_seq": 3
-}
-```
-
-| HTTP Code | Meaning |
-|-----------|---------|
-| `202 Accepted` | Sync dispatched (or already in progress — idempotent). |
-| `404 Not Found` | Connector does not exist. |
-| `409 Conflict` | Connector is `DELETE_PENDING` or a cancellation is already in progress (`CANCEL_PENDING`). |
+| `200 OK` | Paginated history returned. |
+| `404 Not Found` | Connector not found. |
 | `500 Internal Server Error` | Unexpected DB error. |
 
 #### `POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop`
