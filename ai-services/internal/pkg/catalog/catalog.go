@@ -807,7 +807,9 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 
 // LoadComponentRuntimeMetadata loads runtime-specific metadata for a component.
 // This includes PodTemplateExecutions and other runtime configuration.
-func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID string) (*clitemplates.AppMetadata, error) {
+// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+// Pass string(vars.RuntimeFactory.GetRuntimeType()) when targeting the local runtime.
+func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID, runtimeType string) (*clitemplates.AppMetadata, error) {
 	// Get component path from catalog
 	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
 	componentPath, err := p.GetCatalogItemPath(componentKey)
@@ -815,12 +817,8 @@ func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(componentPath, runtimeStr)
+	catalogPath := filepath.Join(componentPath, runtimeType)
 
 	// Read metadata.yaml using the item's own filesystem
 	itemFS, err := p.getItemFS(componentKey)
@@ -912,19 +910,17 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 
 // LoadServiceRuntimeMetadata loads runtime-specific metadata for a service.
 // This includes PodTemplateExecutions and other runtime configuration.
-func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID string) (*clitemplates.AppMetadata, error) {
+// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+// Pass string(vars.RuntimeFactory.GetRuntimeType()) when targeting the local runtime.
+func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID, runtimeType string) (*clitemplates.AppMetadata, error) {
 	// Get service path from catalog
 	servicePath, err := p.GetCatalogItemPath(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(servicePath, runtimeStr)
+	catalogPath := filepath.Join(servicePath, runtimeType)
 
 	// Read metadata.yaml using the item's own filesystem
 	itemFS, err := p.getItemFS(serviceID)

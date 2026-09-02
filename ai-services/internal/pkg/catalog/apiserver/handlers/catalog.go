@@ -149,16 +149,25 @@ func (h *CatalogHandler) GetServiceDetails(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
-//	@Success		200	{object}	types.DeployOptionsArchitecture
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
-//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id		path		string	true	"Architecture ID (e.g., 'rag')"
+//	@Param			runtime	query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200		{object}	types.DeployOptionsArchitecture
+//	@Failure		400		{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures/{id}/deploy-options [get]
 func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 	architectureID := c.Param("id")
 
-	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID)
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for architecture '%s': %v", architectureID, err),
@@ -177,16 +186,25 @@ func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Service ID (e.g., 'digitize', 'chat')"
-//	@Success		200	{object}	types.DeployOptionsService
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse	"Service not found"
-//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id		path		string	true	"Service ID (e.g., 'digitize', 'chat')"
+//	@Param			runtime	query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200		{object}	types.DeployOptionsService
+//	@Failure		400		{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse	"Service not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services/{id}/deploy-options [get]
 func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	serviceID := c.Param("id")
 
-	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID)
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for service '%s': %v", serviceID, err),
@@ -207,8 +225,9 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			component_type	path		string					true	"Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')"
 //	@Param			provider_id		path		string					true	"Provider identifier (e.g., 'opensearch', 'vllm', 'watsonx')"
+//	@Param			runtime			query		string					false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
 //	@Success		200				{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties. Properties may include x-data-id field indicating data should be populated from metadata specifications (e.g., supported_models)"
-//	@Failure		400				{object}	ErrorResponse			"Bad Request - Invalid component_type or provider_id"
+//	@Failure		400				{object}	ErrorResponse			"Bad Request - Invalid component_type, provider_id, or runtime parameter"
 //	@Failure		401				{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
 //	@Failure		404				{object}	ErrorResponse			"Component type or provider not found"
 //	@Failure		500				{object}	ErrorResponse			"Internal Server Error"
@@ -217,7 +236,14 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 	componentType := c.Param("component_type")
 	providerID := c.Param("provider_id")
 
-	schema, err := h.provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID)
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	schema, err := h.provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", componentType, providerID, err),
@@ -304,17 +330,25 @@ func (h *CatalogHandler) GetConnectorProviderParams(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string					true	"Service ID (e.g., 'chat', 'digitize', 'similarity')"
-//	@Success		200	{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties defining service parameters"
-//	@Failure		400	{object}	ErrorResponse			"Bad Request - Invalid service ID"
-//	@Failure		401	{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
-//	@Failure		404	{object}	ErrorResponse			"Service not found"
-//	@Failure		500	{object}	ErrorResponse			"Internal Server Error"
+//	@Param			id		path		string					true	"Service ID (e.g., 'chat', 'digitize', 'similarity')"
+//	@Param			runtime	query		string					false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200		{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties defining service parameters"
+//	@Failure		400		{object}	ErrorResponse			"Bad Request - Invalid service ID or runtime parameter"
+//	@Failure		401		{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
+//	@Failure		404		{object}	ErrorResponse			"Service not found"
+//	@Failure		500		{object}	ErrorResponse			"Internal Server Error"
 //	@Router			/services/{id}/params [get]
 func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 	serviceID := c.Param("id")
 
-	schema, err := h.provider.GetServiceParams(c.Request.Context(), serviceID)
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	schema, err := h.provider.GetServiceParams(c.Request.Context(), serviceID, rt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for service '%s': %v", serviceID, err),
@@ -542,6 +576,24 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// resolveRuntimeParam validates the optional ?runtime= query parameter.
+// When raw is empty, the server's local runtime is returned.
+// When raw is non-empty, it must be "podman" or "openshift"; any other value
+// returns an error so the handler can respond with HTTP 400.
+func resolveRuntimeParam(raw string) (string, error) {
+	if raw == "" {
+		return string(vars.RuntimeFactory.GetRuntimeType()), nil
+	}
+
+	rt := runtimeTypes.RuntimeType(raw)
+	if !rt.Valid() {
+		return "", fmt.Errorf("invalid runtime %q: must be %q or %q",
+			raw, runtimeTypes.RuntimeTypePodman, runtimeTypes.RuntimeTypeOpenShift)
+	}
+
+	return string(rt), nil
 }
 
 // Made with Bob

@@ -41,10 +41,10 @@ type UpdateDatasourceRequest struct {
 
 // PropagationError describes a single Digitize propagation failure during a datasource update.
 type PropagationError struct {
-	// ApplicationID is the UUID of the application whose Digitize service could not be updated.
-	ApplicationID string `json:"application_id"`
-	// ApplicationName is the display name of that application, for UI rendering.
-	ApplicationName string `json:"application_name"`
+	// ID is the UUID of the application whose Digitize service could not be updated.
+	ID string `json:"id"`
+	// Name is the display name of that application, for UI rendering.
+	Name string `json:"name"`
 	// Error is the human-readable reason the propagation failed.
 	Error string `json:"error"`
 }
@@ -82,15 +82,7 @@ type DatasourceProviderInfo struct {
 	Name string `json:"name"`
 }
 
-// ConnectedServiceInfo is the service sub-object embedded in ConnectedServiceItem.
-// id is the catalog_id of the owning application (e.g. "rag"); name is its resolved
-// display name from catalog metadata (e.g. "Digital Assistants").
-type ConnectedServiceInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// ConnectorSyncState holds the sync fields returned by the connected service's
+// ConnectorSyncState holds the sync fields returned by the downstream service pod's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
 	SyncStatus string  `json:"sync_status"`
@@ -102,7 +94,7 @@ type ConnectorSyncState struct {
 // ServiceSyncDetails holds the live sync state fetched from the connected service for a
 // single linked service. Fields map directly to what the downstream connector API returns.
 // ErrMsg is populated when the sync state could not be fetched; omitted on success.
-// This matches the err_msg pattern used in ConnectedServiceItem.
+// This matches the err_msg pattern used in ConnectedApplicationItem.
 type ServiceSyncDetails struct {
 	// SyncStatus is the current sync state from the service. Set to "unknown" when unreachable.
 	SyncStatus string `json:"sync_status"`
@@ -152,19 +144,22 @@ type ConnectorItem struct {
 	Message    string  `json:"message,omitempty"`
 }
 
-// ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
-// Identity fields are sourced from the service_dependencies → services → applications DB join;
-// sync fields are fetched live from the service's Digitize pod and gracefully degrade to
-// "unknown" when unreachable.
-type ConnectedServiceItem struct {
-	// ApplicationID is the UUID of the application that owns this service.
-	ApplicationID string `json:"application_id"`
-	// ApplicationName is the human-readable display name of the owning application.
-	ApplicationName string `json:"application_name"`
-	// Service contains the catalog identity (id + resolved name) of the owning application.
-	Service ConnectedServiceInfo `json:"service"`
-	// SyncStatus is the current sync state sourced from the Digitize pod.
-	// Set to "unknown" when the Digitize pod is unreachable.
+// ConnectedApplicationItem is one entry in the applications array of GetDatasourceResponse and
+// DatasourceApplicationsResponse. Identity fields are sourced from the
+// service_dependencies → services → applications DB join; sync fields are fetched live
+// from the downstream service pod and gracefully degrade to "unknown" when unreachable.
+type ConnectedApplicationItem struct {
+	// ID is the UUID of the application that owns this service.
+	ID string `json:"id"`
+	// Name is the human-readable display name of the owning application.
+	Name string `json:"name"`
+	// CatalogID is the catalog identifier of the owning application (e.g. "rag").
+	CatalogID string `json:"catalog_id"`
+	// Type is the resolved catalog type name of the owning application (e.g. "Digital Assistants").
+	// Falls back to CatalogID when the catalog entry cannot be loaded.
+	Type string `json:"type"`
+	// SyncStatus is the current sync state sourced from the downstream service pod.
+	// Set to "unknown" when the pod is unreachable.
 	SyncStatus string `json:"sync_status"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
@@ -175,7 +170,7 @@ type ConnectedServiceItem struct {
 
 // GetDatasourceResponse is the response body for GET /api/v1/datasources/:id.
 // It returns the full connector record with non-sensitive metadata and the list of
-// connected services enriched with live Digitize sync state.
+// connected applications enriched with live sync state from each downstream service pod.
 type GetDatasourceResponse struct {
 	// ID is the UUID of the datasource connector.
 	ID string `json:"id"`
@@ -192,9 +187,9 @@ type GetDatasourceResponse struct {
 	// Metadata holds the non-sensitive configuration fields.
 	// Sensitive fields (e.g. secret_access_key, private_key) are always stripped.
 	Metadata map[string]any `json:"metadata"`
-	// Services lists every service currently connected to this datasource,
-	// enriched with live sync state from each service's Digitize pod.
-	Services []ConnectedServiceItem `json:"services"`
+	// Applications lists every application currently connected to this datasource,
+	// enriched with live sync state from each downstream service pod.
+	Applications []ConnectedApplicationItem `json:"applications"`
 	// CreatedAt is the creation timestamp.
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is the last-update timestamp.
@@ -294,6 +289,18 @@ type DatasourceConnectionError struct {
 // On full success the handler returns 204 No Content with no body.
 type ConnectDatasourcesResponse struct {
 	Errors []DatasourceConnectionError `json:"errors"`
+}
+
+// DatasourceApplicationsResponse is the response body for GET /api/v1/datasources/:id/applications.
+// It returns the list of applications currently connected to the datasource, enriched with live
+// sync state from each downstream service pod. The applications array reuses ConnectedApplicationItem
+// verbatim — identical shape to the applications field in GetDatasourceResponse.
+type DatasourceApplicationsResponse struct {
+	// DatasourceID is the UUID of the queried datasource connector.
+	DatasourceID string `json:"datasource_id"`
+	// Applications lists every application currently connected to this datasource,
+	// enriched with live sync state from each downstream service pod.
+	Applications []ConnectedApplicationItem `json:"applications"`
 }
 
 // Made with Bob

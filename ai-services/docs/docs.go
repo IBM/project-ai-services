@@ -574,6 +574,72 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Removes a single datasource connector from each eligible service in a running application and deletes the service_dependency record.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Disconnect a datasource from an application",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Datasource ID (UUID)",
+                        "name": "datasource_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Datasource disconnected successfully"
+                    },
+                    "400": {
+                        "description": "Invalid application or datasource ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not connected to this application",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Downstream Digitize service returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/applications/{id}/ps": {
@@ -800,6 +866,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -807,6 +879,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid runtime parameter",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -1551,6 +1629,12 @@ const docTemplate = `{
                         "name": "provider_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1562,7 +1646,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request - Invalid component_type or provider_id",
+                        "description": "Bad Request - Invalid component_type, provider_id, or runtime parameter",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -2025,6 +2109,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/datasources/{id}/applications": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the list of applications currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the application entry is still returned with sync_status set to \"unknown\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Get connected applications for a datasource",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connected applications with live sync state",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -2176,6 +2318,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2183,6 +2331,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid runtime parameter",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2338,6 +2492,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent.",
+                        "name": "runtime",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2349,7 +2509,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request - Invalid service ID",
+                        "description": "Bad Request - Invalid service ID or runtime parameter",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -2687,46 +2847,35 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem": {
             "type": "object",
             "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem": {
-            "type": "object",
-            "properties": {
-                "application_id": {
-                    "description": "ApplicationID is the UUID of the application that owns this service.",
-                    "type": "string"
-                },
-                "application_name": {
-                    "description": "ApplicationName is the human-readable display name of the owning application.",
+                "catalog_id": {
+                    "description": "CatalogID is the catalog identifier of the owning application (e.g. \"rag\").",
                     "type": "string"
                 },
                 "err_msg": {
                     "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
                     "type": "string"
                 },
+                "id": {
+                    "description": "ID is the UUID of the application that owns this service.",
+                    "type": "string"
+                },
                 "last_sync_at": {
                     "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
                     "type": "string"
                 },
-                "service": {
-                    "description": "Service contains the catalog identity (id + resolved name) of the owning application.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceInfo"
-                        }
-                    ]
+                "name": {
+                    "description": "Name is the human-readable display name of the owning application.",
+                    "type": "string"
                 },
                 "sync_status": {
-                    "description": "SyncStatus is the current sync state sourced from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "description": "SyncStatus is the current sync state sourced from the downstream service pod.\nSet to \"unknown\" when the pod is unreachable.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the resolved catalog type name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
                     "type": "string"
                 }
             }
@@ -2800,6 +2949,22 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse": {
+            "type": "object",
+            "properties": {
+                "applications": {
+                    "description": "Applications lists every application currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem"
+                    }
+                },
+                "datasource_id": {
+                    "description": "DatasourceID is the UUID of the queried datasource connector.",
                     "type": "string"
                 }
             }
@@ -2912,6 +3077,13 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetDatasourceResponse": {
             "type": "object",
             "properties": {
+                "applications": {
+                    "description": "Applications lists every application currently connected to this datasource,\nenriched with live sync state from each downstream service pod.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedApplicationItem"
+                    }
+                },
                 "created_at": {
                     "description": "CreatedAt is the creation timestamp.",
                     "type": "string"
@@ -2941,13 +3113,6 @@ const docTemplate = `{
                         }
                     ]
                 },
-                "services": {
-                    "description": "Services lists every service currently connected to this datasource,\nenriched with live sync state from each service's Digitize pod.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectedServiceItem"
-                    }
-                },
                 "status": {
                     "description": "Status is the current connectivity status (\"connected\" or \"offline\").",
                     "type": "string"
@@ -2965,16 +3130,16 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.PropagationError": {
             "type": "object",
             "properties": {
-                "application_id": {
-                    "description": "ApplicationID is the UUID of the application whose Digitize service could not be updated.",
-                    "type": "string"
-                },
-                "application_name": {
-                    "description": "ApplicationName is the display name of that application, for UI rendering.",
-                    "type": "string"
-                },
                 "error": {
                     "description": "Error is the human-readable reason the propagation failed.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is the UUID of the application whose Digitize service could not be updated.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the display name of that application, for UI rendering.",
                     "type": "string"
                 }
             }

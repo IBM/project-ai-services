@@ -114,6 +114,8 @@ func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandl
 		g.PUT("/:id/datasources", datasourceH.ConnectDatasourcesToApplication)
 		// GET /api/v1/applications/:id/datasources/:datasource_id — get datasource status for application
 		g.GET("/:id/datasources/:datasource_id", datasourceH.GetApplicationDatasource)
+		// DELETE /api/v1/applications/:id/datasources/:datasource_id — disconnect a single datasource from application
+		g.DELETE("/:id/datasources/:datasource_id", datasourceH.DisconnectDatasourcesFromApplication)
 	}
 }
 
@@ -134,6 +136,7 @@ func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler
 		g.POST("", h.CreateDatasource)
 		g.GET("", h.ListDatasources)
 		g.GET("/:id", h.GetDatasource)
+		g.GET("/:id/applications", h.GetDatasourceApplications)
 		g.PUT("/:id", h.UpdateDatasource)
 		g.DELETE("/:id", h.DeleteDatasource)
 	}

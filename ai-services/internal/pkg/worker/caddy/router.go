@@ -10,7 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
+	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 )
 
@@ -24,7 +24,7 @@ type ProxyRouter struct {
 // New builds a ProxyRouter by discovering the Caddy admin port from the
 // named pod via the runtime and pointing the HTTP client at it.
 func New(ctx context.Context, rt runtime.Runtime) (*ProxyRouter, error) {
-	adminPort, err := proxy.GetCaddyAdminPort(ctx, rt, workerdeploy.WorkerCaddyPodName)
+	adminPort, err := proxy.GetCaddyAdminPort(ctx, rt, workerpodman.WorkerCaddyPodName)
 	if err != nil {
 		return nil, fmt.Errorf("caddy router: discover admin port: %w", err)
 	}

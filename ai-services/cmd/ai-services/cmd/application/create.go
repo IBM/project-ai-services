@@ -620,7 +620,7 @@ func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource
 	}
 
 	// Get deploy options for the architecture
-	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID)
+	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -667,7 +667,7 @@ func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiMo
 	}
 
 	// Get deploy options for the service
-	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID)
+	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -952,7 +952,7 @@ func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent,
 // User-provided params override defaults.
 func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
 	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %w", err)
 	}
