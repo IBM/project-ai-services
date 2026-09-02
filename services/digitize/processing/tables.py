@@ -290,6 +290,11 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         raw_markdown = table.export_to_markdown(doc=converted_doc)
         caption = table.caption_text(doc=converted_doc)
 
+        # DOCX only: caption_text() returns empty for most Word tables because
+        # Docling rarely populates captions[]. The recovery function scans nearby
+        # body/parent refs for a matching "Table X-Y ..." paragraph.
+        # Skipped for PDFs: Docling stores PDF captions in captions[] (already
+        # handled above), and the section-header fallback would give false positives.
         if not caption and is_docx:
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
