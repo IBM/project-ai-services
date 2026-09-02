@@ -123,7 +123,7 @@ func extractSubdomainFromDomain(domain string) string {
 }
 
 // addRoutesToDomainMap stores each route's ExternalURL in the domain map under
-// a standardised key derived from the subdomain (e.g. "CATALOG_API_URL").
+// a standardised key derived from the subdomain (e.g. "CATALOG_API_ROUTE").
 // The full URL is used directly so callers don't need a separate HTTPS port.
 func addRoutesToDomainMap(routes []proxy.Route, routeDomains map[string]string) {
 	for _, route := range routes {
@@ -159,7 +159,7 @@ func parseRouteEntry(routeEntry, podName string) string {
 }
 
 // processRouteInfo queries Caddy for each route and adds its ExternalURL
-// to the routeURLs map under a standardised key (e.g. "CATALOG_API_URL").
+// to the routeURLs map under a standardised key (e.g. "CATALOG_API_ROUTE").
 // ExternalURL is now populated by GetRouteByID directly.
 func processRouteInfo(ctx context.Context, info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeURLs map[string]string) {
 	for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {

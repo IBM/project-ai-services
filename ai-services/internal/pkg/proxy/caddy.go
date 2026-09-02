@@ -77,17 +77,26 @@ func (c *caddyManager) HealthCheck(ctx context.Context) error {
 }
 
 // RegisterRoute registers a route with Caddy and returns its external URL.
-// Both DOMAIN_SUFFIX and CADDY_HTTPS_PORT are read from the local environment
-// — the same machine that is running this Caddy instance — so the URL is
-// always correct regardless of whether this is the catalog or a remote worker.
+// DOMAIN_SUFFIX and CADDY_HTTPS_PORT are read from the local environment —
+// the same machine that is running this Caddy instance — so the domain and
+// URL are always correct regardless of whether this is the catalog or a
+// remote worker. Route.Domain carries the subdomain; the full hostname is
+// built as "<route.Domain>.<DOMAIN_SUFFIX>".
 func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, error) {
 	if route.ID == "" {
 		return "", fmt.Errorf("cannot register route: route ID is empty")
 	}
 
 	if route.Domain == "" {
-		return "", fmt.Errorf("cannot register route %s: domain is empty", route.ID)
+		return "", fmt.Errorf("cannot register route %s: domain/subdomain is empty", route.ID)
 	}
+
+	domainSuffix := utils.GetEnv(DomainSuffixEnvVar, "")
+	if domainSuffix == "" {
+		return "", fmt.Errorf("cannot register route %s: %s environment variable not set", route.ID, DomainSuffixEnvVar)
+	}
+
+	domain := route.Domain + "." + domainSuffix
 
 	// Verify Caddy is reachable before attempting registration.
 	if err := c.HealthCheck(ctx); err != nil {
@@ -96,7 +105,7 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 
 	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]any{{"host": []string{route.Domain}}},
+		"match": []map[string]any{{"host": []string{domain}}},
 		"handle": []map[string]any{{
 			"handler":   "reverse_proxy",
 			"upstreams": []map[string]any{{"dial": route.Upstream}},
@@ -126,7 +135,7 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 
 	httpsPort := utils.GetEnv(CaddyHTTPSPortEnvVar, DefaultHTTPSPort)
 
-	return buildExternalURL(route.Domain, httpsPort), nil
+	return buildExternalURL(domain, httpsPort), nil
 }
 
 // Helper to append a new route to the server's route array.

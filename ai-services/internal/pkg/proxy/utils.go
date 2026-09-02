@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // RouteEntryParts represents the parsed components of a route entry.
@@ -55,15 +54,12 @@ func ParseRouteEntry(routeEntry string) (*RouteEntryParts, error) {
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
 // The annotation format is: "port:subdomain:type, port:subdomain:type, ...".
 // Example: "8081:catalog-ui:ui, 8080:catalog-api:api".
-// DOMAIN_SUFFIX is read from env and combined with each subdomain to form the full Domain.
+// Domain is set to the subdomain (e.g. "catalog-api"). RegisterRoute appends
+// DOMAIN_SUFFIX from the local environment to form the full hostname, so the
+// catalog and every remote worker each use their own domain suffix.
 func BuildRoutesFromAnnotation(routesAnnotation, podName string) ([]Route, error) {
 	if routesAnnotation == "" {
 		return nil, nil
-	}
-
-	domainSuffix := utils.GetEnv(DomainSuffixEnvVar, "")
-	if domainSuffix == "" {
-		return nil, fmt.Errorf("%s environment variable not set", DomainSuffixEnvVar)
 	}
 
 	routes := []Route{}
@@ -81,7 +77,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, podName string) ([]Route, error
 
 		route := Route{
 			ID:       parts.Subdomain,
-			Domain:   fmt.Sprintf("%s.%s", parts.Subdomain, domainSuffix),
+			Domain:   parts.Subdomain,
 			Upstream: fmt.Sprintf("%s:%s", podName, parts.Port),
 			Terminal: true,
 			Type:     parts.Type,
