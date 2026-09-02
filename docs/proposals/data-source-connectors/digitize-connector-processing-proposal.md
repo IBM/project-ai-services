@@ -33,122 +33,7 @@ Before any `digitize` connector endpoint is called:
 
 ---
 
-### 2.2 Schema Definitions
-
-**File:** `services/digitize/db/scripts/init_schema.sql`
-
-```sql
--- Connectors table
-CREATE TABLE IF NOT EXISTS connectors (
-    id                      TEXT        PRIMARY KEY,
-    name                    TEXT        NOT NULL UNIQUE,
-    type                    TEXT        NOT NULL,
-    connection_details      JSONB       NOT NULL DEFAULT '{}',
-    allowed_extensions      JSONB       NOT NULL DEFAULT '[]',
-    sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
-    attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_sync_at            TIMESTAMPTZ,
-    status                  TEXT        NOT NULL DEFAULT 'up to date',
-    total_files             INTEGER     NOT NULL DEFAULT 0,
-    message                 TEXT,
-    CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name ON connectors (name);
-
--- Connector document checksum registry (Connector-sourced documents ONLY)
--- No FK constraints, no ON DELETE CASCADE — deletion is managed by application code.
-CREATE TABLE IF NOT EXISTS connector_document_checksum (
-    checksum     TEXT NOT NULL,
-    connector_id TEXT NOT NULL,
-    doc_id       TEXT NOT NULL,
-    PRIMARY KEY (checksum, connector_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cdc_connector_id ON connector_document_checksum (connector_id);
-
--- Connector sync logs table
-CREATE TABLE IF NOT EXISTS connector_sync_logs (
-    connector_id     TEXT        NOT NULL,
-    seq              INTEGER     NOT NULL,
-    started_at       TIMESTAMPTZ NOT NULL,
-    finished_at      TIMESTAMPTZ,
-    total_files      INTEGER     NOT NULL DEFAULT 0,
-    new_files        INTEGER     NOT NULL DEFAULT 0,
-    completed_files  INTEGER     NOT NULL DEFAULT 0,
-    removed_files    INTEGER     NOT NULL DEFAULT 0,
-    status           TEXT        NOT NULL DEFAULT 'started',
-    error            TEXT        NOT NULL DEFAULT '',
-    CONSTRAINT pk_csl PRIMARY KEY (connector_id, seq),
-    CONSTRAINT fk_csh_connector
-        FOREIGN KEY (connector_id)
-        REFERENCES connectors(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_csl_connector_started ON connector_sync_logs (connector_id, started_at DESC);
-```
-
----
-
-### 2.3 ORM Mapping
-
-**File:** `services/digitize/db/models.py`
-
-```python
-class Connector(Base):
-    __tablename__ = "connectors"
-
-    id = mapped_column(Text, primary_key=True)
-    name = mapped_column(Text, nullable=False, unique=True)
-    type = mapped_column(Text, nullable=False)
-    connection_details = mapped_column(JSONB, nullable=False, default={})
-    allowed_extensions = mapped_column(JSONB, nullable=False, default=[])
-    sync_interval_seconds = mapped_column(Integer, nullable=False, default=300)
-    attached_at = mapped_column(DateTime(timezone=True), nullable=False,
-                                default=lambda: datetime.now(timezone.utc))
-    last_sync_at = mapped_column(DateTime(timezone=True), nullable=True)
-    status = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
-    total_files = mapped_column(Integer, nullable=False, default=0)
-    message = mapped_column(Text, nullable=True)  # ← teardown/credential error or real-time progress "Processing x/y files"
-
-    sync_logs = relationship("ConnectorSyncLog", back_populates="connector",
-                             cascade="all, delete-orphan")
-
-    __table_args__ = (
-        CheckConstraint("type IN ('file_system', 'object_storage')", name="chk_connector_type"),
-    )
-
-
-class ConnectorDocumentChecksum(Base):
-    __tablename__ = "connector_document_checksum"
-
-    checksum = mapped_column(Text, nullable=False, primary_key=True)
-    connector_id = mapped_column(Text, nullable=False, primary_key=True)
-    doc_id = mapped_column(Text, nullable=False)
-
-
-class ConnectorSyncLog(Base):
-    __tablename__ = "connector_sync_logs"
-
-    connector_id = mapped_column(Text, ForeignKey("connectors.id", ondelete="CASCADE"),
-                                 nullable=False, primary_key=True)
-    seq = mapped_column(Integer, nullable=False, primary_key=True)
-    started_at = mapped_column(DateTime(timezone=True), nullable=False)
-    finished_at = mapped_column(DateTime(timezone=True), nullable=True)
-    total_files = mapped_column(Integer, nullable=False, default=0)
-    new_files = mapped_column(Integer, nullable=False, default=0)
-    completed_files = mapped_column(Integer, nullable=False, default=0)  # ← updated in real time during ingest
-    removed_files = mapped_column(Integer, nullable=False, default=0)
-    status = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
-    error = mapped_column(Text, nullable=False, default="")
-
-    connector = relationship("Connector", back_populates="sync_logs")
-    # PRIMARY KEY (connector_id, seq) — composite, no auto-increment id column
-```
-
----
-
-### 2.4 Data Model Design & Invariants
+### 2.2 Data Model Design & Invariants
 
 1. **Separate Registries:** `connector_document_checksum` is completely isolated from `document_checksum`. A user-submitted file and a connector file with identical hashes exist independently.
 2. **Composite Primary Key `(checksum, connector_id)`:**
@@ -634,6 +519,121 @@ POST /v1/connectors/{connector_id}/syncs/{sync_seq}/stop
 #### Job APIs (`/v1/jobs`)
 - All jobs (user-submitted and connector-initiated) are visible in `GET /v1/jobs` and `GET /v1/jobs/{job_id}`.
 - Connector jobs use the naming convention: `Connector-{connector_name}-{sync_seq}-{batch_number}`.
+
+---
+
+### 3.7 Schema Definitions
+
+**File:** `services/digitize/db/scripts/init_schema.sql`
+
+```sql
+-- Connectors table
+CREATE TABLE IF NOT EXISTS connectors (
+    id                      TEXT        PRIMARY KEY,
+    name                    TEXT        NOT NULL UNIQUE,
+    type                    TEXT        NOT NULL,
+    connection_details      JSONB       NOT NULL DEFAULT '{}',
+    allowed_extensions      JSONB       NOT NULL DEFAULT '[]',
+    sync_interval_seconds   INTEGER     NOT NULL DEFAULT 300,
+    attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_sync_at            TIMESTAMPTZ,
+    status                  TEXT        NOT NULL DEFAULT 'up to date',
+    total_files             INTEGER     NOT NULL DEFAULT 0,
+    message                 TEXT,
+    CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_name ON connectors (name);
+
+-- Connector document checksum registry (Connector-sourced documents ONLY)
+-- No FK constraints, no ON DELETE CASCADE — deletion is managed by application code.
+CREATE TABLE IF NOT EXISTS connector_document_checksum (
+    checksum     TEXT NOT NULL,
+    connector_id TEXT NOT NULL,
+    doc_id       TEXT NOT NULL,
+    PRIMARY KEY (checksum, connector_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdc_connector_id ON connector_document_checksum (connector_id);
+
+-- Connector sync logs table
+CREATE TABLE IF NOT EXISTS connector_sync_logs (
+    connector_id     TEXT        NOT NULL,
+    seq              INTEGER     NOT NULL,
+    started_at       TIMESTAMPTZ NOT NULL,
+    finished_at      TIMESTAMPTZ,
+    total_files      INTEGER     NOT NULL DEFAULT 0,
+    new_files        INTEGER     NOT NULL DEFAULT 0,
+    completed_files  INTEGER     NOT NULL DEFAULT 0,
+    removed_files    INTEGER     NOT NULL DEFAULT 0,
+    status           TEXT        NOT NULL DEFAULT 'started',
+    error            TEXT        NOT NULL DEFAULT '',
+    CONSTRAINT pk_csl PRIMARY KEY (connector_id, seq),
+    CONSTRAINT fk_csh_connector
+        FOREIGN KEY (connector_id)
+        REFERENCES connectors(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_csl_connector_started ON connector_sync_logs (connector_id, started_at DESC);
+```
+
+---
+
+### 3.8 ORM Mapping
+
+**File:** `services/digitize/db/models.py`
+
+```python
+class Connector(Base):
+    __tablename__ = "connectors"
+
+    id = mapped_column(Text, primary_key=True)
+    name = mapped_column(Text, nullable=False, unique=True)
+    type = mapped_column(Text, nullable=False)
+    connection_details = mapped_column(JSONB, nullable=False, default={})
+    allowed_extensions = mapped_column(JSONB, nullable=False, default=[])
+    sync_interval_seconds = mapped_column(Integer, nullable=False, default=300)
+    attached_at = mapped_column(DateTime(timezone=True), nullable=False,
+                                default=lambda: datetime.now(timezone.utc))
+    last_sync_at = mapped_column(DateTime(timezone=True), nullable=True)
+    status = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
+    total_files = mapped_column(Integer, nullable=False, default=0)
+    message = mapped_column(Text, nullable=True)  # ← teardown/credential error or real-time progress "Processing x/y files"
+
+    sync_logs = relationship("ConnectorSyncLog", back_populates="connector",
+                             cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint("type IN ('file_system', 'object_storage')", name="chk_connector_type"),
+    )
+
+
+class ConnectorDocumentChecksum(Base):
+    __tablename__ = "connector_document_checksum"
+
+    checksum = mapped_column(Text, nullable=False, primary_key=True)
+    connector_id = mapped_column(Text, nullable=False, primary_key=True)
+    doc_id = mapped_column(Text, nullable=False)
+
+
+class ConnectorSyncLog(Base):
+    __tablename__ = "connector_sync_logs"
+
+    connector_id = mapped_column(Text, ForeignKey("connectors.id", ondelete="CASCADE"),
+                                 nullable=False, primary_key=True)
+    seq = mapped_column(Integer, nullable=False, primary_key=True)
+    started_at = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at = mapped_column(DateTime(timezone=True), nullable=True)
+    total_files = mapped_column(Integer, nullable=False, default=0)
+    new_files = mapped_column(Integer, nullable=False, default=0)
+    completed_files = mapped_column(Integer, nullable=False, default=0)  # ← updated in real time during ingest
+    removed_files = mapped_column(Integer, nullable=False, default=0)
+    status = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
+    error = mapped_column(Text, nullable=False, default="")
+
+    connector = relationship("Connector", back_populates="sync_logs")
+    # PRIMARY KEY (connector_id, seq) — composite, no auto-increment id column
+```
 
 ---
 
