@@ -335,6 +335,7 @@ class ConnectorListResponse(BaseModel):
                         "last_sync_at": "2025-01-15T10:30:00Z",
                         "status": "up to date",
                         "total_files": 15,
+                        "message": None,
                     }
                 ],
             }
