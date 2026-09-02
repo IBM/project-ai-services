@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
 from digitize.db.models import (
-    Job, JobSource, Document, DocumentChecksum,
+    Job, JobSource, Document, DocumentSource, DocumentChecksum,
     Connector, ConnectorDocumentChecksum, ConnectorSyncLog,
     ConversionTask, ConversionTaskStatus,
 )
@@ -267,6 +267,7 @@ class DatabaseManager:
         completed_at: Optional[datetime] = None,
         error: Optional[str] = None,
         job_id: Optional[str] = None,
+        source: DocumentSource = DocumentSource.USER,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Document]:
         """
@@ -282,6 +283,7 @@ class DatabaseManager:
             completed_at: Completion timestamp (optional, for import)
             error: Error message (optional, for import)
             job_id: Associated job ID
+            source: Document origin — DocumentSource.USER (default) or DocumentSource.CONNECTOR
             metadata: Additional metadata dictionary
 
         Returns:
@@ -295,6 +297,7 @@ class DatabaseManager:
                     name=name,
                     type=doc_type,
                     status=status.value,
+                    source=source.value,
                     output_format=output_format,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
                     completed_at=completed_at,
@@ -332,9 +335,9 @@ class DatabaseManager:
                 if document:
                     # Eagerly access all attributes to load them before session closes
                     _ = (document.doc_id, document.job_id, document.name, document.type,
-                         document.status, document.output_format, document.submitted_at,
-                         document.completed_at, document.error, document.doc_metadata,
-                         document.updated_at)
+                         document.status, document.source, document.output_format,
+                         document.submitted_at, document.completed_at, document.error,
+                         document.doc_metadata, document.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(document)
                     logger.debug(f"Retrieved document from database: {doc_id}")
@@ -418,8 +421,8 @@ class DatabaseManager:
                     # DetachedInstanceError in the caller.
                     _ = (
                         doc.doc_id, doc.job_id, doc.name, doc.type,
-                        doc.status, doc.output_format, doc.submitted_at,
-                        doc.completed_at, doc.error, doc.doc_metadata,
+                        doc.status, doc.source, doc.output_format,
+                        doc.submitted_at, doc.completed_at, doc.error, doc.doc_metadata,
                     )
                     session.expunge(doc)
                     logger.debug(
@@ -450,10 +453,8 @@ class DatabaseManager:
             name: Filter by document name (partial match)
             limit: Maximum number of documents to return
             offset: Number of documents to skip
-            exclude_connector_sourced: When True, omit docs whose parent job
-                has source='connector'. This filter works at every processing
-                stage — accepted, in_progress, completed, etc. — because the
-                job source is fixed at job-creation time.
+            exclude_connector_sourced: When True, omit connector-sourced documents
+                by filtering on Document.source directly — no join to jobs required.
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -473,9 +474,7 @@ class DatabaseManager:
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
-                    stmt = stmt.join(Job, Job.job_id == Document.job_id).where(
-                        Job.source == JobSource.USER.value
-                    )
+                    filters.append(Document.source == DocumentSource.USER.value)
 
                 if filters:
                     stmt = stmt.where(and_(*filters))
@@ -492,7 +491,7 @@ class DatabaseManager:
                 for doc in documents:
                     # Access all attributes to load them before session closes
                     _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
-                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.source, doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
                 logger.debug(f"Retrieved {len(documents)} documents from database (total: {total})")
@@ -523,7 +522,7 @@ class DatabaseManager:
                 for doc in documents:
                     # Access all attributes to load them before session closes
                     _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
-                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.source, doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
                 return documents
@@ -673,7 +672,7 @@ class DatabaseManager:
     @staticmethod
     def delete_user_documents() -> Dict[str, Any]:
         """
-        Delete only user-submitted documents (those NOT in connector_document_checksum).
+        Delete only user-submitted documents — those whose source is 'user'.
 
         Connector-sourced documents and their checksum rows are left untouched.
 
@@ -688,11 +687,7 @@ class DatabaseManager:
                 # Collect user-submitted doc IDs first (excludes connector-sourced).
                 user_doc_ids_stmt = (
                     select(Document.doc_id)
-                    .where(
-                        ~select(ConnectorDocumentChecksum.doc_id)
-                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
-                        .exists()
-                    )
+                    .where(Document.source == DocumentSource.USER.value)
                 )
                 doc_ids = list(session.scalars(user_doc_ids_stmt).all())
 

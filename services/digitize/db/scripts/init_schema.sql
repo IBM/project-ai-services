@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     name VARCHAR(500) NOT NULL,
     type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'user',
     output_format VARCHAR(10) NOT NULL,
     submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,  -- When user submitted the document as part of job (UTC)
     completed_at TIMESTAMP WITH TIME ZONE,           -- When document finished processing (UTC)
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
     CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
+    CONSTRAINT chk_doc_source CHECK (source IN ('user', 'connector')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
 );
 

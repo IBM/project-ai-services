@@ -158,7 +158,8 @@ def initialize_job_state(
             job_id=job_id,
             output_format=output_format,
             operation=operation,
-            submitted_at=submitted_at
+            submitted_at=submitted_at,
+            source=source.value,
         )
     logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
@@ -183,6 +184,7 @@ def initialize_job_state(
                 submitted_at=submitted_at,
                 initial_status=DocStatus.ALREADY_EXISTS,
                 completed_at=submitted_at,
+                source=source.value,
                 extra_metadata={
                     "existing_doc_id": skipped.existing_doc_id,
                     "existing_doc_name": skipped.existing_doc_name,

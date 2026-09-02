@@ -35,6 +35,7 @@ from digitize.db.models import (
     Connector,
     ConnectorSyncLog,
     Document,
+    DocumentSource,
     JobSource,
 )
 from digitize.db.manager import db_manager
@@ -351,6 +352,7 @@ def create_document(
     submitted_at: str,
     initial_status: DocStatus = DocStatus.ACCEPTED,
     completed_at: Optional[str] = None,
+    source: str = DocumentSource.USER.value,
     extra_metadata: Optional[dict] = None,
 ) -> None:
     """
@@ -365,6 +367,7 @@ def create_document(
         submitted_at: ISO timestamp when document was submitted
         initial_status: Initial document status (defaults to ACCEPTED)
         completed_at: Optional ISO timestamp for immediately-terminal documents
+        source: Document origin — 'user' (default) or 'connector'
         extra_metadata: Optional extra fields merged into the metadata JSONB
     """
     if engine is None:
@@ -401,6 +404,7 @@ def create_document(
             submitted_at=submitted_dt,
             completed_at=completed_dt,
             job_id=job_id,
+            source=DocumentSource(source),
             metadata=metadata,
         )
         if result is None:
@@ -472,19 +476,15 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
 
 def is_connector_sourced_document(doc_id: str) -> bool:
     """
-    Return True if *doc_id* appears in connector_document_checksum (i.e. is
-    connector-sourced and must not be exposed via user-facing document APIs).
+    Return True if *doc_id* has source='connector' in the documents table.
     """
     try:
         from digitize.db.connection import get_db_session
-        from digitize.db.models import ConnectorDocumentChecksum
-        from sqlalchemy import select, exists
+        from sqlalchemy import select
         with get_db_session() as session:
-
-            stmt = select(
-                exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
-            )
-            return bool(session.scalar(stmt))
+            stmt = select(Document.source).where(Document.doc_id == doc_id)
+            source = session.scalar(stmt)
+            return source == DocumentSource.CONNECTOR.value
     except Exception as exc:
         logger.error(
             f"DB error in is_connector_sourced_document({doc_id!r}): {exc}",

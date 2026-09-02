@@ -37,6 +37,16 @@ class JobSource(str, enum.Enum):
     CONNECTOR = "connector"
 
 
+class DocumentSource(str, enum.Enum):
+    """Origin of a document: submitted by a human user or created by a connector sync.
+
+    Denormalised copy of the parent job's source so that document-only queries
+    (list, delete, existence checks) can filter without joining to the jobs table.
+    """
+    USER      = "user"
+    CONNECTOR = "connector"
+
+
 class Job(Base):
     """
     Job model representing a processing job.
@@ -127,6 +137,9 @@ class Document(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DocumentSource.USER.value
+    )
     output_format: Mapped[str] = mapped_column(String(10), nullable=False)
 
     # Timestamps
@@ -159,6 +172,10 @@ class Document(Base):
         CheckConstraint(
             "type IN ('ingestion', 'digitization')",
             name="chk_doc_type"
+        ),
+        CheckConstraint(
+            "source IN ('user', 'connector')",
+            name="chk_doc_source"
         ),
         CheckConstraint(
             "output_format IN ('txt', 'md', 'json')",
