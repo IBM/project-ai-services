@@ -576,7 +576,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 			continue
 		}
 
-		err = printNextStepsMD(tmpls, params)
+		err = printNextStepsMD(tmpls, params, application.Name, runtimeType)
 		if err != nil {
 			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
 		}
@@ -589,7 +589,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 }
 
 // printNextStepsMD renders and prints the next.md template for a service.
-func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string) error {
+func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, _, _ string) error {
 	tmpl, ok := tmpls["next.md"]
 	if !ok {
 		// next.md doesn't exist for this service, skip
