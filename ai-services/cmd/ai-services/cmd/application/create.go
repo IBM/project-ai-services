@@ -578,20 +578,23 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 			continue
 		}
 
-		err = printNextStepsMD(tmpls, params, application.Name, runtimeType)
+		err = printNextStepsMD(tmpls, params)
 		if err != nil {
 			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
 		}
 	}
 
+	// Print the info command regardless of whether any service has next.md
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, runtimeType)
+
 	return nil
 }
 
 // printNextStepsMD renders and prints the next.md template for a service.
-func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName, runtime string) error {
+func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string) error {
 	tmpl, ok := tmpls["next.md"]
 	if !ok {
-		// next.md doesn't exist for this service, return nil
+		// next.md doesn't exist for this service, skip
 		return nil
 	}
 
@@ -606,9 +609,6 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 	if strings.TrimSpace(value) != "" {
 		logger.Infoln(value)
 	}
-
-	// Print the info command for all services
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", appName, runtime)
 
 	return nil
 }
