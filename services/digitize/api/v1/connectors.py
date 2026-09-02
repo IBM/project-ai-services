@@ -313,11 +313,13 @@ async def _run_teardown(connector_id: str) -> None:
     """
     Teardown for connector deletion.
 
-    Scheduled via asyncio.create_task from the delete endpoint (Case B),
-    and awaited directly from _handle_interrupt in sync_tick (Case A).
+    Scheduled via asyncio.create_task from the delete endpoint (Case B — no
+    tick running). Awaited directly from _handle_interrupt in sync_tick
+    (Case A — tick interrupted). In Case A the caller is responsible for
+    purging in-flight conversion tasks *before* calling this function, since
+    no tick is running when _run_teardown executes in Case B.
 
     Steps:
-      0. Purge queued conversion tasks so the dispatcher never picks them up
       1. Remove the scheduled job so no new ticks fire
       2. Snapshot checksums owned by this connector
       3. Remove ownership rows; delete documents when last owner
@@ -327,15 +329,6 @@ async def _run_teardown(connector_id: str) -> None:
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_errors: list[str] = []
     try:
-        # Step 0: Purge any queued conversion tasks before anything else so the
-        # dispatcher cannot pick up tasks that belong to a connector being deleted.
-        from digitize.db.manager import db_manager
-        deleted_tasks = db_manager.delete_conversion_tasks_for_connector(connector_id)
-        if deleted_tasks:
-            logger.info(
-                f"Purged {deleted_tasks} queued conversion task(s) for connector {connector_id!r}"
-            )
-
         # Step 1: Remove the scheduled job so no new ticks fire after this point.
         try:
             import digitize.connectors.scheduler as _sched

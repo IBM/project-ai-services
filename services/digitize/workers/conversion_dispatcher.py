@@ -7,8 +7,7 @@ seconds and dispatches at most one task per tick.
 
 Scheduling
 ----------
-Three logical lanes are served in a fixed cycle — turn advances
-unconditionally every tick regardless of whether a task was dispatched:
+Three logical lanes are served in a fixed cycle:
 
   Turn 0 — U-ING : user ingestion
   Turn 1 — U-DIG : user digitization
@@ -17,11 +16,18 @@ unconditionally every tick regardless of whether a task was dispatched:
 This gives user lanes 2 out of every 3 dispatch opportunities and
 connector lanes 1 out of 3, with no lane ever starving.
 
-Head-of-line blocking
-----------------------
-If the oldest queued task for a lane needs more semaphore capacity than
-is currently available the dispatcher skips that lane's dispatch this
-tick.  Nothing behind the head is attempted; the turn still advances.
+Turn advancement
+----------------
+The turn advances when a task was claimed OR the queue was empty.
+It holds only when the head task exists but its weight exceeds available slots (HOL).
+
+- Task claimed (dispatched)           → advance
+- Queue empty for the lane            → advance (nothing to wait for; move on)
+- HOL-blocked (head weight > avail)   → hold — retry same lane next tick
+
+"Advance on empty" is critical: if a lane has nothing queued, holding its
+turn would starve the other lanes indefinitely.  HOL-hold is intentionally
+narrower — only fires when a real task is blocked on semaphore capacity.
 """
 
 import asyncio
@@ -38,7 +44,8 @@ from digitize.workers.conversion_semaphore import conversion_semaphore
 
 logger = get_logger("conversion_dispatcher")
 
-# 3-turn round-robin state — both integers advance unconditionally every tick.
+# 3-turn round-robin state.
+# _op_turn advances only when the current lane is not HOL-blocked.
 _op_turn: int = 0             # 0 = U-ING  1 = U-DIG  2 = C-ING
 _connector_rr_index: int = 0  # index into the live connector list for turn 2
 
@@ -52,21 +59,28 @@ def _try_claim_if_fits(
     operation: str,
     available: int,
     connector_id: str | None = None,
-) -> ConversionTask | None:
+) -> tuple[ConversionTask | None, bool]:
     """
     Peek at the head of the queue for ``operation`` (scoped to
     ``connector_id`` when given).  If the head task fits within
     ``available`` semaphore units, atomically claim and return it.
-    Returns None on HOL-block or empty queue.
+
+    Returns
+    -------
+    (task, hol_blocked)
+        task        — the claimed ConversionTask, or None if not dispatched.
+        hol_blocked — True when a head task exists but its weight exceeds
+                      ``available``.  False when the queue is empty or the
+                      task was claimed successfully.
     """
     head = db_manager.peek_head(operation, connector_id=connector_id)
     if head is None:
-        return None
+        return None, False  # empty queue — not HOL-blocked
 
     if (2 if head.is_large else 1) > available:
-        return None  # head can't run yet — hold the line
+        return None, True   # head can't run yet — HOL-blocked
 
-    return db_manager.claim_head(operation, connector_id=connector_id)
+    return db_manager.claim_head(operation, connector_id=connector_id), False
 
 async def _run_conversion(task: ConversionTask, weight: int) -> None:
     """
@@ -156,13 +170,15 @@ async def dispatch_loop() -> None:
             try:
                 available = conversion_semaphore.available
 
+                hol_blocked = False
+
                 if _op_turn == 0:                        # ── Turn 0: User Ingestion ──
-                    task = _try_claim_if_fits("ingestion", available)
+                    task, hol_blocked = _try_claim_if_fits("ingestion", available)
                     if task:
                         await _dispatch_one(task)
 
                 elif _op_turn == 1:                      # ── Turn 1: User Digitization ──
-                    task = _try_claim_if_fits("digitization", available)
+                    task, hol_blocked = _try_claim_if_fits("digitization", available)
                     if task:
                         await _dispatch_one(task)
 
@@ -170,12 +186,13 @@ async def dispatch_loop() -> None:
                     cids = db_manager.get_connector_ids_with_queued_tasks()
                     if cids:
                         cid = cids[_connector_rr_index % len(cids)]
-                        task = _try_claim_if_fits("ingestion", available, connector_id=cid)
+                        task, hol_blocked = _try_claim_if_fits("ingestion", available, connector_id=cid)
                         if task:
                             await _dispatch_one(task)
-                        _connector_rr_index = (_connector_rr_index + 1) % len(cids)
+                            _connector_rr_index = (_connector_rr_index + 1) % len(cids)
 
-                _op_turn = (_op_turn + 1) % 3            # ALWAYS advance — unconditional
+                if not hol_blocked:
+                    _op_turn = (_op_turn + 1) % 3        # advance only when not HOL-blocked
 
                 # Promote pending → queued for user lanes only.
                 # Connector tasks are always inserted as 'queued' — no promote needed.

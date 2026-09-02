@@ -276,6 +276,121 @@ async def enqueue_conversion_tasks(
     db_manager.create_conversion_tasks_batch(tasks)
 
 
+async def initialize_and_launch(
+    job_id: str,
+    operation,                          # models.OperationType or str
+    output_format: OutputFormat,
+    filenames: list[str],
+    staging_dir: Path,
+    quota: int,
+    queued_for_op: int,
+    job_name: Optional[str] = None,
+    source: "JobSource" = None,
+    already_exists_files: Optional[list] = None,
+    file_checksum_dict: Optional[dict] = None,
+    connector_id: Optional[str] = None,
+) -> dict[str, str]:
+    """
+    Steps 7–9 of the job-creation flow, shared by the user API and the
+    connector sync path.
+
+      7. ``initialize_job_state``       — create jobs + documents DB rows.
+      8. ``enqueue_conversion_tasks``   — insert conversion_tasks rows.
+      9. ``launch_ingest_pipeline``     — fire-and-forget ingestion task.
+         (Digitization jobs skip step 9 here; the caller creates
+         ``_run_digitize`` after this function returns.)
+
+    If step 7 or 8 raises, staged files under *staging_dir* are cleaned up
+    immediately and the exception is re-raised.
+
+    Parameters
+    ----------
+    job_id:
+        Pre-generated job UUID.
+    operation:
+        ``OperationType.INGESTION`` / ``OperationType.DIGITIZATION`` or the
+        equivalent string value.
+    output_format:
+        Requested output format.
+    filenames:
+        Novel filenames to process (already-exists files excluded).
+    staging_dir:
+        Directory holding the staged files. Cleaned up here on error;
+        cleaned up by the pipeline on success.
+    quota:
+        Per-operation queue quota. Pass ``0`` for connector jobs.
+    queued_for_op:
+        Tasks already queued at submission time. Pass ``0`` for connector jobs.
+    job_name:
+        Optional human-readable job name.
+    source:
+        ``JobSource.USER`` (default) or ``JobSource.CONNECTOR``.
+    already_exists_files:
+        Files stripped by hash-dedup (user jobs only).
+    file_checksum_dict:
+        ``filename → md5-hex`` for novel files (user jobs only). Connector
+        jobs omit this — checksums are registered via
+        ``add_connector_checksum_entry`` after the job completes.
+    connector_id:
+        Owning connector UUID; ``None`` for user-submitted jobs.
+
+    Returns
+    -------
+    dict[str, str]
+        The ``filename → doc_id`` mapping produced by ``initialize_job_state``.
+    """
+    from digitize.db.models import JobSource as _JobSource
+    from digitize.models import OperationType
+
+    op_key = operation.value if hasattr(operation, "value") else operation
+    resolved_source = source if source is not None else _JobSource.USER
+
+    try:
+        doc_id_dict = initialize_job_state(
+            job_id=job_id,
+            operation=operation,
+            output_format=output_format,
+            documents_info=filenames,
+            job_name=job_name,
+            source=resolved_source,
+            already_exists_files=already_exists_files,
+        )
+
+        await enqueue_conversion_tasks(
+            job_id=job_id,
+            op_key=op_key,
+            filenames=filenames,
+            doc_id_dict=doc_id_dict,
+            staging_dir=staging_dir,
+            output_format=output_format,
+            quota=quota,
+            queued_for_op=queued_for_op,
+            connector_id=connector_id,
+        )
+    except Exception:
+        logger.error(
+            f"Job {job_id}: DB initialisation or enqueue failed — "
+            f"removing {len(filenames)} staged file(s)",
+        )
+        cleanup_staging_directory(staging_dir.name, staging_dir.parent)
+        raise
+
+    # Step 9: fire-and-forget ingestion pipeline.
+    # Digitization jobs use _run_digitize (owned by the caller); only ingestion
+    # uses launch_ingest_pipeline.
+    if op_key == OperationType.INGESTION.value:
+        asyncio.create_task(
+            launch_ingest_pipeline(
+                job_id=job_id,
+                doc_id_dict=doc_id_dict,
+                file_checksum_dict=file_checksum_dict,
+                staging_dir=staging_dir,
+            )
+        )
+
+    return doc_id_dict
+
+
 async def launch_ingest_pipeline(
     job_id: str,
     doc_id_dict: dict,
@@ -301,9 +416,11 @@ async def launch_ingest_pipeline(
         Mapping of ``filename → doc_id`` as returned by
         ``initialize_job_state()``.
     file_checksum_dict:
-        Optional ``filename → md5-hex`` map used for deduplication.  Pass
-        the connector's ``filename_to_checksum`` dict here when calling from
-        ``sync_tick.py``.
+        Optional ``filename → md5-hex`` map used to store ``file_hash`` on
+        each document upon completion.  Only meaningful for user-submitted
+        jobs — used by ``find_completed_document_by_hash`` for dedup on
+        subsequent uploads.  Connector jobs omit this; connectors manage
+        their own dedup via ``add_connector_checksum_entry``.
     staging_dir:
         The staging directory to clean up after the pipeline finishes.
         Defaults to ``settings.digitize.staging_dir / job_id`` (the path
