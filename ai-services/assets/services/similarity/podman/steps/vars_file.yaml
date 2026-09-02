@@ -1,4 +1,4 @@
 containers:
-  - name: "{{ .AppName }}--similarity-api-similarity-api"
+  - name: "similarity-{{ .InstanceSlug }}-similarity-api"
     format: ".Status"
     alias: API_STATUS

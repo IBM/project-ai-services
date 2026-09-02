@@ -23,6 +23,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -554,6 +555,9 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 
 	rt := vars.RuntimeFactory.GetRuntimeType()
 
+	// InstanceSlug is derived from the application UUID — same as at deploy time
+	instanceSlug := catalogUtils.GenerateInstanceSlug(app.ID)
+
 	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
@@ -579,7 +583,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 
 		// Populate status params generically from vars_file.yaml
 		if appPS != nil {
-			if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, appPS.Name, rt); err != nil {
+			if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, instanceSlug, rt); err != nil {
 				logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
 			}
 		}

@@ -14,6 +14,7 @@ import (
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -105,13 +106,16 @@ func renderApplicationInfo(ctx context.Context, appName string, rt types.Runtime
 	logger.Infoln("Application Template: " + application.CatalogID)
 	logger.Infoln("Application Version: " + application.Version)
 
-	return printServicesInfo(ctx, appClient, application.Services, appPS, rt)
+	return printServicesInfo(ctx, appClient, application.Services, appPS, app.ID, rt)
 }
 
-func printServicesInfo(ctx context.Context, appClient *catalogClient.ApplicationClient, services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse, rt types.RuntimeType) error {
+func printServicesInfo(ctx context.Context, appClient *catalogClient.ApplicationClient, services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse, appID string, rt types.RuntimeType) error {
 	logger.Infoln("Info:")
 	logger.Infoln("-------")
 	logger.Infoln("Day N: ")
+
+	// InstanceSlug is derived from the application UUID — same as at deploy time
+	instanceSlug := catalogUtils.GenerateInstanceSlug(appID)
 
 	for _, service := range services {
 		params := map[string]string{}
@@ -132,7 +136,7 @@ func printServicesInfo(ctx context.Context, appClient *catalogClient.Application
 		}
 
 		// Populate status params generically from vars_file.yaml
-		if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, appPS.Name, rt); err != nil {
+		if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, instanceSlug, rt); err != nil {
 			logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
 		}
 
@@ -182,24 +186,25 @@ type varsFileContainers struct {
 }
 
 // populateStatusFromVarsFile reads the containers section of vars_file.yaml, renders each
-// name template (supports {{ .AppName }} for Podman), then looks up status from appPods:
-//   - Podman: matches the rendered name against pod container names
-//   - OpenShift: matches the rendered name as a pod-name prefix
+// name template, then looks up status from appPods:
+//   - Podman: name renders to "{catalogID}-{instanceSlug}-{containerName}";
+//     matched exactly against Pod.Containers[].Name.
+//   - OpenShift: name is a plain pod-name prefix (e.g. "digitize-ui"); matched against Pod.PodName.
 //
-// For each match with Format ".Status", alias → "running" (healthy) or "" is set in params.
-func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]string, appPods []catalogTypes.Pod, appName string, rt types.RuntimeType) error {
+// For each entry with Format ".Status", alias → "running" (healthy) or "" is set in params.
+func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]string, appPods []catalogTypes.Pod, instanceSlug string, rt types.RuntimeType) error {
 	raw, ok := rawFiles["vars_file.yaml"]
 	if !ok {
 		return nil
 	}
 
-	// Render the vars_file template so {{ .AppName }} is resolved (Podman uses this)
+	// Render the vars_file template — {{ .InstanceSlug }} expands to the computed slug
 	var rendered bytes.Buffer
 	tmpl, err := template.New("vars").Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse vars_file.yaml: %w", err)
 	}
-	if err := tmpl.Execute(&rendered, map[string]string{"AppName": appName}); err != nil {
+	if err := tmpl.Execute(&rendered, map[string]string{"InstanceSlug": instanceSlug}); err != nil {
 		return fmt.Errorf("execute vars_file.yaml: %w", err)
 	}
 
@@ -223,8 +228,9 @@ func populateStatusFromVarsFile(rawFiles map[string]string, params map[string]st
 // resolveContainerStatus returns "running" when the named container/pod is healthy,
 // using a runtime-appropriate lookup strategy derived from vars_file.yaml entries.
 //
-//   - Podman: name is the full container name (e.g. "myapp--chat-bot-ui"); matched
-//     against Pod.Containers[].Name inside all pods.
+//   - Podman: name is the full container name after template rendering
+//     (e.g. "custom-chatbot-abc123-custom-chatbot"); matched exactly against
+//     Pod.Containers[].Name.
 //   - OpenShift: name is a pod-name prefix (e.g. "digitize-ui"); matched against
 //     Pod.PodName with a HasPrefix check, healthy at the pod level.
 func resolveContainerStatus(name string, appPods []catalogTypes.Pod, rt types.RuntimeType) string {

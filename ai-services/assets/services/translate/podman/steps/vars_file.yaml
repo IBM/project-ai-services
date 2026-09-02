@@ -1,4 +1,4 @@
 containers:
-  - name: "{{ .AppName }}--translate-api-translate-api"
+  - name: "translate-{{ .InstanceSlug }}-translate-api"
     format: ".Status"
     alias: API_STATUS
