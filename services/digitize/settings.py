@@ -149,9 +149,9 @@ class DigitizeConfig(BaseSettings):
 
 class TableSummaryConfig(BaseSettings):
     """Table summarization configuration.
-
-    Token Ratios: English:French:Italian:German = 1 : 1.2305 : 1.3066 : 1.5
-
+    
+    Token Ratios: English:French:Italian:German:Japanese = 1 : 1.2305 : 1.3066 : 1.5 : 2.3473
+    
     These ratios account for the fact that different languages require different numbers
     of tokens to express the same semantic content, ensuring fair token allocation across
     all supported languages.
@@ -405,11 +405,78 @@ class TableSummaryConfig(BaseSettings):
             description="Prompt de résumé des tableaux (Français)",
         )
 
+    class JapaneseConfig(BaseSettings):
+        """Japanese-specific table summarization settings.
+
+        max_tokens = round(1024 * 2.3473) = 2404
+        Derived from the Japanese token ratio relative to English.
+        """
+
+        max_tokens: int = Field(
+            default=2404,
+            ge=0,
+            description="Maximum tokens for table summarization (Japanese)",
+        )
+
+        prompt: str = Field(
+        default="""あなたはドキュメントから抽出された表を分析するインテリジェントなアシスタントです。
+
+                あなたのタスク：
+
+                1. 表からすべての情報を非常に詳細に抽出して文書化してください：
+                - すべてのセクション、サブセクション、および存在する場合はその参照番号を一覧表示してください
+                - すべての仕様、機能、番号、コード、条件、および要件を含めてください
+                - 些細に見えるものも含め、すべての項目に言及してください。何も省略しないでください
+                - 明確な構成の構造化されたフォーマット（番号付きリスト、箇条書き、または詳細な段落）を使用してください
+                - 極めて徹底的かつ包括的に行い、最大限の詳細を目指してください
+                - 表に複数の行/列がある場合は、それぞれを説明してください
+                - 技術用語、バージョン番号、および特定の詳細はすべてそのまま保持してください
+
+                2. 表がナレッジベースに関連しているかどうかを判断してください：
+                - 関連あり：質問への回答に役立つ事実的、説明的、または解説的な情報を含んでいる。
+                - 関連なし：個人情報、免責事項、管理上の注意事項、または無関係なコメント。
+
+                3. 以下の正確な形式で出力してください：
+
+                Summary: <ここに非常に詳細な要約を記述してください。冗長かつ包括的に>
+                Decision: <yes または no>
+
+                JSON、追加のコメント、またはその他のテキストを出力しないでください。
+
+                例：
+
+                肯定的な例（関連あり）：
+                表：
+                | プロセッサ | コア数 | メモリ |
+                |------------|--------|--------|
+                | Power10    | 16     | 8 TB   |
+
+                出力：
+                Summary: この表はPower10プロセッサの技術仕様を示しています。プロセッサ構成には並列処理能力のための16コアが含まれています。メモリ容量は最大8 TB（テラバイト）のRAMをサポートしており、エンタープライズワークロードおよびデータ集約型アプリケーションに対して大規模なメモリリソースを提供します。
+                Decision: yes
+
+                否定的な例（関連なし）：
+                表：
+                | 作成者： | John Smith |
+                |----------|------------|
+
+                出力：
+                Summary: John Smithによって作成されたことを示すドキュメントのメタデータ。
+                Decision: no
+
+                次の表を分析してください：
+
+                表：
+                {content}""",
+            description="表の要約プロンプト（日本語）",
+        )
+
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
     italian: ItalianConfig = Field(default_factory=ItalianConfig)
     french: FrenchConfig = Field(default_factory=FrenchConfig)
+    japanese: JapaneseConfig = Field(default_factory=JapaneseConfig)
 
 
 class DatabaseConfig(BaseSettings):
