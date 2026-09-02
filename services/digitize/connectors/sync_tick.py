@@ -56,6 +56,7 @@ from digitize.utils.db import (
     list_all_checksums,
     list_connector_checksums,
     lookup_connector_content_by_checksum,
+    set_connector_error,
     update_connector_total_files,
     update_sync_log,
 )
@@ -159,18 +160,21 @@ async def run_tick(connector_id: str, sync_seq: int) -> None:
         )
 
         total_files = len(scanned_files)
+        new_files = len(ingest_list)
 
         update_sync_log(
             connector_id,
             sync_seq,
             total_files=total_files,
-            new_files=len(ingest_list),
+            new_files=new_files,
             removed_files=len(orphan_checksums),
         )
 
+        update_connector_total_files(connector_id, total_files)
+        set_connector_error(connector_id, f"{new_files} new files found")
+
         invalid_files = await _process_new_files(sync_seq, connector_id, config.name, scanner, ingest_list)
 
-        update_connector_total_files(connector_id, total_files)
 
         await _delete_orphans(connector_id, orphan_checksums)
 
