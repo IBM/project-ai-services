@@ -18,10 +18,6 @@ import (
 
 const uninstallHelmTimeout = 5 * time.Minute
 
-var (
-	ErrReleaseNotFound = errors.New("no release found")
-)
-
 type Helm struct {
 	namespace    string
 	actionConfig *action.Configuration
