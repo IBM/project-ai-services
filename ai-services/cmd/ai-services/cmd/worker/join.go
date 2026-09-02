@@ -127,11 +127,10 @@ func configureFlags(c *cobra.Command) {
 			"Example: --ssl-key /path/to/key.pem\n")
 }
 
-// configureWorker handles the deploy/setup phase of the worker join workflow.
-// It provisions the worker node for the given runtime type and returns once
+// configureWorker provisions the worker node for the given runtime type and returns once
 // the deployment is complete.
 //
-// After Run returns successfully, RunGrpcStream should be called to open
+// After configureWorker returns successfully, 'grpcstream' cmd should be called to open
 // the long-lived CommandStream to the catalog control plane.
 func configureWorker(ctx context.Context, gatewayAddr string) error {
 	switch types.RuntimeType(runtimeType) {
