@@ -60,6 +60,7 @@ from digitize.utils.db import (
     update_connector_total_files,
     update_sync_log,
 )
+from digitize.db.models import JobSource
 from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
 
 logger = get_logger("sync_tick")
@@ -397,6 +398,7 @@ async def _process_new_files(
                 output_format=OutputFormat.JSON,
                 documents_info=filenames,
                 job_name=job_name,
+                source=JobSource.CONNECTOR,
             )
 
             # doc_id → checksum: built from doc_id_dict (filename→doc_id) + filename_to_checksum

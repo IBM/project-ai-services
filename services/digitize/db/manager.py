@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
 from digitize.db.models import (
-    Job, Document, DocumentChecksum,
+    Job, JobSource, Document, DocumentChecksum,
     Connector, ConnectorDocumentChecksum, ConnectorSyncLog,
     ConversionTask, ConversionTaskStatus,
 )
@@ -37,6 +37,7 @@ class DatabaseManager:
         operation: str,
         status: JobStatus = JobStatus.ACCEPTED,
         job_name: Optional[str] = None,
+        source: JobSource = JobSource.USER,
         submitted_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
         error: Optional[str] = None,
@@ -50,6 +51,7 @@ class DatabaseManager:
             operation: Type of operation (ingestion/digitization)
             status: Initial job status
             job_name: Optional human-readable name
+            source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
             submitted_at: Submission timestamp (defaults to now)
             completed_at: Completion timestamp (optional, for import)
             error: Error message (optional, for import)
@@ -65,6 +67,7 @@ class DatabaseManager:
                     job_name=job_name,
                     operation=operation,
                     status=status.value,
+                    source=source.value,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
                     completed_at=completed_at,
                     error=error,
@@ -448,10 +451,9 @@ class DatabaseManager:
             limit: Maximum number of documents to return
             offset: Number of documents to skip
             exclude_connector_sourced: When True, omit docs whose parent job
-                name starts with "Connector-" (connector-sourced documents).
-                This filter works at every processing stage — accepted,
-                in_progress, completed, etc. — because the job name is fixed
-                at job-creation time.
+                has source='connector'. This filter works at every processing
+                stage — accepted, in_progress, completed, etc. — because the
+                job source is fixed at job-creation time.
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -471,11 +473,8 @@ class DatabaseManager:
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
-                    # Exclude connector-sourced documents
-                    # Since the connector doc checksum is inserted after successful ingestion
-                    # we need a mechanism to exclude connector sourced docs irrespective of which stage they are in (Accepted, Digtized, In Progress, etc.)
                     stmt = stmt.join(Job, Job.job_id == Document.job_id).where(
-                        ~Job.job_name.like("Connector-%")
+                        Job.source == JobSource.USER.value
                     )
 
                 if filters:
@@ -730,8 +729,7 @@ class DatabaseManager:
     @staticmethod
     def delete_user_jobs() -> Dict[str, Any]:
         """
-        Delete only user-submitted jobs — those whose job_name does NOT start
-        with the connector-job prefix ``"Connector-"``.
+        Delete only user-submitted jobs — those whose source is 'user'.
 
         Returns:
             Dictionary with:
@@ -741,7 +739,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Job).where(
-                    ~Job.job_name.like("Connector-%")
+                    Job.source == JobSource.USER.value
                 )
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount

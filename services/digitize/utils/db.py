@@ -35,6 +35,7 @@ from digitize.db.models import (
     Connector,
     ConnectorSyncLog,
     Document,
+    JobSource,
 )
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
@@ -176,7 +177,8 @@ def create_job(
     operation: str,
     submitted_at: str,
     documents_info: list[str],
-    job_name: Optional[str] = None
+    job_name: Optional[str] = None,
+    source: JobSource = JobSource.USER,
 ) -> None:
     """
     Create job in database.
@@ -187,6 +189,7 @@ def create_job(
         submitted_at: ISO timestamp when job was submitted
         documents_info: List of document filenames
         job_name: Optional human-readable name for the job
+        source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot create job without database connection.")
@@ -201,6 +204,7 @@ def create_job(
             operation=operation,
             status=JobStatus.ACCEPTED,
             job_name=job_name,
+            source=source,
             submitted_at=submitted_dt,
             stats={
                 "total_documents": len(documents_info),
@@ -505,8 +509,8 @@ def get_all_documents_paginated(
         name: Filter by document name (partial match)
         limit: Maximum number of documents to return
         offset: Number of documents to skip
-        exclude_connector_sourced: When True, omit docs whose doc_id appears
-            in connector_document_checksum (connector-sourced documents)
+        exclude_connector_sourced: When True, omit docs whose parent job has
+            source='connector' (connector-sourced documents)
 
     Returns:
         Tuple of (list of document dictionaries, total count)

@@ -31,6 +31,12 @@ class Base(DeclarativeBase):
     pass
 
 
+class JobSource(str, enum.Enum):
+    """Origin of a job: submitted by a human user or created by a connector sync."""
+    USER      = "user"
+    CONNECTOR = "connector"
+
+
 class Job(Base):
     """
     Job model representing a processing job.
@@ -46,6 +52,9 @@ class Job(Base):
     job_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     operation: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=JobSource.USER.value
+    )
 
     # Timestamps
     submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -84,6 +93,10 @@ class Job(Base):
         CheckConstraint(
             "operation IN ('ingestion', 'digitization')",
             name="chk_job_operation"
+        ),
+        CheckConstraint(
+            "source IN ('user', 'connector')",
+            name="chk_job_source"
         ),
         Index("idx_jobs_submitted_at_status", "submitted_at", "status"),
     )
