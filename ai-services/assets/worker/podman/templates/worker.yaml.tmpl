@@ -7,6 +7,8 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "worker"
+  annotations:
+    run.oci.keep_original_groups: "1"
 spec:
   restartPolicy: always
   containers:
@@ -30,12 +32,22 @@ spec:
           value: "service"
         - name: CONTAINER_HOST
           value: "unix://{{ .Values.worker.podman.uri }}"
+        - name: REGISTRY_AUTH_FILE
+          value: "/run/containers/auth.json"
+        - name: AI_SERVICES_BASE_DIR
+          value: "{{ .BaseDir }}"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}
+        - name: podman-auth
+          mountPath: /run/containers/auth.json
+          subPath: auth.json
+          readOnly: true
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
           readOnly: true
+        - name: ai-services-data
+          mountPath: {{ .BaseDir }}
       resources:
         requests:
           podman.io/device=/dev/vfio: 4
@@ -49,7 +61,14 @@ spec:
         # For root podman: /run/podman/podman.sock
         path: {{ .Values.worker.podman.uri }}
         type: Socket
+    - name: podman-auth
+      secret:
+        secretName: podman-auth-secret
     - name: iommu-groups
       hostPath:
         path: /sys/kernel/iommu_groups
         type: Directory
+    - name: ai-services-data
+      hostPath:
+        path: {{ .BaseDir }}
+        type: DirectoryOrCreate

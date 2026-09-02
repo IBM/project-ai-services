@@ -8,6 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // GetArchitectureModels collects all unique models from component schemas across
@@ -129,7 +130,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 // For components, models are read from values.schema.json file using GetComponentProviderParams.
 func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType, componentID string, allModels map[string]bool) error {
 	// Use existing GetComponentProviderParams to load the schema
-	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID)
+	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to get component schema for %s/%s: %w", componentType, componentID, err)
 	}

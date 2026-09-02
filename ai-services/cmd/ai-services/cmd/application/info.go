@@ -11,7 +11,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
@@ -106,15 +105,10 @@ func renderApplicationInfo(ctx context.Context, appName string, rt types.Runtime
 	logger.Infoln("Application Template: " + application.CatalogID)
 	logger.Infoln("Application Version: " + application.Version)
 
-	return printServicesInfo(application.Services, appPS, rt)
+	return printServicesInfo(ctx, appClient, application.Services, appPS, rt)
 }
 
-func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse, rt types.RuntimeType) error {
-	catalogProvider, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
-	}
-
+func printServicesInfo(ctx context.Context, appClient *catalogClient.ApplicationClient, services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse, rt types.RuntimeType) error {
 	logger.Infoln("Info:")
 	logger.Infoln("-------")
 	logger.Infoln("Day N: ")
@@ -135,9 +129,14 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 			}
 		}
 
-		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
+		rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, rt.String())
 		if err != nil {
-			return fmt.Errorf("failed to load service md files: %w", err)
+			return fmt.Errorf("failed to load service steps for '%s': %w", service.CatalogID, err)
+		}
+
+		tmpls, err := parseStepsTemplates(rawFiles)
+		if err != nil {
+			return fmt.Errorf("failed to parse steps templates for '%s': %w", service.CatalogID, err)
 		}
 
 		err = printInfo(tmpls, params)
@@ -147,6 +146,28 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 	}
 
 	return nil
+}
+
+// parseStepsTemplates parses the raw steps file contents (as returned by GetServiceSteps)
+// into text/template instances keyed by filename. Only .md files are parsed as templates;
+// other files (e.g. vars_file.yaml) are available as raw content under their own key.
+func parseStepsTemplates(rawFiles map[string]string) (map[string]*template.Template, error) {
+	tmpls := make(map[string]*template.Template, len(rawFiles))
+
+	for name, content := range rawFiles {
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+
+		tmpl, err := template.New(name).Parse(content)
+		if err != nil {
+			return nil, fmt.Errorf("parse template %s: %w", name, err)
+		}
+
+		tmpls[name] = tmpl
+	}
+
+	return tmpls, nil
 }
 
 func getContainerStatus(services []catalogTypes.Pod, catalogID string, rt types.RuntimeType) (string, string) {

@@ -7,9 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -34,22 +35,23 @@ func NewParametersCmd() *cobra.Command {
 				return fmt.Errorf("--template flag is required")
 			}
 
-			// Create catalog provider
-			provider, err := catalog.NewCatalogProvider(nil)
+			// NewCatalogSource tries the API first, falls back to the embedded
+			// catalog when the user is not logged in.
+			source, err := catalogClient.NewCatalogSource(cmd.Context())
 			if err != nil {
-				return fmt.Errorf("failed to create catalog provider: %w", err)
+				return err
 			}
 
 			// Try to load as architecture first
-			arch, err := provider.LoadArchitecture(templateID)
+			arch, err := source.LoadArchitecture(cmd.Context(), templateID)
 			if err == nil {
-				return displayArchitectureParameters(cmd.Context(), provider, templateID, arch.Services)
+				return displayArchitectureParameters(cmd.Context(), source, templateID, arch.Services)
 			}
 
 			// Try to load as service
-			service, err := provider.LoadService(templateID)
+			service, err := source.LoadService(cmd.Context(), templateID)
 			if err == nil {
-				return displayServiceParameters(cmd.Context(), provider, templateID, service.Dependencies)
+				return displayServiceParameters(cmd.Context(), source, templateID, service.Dependencies)
 			}
 
 			return fmt.Errorf("template '%s' not found as service or architecture", templateID)
@@ -63,30 +65,31 @@ func NewParametersCmd() *cobra.Command {
 }
 
 // displayServiceParameters displays all parameters for a specific service.
-func displayServiceParameters(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, dependencies []catalogTypes.DependencyReference) error {
+func displayServiceParameters(ctx context.Context, source catalogClient.CatalogSource, serviceID string, dependencies []catalogTypes.DependencyReference) error {
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := provider.GetServiceParams(ctx, serviceID)
+	schema, err := source.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
 
 	// Display component parameters
-	return displayComponentsParameters(ctx, provider, dependencies, nil)
+	return displayComponentsParameters(ctx, source, dependencies, nil)
 }
 
 // displayArchitectureParameters displays all parameters for all services in an architecture.
-func displayArchitectureParameters(ctx context.Context, provider *catalog.CatalogProvider, archID string, services []catalogTypes.ServiceReference) error {
+func displayArchitectureParameters(ctx context.Context, source catalogClient.CatalogSource, archID string, services []catalogTypes.ServiceReference) error {
 	logger.Infof("Supported Parameters for '%s':", archID)
 
 	// Track displayed components to avoid duplicates
 	displayedComponents := make(map[string]bool)
 
-	// Display parameters for each service in the architecture
+	// Display parameters for each service in the architecture.
+	// Log a warning if a service fails so the user knows output may be incomplete.
 	for _, svcRef := range services {
-		if err := displayServiceInArchitecture(ctx, provider, svcRef.ID, displayedComponents); err != nil {
-			continue
+		if err := displayServiceInArchitecture(ctx, source, svcRef.ID, displayedComponents); err != nil {
+			logger.Warningf("skipping parameters for service '%s': %v", svcRef.ID, err)
 		}
 	}
 
@@ -94,31 +97,31 @@ func displayArchitectureParameters(ctx context.Context, provider *catalog.Catalo
 }
 
 // displayServiceInArchitecture displays parameters for a single service within an architecture.
-func displayServiceInArchitecture(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, displayedComponents map[string]bool) error {
+func displayServiceInArchitecture(ctx context.Context, source catalogClient.CatalogSource, serviceID string, displayedComponents map[string]bool) error {
 	// Load the service to get its dependencies
-	service, err := provider.LoadService(serviceID)
+	service, err := source.LoadService(ctx, serviceID)
 	if err != nil {
 		return err
 	}
 
 	// Display service parameters
-	schema, err := provider.GetServiceParams(ctx, serviceID)
+	schema, err := source.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
 
 	// Display component parameters for this service
-	return displayComponentsParameters(ctx, provider, service.Dependencies, displayedComponents)
+	return displayComponentsParameters(ctx, source, service.Dependencies, displayedComponents)
 }
 
 // displayComponentsParameters displays parameters for components based on dependencies.
 // If displayedComponents map is provided, it will track and skip duplicates.
-func displayComponentsParameters(ctx context.Context, provider *catalog.CatalogProvider, dependencies []catalogTypes.DependencyReference, displayedComponents map[string]bool) error {
+func displayComponentsParameters(ctx context.Context, source catalogClient.CatalogSource, dependencies []catalogTypes.DependencyReference, displayedComponents map[string]bool) error {
 	if len(dependencies) == 0 {
 		return nil
 	}
 
-	components, err := provider.ListComponents()
+	components, err := source.ListComponents(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list components: %w", err)
 	}
@@ -137,7 +140,7 @@ func displayComponentsParameters(ctx context.Context, provider *catalog.CatalogP
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := provider.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID)
+				schema, err := source.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID, string(vars.RuntimeFactory.GetRuntimeType()))
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}

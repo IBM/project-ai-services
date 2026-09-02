@@ -126,6 +126,49 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetDatasourceApplications godoc
+//
+//	@Summary		Get connected applications for a datasource
+//	@Description	Returns the list of applications currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the application entry is still returned with sync_status set to "unknown".
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string									true	"Datasource UUID"
+//	@Success		200	{object}	models.DatasourceApplicationsResponse	"Connected applications with live sync state"
+//	@Failure		400	{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse							"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/datasources/{id}/applications [get]
+func (h *DatasourceHandler) GetDatasourceApplications(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetDatasourceApplications(c.Request.Context(), id)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource applications: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource applications",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // DeleteDatasource godoc
 //
 //	@Summary		Delete datasource connector
@@ -351,6 +394,112 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusMultiStatus, resp)
+}
+
+// GetApplicationDatasource godoc
+//
+//	@Summary		Get datasource status for an application
+//	@Description	Returns the catalog identity and live sync state of a datasource connected to the given application. Sync fields are sourced from the linked service and degrade gracefully to sync_status "unknown" when the service is unreachable.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path		string									true	"Application ID (UUID)"
+//	@Param			datasource_id	path		string									true	"Datasource connector ID (UUID)"
+//	@Success		200				{object}	models.GetApplicationDatasourceResponse	"Datasource status"
+//	@Failure		400				{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401				{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse							"Datasource not connected to this application"
+//	@Failure		500				{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [get]
+func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid application ID format: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetApplicationDatasource(c.Request.Context(), applicationID, datasourceID)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get application datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "failed to get application datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// DisconnectDatasourcesFromApplication godoc
+//
+//	@Summary		Disconnect a datasource from an application
+//	@Description	Removes a single datasource connector from each eligible service in a running application and deletes the service_dependency record.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path	string	true	"Application ID (UUID)"
+//	@Param			datasource_id	path	string	true	"Datasource ID (UUID)"
+//	@Success		204				"Datasource disconnected successfully"
+//	@Failure		400				{object}	ErrorResponse	"Invalid application or datasource ID"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse	"Datasource not connected to this application"
+//	@Failure		502				{object}	ErrorResponse	"Downstream Digitize service returned an error"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [delete]
+func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID: %v", err),
+		})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, datasourceID); err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to disconnect datasource from application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to disconnect datasource from application",
+		})
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // Made with Bob

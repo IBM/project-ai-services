@@ -19,6 +19,17 @@ const (
 	serviceConnectPath = "/v1/connectors"
 )
 
+// ServiceHTTPError is returned by client methods when the downstream service responds
+// with a non-2xx status code. Callers can type-assert to inspect the status code and
+// decide whether to treat specific codes (e.g. 404) as non-fatal.
+type ServiceHTTPError struct {
+	StatusCode int
+}
+
+func (e *ServiceHTTPError) Error() string {
+	return fmt.Sprintf("service returned status %d", e.StatusCode)
+}
+
 // serviceUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
 // Only the fields being updated are sent; the service performs a partial update.
 type serviceUpdatePayload struct {
@@ -114,6 +125,22 @@ func (c *ServiceClient) Connect(ctx context.Context, baseURL string, req apimode
 
 	if resp.IsError() {
 		return fmt.Errorf("service returned unexpected status %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// Disconnect calls DELETE /v1/connectors/{connectorID} on the given service base URL.
+func (c *ServiceClient) Disconnect(ctx context.Context, baseURL, connectorID string) error {
+	resp, err := c.http.R().
+		SetContext(ctx).
+		Delete(baseURL + serviceConnectPath + "/" + connectorID)
+	if err != nil {
+		return fmt.Errorf("service DELETE request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return &ServiceHTTPError{StatusCode: resp.StatusCode()}
 	}
 
 	return nil

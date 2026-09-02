@@ -25,6 +25,12 @@ const (
 	archImagesRoute         = "/api/v1/architectures/%s/images"
 	svcModelsRoute          = "/api/v1/services/%s/models"
 	archModelsRoute         = "/api/v1/architectures/%s/models"
+	architecturesRoute      = "/api/v1/architectures"
+	getArchitectureRoute    = "/api/v1/architectures/%s"
+	servicesRoute           = "/api/v1/services"
+	getServiceRoute         = "/api/v1/services/%s"
+	svcParamsRoute          = "/api/v1/services/%s/params"
+	svcStepsRoute           = "/api/v1/services/%s/steps"
 )
 
 // HTTPError represents an HTTP error with status code.
@@ -223,12 +229,17 @@ func (c *ApplicationClient) CreateApplication(ctx context.Context, req *models.C
 
 // GetServiceDeployOptions retrieves deploy options for a specific service.
 // It returns available providers and dependency rules for the service and its components.
-func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, serviceID string) (*types.DeployOptionsService, error) {
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns schemas and resource specs for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, serviceID, runtimeType string) (*types.DeployOptionsService, error) {
 	var result types.DeployOptionsService
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(fmt.Sprintf(svcDeployOptionsRoute, serviceID))
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(svcDeployOptionsRoute, serviceID))
 	if err != nil {
 		return nil, fmt.Errorf("get service deploy options: %w", err)
 	}
@@ -242,12 +253,17 @@ func (c *ApplicationClient) GetServiceDeployOptions(ctx context.Context, service
 
 // GetArchitectureDeployOptions retrieves deploy options for an architecture.
 // It returns available providers and dependency rules for all services in the architecture.
-func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, architectureID string) (*types.DeployOptionsArchitecture, error) {
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns schemas and resource specs for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, architectureID, runtimeType string) (*types.DeployOptionsArchitecture, error) {
 	var result types.DeployOptionsArchitecture
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(fmt.Sprintf(archDeployOptionsRoute, architectureID))
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(archDeployOptionsRoute, architectureID))
 	if err != nil {
 		return nil, fmt.Errorf("get architecture deploy options: %w", err)
 	}
@@ -260,12 +276,17 @@ func (c *ApplicationClient) GetArchitectureDeployOptions(ctx context.Context, ar
 }
 
 // GetComponentProviderParams retrieves the parameter schema for a specific component provider.
-func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns the schema for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
 	var result map[string]any
-	resp, err := c.client.HTTPClient().R().
+	req := c.client.HTTPClient().R().
 		SetContext(ctx).
-		SetResult(&result).
-		Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
 	if err != nil {
 		return nil, fmt.Errorf("get component provider params: %w", err)
 	}
@@ -345,7 +366,10 @@ func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID stri
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil
@@ -371,7 +395,137 @@ func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architect
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return result, nil
+}
+
+// ListArchitectures retrieves all architecture templates from the catalog API.
+func (c *ApplicationClient) ListArchitectures(ctx context.Context) ([]types.ArchitectureSummary, error) {
+	var result []types.ArchitectureSummary
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(architecturesRoute)
+	if err != nil {
+		return nil, fmt.Errorf("list architectures: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("list architectures: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetArchitectureDetails retrieves details for a specific architecture from the catalog API.
+func (c *ApplicationClient) GetArchitectureDetails(ctx context.Context, archID string) (*types.Architecture, error) {
+	var result types.Architecture
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(getArchitectureRoute, archID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get architecture: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// ListServices retrieves all service templates from the catalog API.
+func (c *ApplicationClient) ListServices(ctx context.Context) ([]types.ServiceSummary, error) {
+	var result []types.ServiceSummary
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(servicesRoute)
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("list services: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetServiceDetails retrieves details for a specific service from the catalog API.
+func (c *ApplicationClient) GetServiceDetails(ctx context.Context, serviceID string) (*types.Service, error) {
+	var result types.Service
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(getServiceRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// GetServiceParams retrieves the parameter schema for a specific service from the catalog API.
+// runtimeType is optional; when non-empty it is sent as the ?runtime= query parameter so the
+// server returns the schema for that runtime (e.g. "podman" or "openshift").
+func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
+	var result map[string]any
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+	if runtimeType != "" {
+		req = req.SetQueryParam("runtime", runtimeType)
+	}
+	resp, err := req.Get(fmt.Sprintf(svcParamsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service params: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return result, nil
+}
+
+// GetServiceSteps calls GET /api/v1/services/:id/steps and returns all files under
+// the service's steps directory keyed by filename (e.g. "info.md", "next.md", "vars_file.yaml").
+// runtime selects which runtime's steps to return ("podman" or "openshift");
+// when empty the server defaults to "podman".
+func (c *ApplicationClient) GetServiceSteps(ctx context.Context, serviceID, runtime string) (map[string]string, error) {
+	var result map[string]string
+	req := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if runtime != "" {
+		req.SetQueryParam("runtime", runtime)
+	}
+
+	resp, err := req.Get(fmt.Sprintf(svcStepsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service steps: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil

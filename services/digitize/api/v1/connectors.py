@@ -29,8 +29,8 @@ from digitize.connectors.models import (
     ConnectorCreateResponse,
     ConnectorDetailResponse,
     ConnectorListItem,
+    ConnectorListResponse,
     ConnectorUpdateRequest,
-    SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
     ConnectorStatus,
@@ -189,7 +189,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
-        if existing.sync_status == ConnectorStatus.DELETE_PENDING:
+        if existing.status == ConnectorStatus.DELETE_PENDING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
@@ -272,12 +272,12 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
 async def delete_connector(connector_id: str):
     """Fast, non-blocking DELETE.
 
-    Case A — sync_status == 'syncing':
+    Case A — status == 'syncing':
         Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
         its next checkpoint, cancel itself, and dispatch teardown.
         Return 204 immediately.
 
-    Case B — sync_status != 'syncing':
+    Case B — status != 'syncing':
         Mark DELETE_PENDING, dispatch asyncio.create_task(_run_teardown(...)),
         return 204 immediately.
     """
@@ -291,7 +291,7 @@ async def delete_connector(connector_id: str):
 
         db_ops.mark_connector_delete_pending(connector_id)
 
-        if connector.sync_status != ConnectorStatus.SYNCING:
+        if connector.status != ConnectorStatus.SYNCING:
             # No tick running — kick off teardown ourselves.
             asyncio.create_task(_run_teardown(connector_id))
 
@@ -356,7 +356,7 @@ async def _run_teardown(connector_id: str) -> None:
 
         if deletion_errors:
             error_msg = f"Failed to delete connector, error: {'; '.join(deletion_errors)}"
-            db_ops.set_connector_error(connector_id, error_msg)
+            db_ops.set_connector_message(connector_id, error_msg)
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
@@ -374,7 +374,7 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
-        db_ops.set_connector_error(connector_id, f"Unexpected error during teardown: {exc}")
+        db_ops.set_connector_message(connector_id, f"Unexpected error during teardown: {exc}")
 
 
 def _remove_checksums(
@@ -479,35 +479,39 @@ def _sweep_staging_dir(
 
 @router.get(
     "",
-    response_model=List[ConnectorListItem],
+    response_model=ConnectorListResponse,
     responses={500: http_error_responses[500]},
     summary="List all connectors",
     description=(
-        "Returns all attached connectors with their sync state. "
+        "Returns a paginated list of attached connectors with their sync state. "
         "Secret connection fields (private_key, secret_access_key) are never included."
     ),
-    response_description="List of connectors",
+    response_description="Paginated list of connectors",
 )
-async def list_connectors():
-    """Retrieve a list of all active connectors with their current sync state.
+async def list_connectors(
+    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)."),
+    offset: int = Query(0, ge=0, description="Zero-based offset for pagination."),
+):
+    """Retrieve a paginated list of all active connectors with their current sync state.
 
     Strips out any sensitive/secret connection details from the response.
     """
     try:
-        connectors = db_ops.list_connectors()
-        return [
+        connectors, total = db_ops.list_connectors_paginated(limit=limit, offset=offset)
+        items = [
             ConnectorListItem(
                 id=c.id,
                 name=c.name,
                 type=c.type,
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
-                sync_status=c.sync_status,
-                error=c.error,
+                status=c.status,
                 total_files=c.total_files,
+                message=c.message,
             )
             for c in connectors
         ]
+        return ConnectorListResponse(total=total, limit=limit, offset=offset, items=items)
     except HTTPException as exc:
         message = f"Failed to list connectors: {extract_http_error_message(exc)}"
         logger.error(message)
@@ -559,10 +563,10 @@ async def get_connector(connector_id: str):
             sync_interval_seconds=connector.sync_interval_seconds,
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
-            sync_status=connector.sync_status,
-            error=connector.error,
+            status=connector.status,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
+            message=connector.message,
         )
     except HTTPException as exc:
         message = f"Failed to get connector {connector_id!r}: {extract_http_error_message(exc)}"
@@ -628,7 +632,7 @@ async def dispatch_sync(connector_id: str) -> int:
     connector = db_ops.get_connector_by_id(connector_id)
     if connector is None:
         raise SyncNotFound(f"Connector {connector_id!r} not found")
-    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+    if connector.status == ConnectorStatus.DELETE_PENDING:
         raise SyncLocked(
             f"Connector {connector_id!r} is pending deletion and cannot accept new syncs."
         )
@@ -741,7 +745,7 @@ async def cancel_sync(connector_id: str, sync_seq: int):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
-        if connector.sync_status != ConnectorStatus.SYNCING:
+        if connector.status != ConnectorStatus.SYNCING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "No sync is currently running for this connector.",
@@ -793,8 +797,8 @@ async def cancel_sync(connector_id: str, sync_seq: int):
 )
 async def get_sync_history(
     connector_id: str,
-    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)"),
-    offset: int = Query(0, ge=0, description="Zero-based offset"),
+    limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)."),
+    offset: int = Query(0, ge=0, description="Zero-based offset for pagination."),
 ):
     """Retrieve a paginated history of sync runs for a specific connector."""
     try:
@@ -814,6 +818,7 @@ async def get_sync_history(
                 finished_at=get_utc_timestamp(log.finished_at),
                 total_files=log.total_files,
                 new_files=log.new_files,
+                completed_files=log.completed_files,
                 removed_files=log.removed_files,
                 status=log.status,
                 error=log.error or "",
@@ -844,7 +849,7 @@ async def get_sync_history(
 
 @router.get(
     "/{connector_id}/syncs/{sync_seq}",
-    response_model=SyncLogDetailResponse,
+    response_model=SyncLogResponse,
     responses={
         404: http_error_responses[404],
         500: http_error_responses[500],
@@ -870,15 +875,23 @@ async def get_sync(connector_id: str, sync_seq: int):
                 f"Sync {sync_seq} not found for connector {connector_id!r}",
             )
 
-        return SyncLogDetailResponse(
-            seq=log.seq,
-            started_at=get_utc_timestamp(log.started_at) or "",
-            finished_at=get_utc_timestamp(log.finished_at),
-            total_files=log.total_files,
-            new_files=log.new_files,
-            removed_files=log.removed_files,
-            status=log.status,
-            error=log.error or "",
+        return SyncLogResponse(
+            total=1,
+            limit=1,
+            offset=0,
+            items=[
+                SyncLogItem(
+                    seq=log.seq,
+                    started_at=get_utc_timestamp(log.started_at) or "",
+                    finished_at=get_utc_timestamp(log.finished_at),
+                    total_files=log.total_files,
+                    new_files=log.new_files,
+                    completed_files=log.completed_files,
+                    removed_files=log.removed_files,
+                    status=log.status,
+                    error=log.error or "",
+                )
+            ],
         )
 
     except HTTPException as exc:

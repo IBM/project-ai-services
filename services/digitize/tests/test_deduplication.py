@@ -534,8 +534,8 @@ class TestGetJobMessagePopulation:
 
 @pytest.mark.unit
 class TestUpdateDocMetadataChecksumRegistration:
-    """update_doc_metadata must call upsert_file_checksum when status=COMPLETED
-    and file_hash is present in the update."""
+    """update_doc_metadata must call upsert_file_checksum when status is COMPLETED
+    or COMPLETED_WITH_ERRORS and file_hash is present in the update."""
 
     def test_checksum_upserted_on_completed_with_file_hash(self, mock_db_manager):
         mock_db_manager.get_document_by_id.return_value = Mock(
@@ -578,6 +578,21 @@ class TestUpdateDocMetadataChecksumRegistration:
         })
 
         mock_db_manager.upsert_file_checksum.assert_not_called()
+
+    def test_checksum_upserted_on_completed_with_errors_with_file_hash(self, mock_db_manager):
+        mock_db_manager.get_document_by_id.return_value = Mock(
+            doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
+        )
+        mock_db_manager.update_document.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_doc_metadata("doc-1", {
+            "status": DocStatus.COMPLETED_WITH_ERRORS,
+            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+        })
+
+        mock_db_manager.upsert_file_checksum.assert_called_once_with("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "doc-1")
 
 
 @pytest.mark.unit
@@ -636,6 +651,54 @@ class TestUpdateJobStatsAlreadyExists:
         stats = mock_db_manager.update_job.call_args[1]["stats"]
         assert stats["in_progress"] == 5
         assert stats["completed"] == 0
+
+
+    def test_completed_with_errors_sets_error_field(self, mock_db_manager):
+        """update_job_progress with COMPLETED_WITH_ERRORS and a non-None error writes the error."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
+                                 error="1 table failed to summarize")
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert call_kwargs.get("error") == "1 table failed to summarize"
+
+    def test_completed_with_errors_no_error_when_none(self, mock_db_manager):
+        """update_job_progress with COMPLETED_WITH_ERRORS and no error does not write an error field."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS)
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert "error" not in call_kwargs
+
+    def test_failed_still_sets_error_field(self, mock_db_manager):
+        """Regression: FAILED status still writes the error field."""
+        mock_db_manager.get_job_by_id.return_value = Mock(
+            job_id="job-1", status="in_progress", stats={}
+        )
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["failed"])
+        mock_db_manager.update_job.return_value = True
+
+        from digitize.utils.db import DatabaseStatusManager
+        mgr = DatabaseStatusManager("job-1")
+        mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error="pipeline crashed")
+
+        call_kwargs = mock_db_manager.update_job.call_args[1]
+        assert call_kwargs.get("error") == "pipeline crashed"
+
 
 
 # ============================================================================
