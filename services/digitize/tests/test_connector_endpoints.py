@@ -88,8 +88,8 @@ def _make_connector(
     c.sync_interval_seconds = 300
     c.attached_at = _NOW
     c.last_sync_at = _NOW
-    c.sync_status = sync_status
-    c.sync_message = None
+    c.status = sync_status
+    c.message = None
     c.total_files = 42
     return c
 

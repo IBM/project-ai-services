@@ -614,7 +614,7 @@ class TestCheckInterruptCall:
             assert result == InterruptType.DELETE_CONNECTOR
 
     def test_returns_sync_cancel_when_cancel_pending_on_log(self):
-        """CANCEL_PENDING is read from connector_sync_logs, not from connectors.sync_status."""
+        """CANCEL_PENDING is read from connector_sync_logs, not from connectors.status."""
         with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.CANCEL_PENDING):
             result = _check_interrupt_call("conn-1", sync_seq=5)

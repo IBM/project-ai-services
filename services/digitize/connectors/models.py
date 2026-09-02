@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 class ConnectorStatus(str, Enum):
-    """String enum for the Connector.sync_status column.
+    """String enum for the Connector.status column.
 
     Inherits from str so values can be passed directly to SQLAlchemy and
     compared with raw DB strings without calling .value.
@@ -80,7 +80,7 @@ class ConnectorError(str, Enum):
     """Written by run_tick when scanner.connect() raises a ConnectionError.
 
     Cleared automatically when a subsequent sync tick connects successfully
-    (finalize_sync_log_and_update_connector with COMPLETED status sets sync_message=None).
+    (finalize_sync_log_and_update_connector with COMPLETED status sets message=None).
     """
 
 # ---------------------------------------------------------------------------
@@ -223,9 +223,9 @@ class ConnectorListItem(BaseModel):
     type: str
     attached_at: Optional[str]
     last_sync_at: Optional[str]
-    sync_status: str
+    status: str
     total_files: int
-    sync_message: Optional[str]
+    message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -235,9 +235,9 @@ class ConnectorListItem(BaseModel):
                 "type": "file_system",
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
-                "sync_status": "up to date",
+                "status": "up to date",
                 "total_files": 15,
-                "sync_message": None,
+                "message": None,
             }
         }
     }
@@ -253,10 +253,10 @@ class ConnectorDetailResponse(BaseModel):
     sync_interval_seconds: int
     attached_at: Optional[str]
     last_sync_at: Optional[str]
-    sync_status: str
+    status: str
     connection_details: Dict[str, Any]
     total_files: int
-    sync_message: Optional[str]
+    message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -268,7 +268,7 @@ class ConnectorDetailResponse(BaseModel):
                 "sync_interval_seconds": 60,
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
-                "sync_status": "up to date",
+                "status": "up to date",
                 "connection_details": {
                     "host": "sftp.example.com",
                     "port": 22,
@@ -276,7 +276,7 @@ class ConnectorDetailResponse(BaseModel):
                     "remote_path": "/exports",
                 },
                 "total_files": 15,
-                "sync_message": None,
+                "message": None,
             }
         }
     }
@@ -333,7 +333,7 @@ class ConnectorListResponse(BaseModel):
                         "type": "file_system",
                         "attached_at": "2025-01-15T10:00:00Z",
                         "last_sync_at": "2025-01-15T10:30:00Z",
-                        "sync_status": "up to date",
+                        "status": "up to date",
                         "total_files": 15,
                     }
                 ],

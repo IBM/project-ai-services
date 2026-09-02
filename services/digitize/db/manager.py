@@ -785,7 +785,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status=ConnectorStatus.UP_TO_DATE,
+                        status=ConnectorStatus.UP_TO_DATE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
@@ -811,14 +811,14 @@ class DatabaseManager:
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
         total_files: Optional[int] = None,
-        sync_message: "Optional[str]" = _UNSET,  # type: ignore[assignment]
+        message: "Optional[str]" = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """
         Partial update of an existing connector.
 
         Only non-``_UNSET`` kwargs are written; connection_details is merged at
         the key level using the PostgreSQL ``||`` JSONB concatenation operator.
-        Pass ``sync_message=None`` explicitly to clear a previously set message to NULL.
+        Pass ``message=None`` explicitly to clear a previously set message to NULL.
 
         Raises FileNotFoundError if no connector with the given id exists.
         """
@@ -831,8 +831,8 @@ class DatabaseManager:
                     values["allowed_extensions"] = allowed_extensions
                 if total_files is not None:
                     values["total_files"] = total_files
-                if sync_message is not _UNSET:
-                    values["sync_message"] = sync_message
+                if message is not _UNSET:
+                    values["message"] = message
                 if connection_details is not None:
                     stmt = (
                         update(Connector)
@@ -877,8 +877,8 @@ class DatabaseManager:
                     connector.id, connector.name, connector.type,
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
-                    connector.last_sync_at, connector.sync_status,
-                    connector.total_files, connector.sync_message,
+                    connector.last_sync_at, connector.status,
+                    connector.total_files, connector.message,
                 )
                 session.expunge(connector)
                 return connector
@@ -903,7 +903,7 @@ class DatabaseManager:
                     connector.id, connector.name, connector.type,
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
-                    connector.last_sync_at, connector.sync_status,
+                    connector.last_sync_at, connector.status,
                     connector.error, connector.total_files,
                 )
                 session.expunge(connector)
@@ -915,15 +915,15 @@ class DatabaseManager:
     @staticmethod
     def get_connector_sync_status(connector_id: str) -> Optional[str]:
         """
-        Return the current sync_status string for a connector.
+        Return the current status string for a connector.
 
-        Does a minimal SELECT sync_status query — does not load the full row.
+        Does a minimal SELECT status query — does not load the full row.
         Returns None if the connector does not exist.
         """
         try:
             with get_db_session() as session:
                 stmt = (
-                    select(Connector.sync_status)
+                    select(Connector.status)
                     .where(Connector.id == connector_id)
                 )
                 row = session.execute(stmt).one_or_none()
@@ -950,8 +950,8 @@ class DatabaseManager:
                     _ = (
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
-                        c.attached_at, c.last_sync_at, c.sync_status,
-                        c.total_files, c.sync_message,
+                        c.attached_at, c.last_sync_at, c.status,
+                        c.total_files, c.message,
                     )
                     session.expunge(c)
                 logger.debug(f"Listed {len(connectors)} connector(s)")
@@ -988,8 +988,8 @@ class DatabaseManager:
                     _ = (
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
-                        c.attached_at, c.last_sync_at, c.sync_status,
-                        c.total_files, c.sync_message,
+                        c.attached_at, c.last_sync_at, c.status,
+                        c.total_files, c.message,
                     )
                     session.expunge(c)
                 logger.debug(
@@ -1177,7 +1177,7 @@ class DatabaseManager:
     @staticmethod
     def try_acquire_sync_lock(connector_id: str) -> bool:
         """
-        Atomically set sync_status='syncing' if it is not already 'syncing'.
+        Atomically set status='syncing' if it is not already 'syncing'.
 
         Returns True if the lock was acquired, False if another tick already
         holds it (or the connector row does not exist).
@@ -1188,9 +1188,9 @@ class DatabaseManager:
                     update(Connector)
                     .where(
                         Connector.id == connector_id,
-                        Connector.sync_status != ConnectorStatus.SYNCING,
+                        Connector.status != ConnectorStatus.SYNCING,
                     )
-                    .values(sync_status=ConnectorStatus.SYNCING)
+                    .values(status=ConnectorStatus.SYNCING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1224,7 +1224,7 @@ class DatabaseManager:
     @staticmethod
     def mark_connector_delete_pending(connector_id: str) -> bool:
         """
-        Set sync_status='delete pending' for the given connector regardless of
+        Set status='delete pending' for the given connector regardless of
         current status.
 
         Returns True if the connector was found and updated, False if it does
@@ -1237,7 +1237,7 @@ class DatabaseManager:
                     .where(
                         Connector.id == connector_id
                     )
-                    .values(sync_status=ConnectorStatus.DELETE_PENDING)
+                    .values(status=ConnectorStatus.DELETE_PENDING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1283,13 +1283,13 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set sync_status=SYNCING on the connector row."""
+        """Set status=SYNCING on the connector row."""
         try:
             with get_db_session() as session:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_status=ConnectorStatus.SYNCING)
+                    .values(status=ConnectorStatus.SYNCING)
                 )
         except SQLAlchemyError as e:
             logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)
@@ -1354,15 +1354,15 @@ class DatabaseManager:
         connector_id: str,
         status: str,
         last_sync_at: Optional[datetime] = None,
-        sync_message: Optional[str] = None,
+        message: Optional[str] = None,
     ) -> None:
         """
-        Update last_sync_at, sync_status, and sync_message on the connector row after a sync run.
+        Update last_sync_at, status, and message on the connector row after a sync run.
 
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
 
-        ``sync_message`` carries error detail on failure/cancel paths and is
+        ``message`` carries error detail on failure/cancel paths and is
         cleared to NULL on a successful completion.
         """
         try:
@@ -1374,8 +1374,8 @@ class DatabaseManager:
                 )
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),
-                    "sync_status": connector_sync_status,
-                    "sync_message": sync_message if status != SyncLogStatus.COMPLETED else None,
+                    "status": connector_sync_status,
+                    "message": message if status != SyncLogStatus.COMPLETED else None,
                 }
                 session.execute(
                     update(Connector)
@@ -1440,7 +1440,7 @@ class DatabaseManager:
     def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
         """
         Atomically increment completed_files by *count* on the identified sync-log row,
-        then write a "Processing x/y files" sync_message on the connector row.
+        then write a "Processing x/y files" message on the connector row.
 
         Uses a SQL expression (completed_files + count) so concurrent calls do
         not race against each other.  Returns True if the row was found and
@@ -1469,11 +1469,11 @@ class DatabaseManager:
                     )
                     return False
                 completed, new_files = row
-                sync_message = f"Processing {completed}/{new_files} files"
+                message = f"Processing {completed}/{new_files} files"
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_message=sync_message)
+                    .values(message=message)
                 )
                 return True
         except SQLAlchemyError as e:
@@ -2170,10 +2170,10 @@ class DatabaseManager:
             with get_db_session() as session:
                 result = session.execute(
                     update(Connector)
-                    .where(Connector.sync_status == ConnectorStatus.SYNCING)
+                    .where(Connector.status == ConnectorStatus.SYNCING)
                     .values(
-                        sync_status=ConnectorStatus.OUT_OF_SYNC,
-                        sync_message=error,
+                        status=ConnectorStatus.OUT_OF_SYNC,
+                        message=error,
                     )
                     .returning(Connector.id)
                 )
@@ -2218,7 +2218,7 @@ class DatabaseManager:
                     session.execute(
                         update(Connector)
                         .where(Connector.id == connector_id)
-                        .values(sync_message=None)
+                        .values(message=None)
                     )
                 return result is not None
         except SQLAlchemyError as e:

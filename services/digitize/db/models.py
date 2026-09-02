@@ -204,9 +204,9 @@ class Connector(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     sync_logs: Mapped[List["ConnectorSyncLog"]] = relationship(
@@ -221,7 +221,7 @@ class Connector(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.sync_status}')>"
+        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.status}')>"
 
 
 class ConnectorDocumentChecksum(Base):

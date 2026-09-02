@@ -160,7 +160,7 @@ class TestGetConnector:
         c.sync_interval_seconds = SYNC_INTERVAL
         c.attached_at = _NOW
         c.last_sync_at = None
-        c.sync_status = ConnectorStatus.UP_TO_DATE
+        c.status = ConnectorStatus.UP_TO_DATE
         c.total_files = 0
         return c
 
@@ -206,7 +206,7 @@ class TestListConnectors:
         c1.sync_interval_seconds = 300
         c1.attached_at = _NOW
         c1.last_sync_at = None
-        c1.sync_status = ConnectorStatus.UP_TO_DATE
+        c1.status = ConnectorStatus.UP_TO_DATE
         c1.total_files = 0
 
         session = MagicMock()
@@ -464,7 +464,7 @@ class TestInsertSyncLog:
         # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 3
-        # Second execute: UPDATE connectors SET sync_status='syncing'
+        # Second execute: UPDATE connectors SET status='syncing'
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, update_result]
 
@@ -474,7 +474,7 @@ class TestInsertSyncLog:
         assert seq == 3
         assert session.execute.call_count == 2
 
-    def test_sets_connector_sync_status_syncing(self):
+    def test_sets_connector_status_syncing(self):
         """Both the INSERT and the connectors UPDATE must happen in the same session."""
         session = MagicMock()
         insert_result = MagicMock()

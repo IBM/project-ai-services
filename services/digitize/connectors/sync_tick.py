@@ -3,7 +3,7 @@ connectors/sync_tick.py — end-to-end sync-tick logic for one connector.
 
 Phases
 ------
-1.  [caller] try_acquire_sync_lock()              → atomically set connector.sync_status=SYNCING
+1.  [caller] try_acquire_sync_lock()              → atomically set connector.status=SYNCING
 2.  [caller] init_sync_log_and_update_connector() → INSERT connector_sync_logs row (status='started'),
              returns sync_seq which is passed directly into run_tick()
 3.  load known/all checksums + scanner.scan()
@@ -12,7 +12,7 @@ Phases
 4b. update_sync_log()        → single DB write of total/new/removed counts (all known post-classify)
 5a. _process_new_files()     → download → create job/doc → add checksum row
 5b. _delete_orphans()        → remove checksum rows; delete docs with no owners
-6.  finalize_sync_log_and_update_connector()      → finalize tick row with terminal status + reset sync_status
+6.  finalize_sync_log_and_update_connector()      → finalize tick row with terminal status + reset status
 
 Caller contract
 ---------------
@@ -83,7 +83,7 @@ def _check_interrupt_call(connector_id: str, sync_seq: int) -> Optional[Interrup
     Check for interrupt signals from both connectors and connector_sync_logs tables.
 
     Checks two sources:
-    1. connectors.sync_status for DELETE_PENDING (delete entire connector)
+    1. connectors.status for DELETE_PENDING (delete entire connector)
     2. connector_sync_logs.status for CANCEL_PENDING on the active seq row
        (cancel only the current sync; written by mark_sync_cancel_pending)
 

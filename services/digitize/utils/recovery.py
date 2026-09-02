@@ -164,7 +164,7 @@ def recover_connector_sync_state() -> int:
     Recover connectors that were mid-tick when the service crashed.
 
     On startup this function:
-    1. Bulk-updates every connector whose ``sync_status = 'syncing'`` to
+    1. Bulk-updates every connector whose ``status = 'syncing'`` to
        ``'out of sync'`` — releasing the sync lock so future ticks can run.
     2. For each affected connector, closes the still-open ``connector_sync_logs``
        row (status = 'started' or 'cancel pending') by setting it to

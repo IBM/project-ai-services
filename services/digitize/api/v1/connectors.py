@@ -190,7 +190,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
-        if existing.sync_status == ConnectorStatus.DELETE_PENDING:
+        if existing.status == ConnectorStatus.DELETE_PENDING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
@@ -273,12 +273,12 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
 async def delete_connector(connector_id: str):
     """Fast, non-blocking DELETE.
 
-    Case A — sync_status == 'syncing':
+    Case A — status == 'syncing':
         Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
         its next checkpoint, cancel itself, and dispatch teardown.
         Return 204 immediately.
 
-    Case B — sync_status != 'syncing':
+    Case B — status != 'syncing':
         Mark DELETE_PENDING, dispatch asyncio.create_task(_run_teardown(...)),
         return 204 immediately.
     """
@@ -292,7 +292,7 @@ async def delete_connector(connector_id: str):
 
         db_ops.mark_connector_delete_pending(connector_id)
 
-        if connector.sync_status != ConnectorStatus.SYNCING:
+        if connector.status != ConnectorStatus.SYNCING:
             # No tick running — kick off teardown ourselves.
             asyncio.create_task(_run_teardown(connector_id))
 
@@ -506,9 +506,9 @@ async def list_connectors(
                 type=c.type,
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
-                sync_status=c.sync_status,
+                status=c.status,
                 total_files=c.total_files,
-                sync_message=c.sync_message,
+                message=c.message,
             )
             for c in connectors
         ]
@@ -564,10 +564,10 @@ async def get_connector(connector_id: str):
             sync_interval_seconds=connector.sync_interval_seconds,
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
-            sync_status=connector.sync_status,
+            status=connector.status,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
-            sync_message=connector.sync_message,
+            message=connector.message,
         )
     except HTTPException as exc:
         message = f"Failed to get connector {connector_id!r}: {extract_http_error_message(exc)}"
@@ -633,7 +633,7 @@ async def dispatch_sync(connector_id: str) -> int:
     connector = db_ops.get_connector_by_id(connector_id)
     if connector is None:
         raise SyncNotFound(f"Connector {connector_id!r} not found")
-    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
+    if connector.status == ConnectorStatus.DELETE_PENDING:
         raise SyncLocked(
             f"Connector {connector_id!r} is pending deletion and cannot accept new syncs."
         )
@@ -746,7 +746,7 @@ async def cancel_sync(connector_id: str, sync_seq: int):
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Connector {connector_id!r} not found",
             )
-        if connector.sync_status != ConnectorStatus.SYNCING:
+        if connector.status != ConnectorStatus.SYNCING:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "No sync is currently running for this connector.",
