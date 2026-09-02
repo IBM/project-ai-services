@@ -25,6 +25,11 @@ const (
 	archImagesRoute         = "/api/v1/architectures/%s/images"
 	svcModelsRoute          = "/api/v1/services/%s/models"
 	archModelsRoute         = "/api/v1/architectures/%s/models"
+	architecturesRoute      = "/api/v1/architectures"
+	getArchitectureRoute    = "/api/v1/architectures/%s"
+	servicesRoute           = "/api/v1/services"
+	getServiceRoute         = "/api/v1/services/%s"
+	svcParamsRoute          = "/api/v1/services/%s/params"
 )
 
 // HTTPError represents an HTTP error with status code.
@@ -345,7 +350,10 @@ func (c *ApplicationClient) GetServiceModels(ctx context.Context, serviceID stri
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get service models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return result, nil
@@ -371,7 +379,100 @@ func (c *ApplicationClient) GetArchitectureModels(ctx context.Context, architect
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get architecture models: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
+	}
+
+	return result, nil
+}
+
+// ListArchitectures retrieves all architecture templates from the catalog API.
+func (c *ApplicationClient) ListArchitectures(ctx context.Context) ([]types.ArchitectureSummary, error) {
+	var result []types.ArchitectureSummary
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(architecturesRoute)
+	if err != nil {
+		return nil, fmt.Errorf("list architectures: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("list architectures: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetArchitectureDetails retrieves details for a specific architecture from the catalog API.
+func (c *ApplicationClient) GetArchitectureDetails(ctx context.Context, archID string) (*types.Architecture, error) {
+	var result types.Architecture
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(getArchitectureRoute, archID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get architecture: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// ListServices retrieves all service templates from the catalog API.
+func (c *ApplicationClient) ListServices(ctx context.Context) ([]types.ServiceSummary, error) {
+	var result []types.ServiceSummary
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(servicesRoute)
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("list services: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
+}
+
+// GetServiceDetails retrieves details for a specific service from the catalog API.
+func (c *ApplicationClient) GetServiceDetails(ctx context.Context, serviceID string) (*types.Service, error) {
+	var result types.Service
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(getServiceRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// GetServiceParams retrieves the parameter schema for a specific service from the catalog API.
+func (c *ApplicationClient) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
+	var result map[string]any
+	resp, err := c.client.HTTPClient().R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(fmt.Sprintf(svcParamsRoute, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service params: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service params: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
 	return result, nil

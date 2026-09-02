@@ -735,6 +735,93 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 	return s.persistAndPropagate(ctx, id, merged, sensitive, updatable)
 }
 
+// GetApplicationDatasource returns the catalog identity and live sync state for
+// a datasource linked to the given application.
+//
+// Flow:
+//  1. Verify the application exists — returns 404 if not found.
+//  2. Verify the datasource connector exists — returns 404 if not found.
+//  3. Scan service_dependencies rows for this datasource; on the first row whose
+//     applicationID matches, capture the endpoint URL and break. Returns 404 when
+//     no matching row is found — meaning the datasource is not connected to this application.
+//  4. Resolve provider display name via CatalogProvider.LoadConnector; falls back to the
+//     stored provider ID so the response is never blocked by a missing catalog entry.
+//  5. Fetch live sync state using the captured endpoint URL; degrades gracefully to
+//     sync_status="unknown" when the service is unreachable.
+func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error) {
+	// Step 1: verify the application exists.
+	app, err := s.appRepo.GetByID(ctx, applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load application: %w", err)
+	}
+
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("application %s not found", applicationID),
+		}
+	}
+
+	// Step 2: verify the datasource connector exists (credentials not needed for this response).
+	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, false)
+	if err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return nil, &ValidationError{
+				Code:    http.StatusNotFound,
+				Message: fmt.Sprintf("datasource %s not found", datasourceID),
+			}
+		}
+
+		return nil, fmt.Errorf("failed to fetch datasource: %w", err)
+	}
+
+	// Step 3: confirm the datasource is linked to this application and capture its endpoint URL.
+	baseURL, err := s.resolveLinkedEndpoint(ctx, applicationID, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4: resolve provider display name; fall back to stored provider ID on catalog miss.
+	providerName := connector.Provider
+	if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
+		providerName = catalogConn.Name
+	}
+
+	// Step 5: fetch live sync state using the endpoint URL captured in step 3.
+	// Degrades gracefully to sync_status="unknown" when the service is unreachable.
+	serviceDetails := fetchServiceSyncDetails(ctx, datasourceID, baseURL)
+
+	return &apimodels.GetApplicationDatasourceResponse{
+		ID:             connector.ID.String(),
+		Name:           connector.Name,
+		Status:         string(connector.Status),
+		Message:        connector.Message,
+		Provider:       apimodels.DatasourceProviderInfo{ID: connector.Provider, Name: providerName},
+		ServiceDetails: serviceDetails,
+	}, nil
+}
+
+// resolveLinkedEndpoint confirms that datasourceID is linked to a service belonging to
+// applicationID and returns the API endpoint URL for that service. A datasource can
+// appear at most once per application, so the loop breaks on the first match.
+func (s *DatasourceService) resolveLinkedEndpoint(ctx context.Context, applicationID, datasourceID uuid.UUID) (string, error) {
+	allRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, datasourceID, dbmodels.DependencyTypeConnector)
+	if err != nil {
+		return "", fmt.Errorf("failed to query linked services for datasource %s: %w", datasourceID, err)
+	}
+
+	for _, row := range allRows {
+		if row.ApplicationID == applicationID {
+			return extractAPIEndpointURL(row.EndpointsJSON), nil
+		}
+	}
+
+	return "", &ValidationError{
+		Code:    http.StatusNotFound,
+		Message: "datasource not connected to this application",
+	}
+}
+
 // persistAndPropagate encrypts merged metadata, writes it to the DB, propagates the
 // new (plain-text) credentials to every linked Digitize service, and returns the
 // response DTO. It is called only after a successful connectivity test.
@@ -889,6 +976,37 @@ func fetchSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) 
 	}
 
 	return state.SyncStatus, state.LastSyncAt, ""
+}
+
+// fetchServiceSyncDetails calls GET /v1/connectors/{connectorID} on the connected service
+// at baseURL and returns a fully-populated ServiceSyncDetails. On failure (empty baseURL
+// or HTTP error) it degrades gracefully: SyncStatus = "unknown", all numeric/timestamp
+// fields = nil, ErrMsg populated — identical degradation pattern to
+// fetchDigitzeSyncState / ConnectedServiceItem.
+func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL string) apimodels.ServiceSyncDetails {
+	if baseURL == "" {
+		return apimodels.ServiceSyncDetails{
+			SyncStatus: "unknown",
+			ErrMsg:     "no api endpoint registered for this service",
+		}
+	}
+
+	state, err := catalogclient.NewServiceClient(baseURL).GetConnectorSync(ctx, connectorID.String())
+	if err != nil {
+		logger.WarningfCtx(ctx, "failed to fetch sync state for connector %s from %s: %v", connectorID, baseURL, err)
+
+		return apimodels.ServiceSyncDetails{
+			SyncStatus: "unknown",
+			ErrMsg:     fmt.Sprintf("failed to fetch sync state: %v", err),
+		}
+	}
+
+	return apimodels.ServiceSyncDetails{
+		SyncStatus:    state.SyncStatus,
+		TotalFiles:    state.TotalFiles,
+		LastSyncAt:    state.LastSyncAt,
+		LastSyncError: state.LastSyncError,
+	}
 }
 
 // extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])

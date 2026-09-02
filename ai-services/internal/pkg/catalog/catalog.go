@@ -380,6 +380,7 @@ func ToServiceSummary(service *types.Service) types.ServiceSummary {
 		CertifiedBy:   service.CertifiedBy,
 		Architectures: service.Architectures,
 		Standalone:    service.Standalone,
+		Dependencies:  service.Dependencies,
 	}
 }
 

@@ -396,4 +396,57 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	c.JSON(http.StatusMultiStatus, resp)
 }
 
+// GetApplicationDatasource godoc
+//
+//	@Summary		Get datasource status for an application
+//	@Description	Returns the catalog identity and live sync state of a datasource connected to the given application. Sync fields are sourced from the linked service and degrade gracefully to sync_status "unknown" when the service is unreachable.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path		string									true	"Application ID (UUID)"
+//	@Param			datasource_id	path		string									true	"Datasource connector ID (UUID)"
+//	@Success		200				{object}	models.GetApplicationDatasourceResponse	"Datasource status"
+//	@Failure		400				{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401				{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse							"Datasource not connected to this application"
+//	@Failure		500				{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [get]
+func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid application ID format: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetApplicationDatasource(c.Request.Context(), applicationID, datasourceID)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get application datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "failed to get application datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // Made with Bob

@@ -679,45 +679,64 @@ Removes the link from `service_dependencies` and calls `DELETE /v1/connectors/:c
 
 **`GET /api/v1/applications/:id/datasources/:datasource_id`**
 
-The catalog backend resolves the `connector_id` from `service_dependencies`, fetches the datasource record from `components`, and calls `GET /v1/connectors/:connectorid` on each linked Digitize service pod. The response merges the Digitize sync fields at the top level with catalog identity fields nested under a `datasource` object. `provider_name` is resolved from the provider registry using `components.provider`.
+The catalog backend resolves the link from `service_dependencies`, fetches the datasource record from the `connectors` table, and calls `GET /v1/connectors/:connectorid` on the linked service. The response returns catalog identity fields at the top level and nests live sync fields under a `service_details` object. `provider` is returned as an object with `id` and `name`; `provider.name` is resolved from the provider registry using `connectors.provider`.
 
 **Response `200 OK`:**
 
 ```json
 {
-  "connector_id": "550e8400-e29b-41d4-a716-446655440000",
-  "sync_status": "up to date",
-  "total_files": 150,
-  "new_files": 2,
-  "removed_files": 0,
-  "failed_files": 8,
-  "last_sync_at": "2026-06-01T11:00:00Z",
-  "last_sync_error": null,
-  "datasource": {
-    "name": "My S3 Bucket",
-    "type": "datasource",
-    "provider": "object_storage",
-    "provider_name": "Object storage",
-    "status": "connected"
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My S3 Bucket",
+  "status": "connected",
+  "message": "",
+  "provider": {
+    "id": "object_storage",
+    "name": "Object storage"
+  },
+  "service_details": {
+    "sync_status": "up to date",
+    "total_files": 150,
+    "last_sync_at": "2026-06-01T11:00:00Z",
+    "last_sync_error": null
   }
 }
 ```
 
-| Field                      | Source                                    | Description                                                                                 |
-| -------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `connector_id`             | Digitize (echoed from `connectors.id`)    | The connector UUID used as the Digitize connector ID                                        |
-| `sync_status`              | Digitize                                  | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"` |
-| `total_files`              | Digitize                                  | Total files known to the connector                                                          |
-| `new_files`                | Digitize                                  | Files added since the last tick                                                             |
-| `removed_files`            | Digitize                                  | Files removed since the last tick                                                           |
-| `failed_files`             | Digitize                                  | Files that failed to process in the last tick                                               |
-| `last_sync_at`             | Digitize                                  | Timestamp of the last completed sync                                                        |
-| `last_sync_error`          | Digitize                                  | Error string from the last failed sync, or `null`                                           |
-| `datasource.name`          | catalog (`connectors.name`)               | User-supplied display name of the datasource                                                |
-| `datasource.type`          | catalog (`connectors.type`)               | Always `"datasource"`                                                                       |
-| `datasource.provider`      | catalog (`connectors.provider`)           | Provider identifier, e.g. `"object_storage"`, `"file_system"`                               |
-| `datasource.provider_name` | catalog (`CatalogProvider.LoadConnector`) | Human-readable provider name from `metadata.yaml`, e.g. `"Object storage"`, `"File system"` |
-| `datasource.status`        | catalog (`connectors.status`)             | Catalog-side connectivity health: `"connected"` or `"offline"`                              |
+**Response `200 OK` — when the connected service is unreachable (graceful degradation):**
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My S3 Bucket",
+  "status": "connected",
+  "message": "",
+  "provider": {
+    "id": "object_storage",
+    "name": "Object storage"
+  },
+  "service_details": {
+    "sync_status": "unknown",
+    "total_files": null,
+    "last_sync_at": null,
+    "last_sync_error": null,
+    "err_msg": "failed to fetch sync state: connection refused"
+  }
+}
+```
+
+| Field                             | Source                                    | Description                                                                                  |
+| --------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `id`                              | catalog (`connectors.id`)                 | UUID of the datasource connector                                                             |
+| `name`                            | catalog (`connectors.name`)               | User-supplied display name of the datasource                                                 |
+| `status`                          | catalog (`connectors.status`)             | Catalog-side connectivity health: `"connected"` or `"offline"`                               |
+| `message`                         | catalog (`connectors.message`)            | Human-readable description of the current status; omitted when empty                         |
+| `provider.id`                     | catalog (`connectors.provider`)           | Provider identifier, e.g. `"object_storage"`, `"file_system"`                                |
+| `provider.name`                   | catalog (`CatalogProvider.LoadConnector`) | Human-readable provider name from `metadata.yaml`; falls back to `provider.id` on miss       |
+| `service_details.sync_status`     | connected service                         | Current sync state: `"up to date"`, `"out of sync"`, `"started"`, `"completed"`, `"failed"`; `"unknown"` when unreachable |
+| `service_details.total_files`     | connected service                         | Total files known to the connector; `null` when service is unreachable                       |
+| `service_details.last_sync_at`    | connected service                         | Timestamp of the last completed sync; `null` when service is unreachable                     |
+| `service_details.last_sync_error` | connected service                         | Error string from the last failed sync, or `null` on success                                 |
+| `service_details.err_msg`         | catalog (internal)                        | Populated when the service was unreachable or returned an error; omitted on success          |
 
 **Response `404 Not Found`:** Returned if the datasource is not connected to this application (no row in `service_dependencies`).
 
@@ -994,12 +1013,14 @@ When `GET /api/v1/datasources/:id/services` is called:
 
 ### 7.6 Application-Scoped Status Fetch Flow
 
-When `GET /api/v1/applications/:id/connectors/datasources/:datasource_id` is called:
+When `GET /api/v1/applications/:id/datasources/:datasource_id` is called:
 
-1. Query `service_dependencies` where `dependency_id = datasource_id` and `dependency_type = 'connector'`, joined to `services` to filter to this application. Return `404` if no rows found.
-2. Fetch the datasource record from the `connectors` table using `datasource_id`. Resolve `provider_name` via `catalogProvider.LoadConnector(connectorType, provider)`.
-3. For each row, call `GET /v1/connectors/<dependency_id>` on its downstream Digitize pod, using `dependency_id` as the `connector_id`.
-4. Merge the Digitize sync fields at the top level and nest the catalog identity fields (`name`, `type`, `provider`, `provider_name`, `status`) under a `datasource` key.
+1. Verify the application exists by `applicationID` — return `404` if not found.
+2. Verify the datasource connector exists by `datasourceID` — return `404` if not found.
+3. Call `GetLinkedServiceEndpoints(datasourceID, 'connector')` and scan the result for the first row whose `applicationID` matches. Capture the API endpoint URL from that row's `endpoints` JSONB column at the same time and break. Return `404` if no matching row is found — meaning the datasource is not connected to this application.
+4. Resolve `provider.name` via `catalogProvider.LoadConnector(connectorType, provider)`; fall back to the stored provider ID if the catalog entry is missing.
+5. Call `GET /v1/connectors/<datasourceID>` on the linked service using the endpoint URL captured in step 3. If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
+6. Return the merged response: catalog identity fields at the top level, live sync fields nested under `service_details`.
 
 ---
 

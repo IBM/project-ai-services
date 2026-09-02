@@ -40,6 +40,12 @@ type DatasourceServiceInterface interface {
 	// each enriched with live sync state from its downstream service pod.
 	// Returns a *ValidationError with code 404 when the connector does not exist.
 	GetDatasourceServices(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceServicesResponse, error)
+
+	// GetApplicationDatasource returns the catalog identity and live Digitize sync state for
+	// a datasource that is connected to the given application.
+	// Returns a *ValidationError with code 404 when no service_dependencies row links
+	// datasourceID to any service of applicationID.
+	GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.
