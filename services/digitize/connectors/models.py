@@ -80,7 +80,7 @@ class ConnectorError(str, Enum):
     """Written by run_tick when scanner.connect() raises a ConnectionError.
 
     Cleared automatically when a subsequent sync tick connects successfully
-    (finalize_sync_log_and_update_connector with COMPLETED status sets error=None).
+    (finalize_sync_log_and_update_connector with COMPLETED status sets sync_message=None).
     """
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,6 @@ class ConnectorListItem(BaseModel):
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    error: Optional[str]
     total_files: int
     sync_message: Optional[str]
 
@@ -237,7 +236,6 @@ class ConnectorListItem(BaseModel):
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
                 "sync_status": "up to date",
-                "error": None,
                 "total_files": 15,
                 "sync_message": None,
             }
@@ -256,7 +254,6 @@ class ConnectorDetailResponse(BaseModel):
     attached_at: Optional[str]
     last_sync_at: Optional[str]
     sync_status: str
-    error: Optional[str]
     connection_details: Dict[str, Any]
     total_files: int
     sync_message: Optional[str]
@@ -272,7 +269,6 @@ class ConnectorDetailResponse(BaseModel):
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
                 "sync_status": "up to date",
-                "error": None,
                 "connection_details": {
                     "host": "sftp.example.com",
                     "port": 22,
@@ -338,7 +334,6 @@ class ConnectorListResponse(BaseModel):
                         "attached_at": "2025-01-15T10:00:00Z",
                         "last_sync_at": "2025-01-15T10:30:00Z",
                         "sync_status": "up to date",
-                        "error": None,
                         "total_files": 15,
                     }
                 ],

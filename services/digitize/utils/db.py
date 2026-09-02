@@ -1453,8 +1453,8 @@ def finalize_sync_log_and_update_connector(
       - connector_sync_log: UPDATEs the matching row with status, finished_at,
         and optional file counts / error message.
       - connector: UPDATEs last_sync_at to now, sync_status to the terminal
-        state, and error — CANCELLED/FAILED both map to OUT_OF_SYNC so the
-        scheduler can retry; COMPLETED clears error to NULL.
+        state, and sync_message — CANCELLED/FAILED both map to OUT_OF_SYNC so
+        the scheduler can retry; COMPLETED clears sync_message to NULL.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1471,9 +1471,9 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    connector_error = f"Error from last sync: {error}" if error else error
+    connector_sync_message = f"Error from last sync: {error}" if error else None
     db_manager.update_connector_after_sync(
-        connector_id, status=status, last_sync_at=now, error=connector_error
+        connector_id, status=status, last_sync_at=now, sync_message=connector_sync_message
     )
     return True
 
@@ -1484,15 +1484,15 @@ def update_connector_total_files(connector_id: str, total_files: int) -> None:
 
 
 def set_connector_error(connector_id: str, error: Optional[str]) -> None:
-    """Persist or clear an error message on the connector row (best-effort; logs on failure).
+    """Persist or clear a message on the connector row (best-effort; logs on failure).
 
-    Pass ``None`` to clear a previously set error.
+    Pass ``None`` to clear a previously set message.
     """
     try:
-        db_manager.update_connector(connector_id=connector_id, error=error)
+        db_manager.update_connector(connector_id=connector_id, sync_message=error)
     except Exception as exc:
         logger.warning(
-            f"Could not persist error on connector {connector_id!r}: {exc}",
+            f"Could not persist message on connector {connector_id!r}: {exc}",
             exc_info=True,
         )
 

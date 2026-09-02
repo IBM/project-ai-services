@@ -161,7 +161,6 @@ class TestGetConnector:
         c.attached_at = _NOW
         c.last_sync_at = None
         c.sync_status = ConnectorStatus.UP_TO_DATE
-        c.error = None
         c.total_files = 0
         return c
 
@@ -208,7 +207,6 @@ class TestListConnectors:
         c1.attached_at = _NOW
         c1.last_sync_at = None
         c1.sync_status = ConnectorStatus.UP_TO_DATE
-        c1.error = None
         c1.total_files = 0
 
         session = MagicMock()

@@ -507,7 +507,6 @@ async def list_connectors(
                 attached_at=get_utc_timestamp(c.attached_at),
                 last_sync_at=get_utc_timestamp(c.last_sync_at),
                 sync_status=c.sync_status,
-                error=c.error,
                 total_files=c.total_files,
                 sync_message=c.sync_message,
             )
@@ -566,7 +565,6 @@ async def get_connector(connector_id: str):
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
             sync_status=connector.sync_status,
-            error=connector.error,
             connection_details=strip_secrets(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
             sync_message=connector.sync_message,

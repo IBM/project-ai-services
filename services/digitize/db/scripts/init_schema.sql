@@ -61,7 +61,6 @@ CREATE TABLE IF NOT EXISTS connectors (
     attached_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_sync_at            TIMESTAMPTZ,
     sync_status             TEXT        NOT NULL DEFAULT 'up to date',
-    error                   TEXT,
     total_files             INTEGER     NOT NULL DEFAULT 0,
     sync_message            TEXT,
     CONSTRAINT chk_connector_type CHECK (type IN ('file_system', 'object_storage'))

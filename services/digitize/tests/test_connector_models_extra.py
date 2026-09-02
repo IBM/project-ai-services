@@ -216,7 +216,6 @@ class TestConnectorListItem:
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
             sync_status="up to date",
-            error=None,
             total_files=42,
             sync_message=None,
         )
@@ -232,7 +231,6 @@ class TestConnectorListItem:
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
             sync_status="syncing",
-            error=None,
             total_files=42,
             sync_message="Processing 3/10 files",
         )
@@ -250,7 +248,6 @@ class TestConnectorDetailResponse:
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
             sync_status="syncing",
-            error=None,
             connection_details={"host": "sftp.example.com"},
             total_files=10,
             sync_message=None,
