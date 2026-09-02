@@ -746,7 +746,7 @@ The catalog backend resolves the link from `service_dependencies`, fetches the d
 
 **`GET /api/v1/applications/:id/datasources`**
 
-Returns a paginated list of datasources currently connected to the given application, enriched with live sync status fetched from the application's Digitize pod.
+Returns a paginated list of datasources currently connected to the given application, enriched with live sync status fetched from the application's service pod.
 
 **Path parameters:**
 
@@ -773,9 +773,9 @@ Returns a paginated list of datasources currently connected to the given applica
         "id": "object_storage",
         "name": "Object Storage"
       },
-      "sync_status": "up to date",
-      "total_files": 150,
-      "last_sync_at": "2026-06-01T11:00:00Z",
+      "status": "up to date",
+      "files": 150,
+      "last_sync": "2026-06-01T11:00:00Z",
       "message": "2 new files found"
     },
     {
@@ -785,11 +785,11 @@ Returns a paginated list of datasources currently connected to the given applica
         "id": "file_system",
         "name": "File System"
       },
-      "sync_status": "out of sync",
-      "total_files": 40,
-      "last_sync_at": "2026-06-01T08:00:00Z",
+      "status": "out of sync",
+      "files": 40,
+      "last_sync": "2026-06-01T08:00:00Z",
       "message": "connection timeout on last tick",
-      "err_msg": ""
+      "err_msg": "connector not found on service pod"
     }
   ],
   "pagination": {
@@ -803,27 +803,27 @@ Returns a paginated list of datasources currently connected to the given applica
 }
 ```
 
-| Field                      | Source                                          | Description                                                                                                                                               |
-| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data[].id`                | catalog (`connectors.id`)                       | UUID of the datasource connector                                                                                                                          |
-| `data[].name`              | catalog (`connectors.name`)                     | User-supplied display name of the datasource                                                                                                              |
-| `data[].provider.id`       | catalog (`connectors.provider`)                 | Provider identifier, e.g. `"object_storage"`, `"file_system"`                                                                                            |
-| `data[].provider.name`     | provider registry                               | Human-readable provider name, e.g. `"Object Storage"`, `"File System"`                                                                                   |
-| `data[].sync_status`       | Digitize (`GET /v1/connectors`)                 | Current sync state: `"up to date"`, `"out of sync"`, `"syncing"`. Set to `"unknown"` when Digitize is unreachable.                                        |
-| `data[].total_files`       | Digitize (`GET /v1/connectors`)                 | Total files known to the connector                                                                                                                        |
-| `data[].last_sync_at`      | Digitize (`GET /v1/connectors`)                 | Timestamp of the last completed sync, or `null`                                                                                                           |
-| `data[].message`           | Digitize (`GET /v1/connectors/{id}/syncs?latest=true`) | Human-readable sync state description: `"syncing" → "Processing X/Y files"`, `"up to date" → "X new files found"`, `"out of sync" → error string. Empty when no sync has run yet. |
-| `data[].err_msg`           | —                                               | Populated when sync state could not be fetched from Digitize (e.g. pod unreachable, no endpoint registered). Omitted on success.                          |
-| `pagination`               | —                                               | Standard pagination envelope (page, page_size, total_items, total_pages, has_next, has_prev)                                                              |
+| Field                  | Source                              | Description                                                                                                                                                                          |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data[].id`            | catalog (`connectors.id`)           | UUID of the datasource connector                                                                                                                                                     |
+| `data[].name`          | catalog (`connectors.name`)         | User-supplied display name of the datasource                                                                                                                                         |
+| `data[].provider.id`   | catalog (`connectors.provider`)     | Provider identifier, e.g. `"object_storage"`, `"file_system"`                                                                                                                       |
+| `data[].provider.name` | provider registry                   | Human-readable provider name, e.g. `"Object Storage"`, `"File System"`                                                                                                              |
+| `data[].status`        | service (`GET /v1/connectors`)      | Current sync state: `"up to date"`, `"out of sync"`, `"syncing"`. Set to `"unknown"` when the service pod is unreachable.                                                            |
+| `data[].files`         | service (`GET /v1/connectors`)      | Total files known to the connector                                                                                                                                                   |
+| `data[].last_sync`     | service (`GET /v1/connectors`)      | Timestamp of the last completed sync, or `null`                                                                                                                                      |
+| `data[].message`       | service (`GET /v1/connectors`)      | Human-readable description covering all sync phases and errors: e.g. `"Processing x/y files"`, `"x new files found"`, or an error string. Sourced directly from the connector's `message` field — no separate sync-log call required. Empty when no sync has run yet. |
+| `data[].err_msg`       | —                                   | Populated when sync state could not be fetched from the service pod (e.g. pod unreachable, no endpoint registered, connector not found). Omitted on success.                         |
+| `pagination`           | —                                   | Standard pagination envelope (page, page_size, total_items, total_pages, has_next, has_prev)                                                                                         |
 
 **Backend logic:**
 
 1. Look up the application by `id` — return `404` if not found.
-2. Query `service_dependencies` (joined to `services`) for all distinct connector `dependency_id` values linked to this application, with pagination applied at the DB level using a window-function query (single round-trip).
-3. For each connector UUID, fetch the `connectors` row from the catalog DB and resolve the provider display name from the catalog.
-4. Resolve the Digitize pod base URL from the first connector's linked service endpoints (all connectors in an application share the same Digitize pod). Call `GET /v1/connectors` **once** to bulk-fetch `sync_status`, `last_sync_at`, and `total_files` for all connectors on the pod.
-5. For each connector, call `GET /v1/connectors/{id}/syncs?latest=true` to obtain the latest sync log entry (`new_files`, `error`) and derive the human-readable `message`.
-6. If Digitize is unreachable or a connector is not found on the pod, set `sync_status: "unknown"`, leave numeric fields at zero, and populate `err_msg` — do not fail the whole request.
+2. Query `service_dependencies` (joined to `services`) for all distinct connector `dependency_id` values linked to this application, with pagination applied at the DB level (single round-trip). The catalog-level `page`/`page_size` params are translated to `limit`/`offset` for both the DB query and the downstream service call.
+3. For each connector UUID on the page, fetch the `connectors` row from the catalog DB and resolve the provider display name from the provider registry.
+4. Resolve the service pod base URL from the first connector's linked service endpoints (all connectors in an application share the same service pod). Call `GET /v1/connectors?limit=<page_size>&offset=<offset>` **once** to bulk-fetch `status`, `last_sync`, `files`, and `message` for all connectors on the page in a single request.
+5. For each connector, look up its entry in the bulk response by connector ID. Set `status`, `files`, `last_sync`, and `message` directly from the service response — no separate sync-log call is needed.
+6. If the service pod is unreachable or a connector is not found in the bulk response, set `status: "unknown"`, leave numeric fields at zero, and populate `err_msg` — do not fail the whole request.
 
 **Response `200 OK` (no datasources connected):**
 
@@ -849,18 +849,19 @@ Returns a paginated list of datasources currently connected to the given applica
 
 ---
 
-## 7. Digitize Service Integration
+## 7. Service Integration
 
 ### 7.1 Connector API Overview
 
-The Digitize service exposes a `/v1/connectors` API that manages the active linkage between a deployed application and a datasource. The catalog service acts as the client.
+The downstream service (e.g. Digitize) exposes a `/v1/connectors` API that manages the active linkage between a deployed application and a datasource. The catalog service acts as the client.
 
-| Operation                         | Catalog Trigger                                                  | Digitize API Call                                                                                         |
-| --------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Connect datasource to application | `PUT /applications/:id/connectors/datasources/:datasource_id`    | `POST /v1/connectors` on each eligible service (using the datasource's `connectors.id` as `connector_id`) |
-| Update datasource credentials     | `PUT /connectors/datasources/:id`                                | `PUT /v1/connectors/<connector_id>` on each service linked in `service_dependencies`                      |
-| Disconnect datasource             | `DELETE /applications/:id/connectors/datasources/:datasource_id` | `DELETE /v1/connectors/<connector_id>` on each linked service; remove `service_dependencies` row          |
-| Fetch sync status                 | `GET /applications/:id/connectors/datasources/:datasource_id`    | `GET /v1/connectors/<connector_id>` on each linked service                                                |
+| Operation                         | Catalog Trigger                                                  | Service API Call                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Connect datasource to application | `PUT /applications/:id/connectors/datasources/:datasource_id`    | `POST /v1/connectors` on each eligible service pod (using the datasource's `connectors.id` as `connector_id`)            |
+| Update datasource credentials     | `PUT /connectors/datasources/:id`                                | `PUT /v1/connectors/<connector_id>` on each service pod linked in `service_dependencies`                                  |
+| Disconnect datasource             | `DELETE /applications/:id/connectors/datasources/:datasource_id` | `DELETE /v1/connectors/<connector_id>` on each linked service pod; remove `service_dependencies` row                     |
+| Fetch sync status (single)        | `GET /applications/:id/connectors/datasources/:datasource_id`    | `GET /v1/connectors/<connector_id>` on the linked service pod                                                             |
+| List sync status (bulk)           | `GET /applications/:id/datasources`                              | `GET /v1/connectors?limit=<page_size>&offset=<offset>` once per request; `message` field covers all phases and errors    |
 
 ### 7.2 Connect Flow
 
@@ -1014,8 +1015,8 @@ When `GET /api/v1/connectors/datasources/:id/services` is called:
 
 1. Return `404` if no record exists in `connectors` for the given `id`.
 2. Query `service_dependencies` where `dependency_id = id` and `dependency_type = 'connector'`, joined with `services` and `applications`, collecting `application_id`, `application_name`, `catalog_id`, and the `endpoints` JSONB column.
-3. For each linked service, call `GET /v1/connectors/<dependency_id>` on its downstream Digitize pod, using `dependency_id` as the `connector_id`. Extract `sync_status` and `last_sync_at` from the response.
-4. If the Digitize call fails for a service, set `sync_status: null` and `last_sync_at: null` for that entry and continue — do not fail the entire request.
+3. For each linked service, call `GET /v1/connectors/<dependency_id>` on its downstream service pod, using `dependency_id` as the `connector_id`. Extract `sync_status`, `last_sync_at`, and `message` from the response.
+4. If the service call fails for a linked service, set `sync_status: "unknown"` and `last_sync_at: null` for that entry and continue — do not fail the entire request.
 5. Return the assembled list.
 
 ### 7.6 Application-Scoped Status Fetch Flow
@@ -1026,7 +1027,7 @@ When `GET /api/v1/applications/:id/datasources/:datasource_id` is called:
 2. Verify the datasource connector exists by `datasourceID` — return `404` if not found.
 3. Call `GetLinkedServiceEndpoints(datasourceID, 'connector')` and scan the result for the first row whose `applicationID` matches. Capture the API endpoint URL from that row's `endpoints` JSONB column at the same time and break. Return `404` if no matching row is found — meaning the datasource is not connected to this application.
 4. Resolve `provider.name` via `catalogProvider.LoadConnector(connectorType, provider)`; fall back to the stored provider ID if the catalog entry is missing.
-5. Call `GET /v1/connectors/<datasourceID>` on the linked service using the endpoint URL captured in step 3. If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
+5. Call `GET /v1/connectors/<datasourceID>` on the linked service using the endpoint URL captured in step 3. The response includes `sync_status`, `total_files`, `last_sync_at`, and `message` (covering all status phases and error details). If the service is unreachable, set `service_details.sync_status = "unknown"`, all numeric/timestamp fields to `null`, and populate `service_details.err_msg`.
 6. Return the merged response: catalog identity fields at the top level, live sync fields nested under `service_details`.
 
 ---

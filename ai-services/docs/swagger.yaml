@@ -9,7 +9,7 @@ definitions:
         type: string
       files:
         description: Files is the total number of files tracked by the connector (total_files
-          from Digitize).
+          from the service).
         type: integer
       id:
         description: ID is the UUID of the datasource connector.
@@ -20,11 +20,9 @@ definitions:
         type: string
       message:
         description: |-
-          Message is a human-readable description of the current sync state:
-            syncing     → "Processing <ingested>/<new> files"
-            up to date  → "<new> new files found"
-            out of sync → <error from latest sync log>
-          Empty when no sync has run yet or the Digitize pod is unreachable.
+          Message is sourced directly from the connector's message field on the service pod.
+          It covers all phases: "x new files found", "Processing x/y files", and error details.
+          Empty when no sync has run yet or the service pod is unreachable.
         type: string
       name:
         description: Name is the human-readable label of the datasource.
@@ -35,8 +33,8 @@ definitions:
         description: Provider contains the provider ID and its resolved display name.
       status:
         description: |-
-          Status is the connector's sync_status sourced live from the Digitize pod.
-          Set to "unknown" when the Digitize pod is unreachable.
+          Status is the connector's sync_status sourced live from the service pod.
+          Set to "unknown" when the service pod is unreachable.
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceListResponse:
@@ -334,9 +332,11 @@ definitions:
         description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
           or null when unavailable.
         type: string
-      last_sync_error:
-        description: LastSyncError is the error string from the last failed sync,
-          or null on success.
+      message:
+        description: |-
+          Message contains the current status and phase description from the connector
+          (e.g. "x new files found", "Processing x/y files", or error details).
+          Omitted when empty.
         type: string
       sync_status:
         description: SyncStatus is the current sync state from the service. Set to

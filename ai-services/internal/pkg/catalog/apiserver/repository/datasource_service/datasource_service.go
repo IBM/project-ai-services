@@ -24,13 +24,6 @@ import (
 const (
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
-
-	// digitizeSyncStatusSyncing is the Digitize sync_status value for an active sync.
-	digitizeSyncStatusSyncing = "syncing"
-	// digitizeSyncStatusUpToDate is the Digitize sync_status value when all files are current.
-	digitizeSyncStatusUpToDate = "up to date"
-	// digitizeSyncStatusOutOfSync is the Digitize sync_status value when an error occurred.
-	digitizeSyncStatusOutOfSync = "out of sync"
 )
 
 // ValidationError re-exported so callers use the same type as for application errors.
@@ -961,8 +954,7 @@ func fetchDigitzeSyncState(ctx context.Context, connectorID uuid.UUID, baseURL s
 // fetchServiceSyncDetails calls GET /v1/connectors/{connectorID} on the connected service
 // at baseURL and returns a fully-populated ServiceSyncDetails. On failure (empty baseURL
 // or HTTP error) it degrades gracefully: SyncStatus = "unknown", all numeric/timestamp
-// fields = nil, ErrMsg populated — identical degradation pattern to
-// fetchDigitzeSyncState / ConnectedServiceItem.
+// fields = nil, ErrMsg populated.
 func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL string) apimodels.ServiceSyncDetails {
 	if baseURL == "" {
 		return apimodels.ServiceSyncDetails{
@@ -982,10 +974,10 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 	}
 
 	return apimodels.ServiceSyncDetails{
-		SyncStatus:    state.SyncStatus,
-		TotalFiles:    state.TotalFiles,
-		LastSyncAt:    state.LastSyncAt,
-		LastSyncError: state.LastSyncError,
+		SyncStatus: state.SyncStatus,
+		TotalFiles: state.TotalFiles,
+		LastSyncAt: state.LastSyncAt,
+		Message:    state.Message,
 	}
 }
 
@@ -1017,11 +1009,11 @@ func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 // ListApplicationDatasources returns a paginated list of datasource connectors linked to
 // the given application.
 //
-// Digitize calls are minimised: GET /v1/connectors is called once per application to bulk-fetch
-// status, last_sync, and total_files for all connectors, then GET /v1/connectors/{id}/syncs?latest=true
-// is called per connector for new_files (needed to build the message).
-// All connectors in an application share the same Digitize pod so one base URL is resolved
+// Service calls are minimised: GET /v1/connectors is called once per page to bulk-fetch
+// status, last_sync, total_files, and message for all connectors on the page.
+// All connectors in an application share the same service pod so one base URL is resolved
 // from the first connector's linked service rows via the existing extractAPIEndpointURL helper.
+// Pagination is translated to limit/offset matching the downstream service API.
 //
 // Returns a *ValidationError with code 404 when the application does not exist.
 func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req apimodels.ListApplicationDatasourcesRequest) (*apimodels.ApplicationDatasourceListResponse, error) {
@@ -1044,13 +1036,15 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 		return nil, fmt.Errorf("failed to list application connectors: %w", err)
 	}
 
-	// Resolve base URL and bulk-fetch all Digitize connectors once for the whole page.
-	// Uses the first connector to locate the shared Digitize pod endpoint.
-	baseURL, digitizeConnectors := s.fetchDigitizeConnectors(ctx, connectorIDs)
+	// Resolve base URL and bulk-fetch all service connectors once for the whole page.
+	// Uses the first connector to locate the shared service pod endpoint.
+	// limit and offset are passed through to match the downstream pagination API.
+	offset := (req.Page - 1) * req.PageSize
+	baseURL, serviceConnectors := s.fetchServiceConnectors(ctx, connectorIDs, req.PageSize, offset)
 
 	data := make([]apimodels.ApplicationDatasourceItem, 0, len(connectorIDs))
 	for _, cid := range connectorIDs {
-		item, buildErr := s.buildApplicationDatasourceItem(ctx, cid, baseURL, digitizeConnectors)
+		item, buildErr := s.buildApplicationDatasourceItem(ctx, cid, baseURL, serviceConnectors)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -1076,18 +1070,18 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 	}, nil
 }
 
-// fetchDigitizeConnectors resolves the Digitize base URL from the first connector in the
+// fetchServiceConnectors resolves the service base URL from the first connector in the
 // list (using the existing GetLinkedServiceEndpoints + extractAPIEndpointURL path), then
-// calls GET /v1/connectors once to return a map keyed by connector ID.
-// Returns an empty string and nil map when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchDigitizeConnectors(ctx context.Context, connectorIDs []uuid.UUID) (string, map[string]apimodels.DigitizeConnectorItem) {
+// calls GET /v1/connectors once with limit/offset pagination to return a map keyed by
+// connector ID. Returns an empty string and nil map when no endpoint is found or the call fails.
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, map[string]apimodels.ConnectorItem) {
 	if len(connectorIDs) == 0 {
 		return "", nil
 	}
 
 	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, connectorIDs[0], dbmodels.DependencyTypeConnector)
 	if err != nil {
-		logger.WarningfCtx(ctx, "failed to resolve Digitize endpoint for connector %s: %v", connectorIDs[0], err)
+		logger.WarningfCtx(ctx, "failed to resolve service endpoint for connector %s: %v", connectorIDs[0], err)
 
 		return "", nil
 	}
@@ -1105,9 +1099,9 @@ func (s *DatasourceService) fetchDigitizeConnectors(ctx context.Context, connect
 		return "", nil
 	}
 
-	connectors, err := catalogclient.NewDigitizeClient(baseURL).ListConnectors(ctx)
+	connectors, err := catalogclient.NewServiceClient(baseURL).ListConnectors(ctx, limit, offset)
 	if err != nil {
-		logger.WarningfCtx(ctx, "failed to list connectors from Digitize at %s: %v", baseURL, err)
+		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 
 		return baseURL, nil
 	}
@@ -1116,9 +1110,10 @@ func (s *DatasourceService) fetchDigitizeConnectors(ctx context.Context, connect
 }
 
 // buildApplicationDatasourceItem fetches connector metadata from the DB and enriches it
-// with sync state from the pre-fetched digitizeConnectors map (status, last_sync, total_files)
-// plus a per-connector sync log call for new_files (needed to build the message).
-func (s *DatasourceService) buildApplicationDatasourceItem(ctx context.Context, connectorID uuid.UUID, baseURL string, digitizeConnectors map[string]apimodels.DigitizeConnectorItem) (*apimodels.ApplicationDatasourceItem, error) {
+// with sync state from the pre-fetched serviceConnectors map (status, last_sync, total_files,
+// message). The message field is sourced directly from the service — no separate sync-log
+// call is needed.
+func (s *DatasourceService) buildApplicationDatasourceItem(ctx context.Context, connectorID uuid.UUID, baseURL string, serviceConnectors map[string]apimodels.ConnectorItem) (*apimodels.ApplicationDatasourceItem, error) {
 	connector, err := s.connectorRepo.GetByID(ctx, connectorID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch connector: %w", err)
@@ -1145,49 +1140,19 @@ func (s *DatasourceService) buildApplicationDatasourceItem(ctx context.Context, 
 		return item, nil
 	}
 
-	digitizeConn, found := digitizeConnectors[connectorID.String()]
+	serviceConn, found := serviceConnectors[connectorID.String()]
 	if !found {
-		item.ErrMsg = "connector not found on Digitize pod"
+		item.ErrMsg = "connector not found on service pod"
 
 		return item, nil
 	}
 
-	item.Status = digitizeConn.SyncStatus
-	item.LastSync = digitizeConn.LastSyncAt
-	item.Files = digitizeConn.TotalFiles
-
-	// Fetch the latest sync log for new_files — needed to build the message.
-	syncLog, logErr := catalogclient.NewDigitizeClient(baseURL).GetLatestConnectorSyncLog(ctx, connectorID.String())
-	if logErr != nil {
-		logger.WarningfCtx(ctx, "failed to fetch latest sync log for connector %s: %v", connectorID, logErr)
-		item.ErrMsg = fmt.Sprintf("failed to fetch latest sync log: %v", logErr)
-
-		return item, nil
-	}
-
-	if syncLog != nil {
-		item.Message = buildSyncMessage(digitizeConn.SyncStatus, syncLog)
-	}
+	item.Status = serviceConn.SyncStatus
+	item.LastSync = serviceConn.LastSyncAt
+	item.Files = serviceConn.TotalFiles
+	item.Message = serviceConn.Message
 
 	return item, nil
-}
-
-// buildSyncMessage derives the human-readable message for a datasource list item.
-//
-//	syncing     → "Processing <total_files>/<new_files> files"
-//	up to date  → "<new_files> new files found"
-//	out of sync → <error from latest sync log>
-func buildSyncMessage(status string, log *apimodels.ConnectorSyncLog) string {
-	switch status {
-	case digitizeSyncStatusSyncing:
-		return fmt.Sprintf("Processing %d/%d files", log.TotalFiles, log.NewFiles)
-	case digitizeSyncStatusUpToDate:
-		return fmt.Sprintf("%d new files found", log.NewFiles)
-	case digitizeSyncStatusOutOfSync:
-		return log.Error
-	default:
-		return ""
-	}
 }
 
 // Made with Bob

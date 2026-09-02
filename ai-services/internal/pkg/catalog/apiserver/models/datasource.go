@@ -7,28 +7,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-// ConnectorSyncLog is a single sync log entry returned by the Digitize pod's
-// GET /v1/connectors/{id}/syncs?latest=true endpoint.
-type ConnectorSyncLog struct {
-	Seq          int     `json:"seq"`
-	StartedAt    string  `json:"started_at"`
-	FinishedAt   *string `json:"finished_at"`
-	TotalFiles   int     `json:"total_files"`
-	NewFiles     int     `json:"new_files"`
-	RemovedFiles int     `json:"removed_files"`
-	Status       string  `json:"status"`
-	Error        string  `json:"error"`
-}
-
-// ConnectorSyncLogResponse is the paginated response from
-// GET /v1/connectors/{id}/syncs on the Digitize pod.
-type ConnectorSyncLogResponse struct {
-	Total  int                `json:"total"`
-	Limit  int                `json:"limit"`
-	Offset int                `json:"offset"`
-	Items  []ConnectorSyncLog `json:"items"`
-}
-
 // CreateDatasourceRequest is the request body for creating a new datasource connector.
 type CreateDatasourceRequest struct {
 	// Name is the unique human-readable label for this connector.
@@ -115,10 +93,10 @@ type ConnectedServiceInfo struct {
 // ConnectorSyncState holds the sync fields returned by the connected service's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
-	SyncStatus    string  `json:"sync_status"`
-	TotalFiles    *int    `json:"total_files"`
-	LastSyncAt    *string `json:"last_sync_at"`
-	LastSyncError *string `json:"last_sync_error"`
+	SyncStatus string  `json:"sync_status"`
+	TotalFiles *int    `json:"total_files"`
+	LastSyncAt *string `json:"last_sync_at"`
+	Message    string  `json:"message,omitempty"`
 }
 
 // ServiceSyncDetails holds the live sync state fetched from the connected service for a
@@ -132,8 +110,10 @@ type ServiceSyncDetails struct {
 	TotalFiles *int `json:"total_files"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
-	// LastSyncError is the error string from the last failed sync, or null on success.
-	LastSyncError *string `json:"last_sync_error"`
+	// Message contains the current status and phase description from the connector
+	// (e.g. "x new files found", "Processing x/y files", or error details).
+	// Omitted when empty.
+	Message string `json:"message,omitempty"`
 	// ErrMsg is populated when the connected service was unreachable or returned an error.
 	// Omitted from the JSON response when empty (i.e. when the service was reachable).
 	ErrMsg string `json:"err_msg,omitempty"`
@@ -160,14 +140,16 @@ type GetApplicationDatasourceResponse struct {
 	ServiceDetails ServiceSyncDetails `json:"service_details"`
 }
 
-// DigitizeConnectorItem is one entry returned by GET /v1/connectors on the Digitize pod.
-// It mirrors the ConnectorListItem shape from the digitize service's models.
-type DigitizeConnectorItem struct {
+// ConnectorItem is one entry returned by GET /v1/connectors on the service pod.
+// It mirrors the ConnectorListItem shape from the downstream service's models.
+// Message carries all status phases and error details; the separate error field has been
+// removed from the downstream API.
+type ConnectorItem struct {
 	ID         string  `json:"id"`
 	SyncStatus string  `json:"sync_status"`
 	LastSyncAt *string `json:"last_sync_at"`
 	TotalFiles int     `json:"total_files"`
-	Error      *string `json:"error"`
+	Message    string  `json:"message,omitempty"`
 }
 
 // ConnectedServiceItem is one entry in the services array of GetDatasourceResponse.
@@ -256,18 +238,16 @@ type ApplicationDatasourceItem struct {
 	Name string `json:"name"`
 	// Provider contains the provider ID and its resolved display name.
 	Provider DatasourceProviderInfo `json:"provider"`
-	// Status is the connector's sync_status sourced live from the Digitize pod.
-	// Set to "unknown" when the Digitize pod is unreachable.
+	// Status is the connector's sync_status sourced live from the service pod.
+	// Set to "unknown" when the service pod is unreachable.
 	Status string `json:"status"`
-	// Files is the total number of files tracked by the connector (total_files from Digitize).
+	// Files is the total number of files tracked by the connector (total_files from the service).
 	Files int `json:"files"`
 	// LastSync is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSync *string `json:"last_sync"`
-	// Message is a human-readable description of the current sync state:
-	//   syncing     → "Processing <ingested>/<new> files"
-	//   up to date  → "<new> new files found"
-	//   out of sync → <error from latest sync log>
-	// Empty when no sync has run yet or the Digitize pod is unreachable.
+	// Message is sourced directly from the connector's message field on the service pod.
+	// It covers all phases: "x new files found", "Processing x/y files", and error details.
+	// Empty when no sync has run yet or the service pod is unreachable.
 	Message string `json:"message,omitempty"`
 	// ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
 	// no endpoint registered). Empty on success.

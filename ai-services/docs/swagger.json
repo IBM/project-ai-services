@@ -2584,7 +2584,7 @@
                     "type": "string"
                 },
                 "files": {
-                    "description": "Files is the total number of files tracked by the connector (total_files from Digitize).",
+                    "description": "Files is the total number of files tracked by the connector (total_files from the service).",
                     "type": "integer"
                 },
                 "id": {
@@ -2596,7 +2596,7 @@
                     "type": "string"
                 },
                 "message": {
-                    "description": "Message is a human-readable description of the current sync state:\n  syncing     → \"Processing \u003cingested\u003e/\u003cnew\u003e files\"\n  up to date  → \"\u003cnew\u003e new files found\"\n  out of sync → \u003cerror from latest sync log\u003e\nEmpty when no sync has run yet or the Digitize pod is unreachable.",
+                    "description": "Message is sourced directly from the connector's message field on the service pod.\nIt covers all phases: \"x new files found\", \"Processing x/y files\", and error details.\nEmpty when no sync has run yet or the service pod is unreachable.",
                     "type": "string"
                 },
                 "name": {
@@ -2612,7 +2612,7 @@
                     ]
                 },
                 "status": {
-                    "description": "Status is the connector's sync_status sourced live from the Digitize pod.\nSet to \"unknown\" when the Digitize pod is unreachable.",
+                    "description": "Status is the connector's sync_status sourced live from the service pod.\nSet to \"unknown\" when the service pod is unreachable.",
                     "type": "string"
                 }
             }
@@ -3011,8 +3011,8 @@
                     "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
                     "type": "string"
                 },
-                "last_sync_error": {
-                    "description": "LastSyncError is the error string from the last failed sync, or null on success.",
+                "message": {
+                    "description": "Message contains the current status and phase description from the connector\n(e.g. \"x new files found\", \"Processing x/y files\", or error details).\nOmitted when empty.",
                     "type": "string"
                 },
                 "sync_status": {
