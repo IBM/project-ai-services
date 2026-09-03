@@ -22,12 +22,12 @@ const (
 	dirPerm  = 0o700
 	certPerm = 0o644
 	keyPerm  = 0o600
+
+	tlsCertFile = "tls.crt"
+	tlsKeyFile  = "tls.key"
+	caCertFile  = "ca.crt"
 )
 
-// generateKeyAndCSR creates a fresh ECDSA P-256 private key and a matching
-// certificate signing request whose CN is the machine hostname.
-// The private key is returned as PEM so it can be written to disk alongside
-// the signed certificate the gateway sends back.
 func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -36,10 +36,8 @@ func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 	keyDER, _ := x509.MarshalECPrivateKey(privKey)
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	hostname, _ := os.Hostname()
 	csrTemplate := x509.CertificateRequest{
 		Subject: pkix.Name{
-			CommonName:   hostname,
 			Organization: []string{"system:workers"},
 		},
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
@@ -56,8 +54,8 @@ func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 // loadClientCert loads the worker's mTLS key pair from tlsDir.
 func loadClientCert(tlsDir string) (tls.Certificate, error) {
 	cert, err := tls.LoadX509KeyPair(
-		filepath.Join(tlsDir, "tls.crt"),
-		filepath.Join(tlsDir, "tls.key"),
+		filepath.Join(tlsDir, tlsCertFile),
+		filepath.Join(tlsDir, tlsKeyFile),
 	)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: %w", err)
@@ -77,7 +75,7 @@ func buildTLSConfig(tlsDir string, clientCert *tls.Certificate) (*tls.Config, er
 		cfg.Certificates = []tls.Certificate{*clientCert}
 	}
 
-	caPath := filepath.Join(tlsDir, "ca.crt")
+	caPath := filepath.Join(tlsDir, caCertFile)
 	switch _, err := os.Stat(caPath); {
 	case err == nil:
 		caPEM, err := os.ReadFile(caPath)
@@ -107,15 +105,15 @@ func writeTLSMaterial(dir string, certPEM, keyPEM, caCertPEM []byte) error {
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.crt"), certPEM, certPerm); err != nil {
-		return fmt.Errorf("write tls.crt: %w", err)
+	if err := os.WriteFile(filepath.Join(dir, tlsCertFile), certPEM, certPerm); err != nil {
+		return fmt.Errorf("write %s: %w", tlsCertFile, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.key"), keyPEM, keyPerm); err != nil {
-		return fmt.Errorf("write tls.key: %w", err)
+	if err := os.WriteFile(filepath.Join(dir, tlsKeyFile), keyPEM, keyPerm); err != nil {
+		return fmt.Errorf("write %s: %w", tlsKeyFile, err)
 	}
 	if len(caCertPEM) > 0 {
-		if err := os.WriteFile(filepath.Join(dir, "ca.crt"), caCertPEM, certPerm); err != nil {
-			return fmt.Errorf("write ca.crt: %w", err)
+		if err := os.WriteFile(filepath.Join(dir, caCertFile), caCertPEM, certPerm); err != nil {
+			return fmt.Errorf("write %s: %w", caCertFile, err)
 		}
 	}
 
@@ -126,9 +124,9 @@ func writeTLSMaterial(dir string, certPEM, keyPEM, caCertPEM []byte) error {
 // This recovers the registered worker name on reconnect without any extra state file,
 // because the gateway embeds the token-bound worker name as the cert CN at registration time.
 func workerNameFromCert(tlsDir string) (string, error) {
-	certPEM, err := os.ReadFile(filepath.Join(tlsDir, "tls.crt"))
+	certPEM, err := os.ReadFile(filepath.Join(tlsDir, tlsCertFile))
 	if err != nil {
-		return "", fmt.Errorf("read tls.crt: %w", err)
+		return "", fmt.Errorf("read %s: %w", tlsCertFile, err)
 	}
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
@@ -152,8 +150,8 @@ func workerNameFromCert(tlsDir string) (string, error) {
 //  3. If ca.crt is present, the cert verifies against it (catches CA rotation).
 func hasValidTLSCredentials(ctx context.Context, tlsDir string) bool {
 	cert, err := tls.LoadX509KeyPair(
-		filepath.Join(tlsDir, "tls.crt"),
-		filepath.Join(tlsDir, "tls.key"),
+		filepath.Join(tlsDir, tlsCertFile),
+		filepath.Join(tlsDir, tlsKeyFile),
 	)
 	if err != nil {
 		return false
@@ -168,7 +166,7 @@ func hasValidTLSCredentials(ctx context.Context, tlsDir string) bool {
 
 	// Verify the client cert against the stored CA so we catch cases where
 	// the CA was rotated and the on-disk cert is no longer trusted.
-	caPath := filepath.Join(tlsDir, "ca.crt")
+	caPath := filepath.Join(tlsDir, caCertFile)
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
 		if os.IsNotExist(err) {

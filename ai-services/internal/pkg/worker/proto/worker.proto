@@ -38,9 +38,9 @@ message RegisterRequest {
 
 message RegisterResponse {
   // tls_cert_pem is the CA-signed client certificate (written to tls.crt on the worker).
-  bytes  tls_cert_pem = 2;
+  bytes  tls_cert_pem = 1;
   // ca_cert_pem is the root CA public cert (written to ca.crt on the worker for server verification).
-  bytes  ca_cert_pem  = 3;
+  bytes  ca_cert_pem  = 2;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

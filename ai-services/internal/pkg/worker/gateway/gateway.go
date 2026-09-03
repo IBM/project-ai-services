@@ -142,7 +142,7 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
 	}
 
-	// 2. Parse, validate, and sign the CSR (required for mTLS). See pki.go: signWorkerCSR.
+	// 2. Parse, validate, and sign the CSR (required for mTLS). See sign.go: signWorkerCSR.
 	csrPEM := req.GetCsrPem()
 	if len(csrPEM) == 0 {
 		logger.ErrorfCtx(ctx, "WorkerGateway: registration rejected for worker=%s: CSR is required", workerName)

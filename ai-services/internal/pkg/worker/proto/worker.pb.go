@@ -5,17 +5,16 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v7.36.0
-// source: internal/pkg/worker/proto/worker.proto
+// source: worker.proto
 
 package proto
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -138,11 +137,11 @@ func (x CommandType) String() string {
 }
 
 func (CommandType) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_pkg_worker_proto_worker_proto_enumTypes[0].Descriptor()
+	return file_worker_proto_enumTypes[0].Descriptor()
 }
 
 func (CommandType) Type() protoreflect.EnumType {
-	return &file_internal_pkg_worker_proto_worker_proto_enumTypes[0]
+	return &file_worker_proto_enumTypes[0]
 }
 
 func (x CommandType) Number() protoreflect.EnumNumber {
@@ -151,7 +150,7 @@ func (x CommandType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CommandType.Descriptor instead.
 func (CommandType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{0}
+	return file_worker_proto_rawDescGZIP(), []int{0}
 }
 
 type RegisterRequest struct {
@@ -171,7 +170,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[0]
+	mi := &file_worker_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -183,7 +182,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[0]
+	mi := &file_worker_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -196,7 +195,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{0}
+	return file_worker_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *RegisterRequest) GetWorkerName() string {
@@ -237,16 +236,16 @@ func (x *RegisterRequest) GetCsrPem() []byte {
 type RegisterResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// tls_cert_pem is the CA-signed client certificate (written to tls.crt on the worker).
-	TlsCertPem []byte `protobuf:"bytes,2,opt,name=tls_cert_pem,json=tlsCertPem,proto3" json:"tls_cert_pem,omitempty"`
+	TlsCertPem []byte `protobuf:"bytes,1,opt,name=tls_cert_pem,json=tlsCertPem,proto3" json:"tls_cert_pem,omitempty"`
 	// ca_cert_pem is the root CA public cert (written to ca.crt on the worker for server verification).
-	CaCertPem     []byte `protobuf:"bytes,3,opt,name=ca_cert_pem,json=caCertPem,proto3" json:"ca_cert_pem,omitempty"`
+	CaCertPem     []byte `protobuf:"bytes,2,opt,name=ca_cert_pem,json=caCertPem,proto3" json:"ca_cert_pem,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[1]
+	mi := &file_worker_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -258,7 +257,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[1]
+	mi := &file_worker_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -271,7 +270,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{1}
+	return file_worker_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RegisterResponse) GetTlsCertPem() []byte {
@@ -299,7 +298,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[2]
+	mi := &file_worker_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -311,7 +310,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[2]
+	mi := &file_worker_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -324,7 +323,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{2}
+	return file_worker_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Command) GetCommandId() string {
@@ -362,7 +361,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -374,7 +373,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_pkg_worker_proto_worker_proto_msgTypes[3]
+	mi := &file_worker_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -387,7 +386,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{3}
+	return file_worker_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CommandResult) GetCommandId() string {
@@ -432,11 +431,11 @@ func (x *CommandResult) GetWorkerName() string {
 	return ""
 }
 
-var File_internal_pkg_worker_proto_worker_proto protoreflect.FileDescriptor
+var File_worker_proto protoreflect.FileDescriptor
 
-const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
+const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"&internal/pkg/worker/proto/worker.proto\x12\tworker.v1\"\x9b\x02\n" +
+	"\fworker.proto\x12\tworker.v1\"\x9b\x02\n" +
 	"\x0fRegisterRequest\x12\x1f\n" +
 	"\vworker_name\x18\x01 \x01(\tR\n" +
 	"workerName\x12(\n" +
@@ -448,9 +447,9 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"T\n" +
 	"\x10RegisterResponse\x12 \n" +
-	"\ftls_cert_pem\x18\x02 \x01(\fR\n" +
+	"\ftls_cert_pem\x18\x01 \x01(\fR\n" +
 	"tlsCertPem\x12\x1e\n" +
-	"\vca_cert_pem\x18\x03 \x01(\fR\tcaCertPem\"n\n" +
+	"\vca_cert_pem\x18\x02 \x01(\fR\tcaCertPem\"n\n" +
 	"\aCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12*\n" +
@@ -500,20 +499,20 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"
 
 var (
-	file_internal_pkg_worker_proto_worker_proto_rawDescOnce sync.Once
-	file_internal_pkg_worker_proto_worker_proto_rawDescData []byte
+	file_worker_proto_rawDescOnce sync.Once
+	file_worker_proto_rawDescData []byte
 )
 
-func file_internal_pkg_worker_proto_worker_proto_rawDescGZIP() []byte {
-	file_internal_pkg_worker_proto_worker_proto_rawDescOnce.Do(func() {
-		file_internal_pkg_worker_proto_worker_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_pkg_worker_proto_worker_proto_rawDesc), len(file_internal_pkg_worker_proto_worker_proto_rawDesc)))
+func file_worker_proto_rawDescGZIP() []byte {
+	file_worker_proto_rawDescOnce.Do(func() {
+		file_worker_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)))
 	})
-	return file_internal_pkg_worker_proto_worker_proto_rawDescData
+	return file_worker_proto_rawDescData
 }
 
-var file_internal_pkg_worker_proto_worker_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_pkg_worker_proto_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_internal_pkg_worker_proto_worker_proto_goTypes = []any{
+var file_worker_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_worker_proto_goTypes = []any{
 	(CommandType)(0),         // 0: worker.v1.CommandType
 	(*RegisterRequest)(nil),  // 1: worker.v1.RegisterRequest
 	(*RegisterResponse)(nil), // 2: worker.v1.RegisterResponse
@@ -521,7 +520,7 @@ var file_internal_pkg_worker_proto_worker_proto_goTypes = []any{
 	(*CommandResult)(nil),    // 4: worker.v1.CommandResult
 	nil,                      // 5: worker.v1.RegisterRequest.MetadataEntry
 }
-var file_internal_pkg_worker_proto_worker_proto_depIdxs = []int32{
+var file_worker_proto_depIdxs = []int32{
 	5, // 0: worker.v1.RegisterRequest.metadata:type_name -> worker.v1.RegisterRequest.MetadataEntry
 	0, // 1: worker.v1.Command.type:type_name -> worker.v1.CommandType
 	1, // 2: worker.v1.WorkerGateway.Register:input_type -> worker.v1.RegisterRequest
@@ -535,27 +534,27 @@ var file_internal_pkg_worker_proto_worker_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_internal_pkg_worker_proto_worker_proto_init() }
-func file_internal_pkg_worker_proto_worker_proto_init() {
-	if File_internal_pkg_worker_proto_worker_proto != nil {
+func init() { file_worker_proto_init() }
+func file_worker_proto_init() {
+	if File_worker_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_pkg_worker_proto_worker_proto_rawDesc), len(file_internal_pkg_worker_proto_worker_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_pkg_worker_proto_worker_proto_goTypes,
-		DependencyIndexes: file_internal_pkg_worker_proto_worker_proto_depIdxs,
-		EnumInfos:         file_internal_pkg_worker_proto_worker_proto_enumTypes,
-		MessageInfos:      file_internal_pkg_worker_proto_worker_proto_msgTypes,
+		GoTypes:           file_worker_proto_goTypes,
+		DependencyIndexes: file_worker_proto_depIdxs,
+		EnumInfos:         file_worker_proto_enumTypes,
+		MessageInfos:      file_worker_proto_msgTypes,
 	}.Build()
-	File_internal_pkg_worker_proto_worker_proto = out.File
-	file_internal_pkg_worker_proto_worker_proto_goTypes = nil
-	file_internal_pkg_worker_proto_worker_proto_depIdxs = nil
+	File_worker_proto = out.File
+	file_worker_proto_goTypes = nil
+	file_worker_proto_depIdxs = nil
 }
