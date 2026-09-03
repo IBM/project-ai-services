@@ -87,6 +87,8 @@ COMPONENTS = {
     "ai-services/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "backend"),
         ("ai-services/assets/catalog/openshift/values.yaml", "backend"),
+        ("ai-services/assets/worker/podman/values.yaml", "worker"),
+        ("ai-services/assets/worker/openshift/values.yaml", "worker"),
     ],
     "images/postgres/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "db"),

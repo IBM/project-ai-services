@@ -31,10 +31,15 @@ class TestEnums:
         assert OperationType.DIGITIZATION.value == "digitization"
 
     def test_job_status_values(self):
-        assert JobStatus.ACCEPTED.value == "accepted"
-        assert JobStatus.IN_PROGRESS.value == "in_progress"
-        assert JobStatus.COMPLETED.value == "completed"
-        assert JobStatus.FAILED.value == "failed"
+        assert {
+            status.value for status in JobStatus
+        } == {
+            "accepted",
+            "in_progress",
+            "completed",
+            "completed_with_errors",
+            "failed",
+        }
 
     def test_doc_status_values(self):
         assert {
@@ -46,6 +51,7 @@ class TestEnums:
             "processed",
             "chunked",
             "completed",
+            "completed_with_errors",
             "failed",
             "already_exists",
         }
@@ -53,7 +59,9 @@ class TestEnums:
     def test_enum_string_conversion(self):
         assert str(OutputFormat.JSON) == "OutputFormat.JSON"
         assert JobStatus("completed") == JobStatus.COMPLETED
+        assert JobStatus("completed_with_errors") == JobStatus.COMPLETED_WITH_ERRORS
         assert DocStatus("failed") == DocStatus.FAILED
+        assert DocStatus("completed_with_errors") == DocStatus.COMPLETED_WITH_ERRORS
 
     def test_invalid_enum_values_raise(self):
         with pytest.raises(ValueError):

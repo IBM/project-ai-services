@@ -5,7 +5,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v7.35.1
-// source: internal/pkg/worker/proto/worker.proto
+// source: worker.proto
 
 package proto
 
@@ -162,5 +162,5 @@ var WorkerGateway_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "internal/pkg/worker/proto/worker.proto",
+	Metadata: "worker.proto",
 }

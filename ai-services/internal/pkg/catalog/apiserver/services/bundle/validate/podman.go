@@ -2,12 +2,15 @@ package validate
 
 import (
 	"archive/tar"
+	"bytes"
 	"fmt"
 	"net/http"
 	"strings"
+	"text/template"
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // Podman runtime directory constant.
@@ -50,18 +53,28 @@ func (v *PodmanBundleValidator) Validate(archiveBytes []byte, topDir, rootVersio
 		return err
 	}
 
+	if err := validateValuesSchema(found.schemaBytes, "podman/values.schema.json"); err != nil {
+		return err
+	}
+
+	if err := validatePodmanTemplates(found.templFiles); err != nil {
+		return err
+	}
+
 	return bundlemetadata.ValidatePodmanMetadata(found.metadataBytes, rootVersion)
 }
 
 // podmanPaths tracks the presence of files required by the Podman layout and
-// carries the raw bytes of podman/metadata.yaml for semantic validation.
+// carries the raw bytes of files needed for semantic validation.
+// hasSchema and hasTemplFile are derived from schemaBytes and templFiles respectively,
+// so they are not stored separately.
 type podmanPaths struct {
 	runtimeDirSeen bool // set on the first entry under podman/
 	hasMetadata    bool
 	hasValues      bool
-	hasSchema      bool
-	hasTemplFile   bool
-	metadataBytes  []byte // raw content of podman/metadata.yaml
+	metadataBytes  []byte            // raw content of podman/metadata.yaml
+	schemaBytes    []byte            // raw content of podman/values.schema.json; non-nil means present
+	templFiles     map[string][]byte // name → raw content of each templates/*.yaml.tmpl; non-empty means present
 }
 
 // collectPodmanPaths walks the archive once, records which required Podman paths
@@ -98,9 +111,12 @@ func (found *podmanPaths) recordEntry(sub string, hdr *tar.Header, content []byt
 	case sub == "values.yaml":
 		found.hasValues = true
 	case sub == "values.schema.json":
-		found.hasSchema = true
+		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml.tmpl"):
-		found.hasTemplFile = true
+		if found.templFiles == nil {
+			found.templFiles = make(map[string][]byte)
+		}
+		found.templFiles[sub] = content
 	}
 }
 
@@ -130,14 +146,55 @@ func collectMissingPodmanFiles(found *podmanPaths) []string {
 	if !found.hasValues {
 		missing = append(missing, "podman/values.yaml")
 	}
-	if !found.hasSchema {
+	if found.schemaBytes == nil {
 		missing = append(missing, "podman/values.schema.json")
 	}
-	if !found.hasTemplFile {
+	if len(found.templFiles) == 0 {
 		missing = append(missing, "podman/templates/*.yaml.tmpl (at least one)")
 	}
 
 	return missing
+}
+
+// validatePodmanTemplates parses each *.yaml.tmpl with text/template (the same
+// package the runtime uses) to surface syntax errors, then renders each template
+// with nil data (missingkey=zero so all .Field references expand to "") and
+// checks the required fields of every ai-services Podman pod spec.
+func validatePodmanTemplates(templFiles map[string][]byte) error {
+	for path, content := range templFiles {
+		// 1. Parse the Go template — catches syntax errors.
+		tmpl, err := template.New(path).Option("missingkey=zero").Parse(string(content))
+		if err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: template syntax error: %s", path, err),
+			}
+		}
+
+		// 2. Execute with nil data; all .Field references expand to "".
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, nil); err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: template execution error: %s", path, err),
+			}
+		}
+
+		// 3. Unmarshal rendered YAML into a generic map and check required keys.
+		var doc map[string]any
+		if err := k8syaml.Unmarshal(buf.Bytes(), &doc); err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("podman/%s: rendered output is not valid YAML: %s", path, err),
+			}
+		}
+
+		if err := checkTemplateSpec(doc, podmanRuntime, path); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Ensure PodmanBundleValidator implements BundleValidator at compile time.

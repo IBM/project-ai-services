@@ -10,6 +10,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -27,8 +28,9 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 	return appservice.ValidatePaginationParams(page, pageSize)
 }
 
-// NewApplicationService creates the appropriate ApplicationServiceInterface implementation
-// based on the runtime type. It is the single construction point for the apiserver.
+// NewApplicationService creates an ApplicationServiceInterface for the given runtime type.
+// reg wires the worker registry so that requests carrying a WorkerName are routed to the
+// named remote worker over the gRPC CommandStream.
 func NewApplicationService(
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
@@ -36,25 +38,24 @@ func NewApplicationService(
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
 	runtimeType runtimeTypes.RuntimeType,
+	reg stream.WorkerRegistry,
 ) ApplicationServiceInterface {
-	base := appservice.ApplicationServiceBase{
+	if runtimeType != runtimeTypes.RuntimeTypePodman && runtimeType != runtimeTypes.RuntimeTypeOpenShift {
+		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
+	}
+
+	return &appservice.ApplicationServiceBase{
 		AppRepo:               appRepo,
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
-		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
-		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
+		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo).WithWorkerRegistry(reg),
+		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validators.NewApplicationValidator(provider),
-	}
-
-	switch runtimeType {
-	case runtimeTypes.RuntimeTypePodman:
-		return appservice.NewPodmanApplicationService(base)
-	case runtimeTypes.RuntimeTypeOpenShift:
-		return appservice.NewOpenShiftApplicationService(base)
-	default:
-		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
+		RuntimeType:           runtimeType,
+		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
+		WorkerRegistry:        reg,
 	}
 }

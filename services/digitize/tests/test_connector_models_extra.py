@@ -38,7 +38,6 @@ from digitize.connectors.models import (
     ConnectorListItem,
     ConnectorStatus,
     ConnectorUpdateRequest,
-    SyncLogDetailResponse,
     SyncLogItem,
     SyncLogResponse,
     SyncLogStatus,
@@ -117,7 +116,7 @@ class TestConnectorCreateRequest:
     def _valid_payload(self, **overrides):
         base = {
             "name": "my-connector",
-            "type": "s3",
+            "type": "file_system",
             "allowed_extensions": [".pdf", ".docx"],
             "connection_details": {"bucket": "my-bucket"},
         }
@@ -215,12 +214,26 @@ class TestConnectorListItem:
             type="s3",
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
-            sync_status="up to date",
-            error=None,
+            status="up to date",
             total_files=42,
+            message=None,
         )
         assert item.total_files == 42
         assert item.last_sync_at is None
+        assert item.message is None
+
+    def test_construction_with_message(self):
+        item = ConnectorListItem(
+            id="c1",
+            name="my-conn",
+            type="s3",
+            attached_at="2024-01-01T00:00:00Z",
+            last_sync_at=None,
+            status="syncing",
+            total_files=42,
+            message="Processing 3/10 files",
+        )
+        assert item.message == "Processing 3/10 files"
 
 
 class TestConnectorDetailResponse:
@@ -233,13 +246,14 @@ class TestConnectorDetailResponse:
             sync_interval_seconds=300,
             attached_at="2024-01-01T00:00:00Z",
             last_sync_at=None,
-            sync_status="syncing",
-            error=None,
+            status="syncing",
             connection_details={"host": "sftp.example.com"},
             total_files=10,
+            message=None,
         )
         assert resp.sync_interval_seconds == 300
         assert resp.connection_details["host"] == "sftp.example.com"
+        assert resp.message is None
 
 
 class TestSyncLogItem:
@@ -250,12 +264,14 @@ class TestSyncLogItem:
             finished_at="2024-01-01T00:05:00Z",
             total_files=100,
             new_files=10,
+            completed_files=10,
             removed_files=2,
             status="completed",
             error="",
         )
         assert item.seq == 1
         assert item.error == ""
+        assert item.completed_files == 10
 
 
 class TestSyncLogResponse:
@@ -266,6 +282,7 @@ class TestSyncLogResponse:
             finished_at=None,
             total_files=5,
             new_files=5,
+            completed_files=3,
             removed_files=0,
             status="started",
             error="",
@@ -285,19 +302,29 @@ class TestSyncTriggerResponse:
             SyncTriggerResponse()
 
 
-class TestSyncLogDetailResponse:
-    def test_construction(self):
-        resp = SyncLogDetailResponse(
-            seq=3,
-            started_at="2024-01-01T00:00:00Z",
-            finished_at=None,
-            total_files=0,
-            new_files=0,
-            removed_files=0,
-            status="failed",
-            error="something went wrong",
+class TestSyncLogDetailEndpointShape:
+    def test_single_item_in_list_envelope(self):
+        resp = SyncLogResponse(
+            total=1,
+            limit=1,
+            offset=0,
+            items=[
+                SyncLogItem(
+                    seq=3,
+                    started_at="2024-01-01T00:00:00Z",
+                    finished_at=None,
+                    total_files=0,
+                    new_files=0,
+                    completed_files=0,
+                    removed_files=0,
+                    status="failed",
+                    error="something went wrong",
+                )
+            ],
         )
-        assert resp.status == "failed"
-        assert resp.error == "something went wrong"
+        assert resp.total == 1
+        assert len(resp.items) == 1
+        assert resp.items[0].status == "failed"
+        assert resp.items[0].error == "something went wrong"
 
 # Made with Bob

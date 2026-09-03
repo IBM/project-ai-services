@@ -83,6 +83,92 @@ func (h *DatasourceHandler) CreateDatasource(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetDatasource godoc
+//
+//	@Summary		Get a single datasource connector
+//	@Description	Returns the full details of a datasource connector including non-sensitive metadata and the list of connected services enriched with live sync state from each service's Digitize pod.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string							true	"Datasource UUID"
+//	@Success		200	{object}	models.GetDatasourceResponse	"Datasource detail"
+//	@Failure		400	{object}	ErrorResponse					"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse					"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse					"Internal Server Error"
+//	@Router			/datasources/{id} [get]
+func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetDatasource(c.Request.Context(), id)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// GetDatasourceApplications godoc
+//
+//	@Summary		Get connected applications for a datasource
+//	@Description	Returns the list of applications currently connected to the given datasource, each enriched with live sync state fetched from its downstream service pod. Sync-state fetch failures degrade gracefully — the application entry is still returned with sync_status set to "unknown".
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string									true	"Datasource UUID"
+//	@Success		200	{object}	models.DatasourceApplicationsResponse	"Connected applications with live sync state"
+//	@Failure		400	{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401	{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse							"Datasource not found"
+//	@Failure		500	{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/datasources/{id}/applications [get]
+func (h *DatasourceHandler) GetDatasourceApplications(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetDatasourceApplications(c.Request.Context(), id)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource applications: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource applications",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // DeleteDatasource godoc
 //
 //	@Summary		Delete datasource connector
@@ -178,6 +264,242 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// UpdateDatasource godoc
+//
+//	@Summary		Update datasource credentials
+//	@Description	Updates the Authentication credential fields for a datasource as defined in the provider schema. Re-runs the connectivity test before saving. If any linked Digitize services cannot be notified, the datasource is still updated and the failures are listed in propagation_errors.
+//	@Tags			Datasources
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string							true	"Datasource ID (UUID)"
+//	@Param			request	body		models.UpdateDatasourceRequest	true	"Credential update request"
+//	@Success		200		{object}	models.UpdateDatasourceResponse	"Datasource updated"
+//	@Failure		400		{object}	ErrorResponse					"Invalid request body or invalid ID"
+//	@Failure		401		{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse					"Datasource not found"
+//	@Failure		422		{object}	ErrorResponse					"Connection test failed with new credentials"
+//	@Failure		500		{object}	ErrorResponse					"Internal Server Error"
+//	@Router			/datasources/{id} [put]
+func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid datasource ID format"})
+
+		return
+	}
+
+	var req models.UpdateDatasourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid request body: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.UpdateDatasource(c.Request.Context(), id, req)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to update datasource %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "failed to update datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// ConnectDatasourcesToApplication godoc
+//
+//	@Summary		Connect datasources to application
+//	@Description	Links one or more datasource connectors to each eligible (Digitize) service in a running application. Each datasource is processed independently. Returns 204 when all succeed; returns 207 with per-datasource errors when one or more fail.
+//	@Tags			Datasources
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path	string								true	"Application ID (UUID)"
+//	@Param			request	body	models.ConnectDatasourcesRequest	true	"List of datasource IDs to connect"
+//	@Success		204		"All datasources connected successfully"
+//	@Success		207		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
+//	@Failure		400		{object}	ErrorResponse						"Invalid request body"
+//	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
+//	@Failure		422		{object}	ErrorResponse						"No eligible running service found"
+//	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
+//	@Router			/applications/{id}/datasources [put]
+func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	var req models.ConnectDatasourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid request body: %v", err),
+		})
+
+		return
+	}
+
+	// Parse each string UUID into uuid.UUID.
+	datasourceIDs := make([]uuid.UUID, 0, len(req.DatasourceIDs))
+	for _, idStr := range req.DatasourceIDs {
+		id, parseErr := uuid.Parse(idStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Error: fmt.Sprintf("Invalid datasource ID %q: %v", idStr, parseErr),
+			})
+
+			return
+		}
+
+		datasourceIDs = append(datasourceIDs, id)
+	}
+
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, datasourceIDs)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to connect datasources to application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to connect datasources to application",
+		})
+
+		return
+	}
+
+	if resp == nil {
+		c.Status(http.StatusNoContent)
+
+		return
+	}
+
+	c.JSON(http.StatusMultiStatus, resp)
+}
+
+// GetApplicationDatasource godoc
+//
+//	@Summary		Get datasource status for an application
+//	@Description	Returns the catalog identity and live sync state of a datasource connected to the given application. Sync fields are sourced from the linked service and degrade gracefully to sync_status "unknown" when the service is unreachable.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path		string									true	"Application ID (UUID)"
+//	@Param			datasource_id	path		string									true	"Datasource connector ID (UUID)"
+//	@Success		200				{object}	models.GetApplicationDatasourceResponse	"Datasource status"
+//	@Failure		400				{object}	ErrorResponse							"Invalid UUID format"
+//	@Failure		401				{object}	ErrorResponse							"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse							"Datasource not connected to this application"
+//	@Failure		500				{object}	ErrorResponse							"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [get]
+func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid application ID format: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	resp, err := h.datasourceSvc.GetApplicationDatasource(c.Request.Context(), applicationID, datasourceID)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get application datasource: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "failed to get application datasource",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// DisconnectDatasourcesFromApplication godoc
+//
+//	@Summary		Disconnect a datasource from an application
+//	@Description	Removes a single datasource connector from each eligible service in a running application and deletes the service_dependency record.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path	string	true	"Application ID (UUID)"
+//	@Param			datasource_id	path	string	true	"Datasource ID (UUID)"
+//	@Success		204				"Datasource disconnected successfully"
+//	@Failure		400				{object}	ErrorResponse	"Invalid application or datasource ID"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404				{object}	ErrorResponse	"Datasource not connected to this application"
+//	@Failure		502				{object}	ErrorResponse	"Downstream Digitize service returned an error"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/datasources/{datasource_id} [delete]
+func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context) {
+	applicationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	datasourceID, err := uuid.Parse(c.Param("datasource_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID: %v", err),
+		})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, datasourceID); err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to disconnect datasource from application: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to disconnect datasource from application",
+		})
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // Made with Bob

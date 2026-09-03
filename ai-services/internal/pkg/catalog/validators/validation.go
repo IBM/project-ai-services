@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -110,7 +111,7 @@ func (v *ApplicationValidator) validateVersion(
 // ValidateServiceVersion validates that the service version matches the runtime metadata.
 func (v *ApplicationValidator) ValidateServiceVersion(serviceID, requestedVersion string) error {
 	return v.validateVersion("Service", serviceID, requestedVersion, func() (string, error) {
-		metadata, err := v.provider.LoadServiceRuntimeMetadata(serviceID)
+		metadata, err := v.provider.LoadServiceRuntimeMetadata(serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 		if err != nil {
 			return "", err
 		}
@@ -124,7 +125,7 @@ func (v *ApplicationValidator) ValidateComponentVersion(componentType, providerI
 	itemID := fmt.Sprintf("%s/%s", componentType, providerID)
 
 	return v.validateVersion("Component", itemID, requestedVersion, func() (string, error) {
-		metadata, err := v.provider.LoadComponentRuntimeMetadata(componentType, providerID)
+		metadata, err := v.provider.LoadComponentRuntimeMetadata(componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 		if err != nil {
 			return "", err
 		}
@@ -153,14 +154,14 @@ func (v *ApplicationValidator) validateParamsWithSchema(
 // ValidateServiceParams validates service-level parameters against schema.
 func (v *ApplicationValidator) ValidateServiceParams(ctx context.Context, serviceID string, params map[string]any) error {
 	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetServiceParams(ctx, serviceID)
+		return v.provider.GetServiceParams(ctx, serviceID, string(vars.RuntimeFactory.GetRuntimeType()))
 	}, fmt.Sprintf("service '%s'", serviceID))
 }
 
 // ValidateComponentParams validates component parameters against schema.
 func (v *ApplicationValidator) ValidateComponentParams(ctx context.Context, componentType, providerID string, params map[string]any) error {
 	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetComponentProviderParams(ctx, componentType, providerID)
+		return v.provider.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	}, fmt.Sprintf("component '%s/%s'", componentType, providerID))
 }
 

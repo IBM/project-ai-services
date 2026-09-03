@@ -1,5 +1,5 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.49
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.55
   log_level: "INFO"
   database: "digitize_metadata"
   numShards: 1
@@ -14,7 +14,7 @@ digitize:
       memory: "50Gi"
 
 digitizeUi:
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.31
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.32
   resources:
     requests:
       cpu: "50m"
@@ -33,7 +33,3 @@ embedding:
   model:
     name: ""
 
-llm:
-  model:
-    name: ""
-  apiKey: ""

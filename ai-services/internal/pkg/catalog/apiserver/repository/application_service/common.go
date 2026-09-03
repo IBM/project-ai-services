@@ -25,6 +25,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // ValidationError represents a validation error with HTTP status code.
@@ -91,12 +92,70 @@ type ApplicationServiceBase struct {
 	DeletionExecutor      *deletion.DeletionExecutor
 	Validator             *validators.ApplicationValidator
 
+	// RuntimeType is the runtime this service instance targets (Podman or OpenShift).
+	// Set once at construction; used by CreateApplication to plan and execute deployments.
+	// TODO: Remove once the existing/legacy flow is retired — in the new flow every
+	// application has a WorkerID and CreateApplication will derive the runtime from the
+	// worker's registered runtime type instead of this field.
+	RuntimeType runtimeTypes.RuntimeType
+
 	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
 	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
 	DeploymentRegistry *DeploymentRegistry
+
+	// WorkerRegistry is used to resolve a remote runtime for worker-hosted applications.
+	WorkerRegistry stream.WorkerRegistry
 }
 
-// ListApplications retrieves a paginated list of applications with filters.
+// createRuntime returns the runtime.Runtime appropriate for app.
+// When WorkerID is set (new flow) it resolves the worker name and builds a RemoteRuntime
+// over the gRPC CommandStream — this covers both the "Local" worker and actual remote workers.
+// When WorkerID is nil (existing/legacy flow, pre-worker feature) it falls back to
+// vars.RuntimeFactory directly, deriving the namespace from app.ID when needed (OpenShift).
+func (s *ApplicationServiceBase) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
+	if app.WorkerID != nil {
+		if s.WorkerRegistry == nil {
+			return nil, fmt.Errorf("worker deployment not configured on this server")
+		}
+
+		workerName, ok := s.WorkerRegistry.WorkerNameByID(*app.WorkerID)
+		if !ok {
+			return nil, fmt.Errorf("worker %s for application %s is not connected", app.WorkerID, app.ID)
+		}
+
+		rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
+		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry)
+		if err != nil {
+			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+		}
+
+		return rt, nil
+	}
+
+	return vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
+}
+
+// buildWorkerInfo resolves the worker name and runtime type from the registry and returns
+// an ApplicationWorker for embedding in the application response. The ID is always set;
+// name and runtime_type are set only when the worker is currently connected.
+func (s *ApplicationServiceBase) buildWorkerInfo(workerID uuid.UUID) *types.ApplicationWorker {
+	w := &types.ApplicationWorker{ID: workerID.String()}
+	if s.WorkerRegistry == nil {
+		return w
+	}
+	name, ok := s.WorkerRegistry.WorkerNameByID(workerID)
+	if !ok {
+		return w
+	}
+
+	w.Name = name
+	if rtStr, ok := s.WorkerRegistry.WorkerRuntimeType(name); ok {
+		w.RuntimeType = rtStr
+	}
+
+	return w
+}
+
 // buildApplication creates an Application from a models.Application.
 func (s *ApplicationServiceBase) buildApplication(app models.Application) (types.Application, error) {
 	// Get type (display name) from catalog metadata
@@ -116,6 +175,10 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 		Version:        app.Version,
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
+	}
+
+	if app.WorkerID != nil {
+		appData.Worker = s.buildWorkerInfo(*app.WorkerID)
 	}
 
 	// Add services array only for architectures (not for individual services)
@@ -260,6 +323,10 @@ func (s *ApplicationServiceBase) buildGetApplicationResponse(ctx context.Context
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
 
+	if app.WorkerID != nil {
+		appresponse.Worker = s.buildWorkerInfo(*app.WorkerID)
+	}
+
 	// Load services with their components if present
 	if len(app.Services) > 0 {
 		appresponse.Services, err = s.loadApplicationServices(ctx, app.Services)
@@ -361,7 +428,7 @@ func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, co
 	}
 
 	// Load component schema to determine which fields are sensitive
-	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
@@ -463,6 +530,16 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		Message:        "Initializing deployment",
 		Version:        plan.Version,
 		CreatedBy:      createdBy,
+	}
+
+	// Attach the worker FK. In the new flow WorkerName is always set by PlanDeployment
+	// (including "Local" for same-machine deployments). The nil check handles the
+	// existing flow where WorkerName is empty and there is no worker row to look up.
+	// TODO: Remove the empty-string guard once the existing flow is retired.
+	if plan.WorkerName != "" {
+		if dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName); ok {
+			app.WorkerID = &dbID
+		}
 	}
 
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
@@ -620,7 +697,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
-func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
+func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
 	// Phase 1: check for duplicate name
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {
@@ -639,7 +716,7 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 	}
 
 	// Phase 3: create deployment plan
-	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, runtimeType.String())
+	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, s.RuntimeType.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
@@ -663,14 +740,15 @@ func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apim
 		deployCtx = s.DeploymentRegistry.Register(deployCtx, plan.ApplicationID)
 	}
 
-	go s.executeDeploymentAsync(deployCtx, plan, req, runtimeType)
+	go s.executeDeploymentAsync(deployCtx, plan, req)
 
 	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
 }
 
 // executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
 // deployCtx is already derived and registered with the DeploymentRegistry by the caller.
-func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
+func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+	runtimeType := s.RuntimeType
 	ctx := deployCtx
 
 	// Deregister on any exit path — success, error, or panic.
@@ -711,8 +789,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 }
 
 // GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
-// namespace is the runtime namespace to query: empty string for Podman, AppNamespace(app.ID) for OpenShift.
-func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID, namespace string) (*types.ApplicationResourcesResponse, error) {
+func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID) (*types.ApplicationResourcesResponse, error) {
 	app, err := s.AppRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -724,7 +801,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		}
 	}
 
-	runtimeClient, err := vars.RuntimeFactory.Create(namespace)
+	runtimeClient, err := s.createRuntime(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -788,7 +865,7 @@ func (s *ApplicationServiceBase) addServiceResources(
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 ) error {
-	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
 	}
@@ -842,7 +919,7 @@ func (s *ApplicationServiceBase) processComponentResources(
 		return fmt.Errorf("failed to get component %s: %w", componentID, err)
 	}
 
-	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 	}
@@ -916,7 +993,7 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 }
 
 // ApplicationsPs returns runtime pod/container status for an application by querying the configured runtime.
-func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID, namespace string) (*types.ApplicationPSResponse, error) {
+func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
 	app, err := s.AppRepo.GetByID(ctx, appID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -928,7 +1005,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		}
 	}
 
-	rt, err := vars.RuntimeFactory.Create(namespace)
+	rt, err := s.createRuntime(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
 	}
@@ -1060,30 +1137,37 @@ func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) 
 	return appPodList, nil
 }
 
-func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+// validateForDeletion fetches the application and validates that the requesting
+// user owns it and it is not already being deleted. Returns the app model on success.
+func (s *ApplicationServiceBase) validateForDeletion(ctx context.Context, id uuid.UUID, user string) (*models.Application, error) {
 	app, err := s.AppRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
+		return nil, &ValidationError{Code: http.StatusNotFound, Message: ErrMsgApplicationNotFound}
 	}
-
 	if app.CreatedBy != user {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
+		return nil, &ValidationError{Code: http.StatusForbidden, Message: ErrMsgUserNotOwner}
+	}
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{Code: http.StatusConflict, Message: ErrMsgApplicationAlreadyDeleting}
 	}
 
-	if app.Status == models.ApplicationStatusDeleting {
-		return nil, &ValidationError{
-			Code:    http.StatusConflict,
-			Message: ErrMsgApplicationAlreadyDeleting,
-		}
+	return app, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
+	app, err := s.validateForDeletion(ctx, id, user)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve the runtime before cancelling or launching the goroutine so that
+	// worker connectivity errors surface synchronously to the HTTP caller.
+	rt, err := s.createRuntime(ctx, app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve runtime for deletion: %w", err)
 	}
 
 	// Cancel any in-flight deployment before transitioning to Deleting.
@@ -1111,7 +1195,7 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
 	}
 
-	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType)
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, rt)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
@@ -1126,7 +1210,7 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
-	runtimeType runtimeTypes.RuntimeType,
+	rt runtime.Runtime,
 ) {
 	var requestID string
 	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
@@ -1148,7 +1232,7 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 		}
 	}()
 
-	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, runtimeType)
+	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, rt)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
 

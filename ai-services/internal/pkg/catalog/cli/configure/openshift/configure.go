@@ -18,6 +18,7 @@ import (
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 )
 
 // DeployCatalog deploys the catalog service to OpenShift using the Helm chart.
@@ -33,7 +34,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	}
 
 	// Step 2: Load the Chart from assets/catalog/openshift
-	chartData, err := loadChart(ctx, tp)
+	chartData, err := helmutils.LoadChart(ctx, tp, catalogconstants.CatalogAppTemplate)
 	if err != nil {
 		return err
 	}
@@ -87,21 +88,6 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, timeout tim
 	}
 
 	return timeout, nil
-}
-
-func loadChart(ctx context.Context, tp templates.Template) (chart.Charter, error) {
-	s := spinner.New("Loading the Helm chart for catalog...")
-
-	s.Start(ctx)
-	chart, err := tp.LoadChart(catalogconstants.CatalogAppTemplate)
-	if err != nil {
-		s.Fail("failed to load the Helm chart")
-
-		return nil, fmt.Errorf("failed to load the chart: %w", err)
-	}
-	s.Stop("Loaded the Helm chart successfully")
-
-	return chart, nil
 }
 
 func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]any, error) {

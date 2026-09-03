@@ -141,6 +141,8 @@ async def _validate_files(
         "skipped files appear in the document list with `status=already_exists`."
     ),
     response_description="Job accepted. `job_id` can be used to poll status.",
+    tags=["MCP"],
+    operation_id="create_digitize_job",
 )
 async def create_job(
     files: List[UploadFile] = File(
@@ -391,6 +393,8 @@ async def list_jobs(
     summary="Get job by ID",
     description="Retrieve detailed status and progress information for a specific job.",
     response_description="Detailed job information including document statuses and statistics",
+    tags=["MCP"],
+    operation_id="get_digitize_job",
 )
 async def get_job(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""

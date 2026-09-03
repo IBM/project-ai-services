@@ -80,6 +80,28 @@ func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
 	return out, nil
 }
 
+func (r *fakeWorkerRepo) GetByID(_ context.Context, id uuid.UUID) (*models.Worker, error) {
+	w, ok := r.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
+func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Worker, error) {
+	w, ok := r.workers[name]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
+func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	return map[uuid.UUID][]uuid.UUID{}, nil
+}
+
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 
 // ──────────────────────────────────────────────────────────────────────────────

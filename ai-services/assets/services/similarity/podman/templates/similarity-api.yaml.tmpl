@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api"
+    ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api,7001:similarity-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   restartPolicy: always
@@ -71,3 +71,32 @@ spec:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
           readOnly: true
+    - name: mcp-sidecar
+      image: "{{ .Values.mcp.image }}"
+      args:
+        - "--description"
+        - "http://localhost:7000/openapi.json"
+        - "--endpoint"
+        - "http://localhost:7000"
+        - "--tag"
+        - "mcp"
+        - "--port"
+        - "{{ .Values.mcp.port }}"
+        - "--auth-passthrough"
+        - "--http"
+      ports:
+        - containerPort: {{ .Values.mcp.port }}
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: {{ .Values.mcp.port }}
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "128Mi"
+        limits:
+          memory: "128Mi"

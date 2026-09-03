@@ -1,0 +1,37 @@
+# ============================================================================
+# Build Stage
+# ============================================================================
+FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
+
+ARG GO_VERSION=1.26.6
+
+WORKDIR /go/src/github.com/project-ai-services/mcp
+
+USER root
+
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" \
+    -o bin/ai-services-mcp \
+    ./cmd/ai-services-mcp/main.go
+
+# ============================================================================
+# Runtime Stage
+# ============================================================================
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
+
+COPY --from=builder /go/src/github.com/project-ai-services/mcp/bin/ai-services-mcp /usr/bin/ai-services-mcp
+
+USER 1001
+
+ENTRYPOINT ["/usr/bin/ai-services-mcp"]
+CMD ["--help"]

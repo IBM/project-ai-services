@@ -3,6 +3,7 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -14,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
@@ -24,6 +26,9 @@ type DeploymentPlanner struct {
 	catalogProvider *catalog.CatalogProvider
 	componentRepo   repository.ComponentRepository
 	paramBuilder    *params.ParamBuilder
+	// workerRegistry is optional; when set, PlanDeployment validates remote
+	// worker metadata (e.g. Caddy config) before any DB records are written.
+	workerRegistry stream.WorkerRegistry
 }
 
 // NewDeploymentPlanner creates a new deployment planner.
@@ -36,6 +41,15 @@ func NewDeploymentPlanner(
 		componentRepo:   componentRepo,
 		paramBuilder:    params.NewParamBuilder(provider),
 	}
+}
+
+// WithWorkerRegistry wires the worker registry into the planner so it can
+// validate remote worker metadata during PlanDeployment and fail early before
+// any DB records are written.
+func (p *DeploymentPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *DeploymentPlanner {
+	p.workerRegistry = reg
+
+	return p
 }
 
 // Type aliases for deployment plan types.
@@ -51,6 +65,27 @@ func (p *DeploymentPlanner) PlanDeployment(
 	req apimodels.CreateApplicationRequest,
 	runtimeType string,
 ) (*DeploymentPlan, error) {
+	// Default to local when the caller did not specify a worker so that
+	// WorkerName is always set and no downstream code needs to treat "" as local.
+	// TODO: Enable this to test local worker by default
+	// if req.WorkerName == "" {
+	// 	req.WorkerName = workerconstants.LocalWorkerName
+	// }
+
+	// For remote workers, validate connectivity and Caddy metadata before
+	// touching the DB so the Create API returns an immediate error on failure.
+	if err := p.ValidateWorker(ctx, req.WorkerName); err != nil {
+		return nil, err
+	}
+
+	// When deploying to a named worker, use the worker's registered runtime type
+	// for catalog path resolution and Spyre card allocation — not the server's.
+	if req.WorkerName != "" {
+		if workerRT, ok := p.workerRegistry.WorkerRuntimeType(req.WorkerName); ok {
+			runtimeType = workerRT
+		}
+	}
+
 	// First, determine if this is an architecture or standalone service
 	isArchitecture := false
 	_, archErr := p.catalogProvider.LoadArchitecture(req.CatalogID)
@@ -73,6 +108,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 		IsArchitecture:  isArchitecture,
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
+		WorkerName:      req.WorkerName,
 	}
 
 	// Process each service from request
@@ -107,7 +143,7 @@ func (p *DeploymentPlanner) processService(
 
 	servicePlan := &ServicePlan{
 		CatalogID:     svc.CatalogID,
-		CatalogPath:   fmt.Sprintf("%s/%s", servicePath, runtimeType),
+		CatalogPath:   path.Join(servicePath, runtimeType),
 		Version:       svc.Version,
 		ComponentRefs: make([]string, 0),
 	}
@@ -183,7 +219,7 @@ func (p *DeploymentPlanner) processComponent(
 		Hash:           componentHash,
 		ComponentType:  comp.ComponentType,
 		ProviderID:     comp.ProviderID,
-		CatalogPath:    fmt.Sprintf("%s/%s", componentPath, runtimeType),
+		CatalogPath:    path.Join(componentPath, runtimeType),
 		Version:        comp.Version,
 		Params:         comp.Params,
 		UsedByServices: []string{catalogID},
@@ -257,6 +293,37 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 	}
 
 	return totalSpyreCards, nil
+}
+
+// WorkerDBID returns the database UUID for the named worker by consulting the
+// in-memory registry. Returns (uuid.Nil, false) when the worker is not
+// connected or the registry is nil (local-only server).
+func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
+	if p.workerRegistry == nil {
+		return uuid.Nil, false
+	}
+
+	return p.workerRegistry.WorkerID(workerName)
+}
+
+// ValidateWorker confirms the named remote worker is connected. Called from
+// PlanDeployment before any DB records are written so the Create API can
+// return an error immediately on failure.
+func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName string) error {
+	if p.workerRegistry == nil {
+		return fmt.Errorf("worker deployment is not configured on this server")
+	}
+
+	// TODO: Remove this when remote deployment is by default
+	if workerName == "" {
+		return nil
+	}
+
+	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {
+		return fmt.Errorf("worker %q is not connected", workerName)
+	}
+
+	return nil
 }
 
 // Made with Bob

@@ -46,20 +46,16 @@ const (
 	CatalogSecretLabel = "ai-services.io/secret"
 	// CatalogSecretSkipLabel represents if catalog secret associated with pod should be skipped while deletion.
 	CatalogSecretSkipLabel = "ai-services.io/secret-skip-cleanup"
-	// CatalogVolumeLabel represents the catalog volume name associated with Catalog Pod.
-	CatalogVolumeLabel = "ai-services.io/volume"
 	// CatalogVolumeSkipLabel represents if catalog volume associated with pod should be skipped while deletion.
 	CatalogVolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
-	// PodmanAuthSecret represents podman auth secret name.
-	PodmanAuthSecret = "podman-auth-secret"
 	// CatalogSecretName represents the catalog secret name.
 	CatalogSecretName = "catalog-secret"
+	// CatalogCertSecretName represents caddy cert secret name.
+	CatalogCertSecretName = "catalog-caddy-cert-secret"
 	// CatalogDBSecretName represents the catalog database secret name used in OpenShift deployments.
 	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogConnectorSecretName represents the catalog connector encryption key secret name.
 	CatalogConnectorSecretName = "catalog-db-encryption-secret"
-	// CatalogPodmanAuthSecretName represent the podman auth secret name.
-	CatalogPodmanAuthSecretName = "podman-auth-secret"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
 )
@@ -78,12 +74,6 @@ const (
 const (
 	// RFC3339WithTimezone is the time format for API responses (ISO 8601 with timezone).
 	RFC3339WithTimezone = "2006-01-02T15:04:05Z07:00"
-)
-
-// Network constants.
-const (
-	// DefaultHTTPSPort is the default HTTPS port.
-	DefaultHTTPSPort = "443"
 )
 
 // Environment variable name constants.

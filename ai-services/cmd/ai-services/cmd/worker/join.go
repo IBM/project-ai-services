@@ -1,22 +1,23 @@
 package worker
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
+	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
+	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/join"
+	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
 const defaultJoinHTTPSPort = 443
@@ -79,73 +80,176 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 	return utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName)
 }
 
-func joinRunE(_ *cobra.Command, args []string) error {
-	aiServicesDir, err := utils.ValidateBaseDir(baseDir)
-	if err != nil {
-		return fmt.Errorf("invalid base directory %q: %w", baseDir, err)
+// joinRunE provisions the worker node for the given runtime type and returns once
+// the deployment is complete.
+//
+// After DeployWorker returns successfully, 'grpcstream' cmd should be called to open
+// the long-lived CommandStream to the catalog control plane.
+func joinRunE(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	gatewayAddr := args[0]
+
+	switch types.RuntimeType(runtimeType) {
+	case types.RuntimeTypePodman:
+		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
+		if err != nil {
+			return fmt.Errorf("invalid base directory %q: %w", baseDir, err)
+		}
+
+		if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
+			return fmt.Errorf("failed to create model directory: %w", err)
+		}
+
+		opts := workertypes.PodmanWorkerOptions{
+			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
+				GatewayAddr: gatewayAddr,
+				Token:       token,
+			},
+			Setup: workertypes.Options{
+				BaseDir:     aiServicesDir,
+				HTTPSPort:   httpsPort,
+				DomainName:  domainName,
+				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+			},
+		}
+
+		// Setup worker node
+		if err := workerpodman.DeployWorker(ctx, opts); err != nil {
+			return fmt.Errorf("worker join: setup: %w", err)
+		}
+	case types.RuntimeTypeOpenShift:
+		opts := workertypes.OpenshiftWorkerOptions{
+			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
+				GatewayAddr: gatewayAddr,
+				Token:       token,
+			},
+		}
+		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
+			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
 
-	if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
-		return fmt.Errorf("failed to create model directory: %w", err)
-	}
-
-	opts := join.Options{
-		GatewayAddr: args[0],
-		Token:       token,
-		RuntimeType: types.RuntimeType(runtimeType),
-		Setup: workerdeploy.Options{
-			BaseDir:     aiServicesDir,
-			HTTPSPort:   httpsPort,
-			DomainName:  domainName,
-			SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
-			SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
-		},
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return join.Run(ctx, opts)
+	return nil
 }
 
-func newJoinCmd() *cobra.Command {
-	cmd.Flags().StringVar(&token, "token", "",
+// configureFlags registers the flags shared by the join and grpcstream
+// commands: --token (required), --runtime, --basedir, --https-port,
+// --ssl-cert, and --ssl-key.
+func configureFlags(c *cobra.Command) {
+	c.Flags().StringVar(&token, "token", "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
-	_ = cmd.MarkFlagRequired("token")
+	_ = c.MarkFlagRequired("token")
 
-	cmdcommon.ConfigureRuntimeFlag(cmd, &runtimeType)
+	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
-	cmd.Flags().StringVar(&baseDir, "basedir", "",
+	c.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 
-	cmd.Flags().IntVar(&httpsPort, "https-port", defaultJoinHTTPSPort,
+	c.Flags().IntVar(&httpsPort, "https-port", defaultJoinHTTPSPort,
 		"Custom HTTPS port to expose the service endpoints externally.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n")
 
-	cmd.Flags().StringVar(&domainName, "domain-name", "",
+	c.Flags().StringVar(&domainName, "domain-name", "",
 		"Custom domain name for self-signed certificates.\n"+
 			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
 			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and this flag is ignored.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --domain-name example.com\n")
 
-	cmd.Flags().StringVar(&sslCertPath, "ssl-cert", "",
+	c.Flags().StringVar(&sslCertPath, "ssl-cert", "",
 		"Path to user-provided SSL certificate (optional).\n"+
 			"Must be used together with --ssl-key.\n"+
 			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-cert /path/to/cert.pem\n")
 
-	cmd.Flags().StringVar(&sslKeyPath, "ssl-key", "",
+	c.Flags().StringVar(&sslKeyPath, "ssl-key", "",
 		"Path to user-provided SSL private key (optional).\n"+
 			"Must be used together with --ssl-cert.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-key /path/to/key.pem\n")
+}
+
+func newJoinCmd() *cobra.Command {
+	configureFlags(cmd)
 
 	return cmd
+}
+
+var grpcStreamCmd = &cobra.Command{
+	Use:    "grpcstream <gateway>",
+	Short:  "Connect to the catalog gRPC worker-gateway",
+	Hidden: true,
+	Args:   cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
+
+		return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+	},
+	RunE: grpcStreamRunE,
+}
+
+// grpcStreamRunE starts the long-lived gRPC CommandStream for the worker.
+// It is called inside the worker pod after the deploy step (Run) has completed.
+//
+// For Podman workers it initialises the Podman runtime and builds the local
+// Caddy proxy router before opening the stream.
+//
+// For OpenShift workers it initialises the runtime scoped to the worker
+// namespace and opens the stream, since routing is handled natively by the platform.
+func grpcStreamRunE(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	gatewayAddr := args[0]
+
+	var pr *workercaddy.ProxyRouter
+	var rt runtime.Runtime
+
+	switch types.RuntimeType(runtimeType) {
+	case types.RuntimeTypePodman:
+		var err error
+		rt, err = runtime.CreateRuntime(types.RuntimeTypePodman, "")
+		if err != nil {
+			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
+		}
+
+		// ── Build Caddy proxy router (Podman only) ──────────────────────
+		// Must happen after Setup so the Caddy pod is running and its admin port
+		// is discoverable. For OpenShift workers routes are managed natively.
+		pr, err = workercaddy.NewProxyRouter(ctx)
+		if err != nil {
+			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
+		}
+	case types.RuntimeTypeOpenShift:
+		var err error
+		rt, err = runtime.CreateRuntime(types.RuntimeTypeOpenShift, workerconstants.WorkerAppName)
+		if err != nil {
+			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+	}
+
+	opts := workertypes.GrpcStreamOptions{
+		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
+			GatewayAddr: gatewayAddr,
+			Token:       token,
+		},
+	}
+
+	return join.StartGrpcStream(ctx, rt, pr, opts)
+}
+
+func newGrpcStreamCmd() *cobra.Command {
+	configureFlags(grpcStreamCmd)
+
+	return grpcStreamCmd
 }

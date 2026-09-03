@@ -6,6 +6,13 @@ type ApplicationListResponse struct {
 	Pagination PaginationMetadata `json:"pagination"`
 }
 
+// ApplicationWorker carries the worker details embedded in an Application response.
+type ApplicationWorker struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	RuntimeType string `json:"runtime_type"`
+}
+
 // Application represents an application in the list/get response.
 type Application struct {
 	ID             string               `json:"id"`
@@ -19,6 +26,7 @@ type Application struct {
 	Services       []ApplicationService `json:"services,omitempty"`
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
+	Worker         *ApplicationWorker   `json:"worker,omitempty"`
 }
 
 // ApplicationService represents an application service in the list/get response.

@@ -13,14 +13,42 @@ type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
+	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
+	// eligible service in a running application and removes the service_dependency record.
+	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error
+	// GetDatasource retrieves a single datasource by ID with non-sensitive metadata and
+	// connected services enriched with live sync state from each service's Digitize pod.
+	// Returns a *ValidationError with code 404 when the connector does not exist.
+	GetDatasource(ctx context.Context, id uuid.UUID) (*apimodels.GetDatasourceResponse, error)
 	// DeleteDatasource removes a datasource connector by ID.
 	// Returns a ValidationError with status 404 if not found, 409 if the connector is
 	// still linked to one or more services via service_dependencies.
 	DeleteDatasource(ctx context.Context, id uuid.UUID) error
-
 	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
 	// Sensitive credential fields are never included in any returned item.
 	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
+
+	// UpdateDatasource updates only the updatable credential fields for a datasource.
+	// It re-runs the connectivity test with the merged (new credentials + existing structural
+	// fields) metadata. If the test passes, the DB record is updated and the new credentials
+	// are propagated to every linked Digitize service.
+	// Returns 404 when the datasource does not exist, 422 when the connectivity test fails.
+	// A 200 is returned even when propagation to some Digitize services fails; in that case,
+	// the response body contains a non-empty PropagationErrors list.
+	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
+
+	// GetDatasourceApplications returns the list of applications currently connected to a datasource,
+	// each enriched with live sync state from its downstream service pod.
+	// Returns a *ValidationError with code 404 when the connector does not exist.
+	GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error)
+
+	// GetApplicationDatasource returns the catalog identity and live Digitize sync state for
+	// a datasource that is connected to the given application.
+	// Returns a *ValidationError with code 404 when no service_dependencies row links
+	// datasourceID to any service of applicationID.
+	GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

@@ -1,23 +1,28 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
-	reg *registry.Registry
+	reg  *registry.Registry
+	repo repository.WorkerRepository
 }
 
 // NewWorkerHandler creates a new WorkerHandler.
-func NewWorkerHandler(reg *registry.Registry) *WorkerHandler {
-	return &WorkerHandler{reg: reg}
+func NewWorkerHandler(reg *registry.Registry, repo repository.WorkerRepository) *WorkerHandler {
+	return &WorkerHandler{reg: reg, repo: repo}
 }
 
 // createWorkerReq is the request body for registering a new worker.
@@ -66,6 +71,7 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 	token, err := h.reg.Preregister(ctx, req.WorkerName)
 	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to register worker %q: %v", req.WorkerName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register worker"})
 
 		return
@@ -80,7 +86,7 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 // ListWorkers godoc
 //
 //	@Summary		List all workers
-//	@Description	Returns all registered workers and their current status from the database.
+//	@Description	Returns all registered workers, their current status, human-readable message, and connected application IDs.
 //	@Tags			Workers
 //	@Produce		json
 //	@Success		200	{array}		catalogtypes.Worker		"List of workers"
@@ -88,28 +94,78 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/workers [get]
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
-	workers, err := h.reg.List(c.Request.Context())
+	ctx := c.Request.Context()
+
+	workers, err := h.reg.List(ctx)
 	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to list workers: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workers"})
+
+		return
+	}
+
+	appIDMap, err := h.fetchAppIDs(ctx, workers)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to fetch application IDs for workers: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application IDs"})
 
 		return
 	}
 
 	result := make([]catalogtypes.Worker, len(workers))
 	for i, w := range workers {
-		result[i] = catalogtypes.Worker{
-			ID:            w.ID.String(),
-			Name:          w.Name,
-			RuntimeType:   catalogtypes.WorkerRuntimeType(w.RuntimeType),
-			Status:        catalogtypes.WorkerStatus(w.Status),
-			LastHeartbeat: w.LastHeartbeat,
-			Metadata:      w.Metadata,
-			RegisteredAt:  w.RegisteredAt.UTC().Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:     w.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		}
+		result[i] = toAPIWorker(w, appIDMap[w.ID])
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// GetWorker godoc
+//
+//	@Summary		Get a single worker
+//	@Description	Returns the worker with the given ID, including its status message and connected application IDs.
+//	@Tags			Workers
+//	@Produce		json
+//	@Param			id	path		string					true	"Worker ID (UUID)"
+//	@Success		200	{object}	catalogtypes.Worker		"Worker details"
+//	@Failure		400	{object}	map[string]interface{}	"Invalid worker ID"
+//	@Failure		404	{object}	map[string]interface{}	"Worker not found"
+//	@Failure		500	{object}	map[string]interface{}	"Internal error"
+//	@Security		BearerAuth
+//	@Router			/workers/{id} [get]
+func (h *WorkerHandler) GetWorker(c *gin.Context) {
+	workerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid worker id"})
+
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	w, err := h.repo.GetByID(ctx, workerID)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to fetch worker %s: %v", workerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch worker"})
+
+		return
+	}
+
+	if w == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
+
+		return
+	}
+
+	appIDMap, err := h.repo.GetApplicationIDsByWorkerIDs(ctx, []uuid.UUID{workerID})
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to fetch application IDs for worker %s: %v", workerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application IDs"})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, toAPIWorker(*w, appIDMap[workerID]))
 }
 
 // DeleteWorker godoc
@@ -138,6 +194,7 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 
 	deleted, err := h.reg.Deregister(ctx, workerID)
 	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to deregister worker %s: %v", workerID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete worker"})
 
 		return
@@ -150,4 +207,45 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+// fetchAppIDs does a single bulk query for all workers and returns a map of workerID → appIDs.
+func (h *WorkerHandler) fetchAppIDs(ctx context.Context, workers []models.Worker) (map[uuid.UUID][]uuid.UUID, error) {
+	if h.repo == nil || len(workers) == 0 {
+		return map[uuid.UUID][]uuid.UUID{}, nil
+	}
+
+	ids := make([]uuid.UUID, len(workers))
+	for i, w := range workers {
+		ids[i] = w.ID
+	}
+
+	return h.repo.GetApplicationIDsByWorkerIDs(ctx, ids)
+}
+
+// toAPIWorker converts a DB worker model to the public API type, populating
+// Message and ApplicationIDs from the provided slice.
+func toAPIWorker(w models.Worker, appIDs []uuid.UUID) catalogtypes.Worker {
+	out := catalogtypes.Worker{
+		ID:            w.ID.String(),
+		Name:          w.Name,
+		RuntimeType:   catalogtypes.WorkerRuntimeType(w.RuntimeType),
+		Status:        catalogtypes.WorkerStatus(w.Status),
+		Message:       w.Message,
+		LastHeartbeat: w.LastHeartbeat,
+		Metadata:      w.Metadata,
+		RegisteredAt:  w.RegisteredAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     w.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+
+	if len(appIDs) > 0 {
+		out.ApplicationIDs = make([]string, len(appIDs))
+		for i, id := range appIDs {
+			out.ApplicationIDs[i] = id.String()
+		}
+	}
+
+	return out
 }

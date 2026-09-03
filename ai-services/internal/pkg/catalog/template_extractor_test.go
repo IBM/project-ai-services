@@ -444,7 +444,7 @@ spec:
       resources:
         requests:
           podman.io/device=/dev/vfio: 4
-          memory: "150Gi"
+          memory: "200Gi"
 `
 
 	// Load real reranker-spyre template (has 1 Spyre card)
@@ -479,7 +479,7 @@ spec:
 	}
 
 	values := map[string]any{
-		"image": "registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0",
+		"image": "registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0",
 	}
 
 	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)

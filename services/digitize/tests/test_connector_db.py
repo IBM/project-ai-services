@@ -146,7 +146,7 @@ class TestUpsertActiveConnector:
 
 
 # ===========================================================================
-# get_active_connector
+# get_connector_by_id
 # ===========================================================================
 
 class TestGetConnector:
@@ -160,8 +160,7 @@ class TestGetConnector:
         c.sync_interval_seconds = SYNC_INTERVAL
         c.attached_at = _NOW
         c.last_sync_at = None
-        c.sync_status = ConnectorStatus.UP_TO_DATE
-        c.error = None
+        c.status = ConnectorStatus.UP_TO_DATE
         c.total_files = 0
         return c
 
@@ -169,26 +168,26 @@ class TestGetConnector:
         connector = self._make_connector()
         session = MagicMock()
         session.get.return_value = connector
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector(CONNECTOR_ID)
+            result = get_connector_by_id(CONNECTOR_ID)
         assert result is connector
         session.expunge.assert_called_once_with(connector)
 
     def test_returns_none_when_not_found(self):
         session = MagicMock()
         session.get.return_value = None
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector("nonexistent-id")
+            result = get_connector_by_id("nonexistent-id")
         assert result is None
 
     def test_returns_none_on_db_error(self):
         session = MagicMock()
         session.get.side_effect = SQLAlchemyError("timeout")
-        from digitize.utils.db import get_active_connector
+        from digitize.utils.db import get_connector_by_id
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            result = get_active_connector(CONNECTOR_ID)
+            result = get_connector_by_id(CONNECTOR_ID)
         assert result is None
 
 
@@ -207,8 +206,7 @@ class TestListConnectors:
         c1.sync_interval_seconds = 300
         c1.attached_at = _NOW
         c1.last_sync_at = None
-        c1.sync_status = ConnectorStatus.UP_TO_DATE
-        c1.error = None
+        c1.status = ConnectorStatus.UP_TO_DATE
         c1.total_files = 0
 
         session = MagicMock()
@@ -466,7 +464,7 @@ class TestInsertSyncLog:
         # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 3
-        # Second execute: UPDATE connectors SET sync_status='syncing'
+        # Second execute: UPDATE connectors SET status='syncing'
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, update_result]
 
@@ -476,7 +474,7 @@ class TestInsertSyncLog:
         assert seq == 3
         assert session.execute.call_count == 2
 
-    def test_sets_connector_sync_status_syncing(self):
+    def test_sets_connector_status_syncing(self):
         """Both the INSERT and the connectors UPDATE must happen in the same session."""
         session = MagicMock()
         insert_result = MagicMock()
@@ -488,6 +486,27 @@ class TestInsertSyncLog:
             init_sync_log_and_update_connector(CONNECTOR_ID)
         # Two DB calls: INSERT log row + UPDATE connector status
         assert session.execute.call_count == 2
+
+    def test_clears_message_on_open_sync(self):
+        """Opening a sync log must clear the message field on the connector row."""
+        session = MagicMock()
+        insert_result = MagicMock()
+        insert_result.scalar_one.return_value = 1
+        update_result = MagicMock()
+        session.execute.side_effect = [insert_result, update_result]
+
+        from digitize.utils.db import init_sync_log_and_update_connector
+        from digitize.db.models import Connector
+        from sqlalchemy import update as sa_update
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            init_sync_log_and_update_connector(CONNECTOR_ID)
+
+        # Inspect the UPDATE statement sent to the connector row (second execute call)
+        update_call_args = session.execute.call_args_list[1]
+        stmt = update_call_args[0][0]  # first positional arg
+        compiled = stmt.compile(compile_kwargs={"literal_binds": True})
+        assert "message" in str(compiled).lower()
 
     def test_does_not_accept_seq_parameter(self):
         """seq must not be an accepted parameter — it is auto-generated."""
@@ -545,7 +564,7 @@ class TestUpdateSyncLog:
         session.execute.side_effect = [log_result, conn_result]
         from digitize.utils.db import finalize_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
-            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=2, status=ConnectorStatus.UP_TO_DATE)
+            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=2, status=SyncLogStatus.COMPLETED)
         assert session.execute.call_count == 2
 
     def test_optional_fields_omitted_when_none(self):
@@ -638,6 +657,7 @@ class TestListSyncLogs:
             items, total = list_sync_logs(CONNECTOR_ID)
         assert items == []
         assert total == 0
+
 
 
 # ===========================================================================

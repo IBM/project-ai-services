@@ -35,6 +35,8 @@ from digitize.db.models import (
     Connector,
     ConnectorSyncLog,
     Document,
+    DocumentSource,
+    JobSource,
 )
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
@@ -176,7 +178,8 @@ def create_job(
     operation: str,
     submitted_at: str,
     documents_info: list[str],
-    job_name: Optional[str] = None
+    job_name: Optional[str] = None,
+    source: JobSource = JobSource.USER,
 ) -> None:
     """
     Create job in database.
@@ -187,6 +190,7 @@ def create_job(
         submitted_at: ISO timestamp when job was submitted
         documents_info: List of document filenames
         job_name: Optional human-readable name for the job
+        source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot create job without database connection.")
@@ -201,6 +205,7 @@ def create_job(
             operation=operation,
             status=JobStatus.ACCEPTED,
             job_name=job_name,
+            source=source,
             submitted_at=submitted_dt,
             stats={
                 "total_documents": len(documents_info),
@@ -347,6 +352,7 @@ def create_document(
     submitted_at: str,
     initial_status: DocStatus = DocStatus.ACCEPTED,
     completed_at: Optional[str] = None,
+    source: str = DocumentSource.USER.value,
     extra_metadata: Optional[dict] = None,
 ) -> None:
     """
@@ -361,6 +367,7 @@ def create_document(
         submitted_at: ISO timestamp when document was submitted
         initial_status: Initial document status (defaults to ACCEPTED)
         completed_at: Optional ISO timestamp for immediately-terminal documents
+        source: Document origin — 'user' (default) or 'connector'
         extra_metadata: Optional extra fields merged into the metadata JSONB
     """
     if engine is None:
@@ -397,6 +404,7 @@ def create_document(
             submitted_at=submitted_dt,
             completed_at=completed_dt,
             job_id=job_id,
+            source=DocumentSource(source),
             metadata=metadata,
         )
         if result is None:
@@ -468,19 +476,15 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
 
 def is_connector_sourced_document(doc_id: str) -> bool:
     """
-    Return True if *doc_id* appears in connector_document_checksum (i.e. is
-    connector-sourced and must not be exposed via user-facing document APIs).
+    Return True if *doc_id* has source='connector' in the documents table.
     """
     try:
         from digitize.db.connection import get_db_session
-        from digitize.db.models import ConnectorDocumentChecksum
-        from sqlalchemy import select, exists
+        from sqlalchemy import select
         with get_db_session() as session:
-
-            stmt = select(
-                exists().where(ConnectorDocumentChecksum.doc_id == doc_id)
-            )
-            return bool(session.scalar(stmt))
+            stmt = select(Document.source).where(Document.doc_id == doc_id)
+            source = session.scalar(stmt)
+            return source == DocumentSource.CONNECTOR.value
     except Exception as exc:
         logger.error(
             f"DB error in is_connector_sourced_document({doc_id!r}): {exc}",
@@ -505,8 +509,8 @@ def get_all_documents_paginated(
         name: Filter by document name (partial match)
         limit: Maximum number of documents to return
         offset: Number of documents to skip
-        exclude_connector_sourced: When True, omit docs whose doc_id appears
-            in connector_document_checksum (connector-sourced documents)
+        exclude_connector_sourced: When True, omit docs whose parent job has
+            source='connector' (connector-sourced documents)
 
     Returns:
         Tuple of (list of document dictionaries, total count)
@@ -603,6 +607,42 @@ def get_all_document_ids() -> list[str]:
         return doc_ids
     except Exception as e:
         logger.error(f"Failed to read document IDs from database: {e}", exc_info=True)
+        raise
+
+
+def get_user_document_ids() -> list[str]:
+    """
+    Read IDs of user-submitted documents only (connector-sourced docs excluded).
+
+    Returns:
+        List of doc_id strings for documents not in connector_document_checksum
+    """
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot retrieve document IDs without database connection.")
+
+    try:
+        logger.debug("Reading user-submitted document IDs from database")
+        all_documents = []
+        offset = 0
+
+        while True:
+            documents, total = db_manager.get_all_documents(
+                limit=IMPORT_EXPORT_DEFAULT_LIMIT,
+                offset=offset,
+                exclude_connector_sourced=True,
+            )
+            if not documents:
+                break
+            all_documents.extend(documents)
+            offset += len(documents)
+            if offset >= total:
+                break
+
+        doc_ids = [doc.doc_id for doc in all_documents]
+        logger.info(f"Found {len(doc_ids)} user-submitted document IDs in database")
+        return doc_ids
+    except Exception as e:
+        logger.error(f"Failed to read user document IDs from database: {e}", exc_info=True)
         raise
 
 
@@ -742,12 +782,18 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
-                completed=sum(1 for job in exported_jobs if job.status == JobStatus.COMPLETED.value),
+                completed=sum(
+                    1 for job in exported_jobs
+                    if job.status in (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value)
+                ),
                 failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
             ),
             documents=ExportEntitySummary(
                 total_exported=len(exported_documents),
-                completed=sum(1 for doc in exported_documents if doc.status == DocStatus.COMPLETED.value),
+                completed=sum(
+                    1 for doc in exported_documents
+                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+                ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
         ),
@@ -1048,11 +1094,11 @@ class DatabaseStatusManager:
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
             if success:
-                # Register the checksum once the document is marked COMPLETED so
-                # that future uploads of the same content are caught via the
-                # document_checksum table.
+                # Register the checksum when the document reaches any terminal success
+                # state (COMPLETED or COMPLETED_WITH_ERRORS) so future re-uploads of
+                # the same content are de-duplicated via document_checksum.
                 if (
-                    update_params.get("status") == DocStatus.COMPLETED
+                    update_params.get("status") in [DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS]
                     and "file_hash" in metadata_fields
                 ):
                     db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
@@ -1088,14 +1134,17 @@ class DatabaseStatusManager:
         # Get all documents for this job to recalculate stats
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
-        # Recalculate statistics
-        # ALREADY_EXISTS is a terminal resolved state — count it with completed.
+        # Recalculate statistics.
+        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
+        # count them with completed.
+        _terminal_ok = (
+            DocStatus.COMPLETED.value,
+            DocStatus.ALREADY_EXISTS.value,
+            DocStatus.COMPLETED_WITH_ERRORS.value,
+        )
         stats = {
             "total_documents": len(documents),
-            "completed": sum(
-                1 for d in documents
-                if d.status in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
-            ),
+            "completed": sum(1 for d in documents if d.status in _terminal_ok),
             "failed": sum(1 for d in documents if d.status == DocStatus.FAILED.value),
             "in_progress": sum(
                 1 for d in documents if d.status in [
@@ -1103,19 +1152,20 @@ class DatabaseStatusManager:
                     DocStatus.IN_PROGRESS.value,
                     DocStatus.DIGITIZED.value,
                     DocStatus.PROCESSED.value,
-                    DocStatus.CHUNKED.value
+                    DocStatus.CHUNKED.value,
                 ]
-            )
+            ),
         }
 
         # Prepare job update parameters
         update_params: Dict[str, Any] = {
             "status": job_status,
-            "stats": stats
+            "stats": stats,
         }
 
-        # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+        # Set completed_at for all terminal job states
+        _terminal_job = (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED)
+        if job_status in _terminal_job:
             total_docs = stats["total_documents"]
             completed_docs = stats["completed"]
             failed_docs = stats["failed"]
@@ -1123,8 +1173,8 @@ class DatabaseStatusManager:
             if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
                 update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error if provided
-        if error and job_status == JobStatus.FAILED:
+        # Set error for hard failures and completed_with_errors (when an error message is provided)
+        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
             update_params["error"] = error
 
         # Perform database update
@@ -1162,7 +1212,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name", "had_table_failures"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
@@ -1197,7 +1247,7 @@ def insert_connector(
     """
     Insert a new connector row on first-time POST /v1/connectors.
 
-    Raises IntegrityError if the id already exists (maps to 409).
+    Raises IntegrityError if the id or name already exists (maps to 409).
     """
     db_manager.insert_connector(
         connector_id=connector_id,
@@ -1228,7 +1278,7 @@ def upsert_connector(
     )
 
 
-def get_active_connector(connector_id: str) -> Optional[Connector]:
+def get_connector_by_id(connector_id: str) -> Optional[Connector]:
     """
     Fetch a single connector by id.
 
@@ -1237,9 +1287,18 @@ def get_active_connector(connector_id: str) -> Optional[Connector]:
     return db_manager.get_connector_by_id(connector_id)
 
 
+def get_connector_by_name(name: str) -> Optional[Connector]:
+    """
+    Fetch a single connector by name.
+
+    Returns the ORM object or None if not found.
+    """
+    return db_manager.get_connector_by_name(name)
+
+
 def get_connector_sync_status(connector_id: str) -> Optional[str]:
     """
-    Return the current sync_status string for a connector.
+    Return the current status string for a connector.
 
     Does a minimal SELECT — does not load the full row.
     Returns None if the connector does not exist.
@@ -1260,7 +1319,7 @@ def try_acquire_sync_lock(connector_id: str) -> bool:
     """
     Atomically acquire the sync lock for *connector_id*.
 
-    Sets sync_status='syncing' only when it is not already 'syncing'.
+    Sets status='syncing' only when it is not already 'syncing'.
     Returns True if the lock was acquired, False if already held (or not found).
     """
     return db_manager.try_acquire_sync_lock(connector_id)
@@ -1271,7 +1330,7 @@ def mark_sync_cancel_pending(connector_id: str) -> bool:
     Signal a running tick to cancel without deleting the connector.
 
     Sets connector_sync_logs.status='cancel pending' on the active sync-log row,
-    only when connectors.sync_status='syncing'.  The connector row itself stays
+    only when connectors.status='syncing'.  The connector row itself stays
     'syncing' until the tick's finalize_sync_log_and_update_connector() transitions it to 'out of sync'.
     Returns True if the signal was written (tick was running), False otherwise.
     """
@@ -1280,7 +1339,7 @@ def mark_sync_cancel_pending(connector_id: str) -> bool:
 
 def mark_connector_delete_pending(connector_id: str) -> bool:
     """
-    Set sync_status='delete pending' for the given connector regardless of
+    Set status='delete pending' for the given connector regardless of
     current status.
 
     Returns True if the connector was found and updated, False if it does
@@ -1292,6 +1351,17 @@ def mark_connector_delete_pending(connector_id: str) -> bool:
 def list_connectors() -> List[Connector]:
     """Return all connectors ordered by attached_at descending."""
     return db_manager.get_all_connectors()
+
+
+def list_connectors_paginated(
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[List[Connector], int]:
+    """Return paginated connectors ordered by attached_at descending.
+
+    Returns (items, total_count).
+    """
+    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset)
 
 
 def delete_active_connector(connector_id: str) -> bool:
@@ -1363,7 +1433,7 @@ def init_sync_log_and_update_connector(
     Initialise a new sync run across two tables:
       - connector_sync_log: inserts a new row with status=STARTED and an
         auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
-      - connector: sets sync_status=SYNCING on the matching row.
+      - connector: sets status=SYNCING on the matching row.
 
     Returns the generated seq value.
     """
@@ -1386,9 +1456,9 @@ def finalize_sync_log_and_update_connector(
     Finalize a sync run across two tables:
       - connector_sync_log: UPDATEs the matching row with status, finished_at,
         and optional file counts / error message.
-      - connector: UPDATEs last_sync_at to now, sync_status to the terminal
-        state, and error — CANCELLED/FAILED both map to OUT_OF_SYNC so the
-        scheduler can retry; COMPLETED clears error to NULL.
+      - connector: UPDATEs last_sync_at to now, status to the terminal
+        state, and message — CANCELLED/FAILED both map to OUT_OF_SYNC so
+        the scheduler can retry; COMPLETED clears message to NULL.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1405,28 +1475,30 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    connector_error = f"Error from last sync: {error}" if error else error
+    connector_message = f"Error from last sync: {error}" if error else None
     db_manager.update_connector_after_sync(
-        connector_id, status=status, last_sync_at=now, error=connector_error
+        connector_id, status=status, last_sync_at=now, message=connector_message
     )
     return True
 
 
-def update_connector_total_files(connector_id: str, total_files: int) -> None:
-    """Update the total_files count on the connectors table for *connector_id*."""
-    db_manager.update_connector(connector_id=connector_id, total_files=total_files)
+def update_connector_total_files_and_message(
+    connector_id: str, total_files: int, message: str
+) -> None:
+    """Update total_files and message on the connector row in a single DB call."""
+    db_manager.update_connector(connector_id=connector_id, total_files=total_files, message=message)
 
 
-def set_connector_error(connector_id: str, error: Optional[str]) -> None:
-    """Persist or clear an error message on the connector row (best-effort; logs on failure).
+def set_connector_message(connector_id: str, error: Optional[str]) -> None:
+    """Persist or clear a message on the connector row (best-effort; logs on failure).
 
-    Pass ``None`` to clear a previously set error.
+    Pass ``None`` to clear a previously set message.
     """
     try:
-        db_manager.update_connector(connector_id=connector_id, error=error)
+        db_manager.update_connector(connector_id=connector_id, message=error)
     except Exception as exc:
         logger.warning(
-            f"Could not persist error on connector {connector_id!r}: {exc}",
+            f"Could not persist message on connector {connector_id!r}: {exc}",
             exc_info=True,
         )
 
@@ -1450,6 +1522,15 @@ def update_sync_log(
         new_files=new_files,
         removed_files=removed_files,
     )
+
+
+def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
+    """
+    Atomically increment the completed_files counter on a sync-log row.
+
+    Returns True on success, False if the row was not found.
+    """
+    return db_manager.increment_completed_files(connector_id=connector_id, seq=seq, count=count)
 
 
 def list_sync_logs(
@@ -1491,7 +1572,7 @@ def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
 
 def reset_syncing_connectors(error: str = "Service restarted during sync tick") -> List[str]:
     """
-    Bulk-set sync_status='out of sync' for every connector currently stuck in
+    Bulk-set status='out of sync' for every connector currently stuck in
     'syncing', and stamp ``error`` with *error*.
     Returns the list of affected connector IDs.
     """

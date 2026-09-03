@@ -29,9 +29,12 @@ import (
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
+	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -217,7 +220,25 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
+// For remote workers the command is forwarded over the gRPC stream; the worker
+// resolves AI_SERVICES_BASE_DIR from its own environment to find the models
+// directory. For local deployments helpers.DownloadModelContainer is called
+// directly with the local models path.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
+	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		for modelName := range modelSet {
+			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
+			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
+				Model: modelName,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to download model %s: %w", modelName, err)
+			}
+		}
+
+		return nil
+	}
+
 	modelsPath := utils.GetModelsPath()
 
 	for modelName := range modelSet {
@@ -412,7 +433,7 @@ func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Com
 		return nil, nil, nil, fmt.Errorf("failed to load component from catalog: %w", err)
 	}
 
-	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
+	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component runtime metadata: %w", err)
 	}
@@ -606,7 +627,7 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	logger.InfofCtx(ctx, "Service %s loaded: %s\n", service.ID, service.Name)
 
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
-	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
+	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata: %w", err)
 	}
@@ -1074,7 +1095,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Registering routes for application '%s'\n", plan.ApplicationName)
 
-	domainSuffix, httpsPort, proxyManager, err := d.getCaddyConfiguration()
+	proxyManager, err := d.getProxyManager()
 	if err != nil {
 		return err
 	}
@@ -1086,7 +1107,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, proxyManager, domainSuffix, httpsPort, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, proxyManager, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1100,33 +1121,24 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
-// getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
-func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
-	// Get domain suffix from env var (set during catalog configure)
-	// This is pre-computed: certDomain OR customDomain OR hostIP.nip.io
-	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
-	if domainSuffix == "" {
-		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
+// getProxyManager returns the appropriate ProxyManager for this deployment.
+// domainSuffix and httpsPort are intentionally not returned — RegisterRoute
+// on the ProxyManager reads both from its own environment (local or worker)
+// so the correct values are always used regardless of where Caddy is running.
+func (d *PodmanDeployer) getProxyManager() (proxy.ProxyManager, error) {
+	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		return proxy.NewRemoteProxyManager(rt.Sender), nil
 	}
 
-	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
-
-	// Get Caddy proxy manager - fails if CADDY_ADMIN_URL not set
-	proxyManager, err := proxy.GetCaddyProxyManager()
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	return domainSuffix, httpsPort, proxyManager, nil
+	return proxy.GetCaddyProxyManager()
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
+// domainSuffix and httpsPort are resolved by RegisterRoute from the ProxyManager's own environment.
 func (d *PodmanDeployer) registerServiceRoutes(
 	ctx context.Context,
 	svc *ServicePlan,
 	proxyManager proxy.ProxyManager,
-	domainSuffix string,
-	httpsPort string,
 	registrationErrors *[]error,
 ) error {
 	var serviceEndpoints []map[string]any
@@ -1138,7 +1150,6 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			catalogconstants.CatalogAppName,
 			proxyManager,
 			routesAnnotation,
-			domainSuffix,
 			podName,
 		)
 		if err != nil {
@@ -1147,13 +1158,10 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			continue
 		}
 
-		// Convert registered routes to endpoint format using route type
 		for _, route := range registeredRoutes {
-			url := catalogutils.BuildExternalURL(route.Domain, httpsPort)
-
 			endpoint := map[string]any{
 				"type": route.Type,
-				"url":  url,
+				"url":  route.ExternalURL,
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
 		}

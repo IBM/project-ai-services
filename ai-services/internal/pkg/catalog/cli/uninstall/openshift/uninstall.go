@@ -8,6 +8,7 @@ import (
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	internalutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -63,16 +64,12 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 }
 
 func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (bool, error) {
-	if autoYes {
-		return true, nil
-	}
-
 	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return false, err
 	}
 
-	return utils.ConfirmDeletion(ctx, pods)
+	return internalutils.ConfirmUninstall(ctx, pods, autoYes)
 }
 
 // Made with Bob

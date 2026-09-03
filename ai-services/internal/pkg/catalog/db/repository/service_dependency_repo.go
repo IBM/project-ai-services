@@ -2,12 +2,38 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
+
+// LinkedServiceRow is the raw result of the service_dependencies → services → applications
+// join. It exposes all fetched columns so consumers can decide what to extract.
+// EndpointsJSON is the raw JSONB endpoints array from the services table; consumers are
+// responsible for parsing it to extract the URL they need.
+type LinkedServiceRow struct {
+	// ServiceID is the DB UUID of the linked service.
+	ServiceID uuid.UUID
+	// ServiceCatalogID is the catalog_id of the service itself (e.g. "digitize").
+	ServiceCatalogID string
+	// ApplicationID is the DB UUID of the application that owns the service.
+	ApplicationID uuid.UUID
+	// ApplicationName is the display name of the application.
+	ApplicationName string
+	// ApplicationCatalogID is the catalog_id of the owning application (e.g. "rag").
+	ApplicationCatalogID string
+	// ApplicationDeploymentType is the deployment_type of the owning application
+	// ("architectures" or "services"), used to resolve the display name from catalog metadata.
+	ApplicationDeploymentType string
+	// URL is the first api-type endpoint URL for this service (empty when none registered).
+	URL string
+	// EndpointsJSON is the raw JSONB value of the services.endpoints column.
+	// Consumers parse this to extract the endpoint URL relevant to their use case.
+	EndpointsJSON json.RawMessage
+}
 
 // ServiceDependencyRepository defines the interface for service dependency data operations.
 type ServiceDependencyRepository interface {
@@ -25,6 +51,11 @@ type ServiceDependencyRepository interface {
 	GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error)
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
+	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
+	// all rows matching dependencyID + dependencyType, returning the raw DB columns for each
+	// linked service. Consumers are responsible for extracting the specific endpoint URL they
+	// need from EndpointsJSON.
+	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -185,6 +216,45 @@ func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Cont
 	}
 
 	return nil
+}
+
+// GetLinkedServiceEndpoints joins service_dependencies → services → applications for all
+// rows where dependency_id = dependencyID AND dependency_type = dependencyType, returning
+// the raw DB columns for each linked service. Consumers parse EndpointsJSON to extract
+// the endpoint URL they need. A single query is issued regardless of how many services
+// are linked.
+func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error) {
+	query := `
+		SELECT sd.service_id, s.catalog_id, a.id, a.name, a.catalog_id, a.deployment_type, s.endpoints
+		FROM service_dependencies sd
+		INNER JOIN services     s ON s.id = sd.service_id
+		INNER JOIN applications a ON a.id = s.app_id
+		WHERE sd.dependency_id   = $1
+		  AND sd.dependency_type = $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyID, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query linked service endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var results []LinkedServiceRow
+	for rows.Next() {
+		var row LinkedServiceRow
+
+		if err := rows.Scan(&row.ServiceID, &row.ServiceCatalogID, &row.ApplicationID, &row.ApplicationName, &row.ApplicationCatalogID, &row.ApplicationDeploymentType, &row.EndpointsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan linked service row: %w", err)
+		}
+
+		results = append(results, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating linked service rows: %w", err)
+	}
+
+	return results, nil
 }
 
 // Made with Bob

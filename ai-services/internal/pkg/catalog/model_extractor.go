@@ -8,37 +8,56 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// GetCatalogModels collects all unique models from component schemas in a service or architecture template.
-// This is the main entry point for catalog-based model collection from CLI or API.
-// excludeComponentProviders is a variadic parameter that allows excluding specific components provider by ID.
+// GetArchitectureModels collects all unique models from component schemas across
+// every service in the given architecture.
 // Note: Only components have models in their schemas; services do not define models.
-func (p *CatalogProvider) GetCatalogModels(ctx context.Context, templateID string, excludeComponentProviders ...string) ([]string, error) {
+func (p *CatalogProvider) GetArchitectureModels(ctx context.Context, architectureID string, excludeComponentProviders ...string) ([]string, error) {
+	arch, err := p.LoadArchitecture(architectureID)
+	if err != nil {
+		return nil, fmt.Errorf("architecture '%s' not found: %w", architectureID, ErrCatalogItemNotFound)
+	}
+
 	allModels := make(map[string]bool)
-
-	// Try to load as architecture first
-	arch, err := p.LoadArchitecture(templateID)
-	if err == nil {
-		if err := p.collectArchitectureModels(ctx, arch.Services, allModels, excludeComponentProviders); err != nil {
-			return nil, err
-		}
-
-		return utils.ExtractMapKeys(allModels), nil
+	if err := p.collectArchitectureModels(ctx, arch.Services, allModels, excludeComponentProviders); err != nil {
+		return nil, err
 	}
 
-	// Try to load as service
-	service, err := p.LoadService(templateID)
-	if err == nil {
-		// Only collect component models (services don't have models in schemas)
-		if err := p.collectComponentsModels(ctx, service.Dependencies, allModels, excludeComponentProviders); err != nil {
-			return nil, err
-		}
+	return utils.ExtractMapKeys(allModels), nil
+}
 
-		return utils.ExtractMapKeys(allModels), nil
+// GetServiceModels collects all unique models from the component schemas of the
+// given service's dependencies.
+// Note: Only components have models in their schemas; services do not define models.
+func (p *CatalogProvider) GetServiceModels(ctx context.Context, serviceID string, excludeComponentProviders ...string) ([]string, error) {
+	service, err := p.LoadService(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("service '%s' not found: %w", serviceID, ErrCatalogItemNotFound)
 	}
 
-	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
+	allModels := make(map[string]bool)
+	if err := p.collectComponentsModels(ctx, service.Dependencies, allModels, excludeComponentProviders); err != nil {
+		return nil, err
+	}
+
+	return utils.ExtractMapKeys(allModels), nil
+}
+
+// GetCatalogModels collects all unique models for a template ID that may be
+// either a service or an architecture. It tries architecture first, then service.
+// Kept for CLI paths that do not know the type ahead of time.
+func (p *CatalogProvider) GetCatalogModels(ctx context.Context, templateID string, excludeComponentProviders ...string) ([]string, error) {
+	if models, err := p.GetArchitectureModels(ctx, templateID, excludeComponentProviders...); err == nil {
+		return models, nil
+	}
+
+	if models, err := p.GetServiceModels(ctx, templateID, excludeComponentProviders...); err == nil {
+		return models, nil
+	}
+
+	return nil, fmt.Errorf("template '%s' not found as service or architecture: %w", templateID, ErrCatalogItemNotFound)
 }
 
 // collectArchitectureModels collects models from all component dependencies across all services in an architecture.
@@ -111,7 +130,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 // For components, models are read from values.schema.json file using GetComponentProviderParams.
 func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType, componentID string, allModels map[string]bool) error {
 	// Use existing GetComponentProviderParams to load the schema
-	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID)
+	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID, string(vars.RuntimeFactory.GetRuntimeType()))
 	if err != nil {
 		return fmt.Errorf("failed to get component schema for %s/%s: %w", componentType, componentID, err)
 	}

@@ -1,4 +1,4 @@
-# IBM Cloud API MCP Server - Developer Guide
+# AI Services MCP Sidecar - Developer Guide
 
 ## 📋 Table of Contents
 - [Overview](#overview)
@@ -11,21 +11,23 @@
 - [Running the Application](#running-the-application)
   - [Building the Project](#building-the-project)
   - [Running Locally](#running-locally)
-  - [Running with Docker](#running-with-docker)
+  - [Running with Podman](#running-with-podman)
 - [Testing](#testing)
 - [Dependencies](#dependencies)
 
 ## Overview
 
-The IBM Cloud API MCP Server is a Go implementation of the Model Context Protocol (MCP) that dynamically generates tools from IBM Cloud OpenAPI specifications. It enables MCP clients to interact with IBM Cloud services through a standardized interface.
+The AI Services MCP Sidecar is a Go implementation of the Model Context Protocol (MCP) that dynamically generates tools from OpenAPI specifications. It runs as a second container inside each AI Services service pod, exposing the service's API as MCP tools that can be consumed by any MCP-compatible client.
 
 ### Key Features
 - Dynamic tool generation from OpenAPI specs
-- Multiple authentication methods (API Key, CLI, Token, Passthrough)
+- Multiple authentication methods (API Key, Token, Passthrough)
 - Support for both stdio and HTTP transports
-- Schema inspection capabilities
 - Tag-based tool filtering
 - Global query parameters and headers support
+- TLS skip-verify for self-signed or internal-CA endpoints
+- Rate limiting for HTTP transport (configurable via environment variables)
+- MCP client configuration output (`--config`)
 
 ## Architecture
 
@@ -64,14 +66,27 @@ The IBM Cloud API MCP Server is a Go implementation of the Model Context Protoco
                      │
                      ▼
 ┌──────────────────────────────────────────────────────────┐
-│                  IBM Cloud Services                      │
+│                  AI Services APIs                        │
 └──────────────────────────────────────────────────────────┘
 ```
+
+### Sidecar Deployment
+
+The sidecar runs as a second container inside each service pod — no new pod is created. Each service has a dedicated port:
+
+| Service    | Sidecar Port |
+|------------|-------------|
+| chatbot    | 5001        |
+| digitize   | 4002        |
+| summarize  | 6001        |
+| similarity | 7001        |
+
+Caddy automatically registers an `<service>-mcp.<app-domain>` route for each sidecar when an application is created, and removes it when the application is deleted.
 
 ## Project Structure
 
 ```
-go-api-mcp/
+mcp/
 ├── cmd/
 │   └── ai-services-mcp/
 │       └── main.go              # Application entry point & CLI
@@ -80,9 +95,7 @@ go-api-mcp/
 │   ├── authenticator/           # Authentication implementations
 │   │   ├── interface.go         # Authenticator interface
 │   │   ├── api_key.go           # API key authentication
-│   │   ├── cli.go               # IBM Cloud CLI authentication
 │   │   ├── env.go               # Environment variable auth
-│   │   ├── op.go                # 1Password integration
 │   │   ├── passthrough.go       # Passthrough authentication
 │   │   └── token.go             # Direct token authentication
 │   │
@@ -126,7 +139,6 @@ The main package provides:
 **Key Functions:**
 - `runServer()`: Main orchestration function
 - `createAuthenticator()`: Factory for authentication methods
-- `validateEndpoint()`: Ensures IBM Cloud endpoint format
 
 ### 2. OpenAPI Interface (`internal/openapi/`)
 
@@ -135,7 +147,6 @@ Processes OpenAPI specifications into usable operations:
 **interface.go:**
 - `NewInterface()`: Creates interface from OpenAPI document
 - `collectOperations()`: Extracts all API operations
-- `extractRegionServers()`: Parses regional endpoints
 
 **loader.go:**
 - Handles both local file and remote URL loading
@@ -161,14 +172,10 @@ Manages tool generation and execution:
 - Processes API responses
 - Uses modular schema building with `schemaBuilder` helper
 - Includes focused methods for different parameter types:
-  - `addServerRegionToSchema()`: Handles region parameters
   - `addPathParametersToSchema()`: Processes path parameters
   - `addQueryParametersToSchema()`: Manages query parameters
   - `addHeaderParametersToSchema()`: Handles header parameters
   - `addRequestBodyToSchema()`: Adds request body schemas
-- Pure helper functions:
-  - `extractRegions()`: Extracts region names
-  - `buildServerRegionSchema()`: Creates region selection schemas
 
 ### 4. Server Implementations (`internal/server/`)
 
@@ -181,7 +188,7 @@ Manages tool generation and execution:
 - Implements HTTP server with streamable transport
 - Creates MCP server once at startup (maintains single instance)
 - Includes CORS support for web clients
-- Provides health check endpoint
+- Provides health check endpoint at `/health`
 
 ### 5. Authentication System (`internal/authenticator/`)
 
@@ -191,26 +198,21 @@ Supports multiple authentication methods:
 - Direct API key usage
 - Exchanges key for IAM token
 
-**CLI** (`cli.go`):
-- Uses existing `ibmcloud` CLI session
-- Reads token from CLI configuration
-
 **Environment** (`env.go`):
 - Reads API key from environment variable
 - Format: `--auth-api-key $VAR_NAME`
 
-**1Password** (`op.go`):
-- Integrates with 1Password CLI
-- Format: `--auth-api-key op://vault/item/field`
-
 **Token** (`token.go`):
-- Direct IAM token usage
+- Direct token usage
 - No token refresh capability
 
 **Passthrough** (`passthrough.go`):
 - Client provides Authorization header
 - Forwarded verbatim to the upstream API, which validates it
 - Required for HTTP transport, and only usable with HTTP transport
+
+**Environment** note: `--auth-api-key` accepts `$VAR_NAME` syntax to read the API key from an
+environment variable at startup (and re-reads it on each token refresh).
 
 ## Authentication System
 
@@ -237,7 +239,7 @@ Auth mode and transport are not independent — each transport permits exactly o
 
 | Transport | Permitted auth | Rationale |
 |-----------|----------------|-----------|
-| Stdio (default) | `--auth-api-key`, `--auth-cli`, `--auth-token` | The server is a subprocess of a single trusted client, so a server-held credential is scoped to that user. |
+| Stdio (default) | `--auth-api-key`, `--auth-token` | The server is a subprocess of a single trusted client, so a server-held credential is scoped to that user. |
 | HTTP (`--http`) | `--auth-passthrough` only | The server does not authenticate incoming requests, so a server-held credential would be usable by any caller that can reach the port. |
 
 Any other combination is rejected at startup. In particular, `--auth-passthrough` cannot be used with
@@ -248,7 +250,6 @@ would fail.
 - Tokens are cached where appropriate
 - Automatic token refresh for API key auth
 - No credentials stored in memory longer than necessary
-- Support for external secret managers (1Password)
 - HTTP transport never holds a credential of its own; each caller is authorized individually by the upstream API
 
 ## Transport Modes
@@ -257,15 +258,18 @@ would fail.
 - Designed for desktop MCP clients
 - Persistent bidirectional communication
 - Maintains session state
-- Authenticates with a server-held credential (API key, CLI session, or token)
+- Authenticates with a server-held credential (API key or token)
 
 ### HTTP Transport
 - RESTful API interface
 - CORS-enabled for web clients
-- Session management via headers
+- Session management via `Mcp-Session-Id` header
 - Requires `--auth-passthrough`: each caller supplies its own Authorization header, which is
   forwarded to the upstream API for validation. The server holds no credential, so one instance
   can serve many users without any of them borrowing another's access.
+- Rate limiting per client IP (X-Forwarded-For aware), configurable via:
+  - `RATE_LIMIT_REQUESTS` — number of requests allowed per window (default: `20`)
+  - `RATE_LIMIT_PER_SECONDS` — window size in seconds (default: `60`)
 
 ## Tool Generation Pipeline
 
@@ -273,9 +277,10 @@ The tool generation follows this pipeline:
 
 1. **OpenAPI Loading** - Fetch and parse specification
 2. **Operation Extraction** - Identify all API operations
-3. **Parameter Analysis** - Process path/query/body parameters
-4. **Tool Creation** - Generate MCP tool definitions
-5. **Handler Registration** - Map tools to execution handlers
+3. **Tag Filtering** - Filter operations by `--tag` flag (e.g. `--tag similarity`)
+4. **Parameter Analysis** - Process path/query/body parameters
+5. **Tool Creation** - Generate MCP tool definitions
+6. **Handler Registration** - Map tools to execution handlers
 
 ## Running the Application
 
@@ -285,182 +290,166 @@ The tool generation follows this pipeline:
 # Install/update dependencies
 make install
 
-# Build the binary
+# Build the Go binary (native)
+make build-binary
+
+# Build the container image
 make build
 
 # Run the application with --help
 make run
+
+# Run linter
+make lint
+
+# Cross-compile for all supported platforms (darwin/amd64, darwin/arm64, linux/amd64, linux/ppc64le)
+make cross-compile
 ```
 
 ### Running Locally
 
+The sidecar needs an OpenAPI spec URL (`--description`) and the service base URL (`--endpoint`).
+In the pod templates these are wired to the service's own `/openapi.json` endpoint via Caddy.
+
+The default HTTP port is **3000**. The examples below use `-p 7001` to match the similarity sidecar port assignment.
+
+To output an MCP client-compatible configuration instead of starting the server, use `--config` (`-C`):
+
 ```bash
-# HTTP mode (requires --auth-passthrough)
 ./bin/ai-services-mcp \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
+  --description https://<service-url>/openapi.json \
+  --endpoint https://<service-url> \
+  --auth-api-key your-api-key-here \
+  --config
+```
+
+For endpoints with self-signed or internal-CA certificates, add `--tls-skip-verify`:
+
+```bash
+./bin/ai-services-mcp \
+  --description https://<service-url>/openapi.json \
+  --endpoint https://<service-url> \
+  --auth-api-key your-api-key-here \
+  --tls-skip-verify \
+  --tag similarity
+```
+
+**HTTP mode (used by the sidecar in pods):**
+
+```bash
+./bin/ai-services-mcp \
+  --description https://similarity-mcp-<id>.<domain>/openapi.json \
+  --endpoint https://similarity-mcp-<id>.<domain> \
   --auth-passthrough \
-  --query version=2025-07-01 \
+  --tag similarity \
   --http \
-  -p 3001
+  -p 7001
 ```
 
-Callers must supply their own IAM token on each request:
+Callers must supply their own Authorization header on each request:
 
 ```bash
-curl -X POST http://localhost:3001/mcp \
-  -H "Authorization: Bearer $(ibmcloud iam oauth-tokens --output json | jq -r .iam_token)" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+# Initialize session
+SESSION=$(curl -ski http://localhost:7001/mcp \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' \
+  2>&1 | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
+
+# List tools
+curl -s http://localhost:7001/mcp \
+  -X POST -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
+**Stdio mode (for local MCP clients):**
+
 ```bash
-# STDIO mode (server holds the credential)
 ./bin/ai-services-mcp \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
-  --query version=2025-07-01
+  --description https://<service-url>/openapi.json \
+  --endpoint https://<service-url> \
+  --auth-api-key your-api-key-here \
+  --tag similarity
 ```
 
-### Running with Docker
+### Running with Podman
 
-The project includes a multi-stage Dockerfile optimized for size and security.
+The project includes a multi-stage Containerfile optimized for size and security.
 
-#### Building the Docker Image
+#### Building the Container Image
 
 ```bash
-# Build the image
-docker build -t ai-services-mcp:latest .
+# Build the image (defaults to icr.io/ai-services-private/ai-services-mcp:v0.0.1)
+make build
 
-# Build with a specific tag
-docker build -t ai-services-mcp:v1.0.0 .
+# Build targeting the cicd registry
+make build REGISTRY=icr.io/ai-services-cicd
+
+# Push the image
+make push REGISTRY=icr.io/ai-services-cicd
 ```
 
 #### Running the Container
 
 HTTP mode requires `--auth-passthrough`, so the container never needs a credential of its own —
-each caller supplies its own Authorization header. The server-held credential options
-(`--auth-api-key`, `--auth-cli`, `--auth-token`) are stdio-only; see
-[Stdio Mode in Docker](#stdio-mode-in-docker) below.
+each caller supplies its own Authorization header.
 
-**Basic HTTP Mode (Recommended for Docker)**
+**HTTP Mode (matches sidecar pod configuration):**
 
 ```bash
-docker run -p 3000:3000 \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
+podman run -p 7001:7001 \
+  icr.io/ai-services-cicd/ai-services-mcp:v0.0.1 \
+  --description https://<service-url>/openapi.json \
+  --endpoint https://<service-url> \
   --auth-passthrough \
-  --query version=2025-07-01 \
-  --http
-```
-
-**With Local OpenAPI Specification**
-
-```bash
-# Mount local spec file
-docker run -p 3000:3000 \
-  -v /path/to/specs:/app/specs:ro \
-  ai-services-mcp:latest \
-  --description /app/specs/openapi.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-passthrough \
-  --query version=2025-07-01 \
-  --http
-```
-
-**Custom Port Configuration**
-
-```bash
-# Run on custom port (e.g., 8080)
-docker run -p 8080:8080 \
-  -e PORT=8080 \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-passthrough \
-  --query version=2025-07-01 \
+  --tag similarity \
   --http \
-  -p 8080
+  -p 7001
 ```
 
-#### Stdio Mode in Docker
+**With Local OpenAPI Specification:**
+
+```bash
+podman run -p 7001:7001 \
+  -v /path/to/specs:/app/specs:ro \
+  icr.io/ai-services-cicd/ai-services-mcp:v0.0.1 \
+  --description /app/specs/openapi.json \
+  --endpoint https://<service-url> \
+  --auth-passthrough \
+  --http \
+  -p 7001
+```
+
+#### Stdio Mode in Podman
 
 Stdio transport is where server-held credentials belong: the container is a subprocess of a single
 trusted client, so run it with `-i` and no published port.
 
-**Using Environment Variable for API Key**
-
 ```bash
-# Set API key in environment
-export IBMCLOUD_API_KEY=your-api-key-here
-
-# Run container
-docker run -i --rm \
-  -e IBMCLOUD_API_KEY \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-api-key '$IBMCLOUD_API_KEY' \
-  --query version=2025-07-01
+podman run -i --rm \
+  icr.io/ai-services-cicd/ai-services-mcp:v0.0.1 \
+  --description https://<service-url>/openapi.json \
+  --endpoint https://<service-url> \
+  --auth-api-key your-api-key-here \
+  --tag similarity
 ```
 
-**Using IBM Cloud CLI Authentication**
+#### Podman Image Details
 
-```bash
-# Mount IBM Cloud CLI config directory
-docker run -i --rm \
-  -v ~/.bluemix:/home/mcpuser/.bluemix:ro \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-cli \
-  --query version=2025-07-01
-```
-
-**Using Direct Token Authentication**
-
-```bash
-docker run -i --rm \
-  ai-services-mcp:latest \
-  --description https://cloud.ibm.com/apidocs/codeengine/v2.json \
-  --endpoint https://api.us-south.codeengine.cloud.ibm.com/v2 \
-  --auth-token your-iam-token-here \
-  --query version=2025-07-01
-```
-
-#### Docker Environment Variables
-
-The following environment variables can be configured:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | HTTP server port | `3000` |
-| `IAM_ENDPOINT` | IBM Cloud IAM endpoint | `https://iam.cloud.ibm.com/identity/keys` |
-| `IBMCLOUD_API_KEY` | IBM Cloud API key (for convenience) | - |
-| `RATE_LIMIT_REQUESTS` | Rate limit (requests per second) | System default |
-| `RATE_LIMIT_PER_SECONDS` | Rate burst limit | System default |
+- **Base Image**: UBI minimal (Red Hat Universal Base Image) — runtime stage uses `ubi9/ubi-minimal`
+- **User**: Runs as non-root (UID 1001)
+- **Security**: Minimal attack surface, no unnecessary packages
+- **Container architecture**: `linux/ppc64le` (built by the Containerfile; the Go binary can be cross-compiled for `linux/amd64` via `make cross-compile`)
 
 #### Health Check
 
-The container includes a health check that monitors the `/health` endpoint:
-
 ```bash
-# Check container health
-docker ps
+# Check container health via HTTP (requires --http flag)
+curl http://localhost:<port>/health
 
-# View health check logs
-docker inspect --format='{{json .State.Health}}' <container-id>
+# Check container status
+podman ps
 ```
-
-#### Docker Image Details
-
-- **Base Image**: Alpine Linux (minimal footprint)
-- **Size**: ~20-30 MB (optimized multi-stage build)
-- **User**: Runs as non-root user `mcpuser` (UID 1000)
-- **Security**: Minimal attack surface, no unnecessary packages
-- **Architecture**: Built for linux/amd64
 
 ## Testing
 
@@ -486,7 +475,7 @@ Core utilities and data structures:
 
 #### Core Functionality Tests
 Business logic and tool system:
-- **`internal/authenticator`** - All authentication methods (API Key, CLI, Token, 1Password, Environment, Passthrough)
+- **`internal/authenticator`** - All authentication methods (API Key, Token, Environment, Passthrough)
 - **`internal/tool`** - Tool aggregation, provider execution, schema building
 
 #### Application Tests
@@ -515,5 +504,7 @@ make clean-coverage
 Key dependencies from `go.mod`:
 - `github.com/modelcontextprotocol/go-sdk`: MCP protocol implementation
 - `github.com/pb33f/libopenapi`: OpenAPI parsing and processing
-- `github.com/IBM/go-sdk-core`: IBM Cloud SDK utilities
+- `github.com/IBM/go-sdk-core`: IAM token exchange for API key authentication
 - `github.com/spf13/cobra`: CLI framework
+- `github.com/google/jsonschema-go`: JSON Schema generation
+- `golang.org/x/time`: Token-bucket rate limiter for HTTP transport
