@@ -245,7 +245,7 @@ const DeploymentDetails = ({
                 service.type.charAt(0).toUpperCase() + service.type.slice(1),
               description: serviceDescription,
               baseURL: uiEndpoint?.url || apiEndpoint?.url || "",
-              apiDocumentaion: apiEndpoint?.url
+              apiDocumentation: apiEndpoint?.url
                 ? `${apiEndpoint.url}/docs`
                 : "",
               interactiveAPIs: service.endpoints
@@ -789,7 +789,7 @@ const DeploymentDetails = ({
                             </span>
                           </div>
 
-                          {integrationEndpointsData.apiDocumentaion && (
+                          {integrationEndpointsData.apiDocumentation && (
                             <div className={styles.integrationEndpointField}>
                               <span
                                 className={
@@ -805,12 +805,12 @@ const DeploymentDetails = ({
                               >
                                 <a
                                   href={
-                                    integrationEndpointsData.apiDocumentaion
+                                    integrationEndpointsData.apiDocumentation
                                   }
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  {integrationEndpointsData.apiDocumentaion}
+                                  {integrationEndpointsData.apiDocumentation}
                                 </a>
                               </span>
                             </div>

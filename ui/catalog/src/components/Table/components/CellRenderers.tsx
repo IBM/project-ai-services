@@ -56,6 +56,22 @@ export const STATUS_CONFIG = {
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
+  // ── Worker statuses ──────────────────────────────────────────────────────────
+  ready: {
+    tagType: "green" as const,
+    icon: CheckmarkFilled,
+    className: sharedStyles.statusTagSuccess,
+  },
+  pending: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: sharedStyles.statusTagInfo,
+  },
+  disconnected: {
+    tagType: "red" as const,
+    icon: ErrorFilled,
+    className: sharedStyles.statusTagError,
+  },
 } as const;
 
 const DEFAULT_STATUS_CONFIG = {
