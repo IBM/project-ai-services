@@ -41,7 +41,6 @@ from pydantic import ValidationError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
 from digitize.connectors.scanners.scanner_factory import build_scanner
-from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
 from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
@@ -60,7 +59,11 @@ from digitize.utils.db import (
     update_sync_log,
 )
 from digitize.db.models import JobSource
-from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
+from digitize.utils.jobs import (
+    generate_uuid,
+    get_job_document_stats,
+    initialize_and_launch,
+)
 
 logger = get_logger("sync_tick")
 
@@ -391,23 +394,31 @@ async def _process_new_files(
 
             filenames = list(filename_to_checksum.keys())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
-            doc_id_dict = initialize_job_state(
+
+            # Steps 7, 8 & 9: create DB rows, enqueue tasks, launch pipeline.
+            # quota=0 / queued_for_op=0: connector tasks bypass user quota.
+            # file_checksum_dict omitted: connectors register checksums via
+            # add_connector_checksum_entry after the job completes.
+            doc_id_dict = await initialize_and_launch(
                 job_id=job_id,
                 operation=OperationType.INGESTION,
                 output_format=OutputFormat.JSON,
-                documents_info=filenames,
+                filenames=filenames,
+                staging_dir=batch_dir,
+                quota=0,
+                queued_for_op=0,
                 job_name=job_name,
                 source=JobSource.CONNECTOR,
+                connector_id=connector_id,
             )
 
-            # doc_id → checksum: built from doc_id_dict (filename→doc_id) + filename_to_checksum
+            # doc_id → checksum: used after job completes to register
+            # connector checksum entries via add_connector_checksum_entry.
             doc_id_to_checksum: dict[str, str] = {
                 doc_id: filename_to_checksum[filename]
                 for filename, doc_id in doc_id_dict.items()
                 if filename in filename_to_checksum
             }
-
-            await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
             await _wait_for_job(job_id, connector_id, sync_seq)
 
@@ -504,6 +515,15 @@ async def _handle_interrupt(
     elif interrupt_type == InterruptType.DELETE_CONNECTOR:
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
+        # Purge conversion tasks the tick may have enqueued before being interrupted.
+        # Must happen here (Case A only) — _run_teardown is shared with Case B where
+        # no tick was running so no in-flight tasks exist to purge.
+        from digitize.db.manager import db_manager
+        deleted_tasks = db_manager.delete_conversion_tasks_for_connector(connector_id)
+        if deleted_tasks:
+            logger.info(
+                f"Purged {deleted_tasks} queued conversion task(s) for connector {connector_id!r}"
+            )
         # Run full teardown: remove checksums, delete orphaned docs, delete connector row
         from digitize.api.v1.connectors import _run_teardown
         await _run_teardown(connector_id)

@@ -163,7 +163,7 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
     monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
     monkeypatch.setattr(jobs_router_module, "_run_digitize", Mock())
-    monkeypatch.setattr(jobs_router_module, "_run_ingest", Mock())
+    monkeypatch.setattr(digitize_app.dg_util, "initialize_and_launch", AsyncMock(return_value={"sample.pdf": "doc-1"}))
 
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
     monkeypatch.setattr(documents_router_module, "reset_db", Mock())

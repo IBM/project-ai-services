@@ -1,40 +1,33 @@
 """
-Conversion dispatcher — round-robin Docling conversion queue.
+Conversion dispatcher — 3-turn fair round-robin Docling conversion queue.
 
 A single long-running asyncio task (started in app.py lifespan) that
 polls the ``conversion_tasks`` table every ``conversion_poll_interval``
-seconds and drives at most one task per operation type per tick.
+seconds and dispatches at most one task per tick.
 
-Round-robin pick strategy
---------------------------
-On each poll tick the dispatcher alternates between operation types —
-it claims one ingestion task and one digitization task per iteration
-(subject to semaphore capacity), then loops.  This prevents a large
-ingestion batch from starving waiting digitization tasks.
+Scheduling
+----------
+Three logical lanes are served in a fixed cycle:
 
-Head-of-line blocking
-----------------------
-If the oldest queued task for an operation needs more capacity (weight)
-than is currently available, the dispatcher skips that operation *and*
-reserves those units — it does NOT hand them to the other operation.
-This prevents indefinite starvation of large files.
+  Turn 0 — U-ING : user ingestion
+  Turn 1 — U-DIG : user digitization
+  Turn 2 — C-ING : connector ingestion (round-robin across connectors)
 
-The reservation only applies when the other queue's head is itself a
-large task (needed > 1).  A normal task (needed=1) can always fit into
-whatever slots remain, so no pre-reservation is needed for it.
+This gives user lanes 2 out of every 3 dispatch opportunities and
+connector lanes 1 out of 3, with no lane ever starving.
 
-  second_reservation = second_needed if second_needed > 1 else 0
-  budget_for_first   = available - second_reservation
+Turn advancement
+----------------
+The turn advances when a task was claimed OR the queue was empty.
+It holds only when the head task exists but its weight exceeds available slots (HOL).
 
-  first_reservation  = first_needed if first_needed > 1 else 0
-  budget_for_second  = available_after_first - first_reservation
+- Task claimed (dispatched)           → advance
+- Queue empty for the lane            → advance (nothing to wait for; move on)
+- HOL-blocked (head weight > avail)   → hold — retry same lane next tick
 
-Example: first=ING-large(2), second=DIG-normal(1), available=2
-  Old (wrong): budget_for_first = max(0, 2-1) = 1  large ING blocked despite having room
-  New (fixed): budget_for_first = max(0, 2-0) = 2  large ING dispatched correctly
-
-Example: first=ING-normal(1), second=DIG-large(2), available=2
-  budget_for_first = max(0, 2-2) = 0  ING normal held back, both slots preserved for DIG large
+"Advance on empty" is critical: if a lane has nothing queued, holding its
+turn would starve the other lanes indefinitely.  HOL-hold is intentionally
+narrower — only fires when a real task is blocked on semaphore capacity.
 """
 
 import asyncio
@@ -51,8 +44,10 @@ from digitize.workers.conversion_semaphore import conversion_semaphore
 
 logger = get_logger("conversion_dispatcher")
 
-# Round-robin state — alternates each tick when a task was successfully claimed.
-_rr_turn: str = "ingestion"
+# 3-turn round-robin state.
+# _op_turn advances only when the current lane is not HOL-blocked.
+_op_turn: int = 0             # 0 = U-ING  1 = U-DIG  2 = C-ING
+_connector_rr_index: int = 0  # index into the live connector list for turn 2
 
 # Process pool — created lazily inside dispatch_loop() so worker processes are
 # not spawned on module import (which would affect test collection, CLI tools,
@@ -60,26 +55,32 @@ _rr_turn: str = "ingestion"
 _process_pool: ProcessPoolExecutor | None = None
 
 
-def _other(op: str) -> str:
-    return "digitization" if op == "ingestion" else "ingestion"
-
-
-def _try_claim_if_fits(operation: str, available: int) -> ConversionTask | None:
+def _try_claim_if_fits(
+    operation: str,
+    available: int,
+    connector_id: str | None = None,
+) -> tuple[ConversionTask | None, bool]:
     """
-    Peek at the head of ``operation``'s queue.  If it fits within
+    Peek at the head of the queue for ``operation`` (scoped to
+    ``connector_id`` when given).  If the head task fits within
     ``available`` semaphore units, atomically claim and return it.
-    Otherwise return None (head-of-line blocking — nothing behind it
-    is attempted).
+
+    Returns
+    -------
+    (task, hol_blocked)
+        task        — the claimed ConversionTask, or None if not dispatched.
+        hol_blocked — True when a head task exists but its weight exceeds
+                      ``available``.  False when the queue is empty or the
+                      task was claimed successfully.
     """
-    head = db_manager.peek_head(operation)
+    head = db_manager.peek_head(operation, connector_id=connector_id)
     if head is None:
-        return None  # nothing queued for this type
+        return None, False  # empty queue — not HOL-blocked
 
-    needed = 2 if head.is_large else 1
-    if needed > available:
-        return None  # head can't run yet — hold the line
+    if (2 if head.is_large else 1) > available:
+        return None, True   # head can't run yet — HOL-blocked
 
-    return db_manager.claim_head(operation)
+    return db_manager.claim_head(operation, connector_id=connector_id), False
 
 async def _run_conversion(task: ConversionTask, weight: int) -> None:
     """
@@ -135,6 +136,18 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         await conversion_semaphore.release(weight)
 
 
+async def _dispatch_one(task: ConversionTask) -> None:
+    """Acquire a semaphore slot and fire the conversion coroutine."""
+    weight = 2 if task.is_large else 1
+    await conversion_semaphore.acquire(weight)
+    asyncio.create_task(_run_conversion(task, weight))
+    logger.debug(
+        f"Dispatched task {task.task_id} "
+        f"(op={task.operation}, file={Path(task.cached_file).name}, weight={weight}, "
+        f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity})"
+    )
+
+
 async def dispatch_loop() -> None:
     """
     Long-running coroutine that polls the DB and dispatches conversion tasks.
@@ -143,82 +156,47 @@ async def dispatch_loop() -> None:
     The process pool is created here (not at module import) so worker
     processes are only spawned when the dispatcher actually starts.
     """
-    global _rr_turn, _process_pool
+    global _op_turn, _connector_rr_index, _process_pool
 
-    # Initialise the pool on first entry.  max_workers == semaphore capacity
-    # so a worker process is always immediately available when the semaphore
-    # grants a slot — no internal queuing in the pool.
     _process_pool = ProcessPoolExecutor(
         max_workers=conversion_semaphore.capacity  # default 4
     )
     logger.info(
-        f"Conversion dispatcher started "
-        f"(pool workers={conversion_semaphore.capacity})"
+        f"Conversion dispatcher started (pool workers={conversion_semaphore.capacity})"
     )
 
     try:
         while True:
             try:
                 available = conversion_semaphore.available
-                if available > 0:
-                    first, second = _rr_turn, _other(_rr_turn)
 
-                    # Peek at both heads up-front so each queue's budget can account
-                    # for the other queue's pending weight requirement.
-                    first_head  = db_manager.peek_head(first)
-                    second_head = db_manager.peek_head(second)
-                    first_needed  = (2 if first_head.is_large  else 1) if first_head  else 0
-                    second_needed = (2 if second_head.is_large else 1) if second_head else 0
+                hol_blocked = False
 
-                    # Only reserve capacity for second's head when it is a large task
-                    # (needed > 1).  A normal task (needed=1) can always fit into
-                    # whatever remains after first runs — pre-reserving for it would
-                    # wrongly block a large first task that has exactly enough room now.
-                    second_reservation = second_needed if second_needed > 1 else 0
-                    budget_for_first = max(0, available - second_reservation)
-                    first_task = _try_claim_if_fits(first, budget_for_first)
-                    if first_task:
-                        weight = 2 if first_task.is_large else 1
-                        await conversion_semaphore.acquire(weight)
-                        asyncio.create_task(_run_conversion(first_task, weight))
-                        queued_counts = db_manager.get_queued_counts()
-                        logger.debug(
-                            f"Dispatched {first} task {first_task.task_id} "
-                            f"(file={Path(first_task.cached_file).name}, weight={weight}, "
-                            f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
-                            f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
-                        )
+                if _op_turn == 0:                        # ── Turn 0: User Ingestion ──
+                    task, hol_blocked = _try_claim_if_fits("ingestion", available)
+                    if task:
+                        await _dispatch_one(task)
 
-                    # Re-read available after first may have acquired slots.
-                    # Using the stale pre-acquire value would give second too generous
-                    # a budget on the tick where first finally dispatches (e.g. large
-                    # ING acquires weight=2, available drops from 2→0, but stale
-                    # available=2 would yield budget_for_second=0 by coincidence only
-                    # when first_needed==available; for other values it over-grants).
-                    available_after_first = conversion_semaphore.available
+                elif _op_turn == 1:                      # ── Turn 1: User Digitization ──
+                    task, hol_blocked = _try_claim_if_fits("digitization", available)
+                    if task:
+                        await _dispatch_one(task)
 
-                    # Same rule for second: only reserve if first's head is large.
-                    first_reservation = first_needed if first_needed > 1 else 0
-                    budget_for_second = max(0, available_after_first - first_reservation)
-                    second_task = _try_claim_if_fits(second, budget_for_second)
-                    if second_task:
-                        weight = 2 if second_task.is_large else 1
-                        await conversion_semaphore.acquire(weight)
-                        asyncio.create_task(_run_conversion(second_task, weight))
-                        queued_counts = db_manager.get_queued_counts()
-                        logger.debug(
-                            f"Dispatched {second} task {second_task.task_id} "
-                            f"(file={Path(second_task.cached_file).name}, weight={weight}, "
-                            f"semaphore={conversion_semaphore.available}/{conversion_semaphore.capacity}, "
-                            f"queued ingestion={queued_counts['ingestion']}, queued digitization={queued_counts['digitization']})"
-                        )
+                else:                                    # ── Turn 2: Connector Ingestion ──
+                    cids = db_manager.get_connector_ids_with_queued_tasks()
+                    if cids:
+                        cid = cids[_connector_rr_index % len(cids)]
+                        task, hol_blocked = _try_claim_if_fits("ingestion", available, connector_id=cid)
+                        if task:
+                            await _dispatch_one(task)
+                            _connector_rr_index = (_connector_rr_index + 1) % len(cids)
 
-                    # Advance turn only when first was successfully claimed.
-                    if first_task:
-                        _rr_turn = second
+                if not hol_blocked:
+                    _op_turn = (_op_turn + 1) % 3        # advance only when not HOL-blocked
 
-                # After each tick, promote pending → queued to backfill quota headroom.
-                db_manager.promote_pending("ingestion", settings.digitize.ingestion_queue_quota)
+                # Promote pending → queued for user lanes only.
+                # Connector tasks are always inserted as 'queued' — no promote needed.
+                db_manager.promote_pending("ingestion",    settings.digitize.ingestion_queue_quota)
                 db_manager.promote_pending("digitization", settings.digitize.digitization_queue_quota)
 
             except asyncio.CancelledError:

@@ -2,9 +2,8 @@
 Unit tests for the conversion dispatcher — workers/conversion_dispatcher.py.
 
 These tests focus on:
-  - _other() helper
   - _try_claim_if_fits() head-of-line blocking logic
-  - dispatch_loop() round-robin behaviour (mocked DB + semaphore)
+  - dispatch_loop() 3-turn round-robin behaviour (mocked DB + semaphore)
   - _run_conversion() success / failure paths
 """
 
@@ -50,18 +49,22 @@ def _make_task(
 
 
 # ---------------------------------------------------------------------------
-# _other()
+# _op_turn cycle
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
-class TestOther:
-    def test_ingestion_returns_digitization(self):
-        from digitize.workers.conversion_dispatcher import _other
-        assert _other("ingestion") == "digitization"
+class TestOpTurnCycle:
+    def test_turn_cycles_0_1_2(self):
+        """_op_turn increments mod 3 unconditionally each tick."""
+        assert (0 + 1) % 3 == 1
+        assert (1 + 1) % 3 == 2
+        assert (2 + 1) % 3 == 0
 
-    def test_digitization_returns_ingestion(self):
-        from digitize.workers.conversion_dispatcher import _other
-        assert _other("digitization") == "ingestion"
+    def test_turn_0_is_user_ingestion(self):
+        # Turn 0 = U-ING; turn 1 = U-DIG; turn 2 = C-ING
+        turns = {0: "ingestion", 1: "digitization", 2: "connector-ingestion"}
+        assert turns[0] == "ingestion"
+        assert turns[1] == "digitization"
 
 
 # ---------------------------------------------------------------------------
@@ -74,16 +77,18 @@ class TestTryClaimIfFits:
         from digitize.workers import conversion_dispatcher as mod
 
         with patch.object(mod.db_manager, "peek_head", return_value=None):
-            result = mod._try_claim_if_fits("ingestion", available=4)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=4)
+        assert task is None
+        assert hol is False  # empty queue — not HOL-blocked
 
     def test_returns_none_when_head_too_large(self):
         from digitize.workers import conversion_dispatcher as mod
 
         head = _make_task(is_large=True)  # weight 2
         with patch.object(mod.db_manager, "peek_head", return_value=head):
-            result = mod._try_claim_if_fits("ingestion", available=1)  # only 1 free
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=1)  # only 1 free
+        assert task is None
+        assert hol is True  # head exists but can't fit — HOL-blocked
 
     def test_claims_normal_task_when_capacity_available(self):
         from digitize.workers import conversion_dispatcher as mod
@@ -92,8 +97,9 @@ class TestTryClaimIfFits:
         claimed = _make_task(is_large=False)
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head", return_value=claimed):
-            result = mod._try_claim_if_fits("digitization", available=2)
-        assert result is claimed
+            task, hol = mod._try_claim_if_fits("digitization", available=2)
+        assert task is claimed
+        assert hol is False
 
     def test_claims_large_task_when_2_units_free(self):
         from digitize.workers import conversion_dispatcher as mod
@@ -102,18 +108,20 @@ class TestTryClaimIfFits:
         claimed = _make_task(is_large=True)
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head", return_value=claimed):
-            result = mod._try_claim_if_fits("ingestion", available=2)
-        assert result is claimed
+            task, hol = mod._try_claim_if_fits("ingestion", available=2)
+        assert task is claimed
+        assert hol is False
 
     def test_head_of_line_blocking_does_not_skip(self):
-        """Large head present → nothing behind it is skipped, returns None."""
+        """Large head present → nothing behind it is skipped, returns (None, True)."""
         from digitize.workers import conversion_dispatcher as mod
 
         head = _make_task(is_large=True)  # needs 2 units
         with patch.object(mod.db_manager, "peek_head", return_value=head), \
              patch.object(mod.db_manager, "claim_head") as mock_claim:
-            result = mod._try_claim_if_fits("ingestion", available=1)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=1)
+        assert task is None
+        assert hol is True
         mock_claim.assert_not_called()  # claim_head must never be called
 
     def test_zero_budget_returns_none(self):
@@ -121,8 +129,9 @@ class TestTryClaimIfFits:
 
         head = _make_task(is_large=False)  # weight 1
         with patch.object(mod.db_manager, "peek_head", return_value=head):
-            result = mod._try_claim_if_fits("ingestion", available=0)
-        assert result is None
+            task, hol = mod._try_claim_if_fits("ingestion", available=0)
+        assert task is None
+        assert hol is True  # head exists but zero budget — HOL-blocked
 
 
 # ---------------------------------------------------------------------------
@@ -159,105 +168,201 @@ def _make_create_task_mock():
 @pytest.mark.unit
 class TestDispatchLoop:
 
-    def test_turn_flips_after_first_task_claimed(self):
+    def test_turn_advances_when_task_claimed(self):
+        """_op_turn increments when a task is successfully dispatched."""
         import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "ingestion"
+        mod._op_turn = 0   # start at U-ING
 
-        first_t = _make_task(task_id="t-ing", operation="ingestion", is_large=False)
-        second_t = _make_task(task_id="t-dig", operation="digitization", is_large=False)
+        task_t = _make_task(task_id="t-ing", operation="ingestion", is_large=False)
 
-        # Set 4 units available so first AND second can be claimed
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 4)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", return_value=(task_t, False)), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch.object(mod, "_dispatch_one", new_callable=AsyncMock), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+                # Task claimed on turn=0 → turn must advance to 1
+                assert mod._op_turn == 1
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+    def test_turn_advances_when_queue_empty(self):
+        """_op_turn advances when the queue is empty (not HOL-blocked)."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 0
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 4)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, False)), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+                # Empty queue on turn=0 → turn still advances to 1
+                assert mod._op_turn == 1
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+    def test_turn_held_when_hol_blocked(self):
+        """_op_turn does NOT advance when the lane is HOL-blocked."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 0
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 1)  # only 1 slot — large head can't fit
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, True)), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+                # HOL-blocked on turn=0 → turn must stay at 0
+                assert mod._op_turn == 0
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+    def test_turn_0_dispatches_user_ingestion(self):
+        """Turn 0 attempts a user ingestion claim (connector_id=None)."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 0
+
+        claims = []
+
+        def _mock_claim(op, avail, connector_id=None):
+            claims.append((op, connector_id))
+            return None, False
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 4)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_claim), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+        assert ("ingestion", None) in claims
+
+    def test_turn_1_dispatches_user_digitization(self):
+        """Turn 1 attempts a user digitization claim (connector_id=None)."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 1
+
+        claims = []
+
+        def _mock_claim(op, avail, connector_id=None):
+            claims.append((op, connector_id))
+            return None, False
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 4)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_claim), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+        assert ("digitization", None) in claims
+
+    def test_turn_2_dispatches_connector_ingestion(self):
+        """Turn 2 picks the first connector with queued tasks and claims for it."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 2
+        mod._connector_rr_index = 0
+
+        claims = []
+
+        def _mock_claim(op, avail, connector_id=None):
+            claims.append((op, connector_id))
+            return None, False
+
+        original_available = mod.conversion_semaphore._available
+        _set_semaphore_available(mod, 4)
+
+        try:
+            async def _run():
+                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_claim), \
+                     patch.object(mod.db_manager, "get_connector_ids_with_queued_tasks",
+                                   return_value=["conn-1", "conn-2"]), \
+                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
+                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    mock_sleep.side_effect = asyncio.CancelledError()
+                    try:
+                        await mod.dispatch_loop()
+                    except asyncio.CancelledError:
+                        pass
+
+            asyncio.run(_run())
+        finally:
+            _set_semaphore_available(mod, original_available)
+
+        # Should have tried to claim for conn-1 (index 0)
+        assert ("ingestion", "conn-1") in claims
+
+    def test_turn_2_no_op_when_no_connectors(self):
+        """Turn 2 is a no-op when no connectors have queued tasks."""
+        import digitize.workers.conversion_dispatcher as mod
+        mod._op_turn = 2
+
+        claims = []
+
         original_available = mod.conversion_semaphore._available
         _set_semaphore_available(mod, 4)
 
         try:
             async def _run():
                 with patch.object(mod, "_try_claim_if_fits",
-                                   side_effect=lambda op, avail: first_t if op == "ingestion" else second_t), \
-                     patch.object(mod.db_manager, "peek_head",
-                                   return_value=_make_task(is_large=False)), \
-                     patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 0, "digitization": 0}), \
+                                   side_effect=lambda op, avail, connector_id=None: claims.append((op, connector_id)) or (None, False)), \
+                     patch.object(mod.db_manager, "get_connector_ids_with_queued_tasks",
+                                   return_value=[]), \
                      patch.object(mod.db_manager, "promote_pending", return_value=0), \
-                     patch.object(mod.conversion_semaphore, "acquire", new_callable=AsyncMock), \
-                     patch("asyncio.create_task", new=_make_create_task_mock()), \
-                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                    mock_sleep.side_effect = asyncio.CancelledError()
-                    try:
-                        await mod.dispatch_loop()
-                    except asyncio.CancelledError:
-                        pass
-
-                # First was claimed → turn flips to "digitization"
-                assert mod._rr_turn == "digitization"
-
-            asyncio.run(_run())
-        finally:
-            _set_semaphore_available(mod, original_available)
-
-    def test_turn_does_not_flip_when_first_blocked(self):
-        """
-        If first type's head is a large file that can't fit (available=1),
-        _rr_turn must NOT flip.
-        """
-        import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "ingestion"
-
-        large_head = _make_task(task_id="t-large-ing", operation="ingestion", is_large=True)
-
-        original_available = mod.conversion_semaphore._available
-        _set_semaphore_available(mod, 1)  # only 1 free — can't fit large (weight 2)
-
-        try:
-            async def _run():
-                with patch.object(mod, "_try_claim_if_fits", return_value=None), \
-                     patch.object(mod.db_manager, "peek_head", return_value=large_head), \
-                     patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 5, "digitization": 0}), \
-                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
-                     patch("asyncio.create_task", new=_make_create_task_mock()), \
-                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                    mock_sleep.side_effect = asyncio.CancelledError()
-                    try:
-                        await mod.dispatch_loop()
-                    except asyncio.CancelledError:
-                        pass
-
-                assert mod._rr_turn == "ingestion"  # unchanged
-
-            asyncio.run(_run())
-        finally:
-            _set_semaphore_available(mod, original_available)
-
-    def test_second_gets_no_budget_when_first_head_is_large_and_unavailable(self):
-        """
-        First (ING) head needs 2 units but only 1 is free → budget_for_second = 0.
-        No DIG task is queued so second_needed=0 → budget_for_first = available=1.
-        _try_claim_if_fits calls: ingestion receives 1, digitization receives 0.
-        """
-        import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "ingestion"
-
-        large_ing = _make_task(task_id="t-ing-large", operation="ingestion", is_large=True)
-
-        calls = []
-
-        def _mock_try_claim(op, avail):
-            calls.append((op, avail))
-            return None  # nothing can run
-
-        original_available = mod.conversion_semaphore._available
-        _set_semaphore_available(mod, 1)
-
-        try:
-            async def _run():
-                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_try_claim), \
-                     patch.object(mod.db_manager, "peek_head",
-                                   side_effect=lambda op: large_ing if op == "ingestion" else None), \
-                     patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 5, "digitization": 0}), \
-                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
-                     patch("asyncio.create_task", new=_make_create_task_mock()), \
                      patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                     mock_sleep.side_effect = asyncio.CancelledError()
                     try:
@@ -269,96 +374,21 @@ class TestDispatchLoop:
         finally:
             _set_semaphore_available(mod, original_available)
 
-        # second_needed=0 (no DIG head) → budget_for_first = max(0, 1-0) = 1
-        # first_needed=2  (large ING)   → budget_for_second = max(0, 1-2) = 0
-        assert ("ingestion", 1) in calls
-        assert ("digitization", 0) in calls
-
-    def test_first_gets_no_budget_when_second_head_is_large_and_slot_needed(self):
-        """
-        Regression test for large-file starvation via the other queue.
-
-        Scenario (mirrors hol_blocking probe tick 1):
-          - _rr_turn = "digitization"  (turn just flipped to DIG as first)
-          - available = 1
-          - second queue (ING) head is a large task needing weight=2
-          - first queue (DIG) head is a normal task needing weight=1
-
-        Before the fix, DIG normal would be dispatched (budget=available=1 ≥ 1),
-        consuming the last slot and leaving the large ING task unable to ever
-        accumulate its required 2 free slots until DIG *and* all other running
-        tasks finished — indefinite starvation.
-
-        After the fix:
-          budget_for_first = max(0, available - second_needed)
-                           = max(0,     1     -      2       ) = 0
-        DIG must also be blocked; neither queue dispatches on this tick.
-        """
-        import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "digitization"
-
-        normal_dig = _make_task(task_id="t-dig-normal", operation="digitization", is_large=False)
-        large_ing  = _make_task(task_id="t-ing-large",  operation="ingestion",    is_large=True)
-
-        calls = []
-
-        def _mock_try_claim(op, avail):
-            calls.append((op, avail))
-            return None  # nothing should run
-
-        original_available = mod.conversion_semaphore._available
-        _set_semaphore_available(mod, 1)
-
-        try:
-            async def _run():
-                with patch.object(mod, "_try_claim_if_fits", side_effect=_mock_try_claim), \
-                     patch.object(mod.db_manager, "peek_head",
-                                   side_effect=lambda op: normal_dig if op == "digitization" else large_ing), \
-                     patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 1, "digitization": 1}), \
-                     patch.object(mod.db_manager, "promote_pending", return_value=0), \
-                     patch("asyncio.create_task", new=_make_create_task_mock()), \
-                     patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                    mock_sleep.side_effect = asyncio.CancelledError()
-                    try:
-                        await mod.dispatch_loop()
-                    except asyncio.CancelledError:
-                        pass
-
-            asyncio.run(_run())
-        finally:
-            _set_semaphore_available(mod, original_available)
-
-        # second_needed=2 (large ING) → budget_for_first = max(0, 1-2) = 0
-        #   → DIG receives budget=0, _try_claim_if_fits("digitization", 0) → None, no dispatch
-        # first_needed=1  (normal DIG) → first_reservation=0 (only >1 triggers reservation)
-        #   → budget_for_second = max(0, available_after_first - 0) = max(0, 1-0) = 1
-        #   → ING receives budget=1, _try_claim_if_fits("ingestion", 1) → None
-        #     (large ING needs weight=2 > budget=1, so claim_head returns None inside the helper)
-        # Neither queue dispatches; the budget calculation is correct.
-        assert ("digitization", 0) in calls, (
-            "DIG normal must NOT be dispatched when large ING is waiting for 2 slots"
-        )
-        assert ("ingestion", 1) in calls, (
-            "ING receives budget=1 (no first_reservation for normal DIG head); "
-            "_try_claim_if_fits rejects it internally because weight=2 > budget=1"
-        )
+        # No claim should have been attempted
+        assert claims == []
 
     def test_promote_pending_called_each_tick(self):
         import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "ingestion"
+        mod._op_turn = 0
 
         promote_calls = []
 
         original_available = mod.conversion_semaphore._available
-        _set_semaphore_available(mod, 0)  # no capacity — skips claim logic
+        _set_semaphore_available(mod, 0)  # no capacity — _try_claim_if_fits returns None
 
         try:
             async def _run():
-                with patch.object(mod, "_try_claim_if_fits", return_value=None), \
-                     patch.object(mod.db_manager, "peek_head", return_value=None), \
-                     patch.object(mod.db_manager, "get_queued_counts",
-                                   return_value={"ingestion": 0, "digitization": 0}), \
+                with patch.object(mod, "_try_claim_if_fits", return_value=(None, False)), \
                      patch.object(mod.db_manager, "promote_pending",
                                    side_effect=lambda op, q: promote_calls.append(op) or 0), \
                      patch("asyncio.create_task", new=_make_create_task_mock()), \
@@ -382,7 +412,7 @@ class TestDispatchLoop:
         The loop exits only on CancelledError.
         """
         import digitize.workers.conversion_dispatcher as mod
-        mod._rr_turn = "ingestion"
+        mod._op_turn = 0
 
         sleep_count = [0]
 

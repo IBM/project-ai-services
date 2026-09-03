@@ -313,8 +313,11 @@ async def _run_teardown(connector_id: str) -> None:
     """
     Teardown for connector deletion.
 
-    Scheduled via asyncio.create_task from the delete endpoint (Case B),
-    and awaited directly from _handle_interrupt in sync_tick (Case A).
+    Scheduled via asyncio.create_task from the delete endpoint (Case B — no
+    tick running). Awaited directly from _handle_interrupt in sync_tick
+    (Case A — tick interrupted). In Case A the caller is responsible for
+    purging in-flight conversion tasks *before* calling this function, since
+    no tick is running when _run_teardown executes in Case B.
 
     Steps:
       1. Remove the scheduled job so no new ticks fire
