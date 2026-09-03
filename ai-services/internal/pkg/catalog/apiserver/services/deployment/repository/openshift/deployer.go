@@ -25,7 +25,7 @@ import (
 const (
 	defaultHelmTimeout    = 10 * time.Minute
 	predictorPollInterval = 15 * time.Second
-	predictorWaitTimeout  = 10 * time.Minute
+	predictorWaitTimeout  = 15 * time.Minute
 )
 
 // Type aliases for deployment plan types.
