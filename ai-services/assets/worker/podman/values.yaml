@@ -11,3 +11,9 @@ caddy:
   image: icr.io/ai-services-cicd/caddy:v2.11.4-2
   adminPort: ""
   httpsPort: ""
+  # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
+  caddyFileContent: ""
+  # Populated from the certificate content specified via '--ssl-cert' during worker configuration
+  sslCertContent: ""
+  # Populated from the private key content specified via '--ssl-key' during worker configuration
+  sslKeyContent: ""

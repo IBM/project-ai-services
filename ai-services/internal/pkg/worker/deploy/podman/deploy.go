@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +36,15 @@ const (
 
 	dirPerm  = 0o750
 	filePerm = 0o644
+	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
+	// Setup. Exported so join.go can look up the pod's admin port after setup.
+	WorkerCaddyPodName = "ai-services--caddy"
+
+	// workerApp is the app name passed to the template provider.
+	// Resolves to assets/worker/<runtime>/templates/.
+	workerApp = "worker"
+
+	caddyfilePath = "worker/podman/Caddyfile.tmpl"
 )
 
 // Options carries the parameters needed to set up the worker node.
@@ -89,13 +97,17 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return nil
 	}
 
-	if err := writeCaddyfile(opts.Setup.BaseDir); err != nil {
-		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
+	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.SSLCertPath, opts.SSLKeyPath)
+	if err != nil {
+		return fmt.Errorf("worker setup: read Caddyfile: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource, caddyFileContent, sslCertContent, sslKeyContent); err != nil {
 		return err
 	}
+
+	// TODO: Load SSL certs if certs flags are set.
+	// Q: Can we move GetHostAdminURL to utils as we need url to call "LoadUserCertificates()"
 
 	logger.InfolnCtx(ctx, "Worker node setup complete.")
 
@@ -132,33 +144,28 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
-// writeCaddyfile writes the static worker Caddyfile to
-// <baseDir>/worker/caddy/Caddyfile. The Caddyfile has no template variables —
-// it is written verbatim. Caddy must find it at container start.
-func writeCaddyfile(baseDir string) error {
+func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, error) {
 	raw, err := assets.WorkerFS.ReadFile(caddyfilePath)
 	if err != nil {
-		return fmt.Errorf("read Caddyfile: %w", err)
+		return "", "", "", fmt.Errorf("read Caddyfile: %w", err)
 	}
 
-	dir := filepath.Join(baseDir, caddyfileSubDir)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("create dir %s: %w", dir, err)
+	var sslCertContent, sslKeyContent string
+	if sslCertPath != "" && sslKeyPath != "" {
+		certbyte, keyBytes, _, err := utils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to load ssl certs: %w", err)
+		}
+		sslCertContent = string(certbyte)
+		sslKeyContent = string(keyBytes)
 	}
 
-	dst := filepath.Join(dir, "Caddyfile")
-	if err := os.WriteFile(dst, raw, filePerm); err != nil {
-		return fmt.Errorf("write Caddyfile to %s: %w", dst, err)
-	}
-
-	logger.Infof("worker setup: Caddyfile written to %s\n", dst)
-
-	return nil
+	return string(raw), sslCertContent, sslKeyContent, nil
 }
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, caddyFileContent, sslCertContent, sslKeyContent string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
