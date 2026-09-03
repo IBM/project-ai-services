@@ -14,7 +14,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -298,10 +297,9 @@ func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
 	return p.workerRegistry.WorkerID(workerName)
 }
 
-// ValidateWorker confirms the named remote worker is connected and, for Podman
-// workers, that the required Caddy metadata (domainSuffix, httpsPort) is
-// present. Called from PlanDeployment before any DB records are written so the
-// Create API can return an error immediately on failure.
+// ValidateWorker confirms the named remote worker is connected. Called from
+// PlanDeployment before any DB records are written so the Create API can
+// return an error immediately on failure.
 func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName, runtimeType string) error {
 	if p.workerRegistry == nil {
 		return fmt.Errorf("worker deployment is not configured on this server")
@@ -314,26 +312,6 @@ func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName, runt
 
 	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {
 		return fmt.Errorf("worker %q is not connected", workerName)
-	}
-
-	// Validate all the metadata for deployment is present
-	if runtimeType == runtimeTypes.RuntimeTypePodman.String() {
-		meta, ok := p.workerRegistry.WorkerMetadata(workerName)
-		if !ok {
-			return fmt.Errorf("worker %q metadata not available", workerName)
-		}
-
-		if meta[workerconstants.MetaKeyDomainSuffix] == "" {
-			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyDomainSuffix)
-		}
-
-		if meta[workerconstants.MetaKeyHTTPSPort] == "" {
-			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyHTTPSPort)
-		}
-
-		if meta[workerconstants.MetaKeyBaseDir] == "" {
-			return fmt.Errorf("worker %q metadata missing %q", workerName, workerconstants.MetaKeyBaseDir)
-		}
 	}
 
 	return nil

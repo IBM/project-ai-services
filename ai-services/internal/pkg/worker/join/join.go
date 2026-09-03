@@ -52,7 +52,7 @@ const (
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
-func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions, meta map[string]string) error {
+func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
 	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 
@@ -65,7 +65,7 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 	client := workerpb.NewWorkerGatewayClient(conn)
 
 	// ── Step 2: Register + stream loop ───────────────────────────────────────
-	return runRegistrationLoop(ctx, rt, pr, client, opts.Token, meta)
+	return runRegistrationLoop(ctx, rt, pr, client, opts.Token)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -73,8 +73,8 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string, meta map[string]string) error {
-	workerName, err := register(ctx, client, token, rt.Type(), meta)
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string) error {
+	workerName, err := register(ctx, client, token, rt.Type())
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
@@ -86,13 +86,12 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercadd
 
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType, meta map[string]string) (string, error) {
+func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
 	resp, err := client.Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    rt.String(),
-		Metadata:       meta,
 	})
 	// TODO: When registrations fails due to "token already used" error
 	// attempt registretion without token.

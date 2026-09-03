@@ -82,12 +82,6 @@ const (
 	RFC3339WithTimezone = "2006-01-02T15:04:05Z07:00"
 )
 
-// Network constants.
-const (
-	// DefaultHTTPSPort is the default HTTPS port.
-	DefaultHTTPSPort = "443"
-)
-
 // Environment variable name constants.
 const (
 	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to

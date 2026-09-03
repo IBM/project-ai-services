@@ -200,33 +200,21 @@ var grpcStreamCmd = &cobra.Command{
 // grpcStreamRunE starts the long-lived gRPC CommandStream for the worker.
 // It is called inside the worker pod after the deploy step (Run) has completed.
 //
-// For Podman workers it computes the domain suffix from the TLS credentials,
-// builds the metadata map that the control plane needs to route traffic back to
-// this node, and initialises the Podman runtime before opening the stream.
+// For Podman workers it initialises the Podman runtime and builds the local
+// Caddy proxy router before opening the stream.
 //
 // For OpenShift workers it initialises the runtime scoped to the worker
-// namespace and opens the stream with an empty metadata map, since routing is
-// handled natively by the platform.
+// namespace and opens the stream, since routing is handled natively by the platform.
 func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
 
 	var pr *workercaddy.ProxyRouter
 	var rt runtime.Runtime
-	var meta = make(map[string]string)
 
 	switch types.RuntimeType(runtimeType) {
 	case types.RuntimeTypePodman:
-		domainSuffix, err := utils.ComputeDomainSuffix(sslCertPath, sslKeyPath, domainName)
-		if err != nil {
-			return err
-		}
-		meta = map[string]string{
-			workerconstants.MetaKeyBaseDir:      baseDir,
-			workerconstants.MetaKeyDomainSuffix: domainSuffix,
-			workerconstants.MetaKeyHTTPSPort:    fmt.Sprintf("%d", httpsPort),
-		}
-
+		var err error
 		rt, err = runtime.CreateRuntime(types.RuntimeTypePodman, "")
 		if err != nil {
 			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
@@ -235,7 +223,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		// ── Build Caddy proxy router (Podman only) ──────────────────────
 		// Must happen after Setup so the Caddy pod is running and its admin port
 		// is discoverable. For OpenShift workers routes are managed natively.
-		pr, err = workercaddy.New(ctx, rt)
+		pr, err = workercaddy.NewProxyRouter(ctx)
 		if err != nil {
 			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
 		}
@@ -257,7 +245,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.StartGrpcStream(ctx, rt, pr, opts, meta)
+	return join.StartGrpcStream(ctx, rt, pr, opts)
 }
 
 func newGrpcStreamCmd() *cobra.Command {

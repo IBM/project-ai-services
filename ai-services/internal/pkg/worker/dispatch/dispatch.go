@@ -18,6 +18,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
@@ -228,7 +229,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 			return nil, fmt.Errorf("decode download_model payload: %w", err)
 		}
 
-		return nil, helpers.DownloadModelContainer(ctx, req.Model, req.TargetDir)
+		return nil, helpers.DownloadModelContainer(ctx, req.Model, utils.GetModelsPath())
 
 	// ── Caddy proxy management ────────────────────────────────────────────────
 
