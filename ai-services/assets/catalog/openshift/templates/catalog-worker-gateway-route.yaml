@@ -7,7 +7,8 @@ metadata:
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
   annotations:
-    haproxy.router.openshift.io/h2c: "true"
+    ingress.operator.openshift.io/default-to-http2: "true"
+    haproxy.router.openshift.io/timeout: 1d 
 spec:
   port:
     targetPort: worker-gateway
