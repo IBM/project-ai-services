@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -51,12 +50,6 @@ const (
 	// retryBackoffFactor is the exponential multiplier applied to the backoff duration.
 	retryBackoffFactor = 2
 )
-
-var kacp = keepalive.ClientParameters{
-	Time:                15 * time.Second, // Send a ping every 15 seconds of silence
-	Timeout:             5 * time.Second,  // Wait 5 seconds for a response
-	PermitWithoutStream: true,             // Ping even if no active RPCs are moving
-}
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.

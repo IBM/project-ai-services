@@ -19,4 +19,4 @@ spec:
     - name: worker-gateway
       port: {{ .Values.backend.workerGatewayPort }}
       targetPort: {{ .Values.backend.workerGatewayPort }}
-      appProtocol: h2c
+      appProtocol: https
