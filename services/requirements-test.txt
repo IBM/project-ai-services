@@ -49,5 +49,10 @@ pdfplumber==0.11.9
 RapidFuzz==3.14.5
 docling==2.95.0
 sentence-splitter==1.4
+spacy==3.8.7
+# Japanese model only — requires sudachipy + sudachidict-core for the SudachiPy tokeniser
+https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
+sudachipy==0.6.11
+sudachidict-core==20260723
 
 apscheduler[sqlalchemy]==3.11.3

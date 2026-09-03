@@ -3,7 +3,8 @@ Token-based document chunker for translation.
 
 Splits text into ``TranslationChunk`` objects that fit within ``CHUNK_TOKEN_BUDGET``:
 - Blocks are formed by splitting on ``\\n\\n``, then greedily packed by token count.
-- Oversized prose blocks fall back to sentence-level splitting via ``SentenceSplitter``.
+- Oversized prose blocks fall back to sentence-level splitting via sentence-splitter
+  (or spaCy for Japanese).
 - GFM tables are never split — they occupy their own chunk even if oversized.
 - Each chunk carries ``join_after`` (``"paragraph"`` or ``"sentence"``) to drive
   correct reassembly after translation.
@@ -12,9 +13,7 @@ Splits text into ``TranslationChunk`` objects that fit within ``CHUNK_TOKEN_BUDG
 import asyncio
 from typing import Optional
 
-from sentence_splitter import SentenceSplitter
-
-from common.lang_utils import to_sentence_splitter_lang
+from common.lang_utils import split_sentences, to_sentence_splitter_lang
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
 from translate.models import TranslationChunk
@@ -128,7 +127,6 @@ async def build_translation_chunks(
     current_blocks: list[str] = []
     running_tokens = 0
     chunk_index = 0
-    splitter = SentenceSplitter(language=splitter_lang)
 
     for block in blocks:
         is_table = _is_table_block(block)
@@ -165,7 +163,7 @@ async def build_translation_chunks(
                 chunk_index += 1
             else:
                 # Step 3 — sentence-level fallback for oversized prose blocks.
-                sentences = splitter.split(text=block)
+                sentences = split_sentences(block, lang=splitter_lang)
                 sentence_chunks = await _pack_sentences_greedily(
                     sentences=sentences,
                     budget=budget,
@@ -213,7 +211,7 @@ async def build_translation_chunks(
 
     logger.debug(
         f"Chunked document into {len(chunks)} chunk(s) "
-        f"(budget={budget} tokens, splitter_lang={splitter_lang})"
+        f"(budget={budget} tokens, lang={splitter_lang})"
     )
     return chunks
 

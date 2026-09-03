@@ -16,7 +16,7 @@ class TestLanguageCodes:
     def test_language_codes_defined(self):
         """Test language codes are correctly defined as class attributes."""
         from common.lang_utils import LanguageCodes
-        
+
         assert LanguageCodes.ENGLISH == "EN"
         assert LanguageCodes.GERMAN == "DE"
         assert LanguageCodes.ITALIAN == "IT"
@@ -25,67 +25,67 @@ class TestLanguageCodes:
     def test_language_codes_are_strings(self):
         """Test that language codes are string types."""
         from common.lang_utils import LanguageCodes
-        
+
         assert isinstance(LanguageCodes.ENGLISH, str)
         assert isinstance(LanguageCodes.GERMAN, str)
         assert isinstance(LanguageCodes.ITALIAN, str)
         assert isinstance(LanguageCodes.FRENCH, str)
 
-    def test_to_sentence_splitter_english(self):
-        """Test conversion of English code to sentence splitter format."""
+    def test_to_sentence_splitter_lang_english(self):
+        """Test conversion of English code to sentence-splitter language code."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
-        
+
         result = to_sentence_splitter_lang(LanguageCodes.ENGLISH)
         assert result == "en"
-    
-    def test_to_sentence_splitter_german(self):
-        """Test conversion of German code to sentence splitter format."""
+
+    def test_to_sentence_splitter_lang_german(self):
+        """Test conversion of German code to sentence-splitter language code."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
-        
+
         result = to_sentence_splitter_lang(LanguageCodes.GERMAN)
         assert result == "de"
 
-    def test_to_sentence_splitter_italian(self):
-        """Test conversion of Italian code to sentence splitter format."""
+    def test_to_sentence_splitter_lang_italian(self):
+        """Test conversion of Italian code to sentence-splitter language code."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
 
         result = to_sentence_splitter_lang(LanguageCodes.ITALIAN)
         assert result == "it"
 
-    def test_to_sentence_splitter_french(self):
-        """Test conversion of French code to sentence splitter format."""
+    def test_to_sentence_splitter_lang_french(self):
+        """Test conversion of French code to sentence-splitter language code."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
 
         result = to_sentence_splitter_lang(LanguageCodes.FRENCH)
         assert result == "fr"
 
-    def test_to_sentence_splitter_with_string_literal(self):
+    def test_to_sentence_splitter_lang_with_string_literal(self):
         """Test conversion works with string literals."""
         from common.lang_utils import to_sentence_splitter_lang
-        
+
         assert to_sentence_splitter_lang("EN") == "en"
         assert to_sentence_splitter_lang("DE") == "de"
         assert to_sentence_splitter_lang("IT") == "it"
         assert to_sentence_splitter_lang("FR") == "fr"
 
-    def test_to_sentence_splitter_unsupported_language(self):
+    def test_to_sentence_splitter_lang_unsupported_language(self):
         """Test fallback to English for unsupported language codes."""
         from common.lang_utils import to_sentence_splitter_lang
-        
+
         result = to_sentence_splitter_lang("ES")  # Spanish not supported
         assert result == "en"  # Should fallback to English
-    
-    def test_to_sentence_splitter_empty_string(self):
+
+    def test_to_sentence_splitter_lang_empty_string(self):
         """Test handling of empty string."""
         from common.lang_utils import to_sentence_splitter_lang
-        
+
         result = to_sentence_splitter_lang("")
         assert result == "en"  # Should fallback to English
-    
+
     def test_sentence_splitter_mapping_uses_class_variables(self):
         """Test that internal mapping uses class variables (no duplication)."""
         from common.lang_utils import LanguageCodes
-        
+
         # Verify the mapping dictionary keys match the class attributes
         assert LanguageCodes.ENGLISH in LanguageCodes._TO_SENTENCE_SPLITTER
         assert LanguageCodes.GERMAN in LanguageCodes._TO_SENTENCE_SPLITTER
@@ -97,6 +97,14 @@ class TestLanguageCodes:
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.GERMAN] == "de"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ITALIAN] == "it"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.FRENCH] == "fr"
+
+    def test_to_sentence_splitter_lang_all_supported_codes(self):
+        """Test to_sentence_splitter_lang covers all supported language codes."""
+        from common.lang_utils import to_sentence_splitter_lang
+
+        expected = {"EN": "en", "DE": "de", "IT": "it", "FR": "fr"}
+        for code, splitter_code in expected.items():
+            assert to_sentence_splitter_lang(code) == splitter_code
 
     def test_language_codes_immutable(self):
         """Test that language codes maintain their values (not accidentally modified)."""
