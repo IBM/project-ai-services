@@ -551,7 +551,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 	// Fetch pod/container status for vars_file.yaml-driven status population
 	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {
-		logger.Warningf("Failed to get application pods for next steps: %v\n", err)
+		return fmt.Errorf("failed to get application pods for next steps: %w", err)
 	}
 
 	rt := vars.RuntimeFactory.GetRuntimeType()
@@ -594,10 +594,8 @@ func printServiceNextSteps(ctx context.Context, appClient *catalogClient.Applica
 	}
 
 	// Populate status params generically from vars_file.yaml
-	if appPS != nil {
-		if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, instanceSlug, rt); err != nil {
-			logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
-		}
+	if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, instanceSlug, rt); err != nil {
+		logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
 	}
 
 	tmpls, err := parseStepsTemplates(rawFiles)

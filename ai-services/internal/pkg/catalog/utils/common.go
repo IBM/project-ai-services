@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -110,13 +109,7 @@ func SanitizeFilePath(path string) string {
 	return cleanPath
 }
 
-// LoadChartFromCatalogFS walks assets.CatalogFS at catalogPath and returns a Helm chart.
-func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
-	return LoadChartFromFS(&assets.CatalogFS, catalogPath)
-}
-
 // LoadChartFromFS walks the given filesystem at catalogPath and returns a Helm chart.
-// Use this for bundle items that are stored on disk (os.DirFS) rather than embedded.
 func LoadChartFromFS(fsys fs.FS, catalogPath string) (helmchart.Charter, error) {
 	var files []*archive.BufferedFile
 

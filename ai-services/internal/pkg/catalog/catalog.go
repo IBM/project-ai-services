@@ -360,23 +360,16 @@ func (p *CatalogProvider) GetCatalogItemPath(id string) (string, error) {
 	return item.Path, nil
 }
 
-// getItemFS returns the filesystem for the catalog item identified by key.
+// GetItemFS returns the filesystem for the catalog item identified by key.
 // Every item carries a non-nil itemFS: &assets.CatalogFS for embedded items,
 // os.DirFS for bundle items.
-func (p *CatalogProvider) getItemFS(key string) (fs.FS, error) {
+func (p *CatalogProvider) GetItemFS(key string) (fs.FS, error) {
 	item, ok := p.getItem(key)
 	if !ok {
 		return nil, fmt.Errorf("item '%s' not found", key)
 	}
 
 	return item.itemFS, nil
-}
-
-// GetItemFS returns the filesystem for the catalog item identified by key.
-// Embedded items return &assets.CatalogFS; bundle items return an os.DirFS
-// rooted at their extracted directory on disk.
-func (p *CatalogProvider) GetItemFS(key string) (fs.FS, error) {
-	return p.getItemFS(key)
 }
 
 // ToServiceSummary converts a Service to ServiceSummary.
@@ -729,7 +722,7 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 	runtimeStr := string(runtime)
 
 	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -781,7 +774,7 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 	runtimeStr := string(runtime)
 
 	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
-	itemFS, err := p.getItemFS(componentKey)
+	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -828,7 +821,7 @@ func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID
 	catalogPath := filepath.Join(componentPath, runtimeType)
 
 	// Read metadata.yaml using the item's own filesystem
-	itemFS, err := p.getItemFS(componentKey)
+	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -865,7 +858,7 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 	catalogPath := filepath.Join(componentPath, runtimeStr, "templates")
 
 	// Load all template files using the item's own filesystem
-	itemFS, err := p.getItemFS(componentKey)
+	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -930,7 +923,7 @@ func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID, runtimeType stri
 	catalogPath := filepath.Join(servicePath, runtimeType)
 
 	// Read metadata.yaml using the item's own filesystem
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -966,7 +959,7 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 	catalogPath := filepath.Join(servicePath, runtimeStr, "templates")
 
 	// Load all template files using the item's own filesystem
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -1033,7 +1026,7 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 	catalogPath := filepath.Join(servicePath, runtimeStr, "steps")
 
 	// Load all md files using the item's own filesystem
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
@@ -1100,7 +1093,7 @@ func (p *CatalogProvider) GetServiceSteps(serviceID string, runtime runtimeTypes
 
 	stepsPath := filepath.Join(servicePath, string(runtime), "steps")
 
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
