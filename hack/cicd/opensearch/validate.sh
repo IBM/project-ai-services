@@ -46,8 +46,10 @@ KEEP_CONTAINER=false
 
 # Credentials that match the production secret pattern
 # (security plugin is ON — same as the statefulset)
+# Note: OpenSearch 3.x rejects passwords that contain the username ("admin"),
+# so the password must not include that substring.
 OS_USER="admin"
-OS_PASS="Admin1234!"   # strong enough to satisfy the security plugin validator
+OS_PASS="S3cur3#Srvc2024"   # strong: upper+lower+digit+special, no username substring
 
 # ---------------------------------------------------------------------------
 # Argument parsing

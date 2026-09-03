@@ -30,7 +30,7 @@ pipeline {
     environment {
 
         // OpenSearch — version comes from params.OPENSEARCH_VERSION;
-        // version-derived values are set in the 'Initialise Build Config' stage.
+        // version-derived values are set in the 'Prepare' stage.
         ARCHITECTURE = "ppc64le"
         PLATFORM     = "linux"
 
@@ -53,7 +53,10 @@ pipeline {
 
     stages {
 
-        stage('Initialise Build Config') {
+        // ------------------------------------------------------------------ //
+        //  PREPARE — initialise config, clean workspace, checkout sources     //
+        // ------------------------------------------------------------------ //
+        stage('Prepare') {
             steps {
                 script {
                     def ver = params.OPENSEARCH_VERSION
@@ -71,25 +74,18 @@ pipeline {
                     echo "Dockerfile dir      : ${env.DOCKERFILE_DIR}"
                     echo "Image tag           : ${env.IMAGE_TAG}"
                 }
-            }
-        }
 
-        stage('Clean Workspace') {
-            steps {
                 deleteDir()
-            }
-        }
 
-        stage('Checkout Sources') {
-
-            steps {
+                echo "Checking out ai-services (this repo)..."
+                checkout scm
 
                 echo "Checking out OpenSearch Build..."
 
-                dir("${BUILD_DIR}") {
+                dir("${env.BUILD_DIR}") {
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: "refs/tags/${OPENSEARCH_BUILD_BRANCH}"]],
+                        branches: [[name: "refs/tags/${env.OPENSEARCH_BUILD_BRANCH}"]],
                         extensions: [],
                         userRemoteConfigs: [[
                             url: "${OPENSEARCH_BUILD_REPO}",
@@ -100,10 +96,10 @@ pipeline {
 
                 echo "Checking out build-scripts..."
 
-                dir("${SCRIPTS_DIR}") {
+                dir("${env.SCRIPTS_DIR}") {
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: "${BUILD_SCRIPTS_BRANCH}"]],
+                        branches: [[name: "${env.BUILD_SCRIPTS_BRANCH}"]],
                         extensions: [],
                         userRemoteConfigs: [[
                             url: "${BUILD_SCRIPTS_REPO}",
@@ -114,8 +110,10 @@ pipeline {
             }
         }
 
-        stage('Build Build-Env Image') {
-
+        // ------------------------------------------------------------------ //
+        //  BUILD — build-env image, OpenSearch distribution, extra plugins    //
+        // ------------------------------------------------------------------ //
+        stage('Build') {
             steps {
 
                 sh """
@@ -134,12 +132,6 @@ pipeline {
                         -f ${SCRIPTS_DIR}/${BUILD_ENV_DOCKERFILE} \
                         ${BUILD_DIR}
                 """
-            }
-        }
-
-        stage('Build Artifacts and Assemble Distribution') {
-
-            steps {
 
                 sh """
                     set -euo pipefail
@@ -172,12 +164,6 @@ pipeline {
                     cp ${BUILD_DIR}/tar/dist/opensearch/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz \
                         ${ARTIFACTS_DIR}/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz
                 """
-            }
-        }
-
-        stage('Build Extra Plugins') {
-
-            steps {
 
                 sh """
                     set -euo pipefail
@@ -254,6 +240,9 @@ pipeline {
             }
         }
 
+        // ------------------------------------------------------------------ //
+        //  BUILD CONTAINER IMAGE                                              //
+        // ------------------------------------------------------------------ //
         stage('Build Container Image') {
 
             steps {
@@ -275,9 +264,9 @@ pipeline {
                         ${BUILD_DIR}/tar/dist/opensearch/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz \
                         docker-context/opensearch-ppc64le.tgz
 
-                    # Copy extra plugin zips (built in 'Build Extra Plugins') into the Docker
-                    # context so the Dockerfile can place them in the image for optional
-                    # post-deployment installation (they are NOT auto-installed at build time).
+                    # Copy extra plugin zips (built in 'Build') into the Docker context so the
+                    # Dockerfile can place them in the image for optional post-deployment
+                    # installation (they are NOT auto-installed at build time).
                     mkdir -p docker-context/plugin-zips
                     for zip_pattern in "opensearch-jvector-*.zip" "prometheus-exporter-*.zip"; do
                         found=\$(find "${ARTIFACTS_DIR}/plugin-zips" -name "\${zip_pattern}" 2>/dev/null | head -1)
@@ -301,7 +290,10 @@ pipeline {
             }
         }
 
-        stage('Validate Container') {
+        // ------------------------------------------------------------------ //
+        //  VALIDATE — smoke-test + AI-services compatibility check            //
+        // ------------------------------------------------------------------ //
+        stage('Validate') {
 
             steps {
 
@@ -363,17 +355,11 @@ pipeline {
                         exit 1
                     fi
 
-                    echo "=== All validation checks passed ==="
+                    echo "=== Smoke-test passed ==="
 
                     podman stop "\${CONTAINER_NAME}"
                     podman rm   "\${CONTAINER_NAME}"
                 """
-            }
-        }
-
-        stage('Validate AI-Services Compatibility') {
-
-            steps {
 
                 // Non-fatal: a failure marks the stage unstable but does not
                 // prevent the image from being pushed.  The validate.sh script
@@ -395,7 +381,10 @@ pipeline {
             }
         }
 
-        stage('Trivy Security Scan') {
+        // ------------------------------------------------------------------ //
+        //  SECURITY SCAN                                                      //
+        // ------------------------------------------------------------------ //
+        stage('Security Scan') {
 
             steps {
 
@@ -458,7 +447,10 @@ pipeline {
             }
         }
 
-        stage('Push Image to ICR') {
+        // ------------------------------------------------------------------ //
+        //  PUSH TO ICR                                                        //
+        // ------------------------------------------------------------------ //
+        stage('Push to ICR') {
 
             steps {
 
