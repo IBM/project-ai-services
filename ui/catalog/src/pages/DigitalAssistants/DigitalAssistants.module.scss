@@ -9,23 +9,17 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Name column - compact
+    // Compact columns (sized to content) - name, status, uptime, worker resource, worker type
     :global(th:nth-child(2)),
-    :global(td:nth-child(2)) {
-      width: 1%;
-      white-space: nowrap;
-    }
-
-    // Status column - compact
+    :global(td:nth-child(2)),
     :global(th:nth-child(3)),
-    :global(td:nth-child(3)) {
-      width: 1%;
-      white-space: nowrap;
-    }
-
-    // Uptime column - compact
+    :global(td:nth-child(3)),
     :global(th:nth-child(4)),
-    :global(td:nth-child(4)) {
+    :global(td:nth-child(4)),
+    :global(th:nth-child(5)),
+    :global(td:nth-child(5)),
+    :global(th:nth-child(6)),
+    :global(td:nth-child(6)) {
       width: 1%;
       white-space: nowrap;
     }

@@ -122,6 +122,12 @@ export interface ApplicationService {
   }>;
 }
 
+export interface ApplicationWorker {
+  id: string;
+  name: string;
+  runtime_type: string;
+}
+
 export interface Application {
   id: string;
   name: string;
@@ -132,6 +138,7 @@ export interface Application {
   created_at: string;
   updated_at: string;
   services: ApplicationService[];
+  worker?: ApplicationWorker;
 }
 
 export interface PaginationMetadata {
