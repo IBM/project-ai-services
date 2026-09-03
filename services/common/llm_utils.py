@@ -168,7 +168,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                 )
 
             if pending:
-                time.sleep(0.05)
+                time.sleep(0.5)
 
     # Unpack results in index order. Every slot starts as the fallback
     # and is overwritten either by a successful future or left as-is on failure.

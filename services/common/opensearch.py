@@ -209,9 +209,13 @@ class OpensearchVectorStore(VectorStore):
             if cancel_event is not None and cancel_event.is_set():
                 logger.info(
                     f"Cancellation requested — aborting insert_chunks after {i} of "
-                    f"{len(chunks)} chunks for index '{self.index_name}'"
+                    f"{len(chunks)} chunks for doc '{chunks[i].get('filename')}' in index '{self.index_name}'"
                 )
-                return False
+                from digitize.exceptions import JobCancelledError
+                raise JobCancelledError(
+                    f"insert_chunks cancelled at batch {i} of {len(chunks)} "
+                    f"for doc '{chunks[i].get('filename')}'"
+                )
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 

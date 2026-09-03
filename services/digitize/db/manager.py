@@ -1993,38 +1993,58 @@ class DatabaseManager:
     @staticmethod
     def cancel_tasks_for_job(job_id: str) -> int:
         """
-        Mark all non-terminal ConversionTask rows for ``job_id`` as
-        ``cancel_pending`` so the dispatcher will stop them at the next
-        safe checkpoint.
+        Cancel all non-terminal ConversionTask rows for ``job_id``.
 
-        Only tasks in the active pre-terminal statuses (pending, queued,
-        running) are touched.  Tasks already in completed, failed,
-        cancel_pending, or cancelled are left unchanged.
+        Tasks that have never been dispatched (pending, queued) are moved
+        directly to ``cancelled`` — the dispatcher will never pick them up
+        again so there is no checkpoint to wait for.
+
+        Tasks that are actively running are moved to ``cancel_pending`` so
+        the dispatcher can observe the flag at its next safe checkpoint
+        (between 100-page chunks or after the process-pool future returns)
+        and write the final ``cancelled`` status itself.
+
+        Tasks already in completed, failed, cancel_pending, or cancelled are
+        left unchanged.
 
         Returns:
-            Number of rows updated.
+            Total number of rows updated.
         """
-        active_statuses = [
-            ConversionTaskStatus.PENDING,
-            ConversionTaskStatus.QUEUED,
-            ConversionTaskStatus.RUNNING,
-        ]
         try:
             with get_db_session() as session:
-                stmt = (
+                # PENDING / QUEUED → CANCELLED directly: never dispatched, no
+                # checkpoint needed.
+                not_started = (
                     update(ConversionTask)
                     .where(
                         ConversionTask.job_id == job_id,
-                        ConversionTask.status.in_(active_statuses),
+                        ConversionTask.status.in_([
+                            ConversionTaskStatus.PENDING,
+                            ConversionTaskStatus.QUEUED,
+                        ]),
+                    )
+                    .values(status=ConversionTaskStatus.CANCELLED)
+                )
+                not_started_result = cast(CursorResult, session.execute(not_started))
+
+                # RUNNING → CANCEL_PENDING: dispatcher must observe the flag
+                # at its next checkpoint before writing the final CANCELLED.
+                running = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status == ConversionTaskStatus.RUNNING,
                     )
                     .values(status=ConversionTaskStatus.CANCEL_PENDING)
                 )
-                result = cast(CursorResult, session.execute(stmt))
-                updated = result.rowcount
+                running_result = cast(CursorResult, session.execute(running))
+
+                updated = not_started_result.rowcount + running_result.rowcount
                 if updated:
                     logger.info(
-                        f"cancel_tasks_for_job: marked {updated} task(s) "
-                        f"as cancel_pending for job {job_id}"
+                        f"cancel_tasks_for_job: cancelled {not_started_result.rowcount} "
+                        f"queued/pending and signalled {running_result.rowcount} "
+                        f"running task(s) for job {job_id}"
                     )
                 return updated
         except SQLAlchemyError as e:

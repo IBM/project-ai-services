@@ -135,7 +135,7 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=Langua
     current_chunk["source_nodes"] = []
 
 
-def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
+def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Chunk text content from a document into smaller pieces based on token limits.
 
@@ -146,7 +146,6 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
-        cancel_event: Optional threading.Event; if set, chunking is aborted early.
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -174,9 +173,6 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
             current_subsubsection = None
 
             for idx, block in enumerate(data):
-                if cancel_event is not None and cancel_event.is_set():
-                    logger.info(f"Cancellation requested — aborting text chunking for '{input_path}'")
-                    raise JobCancelledError("Text chunking cancelled")
                 label = block.get("label")
                 text = block.get("text", "").strip()
                 page_no = block.get("page", 0)
@@ -242,7 +238,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         return None, None
 
 
-def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
+def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
     Called internally by chunk_single_file() for sequential processing.
@@ -254,7 +250,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
-        cancel_event: Optional threading.Event; if set, chunking is aborted early.
     """
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
@@ -270,9 +265,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
             tab_data_list = list(tab_data.values())
 
             for block in tab_data_list:
-                if cancel_event is not None and cancel_event.is_set():
-                    logger.info(f"Cancellation requested — aborting table chunking for '{input_path}'")
-                    raise JobCancelledError("Table chunking cancelled")
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
                 page_number = block.get('page_number')
@@ -324,8 +316,10 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
     t0 = time.time()
     try:
         splitter_lang = to_sentence_splitter_lang(language)
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang, cancel_event=cancel_event)
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang, cancel_event=cancel_event)
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelledError(f"Chunking cancelled after text chunking for '{input_path}'")
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
     except JobCancelledError:
@@ -778,7 +772,6 @@ def process_documents(
                     except JobCancelledError:
                         logger.info(f"Job {job_id} cancelled — processing was interrupted for document: {path}")
                         is_cancelled = True
-                        _process_stop_event.set()
                     except Exception as e:
                         if doc_id is not None:
                             logger.error(
@@ -866,7 +859,6 @@ def process_documents(
                     except JobCancelledError:
                         logger.info(f"Job {job_id} cancelled — chunking was interrupted for document: {path}")
                         is_cancelled = True
-                        _process_stop_event.set()
                     except Exception as e:
                         if doc_id is not None:
                             logger.error(
@@ -896,6 +888,9 @@ def process_documents(
                     try:
                         fut.result()
                         logger.debug(f"Indexing completed for document: {doc_id}")
+                    except JobCancelledError:
+                        logger.info(f"Job {job_id} cancelled — indexing was interrupted for document: {doc_id}")
+                        is_cancelled = True
                     except Exception as e:
                         logger.error(
                             f"Indexing failed for document {doc_id}: {e}", exc_info=True
