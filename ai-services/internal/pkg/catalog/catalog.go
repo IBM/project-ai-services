@@ -144,7 +144,7 @@ func (p *CatalogProvider) loadBundleItems(ctx context.Context, items map[string]
 		// Map catalog_type "service"/"component" → "services"/"components" to match
 		// the embedded-FS dispatch keys used in parseAndStoreMetadata.
 		catalogType := b.CatalogType + "s"
-		if err := parseAndStoreMetadataWithFS(ctx, catalogType, "metadata.yaml", ".", bundleFS, data, items); err != nil {
+		if err := parseAndStoreMetadataWithFS(ctx, catalogType, "metadata.yaml", "", bundleFS, data, items); err != nil {
 			logger.ErrorfCtx(ctx, "bundle %s: failed to parse metadata: %v", b.ID, err)
 		}
 	}
