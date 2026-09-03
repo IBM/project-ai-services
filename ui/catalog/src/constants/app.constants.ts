@@ -1,3 +1,5 @@
+export const APP_NAME = "AI Launchpad";
+
 export const COMPONENT_TYPES = {
   LLM: "llm",
   RERANKER: "reranker",

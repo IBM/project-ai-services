@@ -13,6 +13,7 @@ import { useNavigate, useLocation } from "react-router";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
 import { ROUTES } from "@/constants/endpoints.constants";
+import { APP_NAME } from "@/constants";
 import {
   LogoutReason,
   SESSION_STORAGE_KEYS,
@@ -93,7 +94,7 @@ const LoginPage = () => {
         <Column lg={8} md={4} sm={4} className={styles.loginLeft}>
           <div className={styles.loginForm}>
             <h1 className={styles.heading}>
-              Log in to <strong>AI Services</strong>
+              Log in to <strong>{APP_NAME}</strong>
             </h1>
 
             <form
