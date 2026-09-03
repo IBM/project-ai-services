@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile,
 from common.misc_utils import get_logger, validate_document_file, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
+from digitize.utils.jobs import request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 import digitize.models as models
 import digitize.utils.db as db_ops
 from digitize.settings import settings
@@ -437,25 +438,13 @@ async def cancel_job(
             )
 
         job_status = job_data.get("status", "")
-        non_cancellable_statuses = (
-            models.JobStatus.COMPLETED,
-            models.JobStatus.FAILED,
-            models.JobStatus.CANCEL_PENDING,
-            models.JobStatus.CANCELLED,
-        )
-        if job_status in non_cancellable_statuses:
+        if job_status in NON_CANCELLABLE_JOB_STATUSES:
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 f"Job '{job_id}' is already in terminal state '{job_status}' and cannot be cancelled",
             )
 
-        # Persist clean_files flag into stats so the background task can read it
-        current_stats = job_data.get("stats") or {}
-        updated_stats = {**current_stats, "clean_files": clean_files}
-
-        # Single update: set status=cancel_pending and store clean_files flag
-        db_manager.update_job(job_id, status=models.JobStatus.CANCEL_PENDING, stats=updated_stats)
-        logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
+        request_job_cancellation(job_id, clean_files=clean_files)
         return
 
     except HTTPException as http_exc:

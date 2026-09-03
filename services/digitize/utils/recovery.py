@@ -63,6 +63,7 @@ def recover_zombie_jobs() -> int:
 
                 try:
                     current_status = job_data.get("status")
+                    is_cancelling = current_status == JobStatus.CANCEL_PENDING.value
                     logger.warning(
                         f"Found zombie job: {job_id} with status '{current_status}'"
                     )
@@ -89,7 +90,7 @@ def recover_zombie_jobs() -> int:
                                     f"{doc_id}: {clean_err}"
                                 )
 
-                        # Only documents that are still in-flight need updating.
+                        # Documents still in-flight need resolving to a terminal state.
                         in_flight = {
                             DocStatus.ACCEPTED.value,
                             DocStatus.IN_PROGRESS.value,
@@ -100,42 +101,62 @@ def recover_zombie_jobs() -> int:
                         if doc_status in in_flight and doc_id:
                             stale_doc_ids.append(doc_id)
 
-                            status_mgr.update_doc_metadata(
-                                doc_id,
-                                {"status": DocStatus.FAILED},
-                                error=(
-                                    f"System restarted during processing. "
-                                    f"Use DELETE /v1/documents/{doc_id} to remove "
-                                    "the stale document and re-submit."
-                                ),
-                            )
+                            if is_cancelling:
+                                # Job was being cancelled when the service crashed —
+                                # complete the cancellation rather than marking failed.
+                                status_mgr.update_doc_metadata(
+                                    doc_id,
+                                    {"status": DocStatus.CANCELLED},
+                                )
+                                status_mgr.update_job_progress(
+                                    doc_id=doc_id,
+                                    doc_status=DocStatus.CANCELLED,
+                                    job_status=JobStatus.IN_PROGRESS,
+                                    error="",
+                                )
+                            else:
+                                status_mgr.update_doc_metadata(
+                                    doc_id,
+                                    {"status": DocStatus.FAILED},
+                                    error=(
+                                        f"System restarted during processing. "
+                                        f"Use DELETE /v1/documents/{doc_id} to remove "
+                                        "the stale document and re-submit."
+                                    ),
+                                )
+                                # Keep job in IN_PROGRESS while we update each doc so
+                                # that the stats recalculation inside update_job_progress
+                                # sees the running totals correctly.
+                                status_mgr.update_job_progress(
+                                    doc_id=doc_id,
+                                    doc_status=DocStatus.FAILED,
+                                    job_status=JobStatus.IN_PROGRESS,
+                                    error="",
+                                )
 
-                            # Keep job in IN_PROGRESS while we update each doc so
-                            # that the stats recalculation inside update_job_progress
-                            # sees the running totals correctly.
-                            status_mgr.update_job_progress(
-                                doc_id=doc_id,
-                                doc_status=DocStatus.FAILED,
-                                job_status=JobStatus.IN_PROGRESS,
-                                error="",
-                            )
-
-                    if stale_doc_ids:
+                    if stale_doc_ids and not is_cancelling:
                         error_message += (
                             ". Stale documents may exist. "
                             "Please use DELETE /v1/documents/{id} to remove them "
                             f"and re-submit: {', '.join(stale_doc_ids)}"
                         )
 
-                    # Final job-level update.
-                    status_mgr.update_job_progress(
-                        doc_id="",
-                        doc_status=DocStatus.FAILED,
-                        job_status=JobStatus.FAILED,
-                        error=error_message,
-                    )
-
-                    logger.info(f"✅ Marked zombie job {job_id} as failed")
+                    # Final job-level update — honour the original intent.
+                    if is_cancelling:
+                        status_mgr.update_job_progress(
+                            doc_id="",
+                            doc_status=DocStatus.CANCELLED,
+                            job_status=JobStatus.CANCELLED,
+                        )
+                        logger.info(f"✅ Marked zombie job {job_id} as cancelled")
+                    else:
+                        status_mgr.update_job_progress(
+                            doc_id="",
+                            doc_status=DocStatus.FAILED,
+                            job_status=JobStatus.FAILED,
+                            error=error_message,
+                        )
+                        logger.info(f"✅ Marked zombie job {job_id} as failed")
                     orphan_count += 1
 
                     # Clean up the staging directory that belonged to this job.

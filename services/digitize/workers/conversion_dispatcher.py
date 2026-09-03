@@ -55,6 +55,17 @@ _connector_rr_index: int = 0  # index into the live connector list for turn 2
 # and any code that transitively imports this module).
 _process_pool: ProcessPoolExecutor | None = None
 
+def _cancel_if_pending(task_id: str, error: str, log_msg: str) -> bool:
+    """Re-read *task_id* from the DB and, if it is ``CANCEL_PENDING``, write
+    ``CANCELLED`` and return ``True``.  Returns ``False`` when the task is not
+    in the cancel-pending state or the row is missing."""
+    fresh = db_manager.get_conversion_task(task_id)
+    if fresh is not None and fresh.status == ConversionTaskStatus.CANCEL_PENDING:
+        db_manager.update_task_status(task_id, ConversionTaskStatus.CANCELLED, error=error)
+        logger.info(log_msg)
+        return True
+    return False
+
 
 def _try_claim_if_fits(
     operation: str,
@@ -129,13 +140,11 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
 
         # Check 1: bail out early if the job was cancelled while this task
         # was still in the queue (cancel_pending was set before claim_head).
-        fresh = db_manager.get_conversion_task(task.task_id)
-        if fresh is not None and fresh.status == ConversionTaskStatus.CANCEL_PENDING:
-            db_manager.update_task_status(
-                task.task_id, ConversionTaskStatus.CANCELLED,
-                error="Job cancelled before conversion started",
-            )
-            logger.info(f"Task {task.task_id} cancelled before starting (was cancel_pending)")
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled before conversion started",
+            log_msg=f"Task {task.task_id} cancelled before starting (was cancel_pending)",
+        ):
             return
 
         # Mark task as running — pipeline layer picks this up via poll.
@@ -158,13 +167,11 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
 
         # Check 2: if the job was cancelled while we were converting, write
         # CANCELLED so the pipeline's poll loop reaches the correct terminal state.
-        fresh = db_manager.get_conversion_task(task.task_id)
-        if fresh is not None and fresh.status == ConversionTaskStatus.CANCEL_PENDING:
-            db_manager.update_task_status(
-                task.task_id, ConversionTaskStatus.CANCELLED,
-                error="Job cancelled during conversion",
-            )
-            logger.info(f"Task {task.task_id} cancelled after conversion completed")
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled during conversion",
+            log_msg=f"Task {task.task_id} cancelled after conversion completed",
+        ):
             return
 
         db_manager.update_task_status(task.task_id, ConversionTaskStatus.COMPLETED, result_path=result_path)
@@ -173,13 +180,12 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
     except Exception as exc:
         # Re-read the task to distinguish a cancellation-induced exception
         # (e.g. JobCancelledError from convert_doc chunk loop) from a genuine failure.
-        fresh = db_manager.get_conversion_task(task.task_id)
-        if fresh is not None and fresh.status == ConversionTaskStatus.CANCEL_PENDING:
-            db_manager.update_task_status(
-                task.task_id, ConversionTaskStatus.CANCELLED,
-                error="Job cancelled during conversion",
-            )
-            logger.info(f"Task {task.task_id} cancelled mid-conversion: {exc}")
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled during conversion",
+            log_msg=f"Task {task.task_id} cancelled mid-conversion: {exc}",
+        ):
+            pass
         else:
             logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
             db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))

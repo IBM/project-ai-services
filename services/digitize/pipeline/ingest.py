@@ -122,6 +122,8 @@ def create_indexing_handler(
             logger.info(f"✅ Successfully indexed document {doc_id}")
             return True
 
+        except JobCancelledError:
+            raise
         except Exception as e:
             logger.error(f"Exception during indexing for {doc_id}: {e}", exc_info=True)
 
