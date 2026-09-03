@@ -14,6 +14,8 @@ export interface DeployedServicesRow {
   status: "Downloading" | "Deploying" | "Running" | "Deleting" | "Error";
   type?: string;
   uptime: string;
+  workerResource: string;
+  workerType: string;
   messages: string;
   actions: string;
   service: string;
@@ -54,11 +56,13 @@ export type AppAction =
       payload: DeployedServicesRow[];
     };
 
-// Table headers - Messages column moved after Service
+// Table headers
 export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
+  { header: "Worker resource", key: "workerResource" },
+  { header: "Worker type", key: "workerType" },
   { header: "Service", key: "service" },
   { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
@@ -77,6 +81,8 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
   uptime: true,
+  workerResource: true,
+  workerType: true,
   messages: true,
   service: true,
 };

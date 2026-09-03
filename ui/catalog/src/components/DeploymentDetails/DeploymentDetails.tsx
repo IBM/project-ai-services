@@ -30,6 +30,7 @@ import type {
   UsedResourcesResponse,
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
+  ApplicationWorker,
 } from "@/types/api.types";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
@@ -38,6 +39,7 @@ import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
+  WORKER_RUNTIME_LABELS,
 } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -70,6 +72,7 @@ const DeploymentDetails = ({
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
+  const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
 
   useEffect(() => {
     setEditedName(deployment.name);
@@ -257,11 +260,13 @@ const DeploymentDetails = ({
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
         setCertifiedBy(isDeploymentCertified ? "IBM" : null);
+        setWorkerInfo(applicationDetailsResponse.data.worker ?? null);
       } catch (error) {
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
         setCertifiedBy(null);
+        setWorkerInfo(null);
       }
     };
 
@@ -490,7 +495,7 @@ const DeploymentDetails = ({
                           <TextInput
                             className={styles.labelColor}
                             id="deployment-name"
-                            labelText="Name"
+                            labelText="AI deployment name"
                             value={editedName}
                             onChange={(e) => {
                               setEditedName(e.target.value);
@@ -501,6 +506,33 @@ const DeploymentDetails = ({
                         )}
                       </Column>
                     </Grid>
+
+                    {(workerInfo?.name || workerInfo?.runtime_type) && (
+                      <div className={styles.workerInfoRow}>
+                        {workerInfo.name && (
+                          <div className={styles.workerInfoField}>
+                            <span className={styles.workerInfoLabel}>
+                              Worker resource
+                            </span>
+                            <span className={styles.workerInfoValue}>
+                              {workerInfo.name}
+                            </span>
+                          </div>
+                        )}
+                        {workerInfo.runtime_type && (
+                          <div className={styles.workerInfoField}>
+                            <span className={styles.workerInfoLabel}>
+                              Deployment type
+                            </span>
+                            <span className={styles.workerInfoValue}>
+                              {WORKER_RUNTIME_LABELS[
+                                workerInfo.runtime_type.toLowerCase()
+                              ]?.label ?? workerInfo.runtime_type}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </ProductiveCard>
                 </Column>
               </Grid>

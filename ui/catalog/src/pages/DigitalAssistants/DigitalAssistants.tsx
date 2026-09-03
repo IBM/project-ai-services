@@ -241,7 +241,14 @@ const DigitalAssistantsPage = () => {
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "uptime", "messages"],
+    searchFields: [
+      "name",
+      "status",
+      "uptime",
+      "workerResource",
+      "workerType",
+      "messages",
+    ],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
     fetchAllRows: async () => {
@@ -272,7 +279,7 @@ const DigitalAssistantsPage = () => {
   const filteredRows = filterRowsBySearch<Record<string, unknown>>(
     state.rowsData as unknown as Record<string, unknown>[],
     state.search,
-    ["name", "status", "uptime", "messages"],
+    ["name", "status", "uptime", "workerResource", "workerType", "messages"],
   ) as unknown as DigitalAssistantRow[];
 
   const noApplications =
@@ -493,6 +500,14 @@ const DigitalAssistantsPage = () => {
                                                   )}
                                                   {state.visibleColumns
                                                     .uptime && <TableCell />}
+                                                  {state.visibleColumns
+                                                    .workerResource && (
+                                                    <TableCell />
+                                                  )}
+                                                  {state.visibleColumns
+                                                    .workerType && (
+                                                    <TableCell />
+                                                  )}
                                                   {state.visibleColumns
                                                     .messages && <TableCell />}
                                                   <TableCell />
