@@ -688,7 +688,10 @@ class TestRunTickCancellation:
         with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.DELETE_PENDING), \
-             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
+             patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock):
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             with pytest.raises(asyncio.CancelledError):
                 asyncio.run(run_tick("conn-1", sync_seq=10))
 
@@ -817,8 +820,10 @@ class TestHandleInterrupt:
 
     def test_delete_connector_calls_cancel_tick_and_teardown(self):
         with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
              patch("digitize.api.v1.connectors._run_teardown",
                    new_callable=AsyncMock) as mock_teardown:
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
                                           interrupt_type=InterruptType.DELETE_CONNECTOR))
         mock_cancel.assert_called_once_with(3, "conn-B")
@@ -827,8 +832,10 @@ class TestHandleInterrupt:
     def test_delete_connector_does_not_call_sweep(self):
         """DELETE_CONNECTOR must not call _sweep_staging_dir."""
         with patch(f"{DB_MODULE}._cancel_tick"), \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
              patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock), \
              patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep:
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
                                           interrupt_type=InterruptType.DELETE_CONNECTOR))
         mock_sweep.assert_not_called()
