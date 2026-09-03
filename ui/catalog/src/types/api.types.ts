@@ -234,7 +234,7 @@ export interface DeployIntegrationEndpoints {
   title: string;
   description: string;
   baseURL: string;
-  apiDocumentaion: string;
+  apiDocumentation: string;
   interactiveAPIs: string[];
 }
 
@@ -397,6 +397,32 @@ export type DeploymentPayload =
   | ServiceDeploymentPayload;
 
 export type ConnectorStatus = "Connected" | "Offline";
+
+export type WorkerStatus = "pending" | "ready" | "disconnected";
+export type WorkerRuntimeType = "unknown" | "podman" | "openshift";
+
+export interface WorkerApiResponse {
+  id: string;
+  name: string;
+  status: WorkerStatus;
+  runtime_type: WorkerRuntimeType;
+  last_heartbeat?: string;
+  registered_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkerListResponse {
+  data: WorkerApiResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface WorkerRegisterResponse {
+  worker_name: string;
+  token: string;
+}
 
 export interface ConnectorProvider {
   id: string;

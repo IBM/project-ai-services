@@ -42,3 +42,9 @@ export const CONNECTORS_ENDPOINTS = {
   GET_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
   DELETE_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
 };
+
+export const WORKERS_ENDPOINTS = {
+  LIST_WORKERS: "/workers",
+  REGISTER_WORKER: "/workers",
+  DEREGISTER_WORKER: (id: string) => `/workers/${id}`,
+};
