@@ -17,8 +17,12 @@ const (
 	WorkerDataSubDir = "worker"
 
 	WorkerAppName         = "ai-services"
+	// WorkerAppTemplate is the app name passed to the template provider.
+	// Resolves to assets/worker/<runtime>/templates/.
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
+
+	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
 	WorkerCaddyPodName    = "ai-services--caddy"
 
 	WorkerPodmanAuthSecretName = "podman-auth-secret"
