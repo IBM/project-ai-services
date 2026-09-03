@@ -139,7 +139,7 @@ func GetPodsFromApplicationsPS(ctx context.Context, appName string) ([]types.Pod
 	return pods, nil
 }
 
-// ConfirmUninstall prompts the user to confirm uninstall and logs pods to be deleted.Add a comment on  lines R21 to R41Add diff commentMarkdown input:  edit mode selected.WritePreviewAdd a suggestionHeadingBold(command b) command⌘ bBItalic(command i) command⌘ iIQuote(command shift right angle bracket) command⌘ shift⇧ right angle bracket>Code(command e) command⌘ eELink(command k) command⌘ kKUnordered list(command 8) command⌘ 88Numbered list(command shift ampersand) command⌘ shift⇧ ampersand&Task list(command shift l) command⌘ shift⇧ lLMentionReferenceMore itemsSaved repliesAdd FilesPaste, drop, or click to add filesCancelCommentStart a review
+// ConfirmUninstall prompts the user to confirm uninstall and logs pods to be deleted.
 func ConfirmUninstall(ctx context.Context, pods []types.Pod, autoYes bool) (bool, error) {
 	if autoYes {
 		return true, nil

@@ -22,7 +22,7 @@ const (
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
 
-	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
+	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
 	WorkerCaddyPodName    = "ai-services--caddy"
 
 	WorkerPodmanAuthSecretName = "podman-auth-secret"
