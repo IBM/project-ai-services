@@ -157,8 +157,9 @@ func runConfigure(ctx context.Context) error {
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace: catalogConstants.CatalogAppName,
-			Timeout:   timeout,
+			Namespace:         catalogConstants.CatalogAppName,
+			Timeout:           timeout,
+			WorkerGatewayPort: workerGatewayPort,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -186,7 +187,12 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 
 // validateConfigureFlags validates the configure command flags.
 func validateConfigureFlags() error {
-	// Validate SSL flags
+	// Validate workergateway-port is a valid port number (applies to all runtimes)
+	if workerGatewayPort < 1 || workerGatewayPort > 65535 {
+		return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
+	}
+
+	// Validate SSL flags (Podman only)
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
 		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
@@ -195,11 +201,6 @@ func validateConfigureFlags() error {
 		// Validate HTTPS port range
 		if httpsPort < 1 || httpsPort > 65535 {
 			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
-		}
-
-		// Validate workergateway-port is a valid port number
-		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
-			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
 		}
 	}
 
@@ -342,14 +343,14 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	builder := flagvalidator.NewFlagValidatorBuilder(rt)
 
-	// Common flags, valid for every runtime.
+	// Common flags, valid for all runtimes.
 	builder.AddCommonFlag("reset-password", nil)
+	builder.AddCommonFlag("workergateway-port", nil)
 
 	// Podman-only flags.
 	builder.
 		AddPodmanFlag("basedir", nil).
 		AddPodmanFlag("https-port", nil).
-		AddPodmanFlag("workergateway-port", nil).
 		AddPodmanFlag("domain-name", nil).
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).

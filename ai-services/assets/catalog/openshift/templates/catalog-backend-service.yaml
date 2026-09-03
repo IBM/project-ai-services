@@ -16,3 +16,7 @@ spec:
       port: 8080
       targetPort: 8080
       protocol: TCP
+    - name: worker-gateway
+      port: {{ .Values.backend.workerGatewayPort }}
+      targetPort: {{ .Values.backend.workerGatewayPort }}
+      protocol: TCP

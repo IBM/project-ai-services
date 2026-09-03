@@ -4,10 +4,8 @@ package configure
 const (
 	ArgParamAdminPasswordHash = "backend.adminPasswordHash"
 	ArgParamDBPassword        = "db.password"
+	ArgParamWorkerGatewayPort = "backend.workerGatewayPort"
 )
-
-// ArgParam keys used only by the OpenShift deployment.
-// (no OpenShift-specific params at present; extend here when needed)
 
 // ArgParam keys used only by the Podman deployment.
 const (
@@ -15,7 +13,6 @@ const (
 	ArgParamPodmanAuthFileContent = "backend.podman.authFileContent"
 	ArgParamPodmanURI             = "backend.podman.uri"
 	ArgParamCaddyHTTPSPort        = "caddy.httpsPort"
-	ArgParamWorkerGatewayPort     = "backend.workerGatewayPort"
 	ArgParamCaddyFileContent      = "caddy.caddyFileContent"
 	ArgParamSSLCertFileContent    = "caddy.sslCertContent"
 	ArgParamSSLKeyFileContent     = "caddy.sslKeyContent"

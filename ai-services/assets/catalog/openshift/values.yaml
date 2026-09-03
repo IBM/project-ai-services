@@ -14,6 +14,8 @@ backend:
   adminPasswordHash: ""
   # @generate:password length=32, special=false
   dbEncryptionKey: ""
+  # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9090.
+  workerGatewayPort: "9090"
   resources:
     requests:
       memory: "1Gi"
