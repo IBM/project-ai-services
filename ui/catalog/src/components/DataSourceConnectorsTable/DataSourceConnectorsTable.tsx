@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef } from "react";
+import { isAxiosError } from "axios";
 import {
   DataTable,
   Table,
@@ -28,6 +29,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import type { SharedTableAction } from "@/components/Table/types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
 import ExportModal from "@/components/Table/components/ExportModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
@@ -41,6 +43,7 @@ import {
   fetchDataSourceConnectors,
   fetchAllDataSourceConnectors,
   transformConnectorToRow,
+  deleteDataSourceConnector,
 } from "@/api/connectors.api";
 import styles from "./DataSourceConnectorsTable.module.scss";
 
@@ -133,6 +136,34 @@ const DataSourceConnectorsTable = ({
     [],
   );
 
+  const handleDelete = async () => {
+    if (!state.selectedRowId) {
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message: "No data source selected for removal" },
+      });
+      return;
+    }
+
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
+    dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: "" });
+
+    try {
+      await deleteDataSourceConnector(state.selectedRowId);
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+      dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+      await loadConnectors();
+    } catch (err) {
+      const msg =
+        isAxiosError(err) && err.response?.data?.error
+          ? err.response.data.error
+          : "Failed to remove data source";
+      dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: msg });
+    } finally {
+      dispatch({ type: "SHARED_SET_DELETING", payload: false });
+    }
+  };
+
   // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
   useAutoRefresh({
     fetchFn: loadConnectors,
@@ -187,8 +218,8 @@ const DataSourceConnectorsTable = ({
         deleteErrorRowName={state.deleteErrorRowName}
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="data source connector"
-        onDeleteErrorClose={() => {}}
-        onDeleteErrorRetry={async () => {}}
+        onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
+        onDeleteErrorRetry={handleDelete}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
@@ -341,6 +372,34 @@ const DataSourceConnectorsTable = ({
                 )}
               </DataTable>
             )}
+
+            {/* Remove data source modal */}
+            <DeleteConfirmNameModal
+              isOpen={state.isDeleteDialogOpen}
+              isDeleting={state.isDeleting}
+              itemName={
+                state.rowsData.find((r) => r.id === state.selectedRowId)
+                  ?.name ?? ""
+              }
+              warningText="Removing this data source will stop future syncing and ingestion, permanently delete indexed data from each connected vector store."
+              confirmValue={state.confirmTextValue}
+              onConfirmValueChange={(value) =>
+                dispatch({
+                  type: ACTION_TYPES.SET_CONFIRM_TEXT,
+                  payload: value,
+                })
+              }
+              errorMessage={state.modalDeleteError}
+              onConfirm={() => void handleDelete()}
+              onClose={() => {
+                dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+                dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+                dispatch({
+                  type: ACTION_TYPES.SET_MODAL_DELETE_ERROR,
+                  payload: "",
+                });
+              }}
+            />
 
             {/* Export modal */}
             <ExportModal

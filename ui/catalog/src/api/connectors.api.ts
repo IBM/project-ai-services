@@ -6,6 +6,10 @@ import type {
 } from "@/types/api.types";
 import type { DataSourceConnectorRow } from "@/components/DataSourceConnectorsTable/types";
 
+export async function deleteDataSourceConnector(id: string): Promise<void> {
+  await api.delete(CONNECTORS_ENDPOINTS.DELETE_CONNECTOR(id));
+}
+
 export function transformConnectorToRow(
   connector: DataSourceConnectorApiResponse,
 ): DataSourceConnectorRow {
