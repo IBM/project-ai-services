@@ -184,6 +184,8 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 		return fmt.Errorf("worker setup: load values: %w", err)
 	}
 
+	values["hostAliases"] = opts.Setup.HostAliases
+
 	params := map[string]any{
 		"BaseDir":         opts.Setup.BaseDir,
 		"AppName":         workerconstants.WorkerAppName,
