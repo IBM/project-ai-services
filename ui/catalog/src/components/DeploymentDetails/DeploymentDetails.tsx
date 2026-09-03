@@ -31,6 +31,7 @@ import type {
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
 } from "@/types/api.types";
+import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import axios from "axios";
@@ -689,7 +690,7 @@ const DeploymentDetails = ({
                           Service version
                         </span>
                         <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.serviceVersion}
+                          {formatVersion(deploymentServiceData.serviceVersion)}
                         </span>
                       </div>
 
