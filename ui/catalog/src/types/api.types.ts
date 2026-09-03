@@ -250,6 +250,7 @@ export interface ApplicationDetailsApiResponse {
   name: string;
   type: string;
   status: string;
+  worker?: ApplicationWorker;
   services: Array<{
     id: string;
     type: string;
