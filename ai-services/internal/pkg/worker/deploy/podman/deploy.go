@@ -91,6 +91,9 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	caddyCtx, err := setupCaddyContext(ctx, opts)
+	if err != nil {
+		return err
+	}
 	// Load SSL certificates if provided
 	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.BaseDir, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
 		return err
