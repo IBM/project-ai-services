@@ -9,7 +9,7 @@ RUN microdnf install -y python3.12-devel python3.12-pip \
     rm -f /tmp/epel-release.rpm && \
     microdnf install -y spatialindex-devel && \
     microdnf clean all && \
-    pip install --upgrade pip && \
+    python3.12 -m pip install --upgrade pip && \
     microdnf remove python3.12-pip && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
