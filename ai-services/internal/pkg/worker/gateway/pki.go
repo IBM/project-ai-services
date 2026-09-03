@@ -223,4 +223,3 @@ func fileExists(path string) bool {
 
 	return err == nil
 }
-
