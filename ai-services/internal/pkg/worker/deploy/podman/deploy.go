@@ -220,9 +220,9 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 
 	return map[string]string{
 		workerconstants.ArgParamCaddyHTTPSPort:     strconv.Itoa(opts.Setup.HTTPSPort),
-		workerconstants.ArgParamCaddyFileContent:   caddyFileContent,
-		workerconstants.ArgsParamCaddyCertContent:  sslCertContent,
-		workerconstants.ArgParamCaddySslKeyContent: sslKeyContent,
+		workerconstants.ArgParamCaddyFileContent:   utils.IndentString(caddyFileContent, utils.CaddyFileIndent),
+		workerconstants.ArgsParamCaddyCertContent:  utils.IndentString(sslCertContent, utils.CertContentIndent),
+		workerconstants.ArgParamCaddySslKeyContent: utils.IndentString(sslKeyContent, utils.CertContentIndent),
 		workerconstants.ArgParamWorkerToken:        opts.Token,
 		workerconstants.ArgParamWorkerGatewayAddr:  opts.GatewayAddr,
 		workerconstants.ArgParamWorkerPodmanURI:    strings.TrimPrefix(podmanURI, "unix://"),
@@ -263,6 +263,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 		return fmt.Errorf("worker setup: template %q not found", tmplName)
 	}
 
+	fmt.Println(params)
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, params); err != nil {
 		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
