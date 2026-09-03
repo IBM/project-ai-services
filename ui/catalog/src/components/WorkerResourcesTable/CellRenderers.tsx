@@ -38,8 +38,13 @@ export const ActionCell = () => (
 
 type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 
+export const MessageCell = ({ value }: CellRendererProps) => (
+  <span>{String(value ?? "")}</span>
+);
+
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
+  messages: MessageCell as RendererFn,
   actions: ActionCell,
 };

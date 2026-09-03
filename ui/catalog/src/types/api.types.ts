@@ -406,6 +406,7 @@ export interface WorkerApiResponse {
   name: string;
   status: WorkerStatus;
   runtime_type: WorkerRuntimeType;
+  message?: string;
   last_heartbeat?: string;
   registered_at: string;
   updated_at: string;
